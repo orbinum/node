@@ -1,0 +1,64 @@
+[package]
+name = "fp-zk-verifier"
+version = "0.1.0"
+authors = ["Orbinum Network <dev@orbinum.net>"]
+edition = "2021"
+license = "Apache-2.0"
+description = "Zero-Knowledge proof verification primitives for Orbinum Network - Groth16 verification on BN254"
+repository = "https://github.com/orbinum/node"
+homepage = "https://orbinum.network"
+keywords = ["cryptography", "zero-knowledge", "groth16", "blockchain", "orbinum"]
+categories = ["cryptography", "no-std"]
+
+[lib]
+name = "fp_zk_verifier"
+path = "src/lib.rs"
+
+[dependencies]
+# Arkworks cryptography stack (verification only)
+ark-bn254 = { version = "0.4", default-features = false, features = ["curve"] }
+ark-ec = { version = "0.4", default-features = false }
+ark-ff = { version = "0.4", default-features = false }
+ark-groth16 = { version = "0.4", default-features = false }
+ark-serialize = { version = "0.4", default-features = false }
+ark-std = { version = "0.4", default-features = false }
+
+# Substrate primitives (optional for runtime integration)
+sp-core = { version = "37", default-features = false, optional = true }
+sp-runtime = { version = "39", default-features = false, optional = true }
+sp-std = { version = "14", default-features = false, optional = true }
+
+# Codec
+parity-scale-codec = { version = "3.7.5", default-features = false, features = ["derive"], optional = true }
+scale-info = { version = "2.11", default-features = false, features = ["derive"], optional = true }
+
+# For parsing verification key from JSON (std only)
+num-bigint = { version = "0.4", optional = true }
+serde_json = { version = "1.0", optional = true }
+
+[dev-dependencies]
+ark-std = { version = "0.4", features = ["std"] }
+
+[features]
+default = ["std"]
+
+# Standard library support (enables JSON parsing, BigInt, etc.)
+std = [
+	"ark-bn254/std",
+	"ark-ec/std",
+	"ark-ff/std",
+	"ark-groth16/std",
+	"ark-serialize/std",
+	"ark-std/std",
+	"num-bigint",
+	"serde_json",
+]
+
+# Substrate runtime integration (requires sp-*)
+substrate = [
+	"sp-core",
+	"sp-runtime",
+	"sp-std",
+	"parity-scale-codec",
+	"scale-info",
+]

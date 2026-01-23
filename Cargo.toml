@@ -39,6 +39,7 @@ members = [
 	"primitives/rpc",
 	"primitives/self-contained",
 	"primitives/zk-primitives",
+	"primitives/zk-verifier",
 	"template/node",
 	"template/runtime",
 	"precompiles",
@@ -240,3 +241,11 @@ inherits = "release"
 lto = true
 # https://doc.rust-lang.org/rustc/codegen-options/index.html#codegen-units
 codegen-units = 1
+
+# Patch Substrate dependencies for local development
+# When publishing to crates.io, the crate will use the versions specified
+# But in the workspace, we override with git dependencies for compatibility
+[patch.crates-io]
+sp-core = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
+sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
+sp-std = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
