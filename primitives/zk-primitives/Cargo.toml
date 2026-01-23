@@ -8,7 +8,7 @@ description = "Native cryptographic primitives for Zero-Knowledge proofs in Orbi
 repository = "https://github.com/orbinum/node"
 homepage = "https://orbinum.network"
 readme = "README.md"
-keywords = ["cryptography", "zero-knowledge", "poseidon", "zk-snark", "blockchain", "orbinum"]
+keywords = ["cryptography", "orbinum", "poseidon", "zk-snark", "blockchain"]
 categories = ["cryptography", "no-std"]
 
 [dependencies]
