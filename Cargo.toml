@@ -38,6 +38,7 @@ members = [
 	"primitives/evm",
 	"primitives/rpc",
 	"primitives/self-contained",
+	"primitives/zk-primitives",
 	"template/node",
 	"template/runtime",
 	"precompiles",
