@@ -3542,7 +3542,7 @@ dependencies = [
 
 [[package]]
 name = "fp-encrypted-memo"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chacha20poly1305",
  "hex",
@@ -3616,7 +3616,7 @@ dependencies = [
 
 [[package]]
 name = "fp-zk-circuits"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "ark-bn254",
  "ark-ec 0.4.2",
@@ -3627,23 +3627,8 @@ dependencies = [
  "ark-serialize 0.4.2",
  "ark-snark",
  "ark-std 0.4.0",
- "fp-zk-primitives 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "fp-zk-verifier 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "sp-std",
-]
-
-[[package]]
-name = "fp-zk-primitives"
-version = "0.1.0"
-dependencies = [
- "ark-bn254",
- "ark-ff 0.4.2",
- "ark-serialize 0.4.2",
- "ark-std 0.4.0",
- "light-poseidon",
- "parity-scale-codec",
- "scale-info",
- "sp-core 37.0.0",
+ "fp-zk-primitives 0.1.0",
+ "fp-zk-verifier 0.1.1",
  "sp-std",
 ]
 
@@ -3665,21 +3650,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "fp-zk-verifier"
+name = "fp-zk-primitives"
 version = "0.1.1"
 dependencies = [
  "ark-bn254",
- "ark-ec 0.4.2",
  "ark-ff 0.4.2",
- "ark-groth16",
  "ark-serialize 0.4.2",
  "ark-std 0.4.0",
- "num-bigint",
+ "light-poseidon",
  "parity-scale-codec",
  "scale-info",
- "serde_json",
  "sp-core 37.0.0",
- "sp-runtime 39.0.5",
  "sp-std",
 ]
 
@@ -3697,6 +3678,25 @@ dependencies = [
  "ark-std 0.4.0",
  "num-bigint",
  "serde_json",
+]
+
+[[package]]
+name = "fp-zk-verifier"
+version = "0.1.2"
+dependencies = [
+ "ark-bn254",
+ "ark-ec 0.4.2",
+ "ark-ff 0.4.2",
+ "ark-groth16",
+ "ark-serialize 0.4.2",
+ "ark-std 0.4.0",
+ "num-bigint",
+ "parity-scale-codec",
+ "scale-info",
+ "serde_json",
+ "sp-core 37.0.0",
+ "sp-runtime 39.0.5",
+ "sp-std",
 ]
 
 [[package]]
