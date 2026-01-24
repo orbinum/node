@@ -2,9 +2,9 @@ name: Build
 
 on:
   push:
-    branches: [main, master]
-  pull_request:
-    branches: [main, master, develop]
+    branches: [main, develop]
+  # Only run on push to main/develop for release builds
+  # Pull requests use the Test workflow's build job
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
