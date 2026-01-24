@@ -10,7 +10,7 @@ use sp_core::ecdsa;
 use sp_core::{Pair, Public, H160, U256};
 use sp_runtime::traits::{IdentifyAccount, Verify};
 // Frontier
-use frontier_template_runtime::{AccountId, Balance, SS58Prefix, Signature, WASM_BINARY};
+use orbinum_runtime::{AccountId, Balance, SS58Prefix, Signature, WASM_BINARY};
 
 // The URL for the telemetry server.
 // const STAGING_TELEMETRY_URL: &str = "wss://telemetry.polkadot.io/submit/";

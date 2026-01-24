@@ -78,7 +78,7 @@ fp-account = { workspace = true }
 fp-dynamic-fee = { workspace = true, features = ["default"] }
 fp-evm = { workspace = true, features = ["default"] }
 fp-rpc = { workspace = true, features = ["default"] }
-frontier-template-runtime = { workspace = true, features = ["std"] }
+orbinum-runtime = { workspace = true, features = ["std"] }
 
 # Cumulus primitives
 cumulus-primitives-proof-size-hostfunction = { workspace = true }
@@ -100,10 +100,10 @@ rocksdb = [
 	"fc-db/rocksdb",
 	"fc-mapping-sync/rocksdb",
 	"fc-rpc/rocksdb",
-	"frontier-template-runtime/with-rocksdb-weights",
+	"orbinum-runtime/with-rocksdb-weights",
 ]
 paritydb = [
-	"frontier-template-runtime/with-paritydb-weights",
+	"orbinum-runtime/with-paritydb-weights",
 ]
 sql = [
 	"fc-db/sql",
@@ -113,5 +113,5 @@ txpool = ["fc-rpc/txpool"]
 rpc-binary-search-estimate = ["fc-rpc/rpc-binary-search-estimate"]
 runtime-benchmarks = [
 	"sc-service/runtime-benchmarks",
-	"frontier-template-runtime/runtime-benchmarks",
+	"orbinum-runtime/runtime-benchmarks",
 ]
