@@ -108,7 +108,7 @@ mod tests {
 	use super::*;
 	use ark_r1cs_std::{alloc::AllocVar, R1CSVar};
 	use ark_relations::r1cs::{ConstraintSystem, SynthesisMode};
-	use fp_zk_primitives::core::types::{Commitment, Nullifier, SpendingKey};
+	use fp_zk_primitives::core::types::{Commitment, SpendingKey};
 	use fp_zk_primitives::crypto::commitment::{
 		compute_nullifier as native_compute_nullifier,
 		create_commitment as native_create_commitment,

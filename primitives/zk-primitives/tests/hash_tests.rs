@@ -112,7 +112,7 @@ fn test_poseidon_hash_variable_inputs() {
 	for size in 1..=12 {
 		let inputs: Vec<Bn254Fr> = (0..size).map(|i| Bn254Fr::from(i as u64)).collect();
 		let hash = poseidon_hash(&inputs);
-		assert!(hash.is_ok(), "Hash with {} inputs should succeed", size);
+		assert!(hash.is_ok(), "Hash with {size} inputs should succeed");
 		assert_ne!(
 			hash.unwrap(),
 			Bn254Fr::from(0u64),

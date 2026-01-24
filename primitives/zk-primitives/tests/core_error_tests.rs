@@ -4,7 +4,7 @@ use fp_zk_primitives::core::error::PrimitiveError;
 
 #[test]
 fn test_primitive_error_variants() {
-	let errors = vec![
+	let errors = [
 		PrimitiveError::InvalidFieldElement,
 		PrimitiveError::MerkleProofVerificationFailed,
 		PrimitiveError::InvalidNoteData,
@@ -71,7 +71,7 @@ fn test_error_clone() {
 #[test]
 fn test_error_debug() {
 	let error = PrimitiveError::InvalidFieldElement;
-	let debug_str = format!("{:?}", error);
+	let debug_str = format!("{error:?}");
 	assert!(debug_str.contains("InvalidFieldElement"));
 }
 
@@ -79,7 +79,7 @@ fn test_error_debug() {
 #[test]
 fn test_error_display() {
 	let error = PrimitiveError::InvalidFieldElement;
-	let display_str = format!("{}", error);
+	let display_str = format!("{error}");
 	assert_eq!(display_str, "Invalid field element");
 }
 
@@ -102,7 +102,7 @@ fn test_error_display_all_variants() {
 	];
 
 	for (error, expected) in errors {
-		assert_eq!(format!("{}", error), expected);
+		assert_eq!(format!("{error}"), expected);
 		assert_eq!(error.as_str(), expected);
 	}
 }
@@ -113,7 +113,7 @@ fn test_error_trait() {
 	use std::error::Error;
 
 	let error: &dyn Error = &PrimitiveError::InvalidFieldElement;
-	let display_str = format!("{}", error);
+	let display_str = format!("{error}");
 	assert_eq!(display_str, "Invalid field element");
 }
 
