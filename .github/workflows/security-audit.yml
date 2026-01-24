@@ -16,11 +16,5 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
-
       - name: Run cargo deny
-        run: make audit
+        uses: EmbarkStudios/cargo-deny-action@v2
