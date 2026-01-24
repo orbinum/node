@@ -1,0 +1,53 @@
+[package]
+name = "fp-encrypted-memo"
+version = "0.1.0"
+authors = ["Orbinum Network <dev@orbinum.net>"]
+edition = "2021"
+license = "Apache-2.0 OR GPL-3.0"
+description = "Encrypted memo primitives for Orbinum shielded transactions"
+repository = "https://github.com/orbinum/node"
+homepage = "https://orbinum.network"
+keywords = ["cryptography", "encryption", "privacy", "blockchain", "orbinum"]
+categories = ["cryptography", "no-std"]
+
+[dependencies]
+# Encryption
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+sha2 = { version = "0.10", default-features = false }
+
+# Serialization (optional for runtime integration)
+parity-scale-codec = { version = "3.6", default-features = false, features = ["derive"], optional = true }
+scale-info = { version = "2.11", default-features = false, features = ["derive"], optional = true }
+
+# Substrate (optional for runtime integration)
+sp-core = { version = "37", default-features = false, optional = true }
+sp-std = { version = "14", default-features = false, optional = true }
+
+# Random (for encryption)
+rand = { version = "0.8", default-features = false, optional = true }
+
+[dev-dependencies]
+hex = "0.4"
+rand = "0.8"
+
+[features]
+default = ["std"]
+std = [
+	"chacha20poly1305/std",
+	"sha2/std",
+	"substrate",
+	"encrypt",
+]
+substrate = [
+	"parity-scale-codec",
+	"scale-info",
+	"sp-core",
+	"sp-std",
+	"parity-scale-codec/std",
+	"scale-info/std",
+	"sp-core/std",
+	"sp-std/std",
+]
+# Feature for encryption with random nonce generation (requires randomness)
+encrypt = ["rand"]
+
