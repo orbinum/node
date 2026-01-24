@@ -18,3 +18,5 @@ jobs:
 
       - name: Run cargo deny
         uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          rust-version: skip
