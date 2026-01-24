@@ -99,7 +99,7 @@ assert!(result.is_ok());
 ```rust
 use fp_zk_verifier::core::constants::{CIRCUIT_ID_TRANSFER, CIRCUIT_ID_UNSHIELD};
 use fp_zk_verifier::vk::registry::{
-    get_vk_by_circuit_id, 
+    get_vk_by_circuit_id,
     get_public_input_count,
     validate_public_input_count
 };
@@ -236,19 +236,19 @@ impl<T: Config> Pallet<T> {
         public_inputs: PublicInputs,
     ) -> DispatchResult {
         ensure_signed(origin)?;
-        
+
         // Validate input count
         validate_public_input_count(CIRCUIT_ID_TRANSFER, public_inputs.len())
             .map_err(|_| Error::<T>::InvalidInputCount)?;
-        
+
         // Get verification key
         let vk = get_vk_by_circuit_id(CIRCUIT_ID_TRANSFER)
             .map_err(|_| Error::<T>::InvalidCircuitId)?;
-        
+
         // Verify proof
         Groth16Verifier::verify(&vk, &public_inputs, &proof)
             .map_err(|_| Error::<T>::ProofVerificationFailed)?;
-        
+
         Ok(())
     }
 }
@@ -275,7 +275,7 @@ impl<T: Config> Pallet<T> {
    // src/vk/new_circuit.rs
    pub const CIRCUIT_ID: u8 = 3;
    pub const PUBLIC_INPUT_COUNT: usize = 6;
-   
+
    pub fn get_vk() -> VerifyingKey {
        // ... paste VK bytes
    }

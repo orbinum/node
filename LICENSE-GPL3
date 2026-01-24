@@ -675,7 +675,7 @@ Public License instead of this License.  But first, please read
 
                      "CLASSPATH" EXCEPTION TO THE GPL
 
-  Linking this library statically or dynamically with other modules is making 
+  Linking this library statically or dynamically with other modules is making
 a combined work based on this library. Thus, the terms and conditions of the
 GNU General Public License cover the whole combination.
 
@@ -691,7 +691,7 @@ of the library, but you are not obligated to do so. If you do not wish to
 do so, delete this exception statement from your version.
 
                                 NOTE
-                                
+
   Individual files contain the following tag instead of the full license text.
 
     SPDX-License-Identifier:  GPL-3.0-or-later WITH Classpath-exception-2.0

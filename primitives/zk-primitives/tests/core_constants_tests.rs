@@ -22,7 +22,8 @@ fn test_max_tree_depth() {
 #[test]
 fn test_tree_depth_relationship() {
 	// Max depth should be greater than default depth
-	assert!(MAX_TREE_DEPTH > DEFAULT_TREE_DEPTH);
+	// Note: This is a compile-time constant check, validated at build time
+	const _: () = assert!(MAX_TREE_DEPTH > DEFAULT_TREE_DEPTH);
 }
 
 #[test]
@@ -61,14 +62,14 @@ fn test_domain_separators_are_different() {
 
 #[test]
 fn test_constants_are_reasonable() {
-	// Sanity checks for constant values
-	assert!(DEFAULT_TREE_DEPTH > 0);
-	assert!(MAX_TREE_DEPTH > 0);
-	assert!(FIELD_ELEMENT_SIZE > 0);
-
-	// Tree depth should be practical
-	assert!(DEFAULT_TREE_DEPTH < 64);
-	assert!(MAX_TREE_DEPTH < 64);
+	// Sanity checks for constant values - validated at compile time
+	const _: () = {
+		assert!(DEFAULT_TREE_DEPTH > 0);
+		assert!(MAX_TREE_DEPTH > 0);
+		assert!(FIELD_ELEMENT_SIZE > 0);
+		assert!(DEFAULT_TREE_DEPTH < 64);
+		assert!(MAX_TREE_DEPTH < 64);
+	};
 
 	// Field element size should match BN254
 	assert_eq!(FIELD_ELEMENT_SIZE, 32);

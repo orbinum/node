@@ -1,0 +1,69 @@
+# Pre-commit hooks for Orbinum Node
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+#
+# WORKFLOW:
+#   Quick commits (per-file):  git commit --no-verify -m "msg"
+#   Full validation:           pre-commit run --all-files
+#   Before push:               pre-commit run --all-files (recommended)
+#
+# IMPORTANT: This project uses a Makefile for consistency with CI/CD pipelines.
+# All commands are executed through make targets to ensure environment consistency.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^(circuits/|ts-tests/|ts-tests-orbinum/)
+      - id: end-of-file-fixer
+        exclude: ^(circuits/|ts-tests/|ts-tests-orbinum/)
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=2000']  # Larger threshold for node project
+
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt (format check)
+        entry: make fmt-check
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: cargo-clippy
+        name: cargo clippy (lint with release profile)
+        entry: bash -c 'SKIP_WASM_BUILD=1 make clippy-release'
+        language: system
+        types: [rust]
+        pass_filenames: false
+        # stages: [manual]  # Uncomment to run only with: pre-commit run --hook-stage manual cargo-clippy
+        # Runs on: git commit, pre-commit run --all-files
+        # Skip with: git commit --no-verify
+
+      - id: cargo-check
+        name: cargo check (quick validation)
+        entry: make check
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [manual]  # Run with: pre-commit run --hook-stage manual cargo-check
+
+      # Tests run in CI only (too slow for local)
+      - id: cargo-test
+        name: cargo test (unit tests with release profile)
+        entry: make test-release
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [manual]  # Run with: pre-commit run --hook-stage manual cargo-test
+
+      - id: integration-test-lint
+        name: integration test lint (TypeScript format check)
+        entry: make integration-test-lint
+        language: system
+        files: ^ts-tests/
+        pass_filenames: false
+        stages: [manual]  # Run with: pre-commit run --hook-stage manual integration-test-lint

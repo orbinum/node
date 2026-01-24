@@ -50,4 +50,3 @@ substrate = [
 ]
 # Feature for encryption with random nonce generation (requires randomness)
 encrypt = ["rand"]
-

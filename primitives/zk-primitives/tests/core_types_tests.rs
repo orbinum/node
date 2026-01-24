@@ -45,14 +45,14 @@ fn test_commitment_equality() {
 #[test]
 fn test_commitment_clone() {
 	let commitment1 = Commitment::new(Bn254Fr::from(123u64));
-	let commitment2 = commitment1.clone();
+	let commitment2 = commitment1;
 	assert_eq!(commitment1, commitment2);
 }
 
 #[test]
 fn test_commitment_debug() {
 	let commitment = Commitment::new(Bn254Fr::from(123u64));
-	let debug_str = format!("{:?}", commitment);
+	let debug_str = format!("{commitment:?}");
 	assert!(debug_str.contains("Commitment"));
 }
 
@@ -98,14 +98,14 @@ fn test_nullifier_equality() {
 #[test]
 fn test_nullifier_clone() {
 	let nullifier1 = Nullifier::new(Bn254Fr::from(123u64));
-	let nullifier2 = nullifier1.clone();
+	let nullifier2 = nullifier1;
 	assert_eq!(nullifier1, nullifier2);
 }
 
 #[test]
 fn test_nullifier_debug() {
 	let nullifier = Nullifier::new(Bn254Fr::from(123u64));
-	let debug_str = format!("{:?}", nullifier);
+	let debug_str = format!("{nullifier:?}");
 	assert!(debug_str.contains("Nullifier"));
 }
 
@@ -143,14 +143,14 @@ fn test_spending_key_equality() {
 #[test]
 fn test_spending_key_clone() {
 	let key1 = SpendingKey::new(Bn254Fr::from(123u64));
-	let key2 = key1.clone();
+	let key2 = key1;
 	assert_eq!(key1, key2);
 }
 
 #[test]
 fn test_spending_key_debug() {
 	let key = SpendingKey::new(Bn254Fr::from(123u64));
-	let debug_str = format!("{:?}", key);
+	let debug_str = format!("{key:?}");
 	assert!(debug_str.contains("SpendingKey"));
 }
 
