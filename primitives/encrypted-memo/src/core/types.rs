@@ -138,7 +138,11 @@ impl ViewingKey {
 	}
 
 	/// Decrypt a memo using this viewing key
-	pub fn decrypt(&self, encrypted: &[u8], commitment: &[u8; 32]) -> Result<MemoData, crate::core::error::MemoError> {
+	pub fn decrypt(
+		&self,
+		encrypted: &[u8],
+		commitment: &[u8; 32],
+	) -> Result<MemoData, crate::core::error::MemoError> {
 		crate::crypto::encryption::decrypt_memo(encrypted, commitment, &self.0)
 	}
 }

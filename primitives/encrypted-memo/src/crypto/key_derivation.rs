@@ -6,7 +6,10 @@
 //! - Nullifier keys (for spending)
 //! - EdDSA keys (for circuit ownership proofs)
 
-use crate::core::{constants::KEY_DOMAIN, types::{EdDSAKey, NullifierKey, ViewingKey}};
+use crate::core::{
+	constants::KEY_DOMAIN,
+	types::{EdDSAKey, NullifierKey, ViewingKey},
+};
 use sha2::{Digest, Sha256};
 
 /// Domain separator for viewing key derivation
