@@ -427,6 +427,7 @@ impl ConstraintSynthesizer<Bn254Fr> for TransferCircuit {
 mod tests {
 	use super::*;
 	use ark_relations::r1cs::ConstraintSystem;
+	use fp_zk_primitives::core::types::Commitment;
 	use fp_zk_primitives::crypto::hash::poseidon_hash_2;
 	use fp_zk_primitives::crypto::merkle::compute_merkle_root;
 
@@ -463,8 +464,8 @@ mod tests {
 		}
 
 		// Verify paths work
-		let root0 = compute_merkle_root(leaf0, &path0, &idx0);
-		let root1 = compute_merkle_root(leaf1, &path1, &idx1);
+		let root0 = compute_merkle_root(&Commitment::from(leaf0), &path0, &idx0);
+		let root1 = compute_merkle_root(&Commitment::from(leaf1), &path1, &idx1);
 
 		assert_eq!(root0, root1, "Both leaves should compute to same root");
 

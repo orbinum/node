@@ -93,12 +93,11 @@ pub use core::constants::{
 };
 
 // Crypto operations (convenience re-exports)
-pub use crypto::encryption::{decrypt_memo, encrypt_memo, try_decrypt_memo};
 #[cfg(feature = "encrypt")]
 pub use crypto::encryption::encrypt_memo_random;
+pub use crypto::encryption::{decrypt_memo, encrypt_memo, try_decrypt_memo};
 pub use crypto::key_derivation::{derive_eddsa_key, derive_nullifier_key, derive_viewing_key};
 pub use crypto::validation::is_valid_encrypted_memo;
 
 // Models
 pub use models::keyset::KeySet;
-

@@ -69,7 +69,7 @@
 //!
 //! // Get VK directly
 //! let transfer_vk = get_transfer_vk();
-//! 
+//!
 //! // Or lookup by circuit ID
 //! let vk = get_vk_by_circuit_id(1)?; // Transfer
 //! ```

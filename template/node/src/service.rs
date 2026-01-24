@@ -19,9 +19,7 @@ use sp_consensus_aura::sr25519::{AuthorityId as AuraId, AuthorityPair as AuraPai
 use sp_core::{H256, U256};
 use sp_runtime::traits::{Block as BlockT, NumberFor};
 // Runtime
-use orbinum_runtime::{
-	opaque::Block, AccountId, Balance, Nonce, RuntimeApi, TransactionConverter,
-};
+use orbinum_runtime::{opaque::Block, AccountId, Balance, Nonce, RuntimeApi, TransactionConverter};
 
 pub use crate::eth::{db_config_dir, EthConfiguration};
 use crate::{

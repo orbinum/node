@@ -108,6 +108,7 @@ mod tests {
 	use super::*;
 	use ark_r1cs_std::{alloc::AllocVar, R1CSVar};
 	use ark_relations::r1cs::{ConstraintSystem, SynthesisMode};
+	use fp_zk_primitives::core::types::{Commitment, Nullifier, SpendingKey};
 	use fp_zk_primitives::crypto::commitment::{
 		compute_nullifier as native_compute_nullifier,
 		create_commitment as native_create_commitment,
@@ -146,7 +147,7 @@ mod tests {
 		.unwrap();
 
 		// Verify it matches native computation
-		assert_eq!(commitment.value().unwrap(), expected);
+		assert_eq!(commitment.value().unwrap(), expected.into());
 	}
 
 	#[test]
@@ -157,21 +158,24 @@ mod tests {
 		});
 
 		// Native values
-		let commitment = Bn254Fr::from(99999u64);
-		let spending_key = Bn254Fr::from(55555u64);
+		let commitment = Commitment::from(Bn254Fr::from(99999u64));
+		let spending_key = SpendingKey::from(Bn254Fr::from(55555u64));
 
 		// Compute native nullifier
-		let expected = native_compute_nullifier(commitment, spending_key);
+		let expected = native_compute_nullifier(&commitment, &spending_key);
 
 		// Allocate circuit variables
-		let commitment_var = FpVar::new_witness(cs.clone(), || Ok(commitment)).unwrap();
-		let key_var = FpVar::new_witness(cs.clone(), || Ok(spending_key)).unwrap();
+		let commitment_var = FpVar::new_witness(cs.clone(), || {
+			Ok::<Bn254Fr, SynthesisError>(commitment.into())
+		})
+		.unwrap();
+		let key_var = FpVar::new_witness(cs.clone(), || Ok(spending_key.0)).unwrap();
 
 		// Compute nullifier in-circuit
 		let nullifier = compute_nullifier(cs.clone(), &commitment_var, &key_var).unwrap();
 
 		// Verify it matches native computation
-		assert_eq!(nullifier.value().unwrap(), expected);
+		assert_eq!(nullifier.value().unwrap(), expected.into());
 	}
 
 	#[test]
@@ -207,9 +211,10 @@ mod tests {
 
 		// Verify native matches circuit
 		let native_commitment = native_create_commitment(value, asset_id, pubkey, blinding);
-		let native_nullifier = native_compute_nullifier(native_commitment, spending_key);
+		let native_nullifier =
+			native_compute_nullifier(&native_commitment, &SpendingKey::from(spending_key));
 
-		assert_eq!(commitment.value().unwrap(), native_commitment);
-		assert_eq!(nullifier.value().unwrap(), native_nullifier);
+		assert_eq!(commitment.value().unwrap(), native_commitment.into());
+		assert_eq!(nullifier.value().unwrap(), native_nullifier.into());
 	}
 }

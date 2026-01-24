@@ -1,7 +1,7 @@
 //! Tests for key derivation functions
 
-use fp_encrypted_memo::*;
 use fp_encrypted_memo::crypto::key_derivation::derive_encryption_key;
+use fp_encrypted_memo::*;
 
 fn sample_viewing_key() -> [u8; 32] {
 	[42u8; 32]

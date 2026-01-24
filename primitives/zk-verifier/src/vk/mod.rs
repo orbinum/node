@@ -26,6 +26,4 @@ pub use transfer::{get_vk as get_transfer_vk, get_vk_bytes as get_transfer_vk_by
 pub use unshield::{get_vk as get_unshield_vk, get_vk_bytes as get_unshield_vk_bytes};
 
 // Re-export registry functions
-pub use registry::{
-	get_public_input_count, get_vk_by_circuit_id, validate_public_input_count,
-};
+pub use registry::{get_public_input_count, get_vk_by_circuit_id, validate_public_input_count};
