@@ -60,6 +60,24 @@ integration-test-lint:
 integration-test: build-release integration-test-lint
 	cd ts-tests && npm run build && npm run test && npm run test-sql
 
+.PHONY: benchmark benchmark-pallet
+# Run all runtime benchmarks
+benchmark:
+	./scripts/benchmark.sh
+# Run benchmark for specific pallet (usage: make benchmark-pallet PALLET=pallet-shielded-pool)
+benchmark-pallet:
+	@if [ -z "$(PALLET)" ]; then \
+		echo "Error: PALLET variable is required. Usage: make benchmark-pallet PALLET=pallet-name"; \
+		exit 1; \
+	fi
+	cargo build --release --features=runtime-benchmarks
+	./target/release/orbinum-node benchmark pallet --chain=dev --pallet=$(PALLET) --extrinsic='*' --steps=50 --repeat=20 --output=./frame/$(PALLET)/src/weights.rs --template=./scripts/frame-weight-template.hbs
+
+.PHONY: audit
+# Run security audit (ignoring known Polkadot SDK transitive dependencies via deny.toml)
+audit:
+	@cargo deny check advisories
+
 .PHONY: help
 # Show help
 help:
