@@ -4,7 +4,7 @@ export const GENESIS_ACCOUNT_BALANCE = "340282366920938463463374607431768211455"
 
 export const FIRST_CONTRACT_ADDRESS = "0xc2bf5f29a4384b1ab0c063e1c666f02121b6084a";
 
-export const NODE_BINARY_NAME = "frontier-template-node";
+export const NODE_BINARY_NAME = "orbinum-node";
 
 export const RUNTIME_SPEC_NAME = "frontier-template";
 export const RUNTIME_SPEC_VERSION = 1;
