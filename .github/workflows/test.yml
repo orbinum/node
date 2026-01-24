@@ -37,6 +37,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang libclang-dev
+
       - name: Cache cargo registry & git sources
         uses: actions/cache@v5
         with:
@@ -81,6 +86,14 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang libclang-dev
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang libclang-dev
 
       - name: Cache cargo registry & git sources
         uses: actions/cache@v5
@@ -128,6 +141,11 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang libclang-dev
 
       - name: Cache cargo registry & git sources
         uses: actions/cache@v5
