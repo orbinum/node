@@ -2,7 +2,7 @@
 
 Groth16 proof verifier primitives for Zero-Knowledge circuits in Orbinum Network.
 
-## 📖 Overview
+## Overview
 
 This crate provides the core verification infrastructure for validating Zero-Knowledge proofs on-chain. It is designed to be used by:
 
@@ -10,7 +10,7 @@ This crate provides the core verification infrastructure for validating Zero-Kno
 - **Pallets**: Integrate proof verification into custom logic
 - **Tests**: Validate proof generation and verification workflows
 
-## 🏗️ Architecture (3 Layers + VK Registry)
+## Architecture (3 Layers + VK Registry)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -60,21 +60,21 @@ This crate provides the core verification infrastructure for validating Zero-Kno
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## 🚀 Usage
+## Usage
 
 ### Imports
 
 **DO NOT use wildcards (`*`)**. Import specific functions with full paths:
 
 ```rust
-// ✅ CORRECT - Explicit paths
+// CORRECT - Explicit paths
 use fp_zk_verifier::core::types::{Proof, VerifyingKey, PublicInputs};
 use fp_zk_verifier::core::constants::{CIRCUIT_ID_TRANSFER, CIRCUIT_ID_UNSHIELD};
 use fp_zk_verifier::crypto::groth16::Groth16Verifier;
 use fp_zk_verifier::vk::registry::{get_vk_by_circuit_id, validate_public_input_count};
 use fp_zk_verifier::compat::snarkjs::{parse_proof_from_snarkjs, parse_public_inputs_from_snarkjs};
 
-// ❌ INCORRECT - Don't use wildcards
+// INCORRECT - Don't use wildcards
 use fp_zk_verifier::crypto::*;
 use fp_zk_verifier::vk::*;
 ```
@@ -143,7 +143,7 @@ let input_count = 5; // Transfer circuit
 let cost = Groth16Verifier::estimate_verification_cost(input_count);
 ```
 
-## 🔧 Features
+## Features
 
 - `std` (default): Enable standard library support
 - `substrate`: Enable Substrate runtime integration (sp-core, sp-runtime, sp-std)
@@ -156,7 +156,7 @@ fp-zk-verifier = { version = "0.1", default-features = false }
 fp-zk-verifier = { version = "0.1", default-features = false, features = ["substrate"] }
 ```
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Run all tests
@@ -181,7 +181,7 @@ tests/
 └── snarkjs_compat_tests.rs  # SnarkJS parsing (4 tests)
 ```
 
-## 🔒 Security Considerations
+## Security Considerations
 
 ### Hardcoded Verification Keys
 
@@ -207,7 +207,7 @@ validate_public_input_count(circuit_id, inputs.len())?;
   - Off-chain proof generators
 - Changing IDs requires coordinated upgrade
 
-## 📊 Performance
+## Performance
 
 | Operation | Time (on-chain) | Gas Cost |
 |-----------|-----------------|----------|
@@ -218,7 +218,7 @@ validate_public_input_count(circuit_id, inputs.len())?;
 
 *Benchmarked on Substrate parachain with BN254 curve*
 
-## 🔗 Integration Example
+## Integration Example
 
 ```rust
 use frame_support::pallet_prelude::*;
@@ -254,7 +254,7 @@ impl<T: Config> Pallet<T> {
 }
 ```
 
-## 🛠️ Development
+## Development
 
 ### Adding New Circuits
 
@@ -293,13 +293,13 @@ impl<T: Config> Pallet<T> {
    }
    ```
 
-## 📚 References
+## References
 
 - [Groth16 Paper](https://eprint.iacr.org/2016/260.pdf)
 - [BN254 Curve](https://github.com/arkworks-rs/curves/tree/master/bn254)
 - [SnarkJS Documentation](https://github.com/iden3/snarkjs)
 - [Arkworks Library](https://github.com/arkworks-rs/groth16)
 
-## 📄 License
+## License
 
 Licensed under Apache 2.0 or GPL-3.0.

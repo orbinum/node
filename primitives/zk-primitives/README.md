@@ -2,7 +2,7 @@
 
 Native cryptographic primitives for Zero-Knowledge proofs in Orbinum Network.
 
-## 📖 Overview
+## Overview
 
 This crate provides the fundamental building blocks for privacy-preserving transactions, without the heavy R1CS constraint system dependencies. It is designed to be used by:
 
@@ -10,7 +10,7 @@ This crate provides the fundamental building blocks for privacy-preserving trans
 - **Runtime**: Validate public inputs, check Merkle roots
 - **Tests**: Unit testing without full circuit dependencies
 
-## 🏗️ Architecture (3 Layers)
+## Architecture (3 Layers)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -62,7 +62,7 @@ This crate provides the fundamental building blocks for privacy-preserving trans
 **DO NOT use wildcards (`*`)**. Import specific functions with full paths:
 
 ```rust
-// ✅ CORRECT - Explicit paths
+// CORRECT - Explicit paths
 use fp_zk_primitives::core::types::{Commitment, Nullifier, SpendingKey};
 use fp_zk_primitives::core::constants::{DEFAULT_TREE_DEPTH, NATIVE_ASSET_ID};
 use fp_zk_primitives::crypto::commitment::{create_commitment, compute_nullifier};
@@ -70,7 +70,7 @@ use fp_zk_primitives::crypto::hash::{poseidon_hash_2, poseidon_hash_4};
 use fp_zk_primitives::crypto::merkle::verify_merkle_proof;
 use fp_zk_primitives::models::note::Note;
 
-// ❌ INCORRECT - Don't use wildcards
+// INCORRECT - Don't use wildcards
 use fp_zk_primitives::crypto::hash::*;
 use fp_zk_primitives::core::*;
 ```
@@ -114,16 +114,16 @@ let is_valid = verify_merkle_proof(
 This crate uses the **new-type pattern** to prevent type confusion at compile time:
 
 ```rust
-// ✅ Type safety
+// Type safety
 let commitment = Commitment::new(field_element);
 let nullifier = Nullifier::new(field_element);
 let spending_key = SpendingKey::new(field_element);
 
-// ❌ This does NOT compile (compile-time error)
+// This does NOT compile (compile-time error)
 // let result = compute_nullifier(&nullifier, &commitment);  // Wrong order
 ```
 
-## 🧪 Testing
+## Testing
 
 The primitive includes **120 integration tests** organized by functionality:
 
@@ -142,7 +142,7 @@ cargo test --test note_tests             # 16 tests - Notes
 cargo test --test integration_tests      # 16 tests - Complete workflows
 ```
 
-## 🔧 Features
+## Features
 
 - **`std`** (default): Enables standard library features
 - **`substrate`**: Enables `parity_scale_codec` and `scale_info` derives
@@ -159,15 +159,15 @@ fp-zk-primitives = { version = "0.1.0", default-features = false }
 fp-zk-primitives = { version = "0.1.0", features = ["substrate"] }
 ```
 
-## 📐 Compatibility
+## Compatibility
 
 All hash functions are **compatible with circomlib/iden3**, ensuring that values computed here match those from Circom circuits:
 
-- ✅ Poseidon hash: Compatible with `circomlib/poseidon.circom`
-- ✅ Merkle tree: Compatible with `circomlib/smt.circom`
-- ✅ Commitment scheme: Same format as ZK circuits
+- Poseidon hash: Compatible with `circomlib/poseidon.circom`
+- Merkle tree: Compatible with `circomlib/smt.circom`
+- Commitment scheme: Same format as ZK circuits
 
-## 📊 File Structure
+## File Structure
 
 ```
 zk-primitives/
@@ -199,7 +199,7 @@ zk-primitives/
 └── README.md                   # This file
 ```
 
-## 🔒 Security
+## Security
 
 - **Strong types**: Prevents type confusion at compile time
 - **No wildcards**: Explicit imports for better traceability
@@ -207,7 +207,7 @@ zk-primitives/
 - **Exhaustive tests**: 120 tests covering all functionality
 - **Verified compatibility**: Hash functions compatible with circomlib
 
-## 🌐 Usage in Orbinum Network
+## Usage in Orbinum Network
 
 This primitive is used by:
 
@@ -216,13 +216,13 @@ This primitive is used by:
 3. **orbinum-wallet-cli**: CLI wallet for creating private transactions
 4. **pallet-shielded-pool**: Substrate pallet for the shielded pool
 
-## 📝 Changelog
+## Changelog
 
 ### v0.1.0 (Initial)
 - 3-layer architecture
 - Strong types (new-type pattern) for compile-time safety
 - 120 integration tests in `tests/` directory
 
-## 📄 License
+## License
 
 Dual-licensed: Apache-2.0 / GPL-3.0
