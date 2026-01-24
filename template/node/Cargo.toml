@@ -1,9 +1,9 @@
 [package]
-name = "frontier-template-node"
+name = "orbinum-node"
 version = "0.0.0"
 license = "Unlicense"
 build = "build.rs"
-description = "A fresh FRAME-based Substrate node, ready for hacking."
+description = "Orbinum Network Node - Privacy-focused blockchain with ZK proofs and EVM compatibility."
 publish = false
 authors = { workspace = true }
 edition = { workspace = true }

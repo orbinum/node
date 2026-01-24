@@ -62,7 +62,7 @@ The existing node must be running with these parameters:
 
 1. Start your debug node:
    ```bash
-   ./target/debug/frontier-template-node \
+   ./target/debug/orbinum-node \
      --chain=dev \
      --validator \
      --execution=Native \
