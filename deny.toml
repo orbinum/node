@@ -39,6 +39,7 @@ allow = [
     "Unicode-3.0",        # ICU4X crates (zerovec, yoke, tinystr, etc.)
     "Unlicense",
     "0BSD",
+    "Zlib",
     "GPL-3.0-only",
     "GPL-3.0-or-later",
     "GPL-3.0-or-later WITH Classpath-exception-2.0",  # Polkadot SDK / Substrate
