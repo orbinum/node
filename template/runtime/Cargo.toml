@@ -1,8 +1,8 @@
 [package]
-name = "frontier-template-runtime"
+name = "orbinum-runtime"
 version = "0.0.0"
-license = "Unlicense"
-description = "A fresh FRAME-based Substrate runtime, ready for hacking."
+license = "Apache-2.0 OR GPL-3.0-or-later"
+description = "Orbinum Privacy Chain Runtime"
 publish = false
 authors = { workspace = true }
 edition = { workspace = true }
