@@ -4,9 +4,9 @@ on:
   schedule:
     - cron: "0 0 * * *"  # Daily at midnight UTC
   push:
-    branches: [main, master, develop]
+    branches: [main, develop]
   pull_request:
-    branches: [main, master, develop]
+    branches: [main, develop]
 
 jobs:
   security_audit:
