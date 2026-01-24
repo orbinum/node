@@ -3628,7 +3628,7 @@ dependencies = [
  "ark-snark",
  "ark-std 0.4.0",
  "fp-zk-primitives 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "fp-zk-verifier 0.1.0",
+ "fp-zk-verifier 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "sp-std",
 ]
 
@@ -3666,22 +3666,6 @@ dependencies = [
 
 [[package]]
 name = "fp-zk-verifier"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fc8615ea6fa18574504d2d40f790eb5d9d5c012fd75fa881380e928dfa43e9a"
-dependencies = [
- "ark-bn254",
- "ark-ec 0.4.2",
- "ark-ff 0.4.2",
- "ark-groth16",
- "ark-serialize 0.4.2",
- "ark-std 0.4.0",
- "num-bigint",
- "serde_json",
-]
-
-[[package]]
-name = "fp-zk-verifier"
 version = "0.1.1"
 dependencies = [
  "ark-bn254",
@@ -3697,6 +3681,22 @@ dependencies = [
  "sp-core 37.0.0",
  "sp-runtime 39.0.5",
  "sp-std",
+]
+
+[[package]]
+name = "fp-zk-verifier"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17834da4ceb05abb26ec5ca5134bc8b69d5a6bd85dfcce010091db6af113d762"
+dependencies = [
+ "ark-bn254",
+ "ark-ec 0.4.2",
+ "ark-ff 0.4.2",
+ "ark-groth16",
+ "ark-serialize 0.4.2",
+ "ark-std 0.4.0",
+ "num-bigint",
+ "serde_json",
 ]
 
 [[package]]
