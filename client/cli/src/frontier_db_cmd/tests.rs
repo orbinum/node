@@ -39,7 +39,7 @@ use substrate_test_runtime_client::{
 };
 // Frontier
 use fp_storage::{constants::*, EthereumStorageSchema};
-use frontier_template_runtime::RuntimeApi;
+use orbinum_runtime::RuntimeApi;
 
 use crate::frontier_db_cmd::{Column, FrontierDbCmd, Operation};
 
