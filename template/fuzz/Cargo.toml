@@ -9,7 +9,7 @@ repository.workspace = true
 arbitrary = { version = "1.4.1", features = ["derive"] }
 evm = { workspace = true }
 frame-system = { workspace = true }
-fuzzed_runtime = { path = "../runtime", package = "frontier-template-runtime" }
+fuzzed_runtime = { path = "../runtime", package = "orbinum-runtime" }
 hex.workspace = true
 pallet-balances = { workspace = true }
 pallet-evm = { workspace = true }

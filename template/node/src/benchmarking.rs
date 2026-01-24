@@ -12,7 +12,7 @@ use sp_inherents::{InherentData, InherentDataProvider};
 use sp_runtime::{generic::Era, OpaqueExtrinsic, SaturatedConversion};
 // Frontier
 use fp_account::AccountId20;
-use frontier_template_runtime::{self as runtime, AccountId, Balance, BalancesCall, SystemCall};
+use orbinum_runtime::{self as runtime, AccountId, Balance, BalancesCall, SystemCall};
 
 use crate::service::Client;
 
