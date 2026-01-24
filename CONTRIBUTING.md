@@ -111,7 +111,7 @@ Naming convention:
 - **Documentation**: Document public functions
   ```rust
   /// Clear description of what this does
-  /// 
+  ///
   /// # Arguments
   /// * `param` - Parameter description
   ///

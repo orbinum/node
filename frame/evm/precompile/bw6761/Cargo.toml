@@ -4,6 +4,7 @@ version = "1.0.0-dev"
 authors = { workspace = true }
 edition = { workspace = true }
 repository = { workspace = true }
+license = "Apache-2.0 OR GPL-3.0-or-later"
 
 [dependencies]
 # Arkworks

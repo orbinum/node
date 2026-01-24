@@ -4,9 +4,9 @@ on:
   schedule:
     - cron: "0 0 * * *"  # Daily at midnight UTC
   push:
-    branches: [main, master, develop]
+    branches: [main, develop]
   pull_request:
-    branches: [main, master, develop]
+    branches: [main, develop]
 
 jobs:
   security_audit:
@@ -16,11 +16,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
-
       - name: Run cargo deny
-        run: make audit
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          rust-version: none
