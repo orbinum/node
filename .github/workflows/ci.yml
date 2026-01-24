@@ -5,17 +5,17 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main, develop]
     paths-ignore:
       - "**.md"
       - "docs/**"
   pull_request:
-    branches: [main, master, develop]
+    branches: [main, develop]
     paths-ignore:
       - "**.md"
       - "docs/**"
   merge_group:
-    branches: [main, master]
+    branches: [main, develop]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -37,9 +37,8 @@ jobs:
         run: |
           echo "✅ CI orchestration complete"
           echo "Individual workflow results should be checked separately:"
-          echo "  - Lint workflow (fmt + clippy)"
-          echo "  - Test workflow (shared build + check + unit tests)"
-          echo "  - Build workflow (release build)"
-          echo "  - Security Audit workflow (cargo deny)"
+          echo "  - Test workflow: fmt → check → build → (unit-test + clippy in parallel)"
+          echo "  - Build workflow: release build (only on push to main/master)"
+          echo "  - Security Audit workflow: cargo deny"
           echo ""
           echo "Note: Integration tests removed (require active node)"
