@@ -15,7 +15,7 @@ categories = ["cryptography"]
 fp-zk-primitives = { version = "0.1.0", default-features = false }
 
 # ZK Verifier (for types and VKs)
-fp-zk-verifier = { version = "0.1.0", default-features = false }
+fp-zk-verifier = { version = "0.1.1", default-features = false }
 
 # Arkworks cryptography stack
 ark-bn254 = { version = "0.4", default-features = false, features = ["curve"] }
