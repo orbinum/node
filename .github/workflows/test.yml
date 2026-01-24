@@ -2,11 +2,11 @@ name: Test
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main, develop]
   pull_request:
-    branches: [main, master, develop]
+    branches: [main, develop]
   merge_group:
-    branches: [main, master]
+    branches: [main, develop]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -19,10 +19,83 @@ env:
   SCCACHE_GHA_ENABLED: "true"
 
 jobs:
-  # Build and check workspace - compiles once for all test jobs to reuse
-  build-and-check:
-    name: Build & Check
+  # Step 1: Format check (fast, no compilation)
+  fmt:
+    name: Rustfmt
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Cache cargo registry & git sources
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-fmt-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-fmt-
+
+      - name: Run sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        run: make setup
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check code format
+        run: make fmt-check
+
+  # Step 2: Check compilation (no binary generation)
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    needs: [fmt]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang libclang-dev
+
+      - name: Cache cargo registry & git sources
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        run: make setup
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check workspace
+        run: cargo check --release --workspace
+
+  # Step 3: Build workspace - compiles once for all subsequent jobs to reuse
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [check]
     steps:
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@main
@@ -65,12 +138,8 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check and build workspace
-        run: |
-          echo "Running cargo check..."
-          cargo check --release --workspace
-          echo "Building workspace..."
-          cargo build --release --workspace --all-targets
+      - name: Build workspace
+        run: cargo build --release --workspace --all-targets
 
       - name: Cache build artifacts for reuse
         uses: actions/cache/save@v5
@@ -82,10 +151,11 @@ jobs:
             target/release/incremental
           key: ${{ runner.os }}-build-${{ github.sha }}
 
+  # Step 4a: Unit tests (uses cached build)
   unit-test:
     name: Unit Tests
     runs-on: ubuntu-latest
-    needs: [build-and-check]
+    needs: [build]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -132,3 +202,53 @@ jobs:
         run: make test-release
         env:
           RUSTFLAGS: "-D warnings"
+
+  # Step 4b: Clippy (uses cached build, runs in parallel with tests)
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang libclang-dev
+
+      - name: Cache cargo registry & git sources
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Restore build artifacts
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            target/release/deps
+            target/release/build
+            target/release/.fingerprint
+            target/release/incremental
+          key: ${{ runner.os }}-build-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      - name: Run sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        run: make setup
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run clippy
+        run: make clippy-release
