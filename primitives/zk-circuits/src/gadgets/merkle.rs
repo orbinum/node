@@ -115,6 +115,7 @@ mod tests {
 	use super::*;
 	use ark_r1cs_std::{alloc::AllocVar, R1CSVar};
 	use ark_relations::r1cs::ConstraintSystem;
+	use fp_zk_primitives::core::types::Commitment;
 	use fp_zk_primitives::crypto::merkle::compute_merkle_root;
 
 	#[test]
@@ -128,7 +129,11 @@ mod tests {
 		let path_indices_native = vec![false];
 
 		// Compute expected root natively
-		let expected_root = compute_merkle_root(leaf, &path_elements_native, &path_indices_native);
+		let expected_root = compute_merkle_root(
+			&Commitment::from(leaf),
+			&path_elements_native,
+			&path_indices_native,
+		);
 
 		// Allocate circuit variables
 		let leaf_var = FpVar::new_witness(cs.clone(), || Ok(leaf)).unwrap();
@@ -158,7 +163,11 @@ mod tests {
 		let path_indices_native = vec![false, true];
 
 		// Compute root natively
-		let root = compute_merkle_root(leaf, &path_elements_native, &path_indices_native);
+		let root = compute_merkle_root(
+			&Commitment::from(leaf),
+			&path_elements_native,
+			&path_indices_native,
+		);
 
 		// Allocate circuit variables
 		let leaf_var = FpVar::new_witness(cs.clone(), || Ok(leaf)).unwrap();
