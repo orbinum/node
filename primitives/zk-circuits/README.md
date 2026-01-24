@@ -2,7 +2,7 @@
 
 R1CS circuits and constraint gadgets for Zero-Knowledge proof generation in Orbinum Network.
 
-## 📖 What is this?
+## What is this?
 
 This crate **generates Zero-Knowledge proofs off-chain** using R1CS (Rank-1 Constraint System). It provides:
 
@@ -11,7 +11,7 @@ This crate **generates Zero-Knowledge proofs off-chain** using R1CS (Rank-1 Cons
 
 **This is NOT used by the runtime**. The runtime only needs `fp-zk-verifier` to verify proofs on-chain.
 
-## 🏗️ The 3-Crate Architecture
+## The 3-Crate Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -54,7 +54,7 @@ This crate **generates Zero-Knowledge proofs off-chain** using R1CS (Rank-1 Cons
 
 **Key insight**: Runtime doesn't need R1CS dependencies (heavy). It only verifies proofs, not generates them.
 
-## 🔄 Gadgets vs Native Primitives
+## Gadgets vs Native Primitives
 
 **Why do gadgets and native implementations coexist?**
 
@@ -79,7 +79,7 @@ assert_eq!(commitment, commitment_var.value());
 | **Use case** | Wallets, runtime checks | Inside ZK circuits (proof generation) |
 | **Proof** | No proof generated | Creates provable computation |
 
-## 📂 Module Structure
+## Module Structure
 
 ```
 fp-zk-circuits/
@@ -92,7 +92,7 @@ fp-zk-circuits/
     └── transfer.rs       # Private transfer circuit (2 inputs → 2 outputs)
 ```
 
-## 🚀 Usage
+## Usage
 
 ### Creating a Transfer Circuit
 
@@ -152,7 +152,7 @@ let root = merkle_tree_verifier(cs.clone(), &leaf, &path, &indices)?;
 let commitment = commitment_gadget(cs.clone(), &value, &blinding)?;
 ```
 
-## 🔧 Features
+## Features
 
 - `std` (default): Standard library support
 - `proving`: Enables proof generation (adds `ark-groth16`, `ark-snark`)
@@ -168,7 +168,7 @@ fp-zk-circuits = { version = "0.1", features = ["std", "proving"] }
 fp-zk-circuits = { version = "0.1", default-features = false }
 ```
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Run all tests
@@ -184,7 +184,7 @@ cargo check
 cargo clippy -- -D warnings
 ```
 
-## 🔗 Dependencies
+## Dependencies
 
 | Dependency | Purpose |
 |------------|---------|
@@ -196,20 +196,20 @@ cargo clippy -- -D warnings
 | `ark-groth16` (optional) | Groth16 proving system |
 | `poseidon-ark` | Poseidon hash (circomlib compatible) |
 
-## 🎯 When to use this crate
+## When to use this crate
 
-✅ **Use fp-zk-circuits when:**
+**Use fp-zk-circuits when:**
 - Generating proofs off-chain (wallet, CLI)
 - Developing new circuits
 - Testing gadget implementations
 - Creating proof servers
 
-❌ **Don't use fp-zk-circuits when:**
+**Don't use fp-zk-circuits when:**
 - Building runtime (use `fp-zk-verifier` instead)
 - Just verifying proofs (use `fp-zk-verifier`)
 - Computing native crypto (use `fp-zk-primitives`)
 
-## 🔒 Security Considerations
+## Security Considerations
 
 ### Trusted Setup
 
@@ -230,7 +230,7 @@ let valid = Fr::from(12345);
 let invalid = Fr::from_be_bytes_mod_order(&[0xFF; 32]);
 ```
 
-## 📊 Performance
+## Performance
 
 | Operation | Constraints | Proof Time | Verification Time |
 |-----------|-------------|------------|-------------------|
@@ -241,12 +241,12 @@ let invalid = Fr::from_be_bytes_mod_order(&[0xFF; 32]);
 
 *Benchmarked on M1 Mac with BN254 curve*
 
-## 📚 Related Crates
+## Related Crates
 
 - **fp-zk-primitives**: Native cryptographic primitives
 - **fp-zk-verifier**: On-chain proof verification
 - **pallet-shielded-pool**: Runtime pallet using these circuits
 
-## 📄 License
+## License
 
 Licensed under Apache 2.0 or GPL-3.0.
