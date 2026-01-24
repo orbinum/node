@@ -228,7 +228,7 @@ pallet-hotfix-sufficients = { path = "frame/hotfix-sufficients", default-feature
 # Frontier Utility
 precompile-utils = { path = "precompiles", default-features = false }
 # Frontier Template
-frontier-template-runtime = { path = "template/runtime", default-features = false }
+orbinum-runtime = { path = "template/runtime", default-features = false }
 
 [profile.release]
 # Substrate runtime requires unwinding.
