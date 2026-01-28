@@ -17,7 +17,7 @@ function choose_and_bench {
         IFS=', ' read -ra parts <<< "${opt}"
         echo "${parts[0]} -- ${parts[1]}"
         [[ "${opt}" == 'EXIT' ]] && exit 0
-        
+
         bench "${parts[0]}" "${parts[1]}"
         break
     done
@@ -39,7 +39,7 @@ function bench {
 
 if  [[ $# -eq 1 && "${1}" == "--help" ]]; then
     echo "USAGE:"
-    echo "  ${0} [<pallet> <extrinsic>]" 
+    echo "  ${0} [<pallet> <extrinsic>]"
 elif [[ $# -ne 2 ]]; then
     choose_and_bench
 else

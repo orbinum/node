@@ -211,10 +211,10 @@ fp-rpc = { path = "primitives/rpc", default-features = false }
 fp-self-contained = { path = "primitives/self-contained", default-features = false }
 fp-storage = { path = "primitives/storage", default-features = false }
 # Orbinum ZK Primitives
+fp-encrypted-memo = { path = "primitives/encrypted-memo", default-features = false }
+fp-zk-circuits = { path = "primitives/zk-circuits", default-features = false }
 fp-zk-primitives = { path = "primitives/zk-primitives", default-features = false }
 fp-zk-verifier = { path = "primitives/zk-verifier", default-features = false }
-fp-zk-circuits = { path = "primitives/zk-circuits", default-features = false }
-fp-encrypted-memo = { path = "primitives/encrypted-memo", default-features = false }
 # Frontier FRAME
 pallet-base-fee = { path = "frame/base-fee", default-features = false }
 pallet-dynamic-fee = { path = "frame/dynamic-fee", default-features = false }

@@ -3,6 +3,7 @@ name = "precompile-utils-tests-external"
 authors = { workspace = true }
 edition = "2021"
 version = "0.1.0"
+license = "Apache-2.0 OR GPL-3.0-or-later"
 
 [lib]
 path = "./lib.rs"

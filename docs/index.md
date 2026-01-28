@@ -21,4 +21,3 @@ features:
 - title: Optional PolkaVM support
   details: Frontier provides an optional PolkaVM support. The format is built on top of EIP-3541, enabling seamless integration.
 ---
-

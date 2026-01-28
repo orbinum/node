@@ -231,6 +231,6 @@ fn test_note_debug_format() {
 	let note = Note::new(100, 0, owner, blinding);
 
 	// Should be able to debug print
-	let debug_str = format!("{:?}", note);
+	let debug_str = format!("{note:?}");
 	assert!(debug_str.contains("Note"));
 }

@@ -1,0 +1,109 @@
+name: Build
+
+on:
+  push:
+    branches: [main, develop]
+  # Only run on push to main/develop for release builds
+  # Pull requests use the Test workflow's build job
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTC_WRAPPER: "sccache"
+  SCCACHE_GHA_ENABLED: "true"
+
+jobs:
+  build-release:
+    name: Build Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang libclang-dev
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang libclang-dev
+
+      - name: Cache cargo registry & git sources
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+            ${{ runner.os }}-cargo-build-
+            ${{ runner.os }}-cargo-
+
+      - name: Run sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        run: make setup
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build release
+        run: make build-release
+
+      - name: Upload node binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbinum-node
+          path: target/release/orbinum-node
+          retention-days: 7
+
+      - name: Build runtime WASM
+        run: cargo build --release -p orbinum-runtime
+
+      - name: Check runtime size
+        run: |
+          WASM_PATH="target/release/wbuild/orbinum-runtime/orbinum_runtime.compact.compressed.wasm"
+          if [ -f "$WASM_PATH" ]; then
+            SIZE=$(wc -c < "$WASM_PATH")
+            SIZE_KB=$((SIZE / 1024))
+            echo "✅ Runtime WASM size: ${SIZE_KB} KB"
+
+            # Check if size is reasonable (< 1.5 MB)
+            MAX_SIZE=$((1536 * 1024))
+            if [ $SIZE -gt $MAX_SIZE ]; then
+              echo "⚠️  Warning: Runtime size ${SIZE_KB} KB exceeds 1.5 MB"
+              exit 1
+            fi
+
+            # Info: Expected size with ZK is ~848 KB
+            echo "📊 Expected size with ZK optimizations: ~848 KB"
+          else
+            echo "❌ Runtime WASM not found at $WASM_PATH"
+            exit 1
+          fi
+
+      - name: Upload runtime WASM
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbinum-runtime-wasm
+          path: target/release/wbuild/orbinum-runtime/orbinum_runtime.compact.compressed.wasm
+          retention-days: 7

@@ -4,6 +4,7 @@ version = "0.1.0"
 authors.workspace = true
 edition.workspace = true
 repository.workspace = true
+license = "Apache-2.0 OR GPL-3.0-or-later"
 
 [dependencies]
 arbitrary = { version = "1.4.1", features = ["derive"] }
