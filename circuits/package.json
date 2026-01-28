@@ -1,0 +1,59 @@
+{
+    "name": "orbinum-circuits",
+    "version": "0.1.0",
+    "description": "Zero-Knowledge circuits for Orbinum privacy blockchain",
+    "scripts": {
+        "compile": "npm run compile:transfer",
+        "compile:transfer": "bash scripts/build/compile.sh transfer",
+        "compile:disclosure": "bash scripts/build/compile.sh disclosure",
+        "compile:unshield": "bash scripts/build/compile.sh unshield",
+        "setup": "npm run setup:transfer",
+        "setup:transfer": "bash scripts/build/setup.sh transfer",
+        "setup:disclosure": "bash scripts/build/setup.sh disclosure",
+        "setup:unshield": "bash scripts/build/setup.sh unshield",
+        "convert:disclosure": "bash scripts/build/convert-to-ark.sh disclosure",
+        "convert:transfer": "bash scripts/build/convert-to-ark.sh transfer",
+        "convert:unshield": "bash scripts/build/convert-to-ark.sh unshield",
+        "copy-artifacts": "bash scripts/build/copy-artifacts.sh disclosure",
+        "full-build:disclosure": "npm run compile:disclosure && npm run setup:disclosure && npm run convert:disclosure && npm run copy-artifacts",
+        "full-build:transfer": "npm run compile:transfer && npm run setup:transfer && npm run convert:transfer",
+        "full-build:unshield": "npm run compile:unshield && npm run setup:unshield && npm run convert:unshield",
+        "gen-input:disclosure": "ts-node scripts/generators/generate_disclosure_input.ts",
+        "gen-input:transfer": "ts-node scripts/generators/generate_input.ts",
+        "prove": "ts-node scripts/generators/generate_proof.ts",
+        "prove:disclosure": "ts-node scripts/generators/generate_disclosure_proof.ts",
+        "prove:transfer": "ts-node scripts/generators/generate_proof.ts",
+        "e2e:disclosure": "ts-node scripts/e2e-disclosure.ts",
+        "e2e:transfer": "ts-node scripts/e2e-transfer.ts",
+        "test": "mocha --require ts-node/register 'test/**/*.test.ts' --timeout 100000",
+        "test:js": "mocha test/**/*.test.js --timeout 100000",
+        "build": "tsc",
+        "bench": "ts-node benches/run-all.bench.ts",
+        "bench:transfer": "ts-node benches/transfer.bench.ts",
+        "bench:disclosure": "ts-node benches/disclosure.bench.ts",
+        "clean": "rm -rf build/*.zkey build/*.json build/*.wtns ptau/"
+    },
+    "devDependencies": {
+        "@types/chai": "^4.3.11",
+        "@types/circomlibjs": "^0.1.6",
+        "@types/mocha": "^10.0.6",
+        "@types/node": "^20.10.0",
+        "@types/snarkjs": "^0.7.9",
+        "chai": "^4.3.10",
+        "circom_tester": "^0.0.19",
+        "circomlib": "^2.0.5",
+        "ffjavascript": "^0.2.60",
+        "mocha": "^10.2.0",
+        "snarkjs": "^0.7.0",
+        "ts-node": "^10.9.2",
+        "typescript": "^5.3.3"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "author": "Orbinum Team",
+    "license": "Apache-2.0",
+    "dependencies": {
+        "circomlibjs": "^0.1.7"
+    }
+}
