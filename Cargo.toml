@@ -127,6 +127,7 @@ sp-consensus = { git = "https://github.com/paritytech/polkadot-sdk", branch = "s
 sp-consensus-aura = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
 sp-consensus-grandpa = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
 sp-core = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+sp-crypto-ec-utils = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
 sp-crypto-hashing = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
 sp-database = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
 sp-externalities = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
@@ -204,6 +205,7 @@ fc-rpc-v2 = { path = "client/rpc-v2" }
 fc-rpc-v2-api = { path = "client/rpc-v2/api" }
 fc-rpc-v2-types = { path = "client/rpc-v2/types" }
 fc-storage = { path = "client/storage" }
+
 # Frontier Primitive
 fp-account = { path = "primitives/account", default-features = false }
 fp-consensus = { path = "primitives/consensus", default-features = false }
@@ -213,11 +215,13 @@ fp-evm = { path = "primitives/evm", default-features = false }
 fp-rpc = { path = "primitives/rpc", default-features = false }
 fp-self-contained = { path = "primitives/self-contained", default-features = false }
 fp-storage = { path = "primitives/storage", default-features = false }
+
 # Orbinum ZK Primitives
 fp-encrypted-memo = { path = "primitives/encrypted-memo", default-features = false }
 fp-zk-circuits = { path = "primitives/zk-circuits", default-features = false }
 orbinum-zk-core = { path = "primitives/zk-core", default-features = false }
 fp-zk-verifier = { path = "primitives/zk-verifier", default-features = false }
+
 # Frontier FRAME
 pallet-base-fee = { path = "frame/base-fee", default-features = false }
 pallet-dynamic-fee = { path = "frame/dynamic-fee", default-features = false }
@@ -237,6 +241,7 @@ pallet-evm-test-vector-support = { path = "frame/evm/test-vector-support" }
 pallet-hotfix-sufficients = { path = "frame/hotfix-sufficients", default-features = false }
 # Frontier Utility
 precompile-utils = { path = "precompiles", default-features = false }
+
 # Frontier Template
 orbinum-runtime = { path = "template/runtime", default-features = false }
 
