@@ -8,12 +8,12 @@
 
 //! Coordinate the verification of a Merkle proof using domain services.
 
-use alloc::{string::String, vec::Vec};
 use crate::domain::{
 	ports::PoseidonHasher,
 	services::MerkleService,
 	value_objects::{Commitment, FieldElement},
 };
+use alloc::{string::String, vec::Vec};
 
 /// Input data for verifying a Merkle proof
 #[derive(Debug, Clone)]

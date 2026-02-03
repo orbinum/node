@@ -13,11 +13,11 @@
 //! - Provide stable API contracts
 //! - Convert between domain entities and external representations
 
-use alloc::string::String;
 use crate::domain::{
 	entities::Note,
 	value_objects::{Blinding, OwnerPubkey},
 };
+use alloc::string::String;
 use ark_bn254::Fr;
 
 /// Data Transfer Object for Note

@@ -10,11 +10,11 @@
 //! - Convert between domain and external representations
 //! - Support various proof verification scenarios
 
-use alloc::{string::String, vec::Vec};
 use crate::domain::{
 	repositories::MerklePath,
 	value_objects::{Commitment, FieldElement},
 };
+use alloc::{string::String, vec::Vec};
 use ark_bn254::Fr;
 
 /// Data Transfer Object for Merkle Proof

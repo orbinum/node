@@ -9,12 +9,12 @@
 
 //! Coordinate the computation of a nullifier using domain entities and services.
 
-use alloc::string::String;
 use crate::domain::{
 	entities::Note,
 	ports::PoseidonHasher,
 	value_objects::{Nullifier, SpendingKey},
 };
+use alloc::string::String;
 
 /// Input data for computing a nullifier
 #[derive(Debug, Clone)]

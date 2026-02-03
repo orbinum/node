@@ -11,11 +11,11 @@
 
 //! Coordinate the creation of a Note entity with proper validation and business rules.
 
-use alloc::string::String;
 use crate::domain::{
 	entities::Note,
 	value_objects::{Blinding, OwnerPubkey},
 };
+use alloc::string::String;
 
 /// Input data for creating a note
 #[derive(Debug, Clone)]

@@ -10,8 +10,8 @@
 
 //! Coordinate the computation of a commitment using domain services and entities.
 
-use alloc::string::String;
 use crate::domain::{entities::Note, ports::PoseidonHasher, value_objects::Commitment};
+use alloc::string::String;
 
 /// Input data for computing a commitment
 #[derive(Debug, Clone)]

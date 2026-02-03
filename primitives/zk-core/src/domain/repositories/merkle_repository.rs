@@ -1,7 +1,7 @@
 //! Merkle Repository Port - Storage abstraction for Merkle tree operations
 
-use alloc::{string::String, vec::Vec};
 use crate::domain::value_objects::{Commitment, FieldElement};
+use alloc::{string::String, vec::Vec};
 
 /// Result type for repository operations
 pub type RepositoryResult<T> = Result<T, RepositoryError>;
