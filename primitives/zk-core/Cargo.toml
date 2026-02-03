@@ -1,0 +1,51 @@
+[package]
+name = "orbinum-zk-core"
+version = "0.2.0"
+authors = ["Orbinum Network <dev@orbinum.net>"]
+edition = "2021"
+license = "Apache-2.0 OR GPL-3.0-or-later"
+description = "Core cryptographic primitives for Zero-Knowledge proofs in Orbinum Network"
+repository = "https://github.com/orbinum/node"
+homepage = "https://orbinum.network"
+readme = "README.md"
+keywords = ["cryptography", "orbinum", "poseidon", "zk-snark", "blockchain"]
+categories = ["cryptography", "no-std"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(substrate_runtime)"] }
+
+[dependencies]
+# Arkworks cryptography library - Minimal dependencies (no R1CS constraint system)
+# Version 0.5.0 required for compatibility with light-poseidon-nostd 0.4.x
+ark-bn254 = { version = "0.5.0", default-features = false }
+ark-ff = { version = "0.5.0", default-features = false }
+
+# Poseidon hash implementation - circomlib compatible, full no_std support
+# Published crate with proper no_std support and no transitive std dependencies
+light-poseidon-nostd = { version = "0.4.1", default-features = false }
+
+# Serialization support (optional)
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc"], optional = true }
+
+# Substrate runtime interface for native host function calls (optional)
+# Enables ~3x performance improvement when running in Substrate native context
+sp-runtime-interface = { version = "33", default-features = false, optional = true }
+
+[dev-dependencies]
+ark-std = { version = "0.5.0", default-features = false, features = ["std"] }
+serde_json = "1.0"
+
+[features]
+default = ["std"]
+std = [
+	"ark-bn254/std",
+	"ark-ff/std",
+	"serde",
+	"serde/std",
+	"sp-runtime-interface",
+	"sp-runtime-interface/std",
+]
+
+# Enable native Poseidon host functions for Substrate runtimes
+# Provides ~3x performance improvement over WASM execution
+native-poseidon = ["std", "sp-runtime-interface"]
