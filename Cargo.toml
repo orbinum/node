@@ -38,7 +38,7 @@ members = [
 	"primitives/evm",
 	"primitives/rpc",
 	"primitives/self-contained",
-	"primitives/zk-primitives",
+	"primitives/zk-core",
 	"primitives/zk-verifier",
 	"primitives/zk-circuits",
 	"primitives/encrypted-memo",
