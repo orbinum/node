@@ -219,8 +219,8 @@ fp-storage = { path = "primitives/storage", default-features = false }
 # Orbinum ZK Primitives
 fp-encrypted-memo = { path = "primitives/encrypted-memo", default-features = false }
 fp-zk-circuits = { path = "primitives/zk-circuits", default-features = false }
-orbinum-zk-core = { path = "primitives/zk-core", default-features = false }
 fp-zk-verifier = { path = "primitives/zk-verifier", default-features = false }
+orbinum-zk-core = { path = "primitives/zk-core", default-features = false }
 
 # Frontier FRAME
 pallet-base-fee = { path = "frame/base-fee", default-features = false }
