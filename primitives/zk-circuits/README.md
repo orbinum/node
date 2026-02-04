@@ -1,252 +1,146 @@
-# fp-zk-circuits
+# orbinum-zk-circuits
 
-R1CS circuits and constraint gadgets for Zero-Knowledge proof generation in Orbinum Network.
+[![crates.io](https://img.shields.io/crates/v/orbinum-zk-circuits.svg)](https://crates.io/crates/orbinum-zk-circuits)
+[![Documentation](https://docs.rs/orbinum-zk-circuits/badge.svg)](https://docs.rs/orbinum-zk-circuits)
 
-## What is this?
+R1CS circuits and constraint gadgets for off-chain ZK proof generation.
 
-This crate **generates Zero-Knowledge proofs off-chain** using R1CS (Rank-1 Constraint System). It provides:
+## Features
 
-- **Gadgets**: R1CS constraint-generating versions of cryptographic primitives
-- **Circuits**: Complete ZK-SNARK circuits (transfer, unshield)
+- **Arkworks gadgets**: Poseidon, Merkle, commitment, nullifier circuits
+- **Type-safe constraints**: Compile-time validation of circuit logic
+- **Compatible**: Works with circom, SnarkJS toolchain
+- **BN254 curve**: Same as Ethereum's alt_bn128
+- **32 tests**: Full circuit validation suite
 
-**This is NOT used by the runtime**. The runtime only needs `fp-zk-verifier` to verify proofs on-chain.
+## Installation
 
-## The 3-Crate Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│ fp-zk-primitives (Native Crypto)                        │
-│ • Poseidon, commitments, Merkle trees                   │
-│ • Direct computation (fast)                             │
-│ • USE: Wallets, runtime, tests                          │
-└─────────────────────────────────────────────────────────┘
-                      ▲
-                      │ (validates compatibility)
-                      │
-┌─────────────────────────────────────────────────────────┐
-│ fp-zk-circuits (Proof Generation) ◄── THIS CRATE       │
-│ • R1CS constraint gadgets                               │
-│ • Complete circuits (transfer, unshield)                │
-│ • GENERATES proofs off-chain                            │
-│ • USE: Wallets, CLI tools, proof servers               │
-└─────────────────────────────────────────────────────────┘
-                      │
-                      │ (generates)
-                      ▼
-                   [Proof]
-                      │
-                      ▼
-┌─────────────────────────────────────────────────────────┐
-│ fp-zk-verifier (Proof Verification)                     │
-│ • Groth16 verifier                                      │
-│ • VERIFIES proofs on-chain                              │
-│ • USE: Runtime only                                     │
-└─────────────────────────────────────────────────────────┘
-```
-
-### Why 3 separate crates?
-
-| Crate | Purpose | Runs where | Size | Dependencies |
-|-------|---------|------------|------|--------------|
-| **fp-zk-primitives** | Fast native crypto | Wallet + Runtime + Tests | Small | Minimal (arkworks) |
-| **fp-zk-circuits** | Generate proofs | Wallet + CLI (off-chain) | Large | Heavy (R1CS, constraint system) |
-| **fp-zk-verifier** | Verify proofs | Runtime (on-chain) | Small | Minimal (Groth16 only) |
-
-**Key insight**: Runtime doesn't need R1CS dependencies (heavy). It only verifies proofs, not generates them.
-
-## Gadgets vs Native Primitives
-
-**Why do gadgets and native implementations coexist?**
-
-```rust
-// NATIVE (fp-zk-primitives) - Wallet computes commitment
-use fp_zk_primitives::crypto::commitment::create_commitment;
-let commitment = create_commitment(value, blinding); // Direct result
-
-// GADGET (fp-zk-circuits) - Circuit generates R1CS constraints
-use fp_zk_circuits::gadgets::commitment::commitment_gadget;
-let commitment_var = commitment_gadget(value_var, blinding_var); // Constraints
-
-// Tests validate both produce the same result
-assert_eq!(commitment, commitment_var.value());
-```
-
-| Aspect | Native (`fp-zk-primitives`) | Gadget (`fp-zk-circuits`) |
-|--------|----------------------------|---------------------------|
-| **Operation** | Computes result directly | Generates R1CS constraints |
-| **Speed** | Fast (native Rust) | Slower (constraint building) |
-| **Output** | Field element value | ConstraintSystem variable |
-| **Use case** | Wallets, runtime checks | Inside ZK circuits (proof generation) |
-| **Proof** | No proof generated | Creates provable computation |
-
-## Module Structure
-
-```
-fp-zk-circuits/
-├── gadgets/              # R1CS constraint gadgets
-│   ├── poseidon.rs       # Poseidon hash (ZK-friendly)
-│   ├── merkle.rs         # Merkle tree membership
-│   └── commitment.rs     # Commitments and nullifiers
-└── circuits/             # Complete ZK circuits
-    ├── note.rs           # Note commitment circuit
-    └── transfer.rs       # Private transfer circuit (2 inputs → 2 outputs)
+```toml
+[dependencies]
+orbinum-zk-circuits = "0.2"
+ark-r1cs-std = "0.4"
+ark-bn254 = "0.4"
+orbinum-zk-core = "0.2"  # For native crypto validation
 ```
 
 ## Usage
 
-### Creating a Transfer Circuit
+### Generate Transfer Proof (Private Transaction)
 
 ```rust
-use fp_zk_circuits::circuits::transfer::{TransferCircuit, TransferWitness};
-use fp_zk_circuits::circuits::note::Note;
-use ark_bn254::Fr;
-
-// Create input notes (what you're spending)
-let input_note1 = Note::new(1000, 0, owner_pubkey, blinding1);
-let input_note2 = Note::new(500, 0, owner_pubkey, blinding2);
-
-// Create output notes (where funds go)
-let output_note1 = Note::new(1200, 0, recipient_pubkey, blinding3);
-let output_note2 = Note::new(300, 0, change_pubkey, blinding4);
-
-// Create witness with private data
-let witness = TransferWitness::new(
-    [input_note1, input_note2],
-    [spending_key1, spending_key2],
-    merkle_path_elements,   // Merkle proofs for inputs
-    merkle_path_indices,
-    [output_note1, output_note2],
-);
-
-// Create circuit with public input (Merkle root)
-let circuit = TransferCircuit::new(witness, merkle_root);
-
-// Generate proof (requires `proving` feature + trusted setup)
+use orbinum_zk_circuits::application::{
+    use_cases::TransferCircuit,
+    dto::{TransferWitness, TransferPublicInputs, MerklePath},
+};
+use ark_bn254::{Bn254, Fr};
 use ark_groth16::Groth16;
-let proof = Groth16::prove(&proving_key, circuit, &mut rng)?;
+use ark_snark::SNARK;
+
+// Create circuit with witness data
+let witness = TransferWitness {
+    input_note_value: Fr::from(1000u64),
+    input_note_asset_id: Fr::from(1u64),
+    input_note_owner: Fr::from(12345u64),
+    input_note_blinding: Fr::from(67890u64),
+    merkle_path: MerklePath::new(vec![
+        Fr::from(0), Fr::from(1), // ... siblings
+    ]),
+    leaf_index: 5,
+    spending_key: Fr::from(999u64),
+    output_note_value: Fr::from(800u64),
+    output_note_recipient: Fr::from(54321u64),
+    output_note_blinding: Fr::from(11111u64),
+};
+
+let public_inputs = TransferPublicInputs {
+    merkle_root: Fr::from(123),
+    nullifier: Fr::from(456),
+    output_commitment: Fr::from(789),
+};
+
+let circuit = TransferCircuit::new(witness, public_inputs);
+
+// Generate proof (requires trusted setup from artifacts/)
+let (pk, vk) = setup::<Bn254, _, _>(&circuit, &mut rng);
+let proof = Groth16::<Bn254>::prove(&pk, circuit, &mut rng)?;
 ```
 
-### Using Gadgets Directly
+### Generate Unshield Proof (Withdraw)
 
 ```rust
-use fp_zk_circuits::gadgets::poseidon::poseidon_hash_2;
-use fp_zk_circuits::gadgets::merkle::merkle_tree_verifier;
-use fp_zk_circuits::gadgets::commitment::commitment_gadget;
+use orbinum_zk_circuits::application::{
+    use_cases::UnshieldCircuit,
+    dto::{UnshieldWitness, UnshieldPublicInputs},
+};
+
+let witness = UnshieldWitness {
+    note_value: Fr::from(500u64),
+    note_asset_id: Fr::from(1u64),
+    note_owner: Fr::from(12345u64),
+    note_blinding: Fr::from(67890u64),
+    merkle_path: MerklePath::new(siblings),
+    leaf_index: 3,
+    spending_key: Fr::from(999u64),
+};
+
+let public_inputs = UnshieldPublicInputs {
+    merkle_root: Fr::from(123),
+    nullifier: Fr::from(456),
+    recipient: Fr::from(99999u64),  // Public destination account
+    amount: Fr::from(500u64),
+    asset_id: Fr::from(1u64),
+};
+
+let circuit = UnshieldCircuit::new(witness, public_inputs);
+let proof = Groth16::<Bn254>::prove(&pk, circuit, &mut rng)?;
+```
+
+### Validate Circuit Constraints
+
+```rust
 use ark_relations::r1cs::ConstraintSystem;
-use ark_r1cs_std::alloc::AllocVar;
-use ark_r1cs_std::fields::fp::FpVar;
 
-let cs = ConstraintSystem::new_ref();
+let cs = ConstraintSystem::<Fr>::new_ref();
+circuit.generate_constraints(cs.clone())?;
 
-// Allocate witness variables (private inputs)
-let value = FpVar::new_witness(cs.clone(), || Ok(Fr::from(100)))?;
-let blinding = FpVar::new_witness(cs.clone(), || Ok(Fr::from(123)))?;
-
-// Generate constraints for Poseidon hash
-let hash = poseidon_hash_2(cs.clone(), &[value, blinding])?;
-
-// Generate constraints for Merkle proof
-let root = merkle_tree_verifier(cs.clone(), &leaf, &path, &indices)?;
-
-// Generate constraints for commitment
-let commitment = commitment_gadget(cs.clone(), &value, &blinding)?;
+assert!(cs.is_satisfied().unwrap(), "Circuit constraints failed!");
+println!("Constraints: {}", cs.num_constraints());
 ```
 
-## Features
+## Supported Circuits
 
-- `std` (default): Standard library support
-- `proving`: Enables proof generation (adds `ark-groth16`, `ark-snark`)
-
-```toml
-[dependencies]
-fp-zk-circuits = { version = "0.1", default-features = false }
-
-# For proof generation (wallets, CLI tools)
-fp-zk-circuits = { version = "0.1", features = ["std", "proving"] }
-
-# For no_std circuit development (testing gadgets only)
-fp-zk-circuits = { version = "0.1", default-features = false }
-```
-
-## Testing
-
-```bash
-# Run all tests
-cargo test
-
-# Run with proving feature
-cargo test --features proving
-
-# Check without proving (faster)
-cargo check
-
-# Verify no warnings
-cargo clippy -- -D warnings
-```
-
-## Dependencies
-
-| Dependency | Purpose |
-|------------|---------|
-| `fp-zk-primitives` | Native crypto primitives (for validation) |
-| `fp-zk-verifier` | Shared types and constants |
-| `ark-r1cs-std` | R1CS constraint system stdlib |
-| `ark-relations` | Constraint relations framework |
-| `ark-bn254` | BN254 elliptic curve |
-| `ark-groth16` (optional) | Groth16 proving system |
-| `poseidon-ark` | Poseidon hash (circomlib compatible) |
-
-## When to use this crate
-
-**Use fp-zk-circuits when:**
-- Generating proofs off-chain (wallet, CLI)
-- Developing new circuits
-- Testing gadget implementations
-- Creating proof servers
-
-**Don't use fp-zk-circuits when:**
-- Building runtime (use `fp-zk-verifier` instead)
-- Just verifying proofs (use `fp-zk-verifier`)
-- Computing native crypto (use `fp-zk-primitives`)
-
-## Security Considerations
-
-### Trusted Setup
-
-Circuits require a trusted setup (Powers of Tau ceremony):
-```bash
-# Generate proving/verifying keys (done once per circuit)
-snarkjs groth16 setup circuit.r1cs pot.ptau circuit.zkey
-```
-
-### Field Element Constraints
-
-All values must be valid BN254 field elements:
-```rust
-// Valid: values < BN254 modulus
-let valid = Fr::from(12345);
-
-// Invalid: will wrap/reduce
-let invalid = Fr::from_be_bytes_mod_order(&[0xFF; 32]);
-```
+| Circuit | Purpose | Public Inputs | Private Inputs |
+|---------|---------|---------------|----------------|
+| **TransferCircuit** | Private transfer | merkle_root, nullifier, output_commitment | input_note, spending_key, merkle_path, output_note |
+| **UnshieldCircuit** | Withdraw to public | merkle_root, nullifier, recipient, amount, asset_id | note, spending_key, merkle_path |
+| **DisclosureCircuit** | Prove ownership | commitment, owner_pubkey | note (value, asset_id, blinding) |
 
 ## Performance
 
-| Operation | Constraints | Proof Time | Verification Time |
-|-----------|-------------|------------|-------------------|
-| Poseidon hash (2 inputs) | ~150 | <1ms | <1ms |
-| Merkle proof (depth 20) | ~3000 | ~5ms | <1ms |
-| Transfer circuit | ~8000 | ~100ms | ~10ms |
-| Unshield circuit | ~5000 | ~60ms | ~8ms |
+| Operation | Constraints | Prove Time | Verify Time |
+|-----------|-------------|------------|-------------|
+| Transfer | ~4,200 | 300ms | 2ms |
+| Unshield | ~3,800 | 280ms | 2ms |
+| Disclosure | ~1,500 | 120ms | 2ms |
 
-*Benchmarked on M1 Mac with BN254 curve*
+*Measured on Apple M1, BN254 curve, Groth16*
 
-## Related Crates
+## Key Concepts
 
-- **fp-zk-primitives**: Native cryptographic primitives
-- **fp-zk-verifier**: On-chain proof verification
-- **pallet-shielded-pool**: Runtime pallet using these circuits
+- **R1CS**: Rank-1 Constraint System (a × b = c format)
+- **Witness**: Private circuit inputs (not revealed in proof)
+- **Public Inputs**: Values exposed in the proof
+- **Gadget**: Reusable constraint generator
+- **ConstraintSystem**: Accumulates R1CS equations
+
+## Integration with Toolchain
+
+Compatible with circom circuits in `/circuits`:
+- Use circom for rapid prototyping
+- Use this crate for Rust-native proof generation
+- Same BN254 curve, same verification keys
+- Can verify proofs generated by either toolchain
 
 ## License
 
-Licensed under Apache 2.0 or GPL-3.0.
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE2) or [GPL v3](LICENSE-GPL3) at your option.

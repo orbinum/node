@@ -179,7 +179,7 @@ git push origin feature/your-feature
 ├── precompiles/     # EVM precompile implementations
 ├── primitives/      # Core types and traits
 │   ├── zk-circuits/     # Circuit primitives
-│   ├── zk-primitives/   # ZK cryptographic primitives
+│   ├── zk-core/   # ZK cryptographic primitives
 │   ├── ethereum/        # Ethereum compatibility
 │   └── ...
 ├── template/        # Node runtime template

@@ -33,14 +33,27 @@ use crate::{
 };
 
 /// Only enable the benchmarking host functions when we actually want to benchmark.
-#[cfg(feature = "runtime-benchmarks")]
+#[cfg(all(feature = "runtime-benchmarks", feature = "native-poseidon"))]
+pub type HostFunctions = (
+	sp_io::SubstrateHostFunctions,
+	frame_benchmarking::benchmarking::HostFunctions,
+	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
+	orbinum_zk_core::infrastructure::host_interface::poseidon_host_interface::HostFunctions,
+);
+#[cfg(all(feature = "runtime-benchmarks", not(feature = "native-poseidon")))]
 pub type HostFunctions = (
 	sp_io::SubstrateHostFunctions,
 	frame_benchmarking::benchmarking::HostFunctions,
 	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
 );
 /// Otherwise we use empty host functions for ext host functions.
-#[cfg(not(feature = "runtime-benchmarks"))]
+#[cfg(all(not(feature = "runtime-benchmarks"), feature = "native-poseidon"))]
+pub type HostFunctions = (
+	sp_io::SubstrateHostFunctions,
+	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
+	orbinum_zk_core::infrastructure::host_interface::poseidon_host_interface::HostFunctions,
+);
+#[cfg(all(not(feature = "runtime-benchmarks"), not(feature = "native-poseidon")))]
 pub type HostFunctions = (
 	sp_io::SubstrateHostFunctions,
 	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,

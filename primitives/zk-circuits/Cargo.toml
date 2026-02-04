@@ -1,56 +1,34 @@
 [package]
-name = "fp-zk-circuits"
-version = "0.1.2"
+name = "orbinum-zk-circuits"
+version = "0.2.0"
 authors = ["Orbinum Network <dev@orbinum.net>"]
 edition = "2021"
 license = "Apache-2.0 OR GPL-3.0-or-later"
 description = "Zero-Knowledge R1CS circuits and gadgets for Orbinum Network"
 repository = "https://github.com/orbinum/node"
 homepage = "https://orbinum.network"
+readme = "README.md"
 keywords = ["cryptography", "zero-knowledge", "circuits", "r1cs", "orbinum"]
-categories = ["cryptography"]
+categories = ["cryptography", "no-std"]
 
 [dependencies]
 # ZK Primitives (native crypto)
-fp-zk-primitives = { version = "0.1.0", default-features = false }
-
-# ZK Verifier (for types and VKs)
-fp-zk-verifier = { version = "0.1.1", default-features = false }
+orbinum-zk-core = { path = "../zk-core", default-features = false }
 
 # Arkworks cryptography stack
-ark-bn254 = { version = "0.4", default-features = false, features = ["curve"] }
-ark-ec = { version = "0.4", default-features = false }
-ark-ff = { version = "0.4", default-features = false }
-ark-serialize = { version = "0.4", default-features = false }
-ark-std = { version = "0.4", default-features = false }
+# Version 0.5.0 to match zk-core (required for light-poseidon-nostd compatibility)
+ark-bn254 = { version = "0.5.0", default-features = false, features = ["curve"] }
 
 # Arkworks constraint system (R1CS)
-ark-groth16 = { version = "0.4", default-features = false, optional = true }
-ark-r1cs-std = { version = "0.4", default-features = false }
-ark-relations = { version = "0.4", default-features = false }
-ark-snark = { version = "0.4", default-features = false, optional = true }
-
-# Substrate primitives
-sp-std = { version = "14", default-features = false }
-
-[dev-dependencies]
-ark-groth16 = { version = "0.4", default-features = false }
-ark-snark = { version = "0.4", default-features = false }
-ark-std = { version = "0.4", features = ["std"] }
+# Must match ark-bn254 version for API compatibility
+ark-r1cs-std = { version = "0.5.0", default-features = false }
+ark-relations = { version = "0.5.0", default-features = false }
 
 [features]
 default = ["std"]
 std = [
-	"fp-zk-primitives/std",
-	"fp-zk-verifier/std",
+	"orbinum-zk-core/std",
 	"ark-bn254/std",
-	"ark-ff/std",
-	"ark-ec/std",
-	"ark-std/std",
-	"ark-serialize/std",
 	"ark-r1cs-std/std",
 	"ark-relations/std",
-	"sp-std/std",
 ]
-# Proving feature - enables proof generation (adds ark-groth16, ark-snark)
-proving = ["ark-snark", "ark-groth16"]

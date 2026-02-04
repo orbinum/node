@@ -16,6 +16,8 @@ node/runtime/wasm/target/
 polkadot.*
 .DS_Store
 .cargo-remote.toml
+/artifacts/
+tmp/
 
 # Editors
 .vscode
