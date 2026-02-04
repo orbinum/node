@@ -35,7 +35,7 @@ ark-snark = { version = "0.5.0", default-features = false, optional = true }
 ark-std = { version = "0.5.0", default-features = false, features = ["std"], optional = true }
 
 # Local dependencies
-orbinum-zk-core = { path = "../zk-core", default-features = false, optional = true }
+orbinum-zk-core = { version = "0.2.0", default-features = false, optional = true }
 
 # WASM runtime (wasm-witness feature, requires std)
 once_cell = { version = "1.19", optional = true }
