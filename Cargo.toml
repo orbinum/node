@@ -212,6 +212,8 @@ fp-self-contained = { path = "primitives/self-contained", default-features = fal
 fp-storage = { path = "primitives/storage", default-features = false }
 # Orbinum ZK Primitives
 orbinum-zk-core = { path = "primitives/zk-core", default-features = false }
+orbinum-zk-verifier = { path = "primitives/zk-verifier", default-features = false }
+
 # Frontier FRAME
 pallet-base-fee = { path = "frame/base-fee", default-features = false }
 pallet-dynamic-fee = { path = "frame/dynamic-fee", default-features = false }

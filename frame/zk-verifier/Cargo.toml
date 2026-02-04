@@ -1,0 +1,74 @@
+[package]
+name = "pallet-zk-verifier"
+version = "0.1.0"
+description = "Zero-Knowledge proof verification pallet for Orbinum"
+authors = ["Orbinum Team"]
+license = "GPL-3.0-or-later"
+edition = "2024"
+repository = "https://github.com/orbinum/orbinum-node"
+readme = "README.md"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+# Parity scale codec
+parity-scale-codec = { version = "3.6", default-features = false, features = ["derive"] }
+scale-info = { version = "2.11", default-features = false, features = ["derive"] }
+
+# Serde (for genesis config)
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+
+# Substrate primitives
+
+sp-io = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+sp-std = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+
+# Logging (optional for std)
+log = { version = "0.4", default-features = false, optional = true }
+
+# FRAME dependencies
+frame-benchmarking = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false, optional = true }
+frame-support = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+frame-system = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+
+# Local dependencies
+orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
+orbinum-zk-verifier = { path = "../../primitives/zk-verifier", default-features = false }
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
+orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
+orbinum-zk-verifier = { path = "../../primitives/zk-verifier", default-features = false }
+
+[[bench]]
+name = "groth16_verify"
+harness = false
+
+[features]
+default = ["std"]
+std = [
+	"parity-scale-codec/std",
+	"scale-info/std",
+	"serde/std",
+	"sp-io/std",
+	"sp-runtime/std",
+	"sp-std/std",
+	"frame-support/std",
+	"frame-system/std",
+	"frame-benchmarking?/std",
+	"orbinum-zk-verifier/std",
+	"orbinum-zk-core/std",
+	"log",
+]
+
+runtime-benchmarks = [
+	"frame-benchmarking/runtime-benchmarks",
+	"frame-support/runtime-benchmarks",
+	"frame-system/runtime-benchmarks",
+]
+try-runtime = [
+	"frame-support/try-runtime",
+	"frame-system/try-runtime",
+]
