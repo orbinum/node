@@ -4,15 +4,12 @@
 use parity_scale_codec::{Decode, Encode};
 #[cfg(feature = "substrate")]
 use scale_info::TypeInfo;
-#[cfg(feature = "substrate")]
-use sp_runtime::RuntimeDebug;
 
 use core::fmt;
 
 /// Errors that can occur during proof verification
-#[derive(Clone, PartialEq, Eq)]
-#[cfg_attr(not(feature = "substrate"), derive(Debug))]
-#[cfg_attr(feature = "substrate", derive(Encode, Decode, TypeInfo, RuntimeDebug))]
+#[derive(Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "substrate", derive(Encode, Decode, TypeInfo))]
 pub enum VerifierError {
 	/// The proof is invalid or malformed
 	InvalidProof,
@@ -21,7 +18,7 @@ pub enum VerifierError {
 	/// Public input is invalid
 	InvalidPublicInput,
 	/// Public input count mismatch
-	InvalidPublicInputCount { expected: usize, got: usize },
+	InvalidPublicInputCount { expected: u32, got: u32 },
 	/// Proof verification failed (proof is incorrect)
 	VerificationFailed,
 	/// Serialization/deserialization error
