@@ -1,6 +1,4 @@
-//! # Error Types
-//!
-//! Error types for ZK proof verification.
+//! Domain error types.
 
 #[cfg(feature = "substrate")]
 use parity_scale_codec::{Decode, Encode};
@@ -12,7 +10,8 @@ use sp_runtime::RuntimeDebug;
 use core::fmt;
 
 /// Errors that can occur during proof verification
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq)]
+#[cfg_attr(not(feature = "substrate"), derive(Debug))]
 #[cfg_attr(feature = "substrate", derive(Encode, Decode, TypeInfo, RuntimeDebug))]
 pub enum VerifierError {
 	/// The proof is invalid or malformed
@@ -21,6 +20,8 @@ pub enum VerifierError {
 	InvalidVerifyingKey,
 	/// Public input is invalid
 	InvalidPublicInput,
+	/// Public input count mismatch
+	InvalidPublicInputCount { expected: usize, got: usize },
 	/// Proof verification failed (proof is incorrect)
 	VerificationFailed,
 	/// Serialization/deserialization error
@@ -39,6 +40,12 @@ impl fmt::Display for VerifierError {
 			VerifierError::InvalidProof => write!(f, "Invalid proof"),
 			VerifierError::InvalidVerifyingKey => write!(f, "Invalid verifying key"),
 			VerifierError::InvalidPublicInput => write!(f, "Invalid public input"),
+			VerifierError::InvalidPublicInputCount { expected, got } => {
+				write!(
+					f,
+					"Invalid public input count: expected {expected}, got {got}"
+				)
+			}
 			VerifierError::VerificationFailed => write!(f, "Verification failed"),
 			VerifierError::SerializationError => write!(f, "Serialization error"),
 			VerifierError::InvalidProofSize => write!(f, "Invalid proof size"),
