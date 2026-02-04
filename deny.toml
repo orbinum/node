@@ -45,11 +45,13 @@ allow = [
     "GPL-3.0-or-later WITH Classpath-exception-2.0",  # Polkadot SDK / Substrate
     "CC0-1.0",            # unicode-ident and other crates
     "MPL-2.0",            # webpki-roots
+    "BSL-1.0",            # xxhash-rust (Boost Software License 1.0)
 ]
 
 # Exception for crates with deprecated SPDX syntax (from Polkadot SDK)
 [[licenses.exceptions]]
 name = "array-bytes"
+version = "6.2.3"
 allow = ["Apache-2.0", "GPL-3.0-only"]
 
 # Polkadot SDK uses GPL-3.0 with Classpath exception

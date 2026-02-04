@@ -38,7 +38,7 @@ members = [
 	"primitives/evm",
 	"primitives/rpc",
 	"primitives/self-contained",
-	"primitives/zk-primitives",
+	"primitives/zk-core",
 	"primitives/zk-verifier",
 	"primitives/zk-circuits",
 	"primitives/encrypted-memo",
@@ -184,10 +184,13 @@ xcm = { package = "staging-xcm", git = "https://github.com/paritytech/polkadot-s
 # Arkworks
 ark-bls12-377 = { version = "0.4.0", default-features = false, features = ["curve"] }
 ark-bls12-381 = { version = "0.4.0", default-features = false, features = ["curve"] }
+ark-bn254 = { version = "0.4.0", default-features = false, features = ["curve"] }
 ark-bw6-761 = { version = "0.4.0", default-features = false }
 ark-ec = { version = "0.4.0", default-features = false }
 ark-ff = { version = "0.4.0", default-features = false }
-ark-std = { version = "0.5.0", default-features = false }
+ark-groth16 = { version = "0.4.0", default-features = false }
+ark-serialize = { version = "0.4.0", default-features = false }
+ark-std = { version = "0.4.0", default-features = false }
 
 # Frontier Client
 fc-api = { path = "client/api" }
@@ -211,10 +214,11 @@ fp-rpc = { path = "primitives/rpc", default-features = false }
 fp-self-contained = { path = "primitives/self-contained", default-features = false }
 fp-storage = { path = "primitives/storage", default-features = false }
 # Orbinum ZK Primitives
-fp-encrypted-memo = { path = "primitives/encrypted-memo", default-features = false }
-fp-zk-circuits = { path = "primitives/zk-circuits", default-features = false }
-fp-zk-primitives = { path = "primitives/zk-primitives", default-features = false }
-fp-zk-verifier = { path = "primitives/zk-verifier", default-features = false }
+orbinum-encrypted-memo = { path = "primitives/encrypted-memo", default-features = false }
+orbinum-zk-circuits = { path = "primitives/zk-circuits", default-features = false }
+orbinum-zk-core = { path = "primitives/zk-core", default-features = false }
+orbinum-zk-verifier = { path = "primitives/zk-verifier", default-features = false }
+
 # Frontier FRAME
 pallet-base-fee = { path = "frame/base-fee", default-features = false }
 pallet-dynamic-fee = { path = "frame/dynamic-fee", default-features = false }
