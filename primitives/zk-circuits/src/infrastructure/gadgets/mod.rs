@@ -1,9 +1,9 @@
-//! # R1CS Gadgets for ZK Circuits
+//! # Gadgets Module (Infrastructure Layer)
 //!
-//! This module provides constraint-generating versions of cryptographic primitives.
-//! These gadgets are used inside ZK circuits to create verifiable computations.
+//! R1CS constraint-generating gadgets for cryptographic operations.
+//! These are infrastructure adapters that implement domain abstractions using arkworks.
 //!
-//! Each gadget corresponds to a native primitive in `fp-zk-primitives`,
+//! Each gadget corresponds to a native primitive in `orbinum-zk-core`,
 //! but generates R1CS constraints instead of computing directly.
 //!
 //! ## Modules
@@ -31,7 +31,7 @@
 //!
 //! ## Difference from Native Primitives
 //!
-//! | Native (`fp-zk-primitives`) | Gadget (`fp-zk-circuits::gadgets`) |
+//! | Native (`orbinum-zk-core`) | Gadget (`orbinum-zk-circuits::gadgets`) |
 //! |-----------------------------|-----------------------------------|
 //! | Computes result directly    | Generates R1CS constraints        |
 //! | Fast (native Rust)          | Slower (constraint generation)    |

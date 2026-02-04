@@ -1,6 +1,7 @@
-//! # ZK Circuits
+//! # Circuits Module (Application Layer)
 //!
 //! Complete ZK-SNARK circuits for private transactions.
+//! These are application use cases that orchestrate infrastructure gadgets.
 //!
 //! ## Circuits
 //!

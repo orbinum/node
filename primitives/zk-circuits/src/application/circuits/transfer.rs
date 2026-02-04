@@ -1,50 +1,20 @@
-//! # Transfer Circuit
+//! Transfer Circuit
 //!
-//! Complete private transfer circuit that proves:
-//!
-//! 1. **Merkle Membership**: Input notes exist in the commitment tree
-//! 2. **Nullifier Correctness**: Nullifiers are computed correctly
-//! 3. **Output Commitments**: Output commitments are computed correctly
-//! 4. **Balance Conservation**: sum(inputs) == sum(outputs)
-//! 5. **Asset Consistency**: All notes use the same asset (MVP)
-//!
-//! ## Public Inputs
-//!
-//! - `merkle_root`: Current Merkle tree root
-//! - `nullifiers[2]`: Nullifiers for spent notes (prevents double-spend)
-//! - `commitments[2]`: Commitments for new notes
-//!
-//! ## Private Inputs
-//!
-//! - Input notes (value, asset_id, owner, blinding)
-//! - Spending keys
-//! - Merkle proofs
-//! - Output notes (value, asset_id, owner, blinding)
-//!
-//! ## Usage
-//!
-//! ```rust,ignore
-//! use fp_zk_circuits::circuits::transfer::*;
-//!
-//! // Create transfer witness
-//! let witness = TransferWitness::new(
-//!     input_notes,
-//!     spending_keys,
-//!     merkle_paths,
-//!     output_notes,
-//! );
-//!
-//! // Create and verify the circuit
-//! let circuit = TransferCircuit::new(witness, merkle_root);
-//! ```
+//! Private transfer circuit proving:
+//! 1. Merkle membership of input notes
+//! 2. Nullifier correctness
+//! 3. Output commitment correctness
+//! 4. Balance conservation: sum(inputs) == sum(outputs)
+//! 5. Asset consistency (MVP: single asset)
 
+use alloc::vec::Vec;
 use ark_r1cs_std::{alloc::AllocVar, boolean::Boolean, eq::EqGadget, fields::fp::FpVar};
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
 
 use super::note::{note_commitment, nullifier, Note};
-use crate::gadgets::merkle::merkle_tree_verifier;
+use crate::infrastructure::gadgets::merkle::merkle_tree_verifier;
 use crate::Bn254Fr;
-use fp_zk_primitives::core::constants::DEFAULT_TREE_DEPTH;
+use orbinum_zk_core::domain::constants::MERKLE_TREE_DEPTH as DEFAULT_TREE_DEPTH;
 
 /// Number of inputs in a transfer (MVP: fixed at 2)
 pub const NUM_INPUTS: usize = 2;
@@ -59,7 +29,7 @@ pub const TREE_DEPTH: usize = DEFAULT_TREE_DEPTH;
 // Transfer Witness
 // ============================================================================
 
-/// Complete witness for a private transfer
+/// Private transfer witness
 #[derive(Clone, Debug)]
 pub struct TransferWitness {
 	// Input notes (being spent)
@@ -145,7 +115,7 @@ impl TransferWitness {
 // Transfer Public Inputs
 // ============================================================================
 
-/// Public inputs for the transfer circuit
+/// Transfer circuit public inputs
 #[derive(Clone, Debug)]
 pub struct TransferPublicInputs {
 	/// Current Merkle tree root
@@ -180,11 +150,9 @@ impl TransferPublicInputs {
 // Transfer Circuit
 // ============================================================================
 
-/// Private transfer circuit implementing ConstraintSynthesizer
+/// Private transfer circuit
 ///
-/// This circuit uses `Option` values to support the arkworks pattern where:
-/// - `None` values are used during trusted setup (only constraint structure needed)
-/// - `Some(values)` are used during proving (actual witness data)
+/// Uses `Option` for arkworks pattern (None during setup, Some during proving).
 #[derive(Clone)]
 pub struct TransferCircuit {
 	/// Private witness data (None during setup)
@@ -426,10 +394,12 @@ impl ConstraintSynthesizer<Bn254Fr> for TransferCircuit {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::infrastructure::native_crypto::poseidon_hash_2;
 	use ark_relations::r1cs::ConstraintSystem;
-	use fp_zk_primitives::core::types::Commitment;
-	use fp_zk_primitives::crypto::hash::poseidon_hash_2;
-	use fp_zk_primitives::crypto::merkle::compute_merkle_root;
+	use orbinum_zk_core::domain::services::MerkleService;
+	use orbinum_zk_core::domain::value_objects::{Commitment, FieldElement};
+	use orbinum_zk_core::infrastructure::crypto::LightPoseidonHasher;
+	extern crate alloc;
 
 	/// Creates test Merkle paths for TREE_DEPTH levels
 	fn create_test_merkle_paths(
@@ -464,12 +434,26 @@ mod tests {
 		}
 
 		// Verify paths work
-		let root0 = compute_merkle_root(&Commitment::from(leaf0), &path0, &idx0);
-		let root1 = compute_merkle_root(&Commitment::from(leaf1), &path1, &idx1);
+		let hasher = LightPoseidonHasher;
+		let service = MerkleService::new(hasher);
+
+		let path0_field: Vec<FieldElement> = path0.iter().map(|&p| FieldElement::new(p)).collect();
+		let path1_field: Vec<FieldElement> = path1.iter().map(|&p| FieldElement::new(p)).collect();
+
+		let root0 = service.compute_root(
+			&Commitment::new(FieldElement::new(leaf0)),
+			&path0_field,
+			&idx0,
+		);
+		let root1 = service.compute_root(
+			&Commitment::new(FieldElement::new(leaf1)),
+			&path1_field,
+			&idx1,
+		);
 
 		assert_eq!(root0, root1, "Both leaves should compute to same root");
 
-		(root0, [path0, path1], [idx0, idx1])
+		(root0.inner(), [path0, path1], [idx0, idx1])
 	}
 
 	fn create_test_witness() -> (TransferWitness, Bn254Fr) {
@@ -558,7 +542,9 @@ mod tests {
 			"Circuit should be satisfied with valid witness"
 		);
 
-		println!("Transfer circuit constraints: {}", cs.num_constraints());
+		// Note: println! is not available in no_std
+		// Uncomment with std feature if needed:
+		// println!("Transfer circuit constraints: {}", cs.num_constraints());
 	}
 
 	#[test]
@@ -577,5 +563,534 @@ mod tests {
 
 		let nf3 = note.nullifier(Bn254Fr::from(999u64));
 		assert_ne!(nf1, nf3);
+	}
+
+	// ===== TransferWitness Tests =====
+
+	#[test]
+	fn test_transfer_witness_new() {
+		let (witness, _) = create_test_witness();
+		assert_eq!(witness.input_notes.len(), NUM_INPUTS);
+		assert_eq!(witness.output_notes.len(), NUM_OUTPUTS);
+	}
+
+	#[test]
+	fn test_input_commitments() {
+		let (witness, _) = create_test_witness();
+		let commitments = witness.input_commitments();
+		assert_eq!(commitments.len(), NUM_INPUTS);
+		assert_ne!(commitments[0], Bn254Fr::from(0u64));
+		assert_ne!(commitments[1], Bn254Fr::from(0u64));
+	}
+
+	#[test]
+	fn test_nullifiers() {
+		let (witness, _) = create_test_witness();
+		let nullifiers = witness.nullifiers();
+		assert_eq!(nullifiers.len(), NUM_INPUTS);
+		assert_ne!(nullifiers[0], Bn254Fr::from(0u64));
+		assert_ne!(nullifiers[1], Bn254Fr::from(0u64));
+		assert_ne!(nullifiers[0], nullifiers[1]);
+	}
+
+	#[test]
+	fn test_output_commitments() {
+		let (witness, _) = create_test_witness();
+		let commitments = witness.output_commitments();
+		assert_eq!(commitments.len(), NUM_OUTPUTS);
+		assert_ne!(commitments[0], Bn254Fr::from(0u64));
+		assert_ne!(commitments[1], Bn254Fr::from(0u64));
+	}
+
+	#[test]
+	fn test_witness_balance_check() {
+		let (witness, _) = create_test_witness();
+		let input_sum = witness.input_notes[0].value + witness.input_notes[1].value;
+		let output_sum = witness.output_notes[0].value + witness.output_notes[1].value;
+		assert_eq!(input_sum, output_sum);
+	}
+
+	#[test]
+	fn test_witness_validation_balanced() {
+		let owner = Bn254Fr::from(100u64);
+		let blinding = Bn254Fr::from(200u64);
+		let spending_key = Bn254Fr::from(300u64);
+
+		let input_notes = [
+			Note::new(500, 0, owner, blinding),
+			Note::new(500, 0, owner, blinding),
+		];
+		let output_notes = [
+			Note::new(600, 0, owner, blinding),
+			Note::new(400, 0, owner, blinding),
+		];
+
+		let (_, path_elements, path_indices) =
+			create_test_merkle_paths(input_notes[0].commitment(), input_notes[1].commitment());
+
+		let witness = TransferWitness::new(
+			input_notes,
+			[spending_key, spending_key],
+			path_elements,
+			path_indices,
+			output_notes,
+		);
+
+		assert!(witness.validate().is_ok());
+	}
+
+	#[test]
+	fn test_witness_validation_input_exceeds_output() {
+		let owner = Bn254Fr::from(100u64);
+		let blinding = Bn254Fr::from(200u64);
+		let spending_key = Bn254Fr::from(300u64);
+
+		let input_notes = [
+			Note::new(600, 0, owner, blinding),
+			Note::new(500, 0, owner, blinding),
+		];
+		let output_notes = [
+			Note::new(400, 0, owner, blinding),
+			Note::new(400, 0, owner, blinding),
+		];
+
+		let (_, path_elements, path_indices) =
+			create_test_merkle_paths(input_notes[0].commitment(), input_notes[1].commitment());
+
+		let witness = TransferWitness::new(
+			input_notes,
+			[spending_key, spending_key],
+			path_elements,
+			path_indices,
+			output_notes,
+		);
+
+		assert!(witness.validate().is_err());
+	}
+
+	#[test]
+	fn test_witness_validation_output_exceeds_input() {
+		let owner = Bn254Fr::from(100u64);
+		let blinding = Bn254Fr::from(200u64);
+		let spending_key = Bn254Fr::from(300u64);
+
+		let input_notes = [
+			Note::new(400, 0, owner, blinding),
+			Note::new(400, 0, owner, blinding),
+		];
+		let output_notes = [
+			Note::new(600, 0, owner, blinding),
+			Note::new(500, 0, owner, blinding),
+		];
+
+		let (_, path_elements, path_indices) =
+			create_test_merkle_paths(input_notes[0].commitment(), input_notes[1].commitment());
+
+		let witness = TransferWitness::new(
+			input_notes,
+			[spending_key, spending_key],
+			path_elements,
+			path_indices,
+			output_notes,
+		);
+
+		assert!(witness.validate().is_err());
+	}
+
+	#[test]
+	fn test_witness_validation_invalid_input_asset() {
+		let owner = Bn254Fr::from(100u64);
+		let blinding = Bn254Fr::from(200u64);
+		let spending_key = Bn254Fr::from(300u64);
+
+		let mut input_notes = [
+			Note::new(500, 0, owner, blinding),
+			Note::new(500, 0, owner, blinding),
+		];
+		input_notes[0].asset_id = Bn254Fr::from(1u64); // Invalid asset
+
+		let output_notes = [
+			Note::new(500, 0, owner, blinding),
+			Note::new(500, 0, owner, blinding),
+		];
+
+		let (_, path_elements, path_indices) =
+			create_test_merkle_paths(input_notes[0].commitment(), input_notes[1].commitment());
+
+		let witness = TransferWitness::new(
+			input_notes,
+			[spending_key, spending_key],
+			path_elements,
+			path_indices,
+			output_notes,
+		);
+
+		assert!(witness.validate().is_err());
+	}
+
+	#[test]
+	fn test_witness_validation_invalid_output_asset() {
+		let owner = Bn254Fr::from(100u64);
+		let blinding = Bn254Fr::from(200u64);
+		let spending_key = Bn254Fr::from(300u64);
+
+		let input_notes = [
+			Note::new(500, 0, owner, blinding),
+			Note::new(500, 0, owner, blinding),
+		];
+
+		let mut output_notes = [
+			Note::new(500, 0, owner, blinding),
+			Note::new(500, 0, owner, blinding),
+		];
+		output_notes[1].asset_id = Bn254Fr::from(2u64); // Invalid asset
+
+		let (_, path_elements, path_indices) =
+			create_test_merkle_paths(input_notes[0].commitment(), input_notes[1].commitment());
+
+		let witness = TransferWitness::new(
+			input_notes,
+			[spending_key, spending_key],
+			path_elements,
+			path_indices,
+			output_notes,
+		);
+
+		assert!(witness.validate().is_err());
+	}
+
+	#[test]
+	fn test_witness_zero_values() {
+		let owner = Bn254Fr::from(100u64);
+		let blinding = Bn254Fr::from(200u64);
+		let spending_key = Bn254Fr::from(300u64);
+
+		let input_notes = [
+			Note::new(0, 0, owner, blinding),
+			Note::new(0, 0, owner, blinding),
+		];
+		let output_notes = [
+			Note::new(0, 0, owner, blinding),
+			Note::new(0, 0, owner, blinding),
+		];
+
+		let (_, path_elements, path_indices) =
+			create_test_merkle_paths(input_notes[0].commitment(), input_notes[1].commitment());
+
+		let witness = TransferWitness::new(
+			input_notes,
+			[spending_key, spending_key],
+			path_elements,
+			path_indices,
+			output_notes,
+		);
+
+		assert!(witness.validate().is_ok());
+	}
+
+	// ===== TransferPublicInputs Tests =====
+
+	#[test]
+	fn test_public_inputs_from_witness() {
+		let (witness, root) = create_test_witness();
+		let public_inputs = TransferPublicInputs::from_witness(&witness, root);
+
+		assert_eq!(public_inputs.merkle_root, root);
+		assert_eq!(public_inputs.nullifiers.len(), NUM_INPUTS);
+		assert_eq!(public_inputs.commitments.len(), NUM_OUTPUTS);
+	}
+
+	#[test]
+	fn test_public_inputs_to_vec() {
+		let (witness, root) = create_test_witness();
+		let public_inputs = TransferPublicInputs::from_witness(&witness, root);
+		let vec = public_inputs.to_vec();
+
+		assert_eq!(vec.len(), 1 + NUM_INPUTS + NUM_OUTPUTS);
+		assert_eq!(vec[0], root);
+		assert_eq!(vec[1], public_inputs.nullifiers[0]);
+		assert_eq!(vec[2], public_inputs.nullifiers[1]);
+		assert_eq!(vec[3], public_inputs.commitments[0]);
+		assert_eq!(vec[4], public_inputs.commitments[1]);
+	}
+
+	#[test]
+	fn test_public_inputs_nullifiers_unique() {
+		let (witness, root) = create_test_witness();
+		let public_inputs = TransferPublicInputs::from_witness(&witness, root);
+
+		assert_ne!(public_inputs.nullifiers[0], public_inputs.nullifiers[1]);
+	}
+
+	#[test]
+	fn test_public_inputs_clone() {
+		let (witness, root) = create_test_witness();
+		let public_inputs1 = TransferPublicInputs::from_witness(&witness, root);
+		let public_inputs2 = public_inputs1.clone();
+
+		assert_eq!(public_inputs1.merkle_root, public_inputs2.merkle_root);
+		assert_eq!(public_inputs1.nullifiers, public_inputs2.nullifiers);
+		assert_eq!(public_inputs1.commitments, public_inputs2.commitments);
+	}
+
+	// ===== TransferCircuit Tests =====
+
+	#[test]
+	fn test_transfer_circuit_new() {
+		let (witness, root) = create_test_witness();
+		let circuit = TransferCircuit::new(witness.clone(), root);
+
+		assert!(circuit.witness.is_some());
+		assert!(circuit.merkle_root.is_some());
+		assert_eq!(circuit.merkle_root.unwrap(), root);
+	}
+
+	#[test]
+	fn test_transfer_circuit_new_for_setup() {
+		let circuit = TransferCircuit::new_for_setup();
+
+		assert!(circuit.witness.is_none());
+		assert!(circuit.merkle_root.is_none());
+	}
+
+	#[test]
+	fn test_transfer_circuit_public_inputs() {
+		let (witness, root) = create_test_witness();
+		let circuit = TransferCircuit::new(witness.clone(), root);
+
+		let public_inputs = circuit.public_inputs();
+		assert_eq!(public_inputs.merkle_root, root);
+		assert_eq!(public_inputs.nullifiers, witness.nullifiers());
+		assert_eq!(public_inputs.commitments, witness.output_commitments());
+	}
+
+	#[test]
+	#[should_panic(expected = "Cannot get public inputs without witness")]
+	fn test_transfer_circuit_public_inputs_without_witness() {
+		let circuit = TransferCircuit::new_for_setup();
+		let _ = circuit.public_inputs();
+	}
+
+	#[test]
+	fn test_transfer_circuit_clone() {
+		let (witness, root) = create_test_witness();
+		let circuit1 = TransferCircuit::new(witness, root);
+		let circuit2 = circuit1.clone();
+
+		assert!(circuit2.witness.is_some());
+		assert_eq!(circuit2.merkle_root, circuit1.merkle_root);
+	}
+
+	#[test]
+	fn test_transfer_circuit_satisfies_constraints() {
+		let (witness, root) = create_test_witness();
+		let circuit = TransferCircuit::new(witness, root);
+
+		let cs = ConstraintSystem::<Bn254Fr>::new_ref();
+		circuit.generate_constraints(cs.clone()).unwrap();
+
+		assert!(cs.is_satisfied().unwrap());
+	}
+
+	#[test]
+	fn test_transfer_circuit_has_constraints() {
+		let (witness, root) = create_test_witness();
+		let circuit = TransferCircuit::new(witness, root);
+
+		let cs = ConstraintSystem::<Bn254Fr>::new_ref();
+		circuit.generate_constraints(cs.clone()).unwrap();
+
+		assert!(cs.num_constraints() > 0);
+	}
+
+	// ===== Integration Tests =====
+
+	#[test]
+	fn test_end_to_end_transfer() {
+		let (witness, root) = create_test_witness();
+
+		// Validate witness
+		assert!(witness.validate().is_ok());
+
+		// Create circuit
+		let circuit = TransferCircuit::new(witness.clone(), root);
+
+		// Get public inputs
+		let public_inputs = circuit.public_inputs();
+		assert_eq!(public_inputs.nullifiers, witness.nullifiers());
+
+		// Generate and verify constraints
+		let cs = ConstraintSystem::<Bn254Fr>::new_ref();
+		circuit.generate_constraints(cs.clone()).unwrap();
+		assert!(cs.is_satisfied().unwrap());
+	}
+
+	#[test]
+	fn test_different_owners() {
+		let owner1 = Bn254Fr::from(1000u64);
+		let owner2 = Bn254Fr::from(2000u64);
+		let blinding = Bn254Fr::from(3000u64);
+		let spending_key = Bn254Fr::from(4000u64);
+
+		let input_notes = [
+			Note::new(700, 0, owner1, blinding),
+			Note::new(300, 0, owner1, blinding),
+		];
+		let output_notes = [
+			Note::new(500, 0, owner2, blinding),
+			Note::new(500, 0, owner2, blinding),
+		];
+
+		let (root, path_elements, path_indices) =
+			create_test_merkle_paths(input_notes[0].commitment(), input_notes[1].commitment());
+
+		let witness = TransferWitness::new(
+			input_notes,
+			[spending_key, spending_key],
+			path_elements,
+			path_indices,
+			output_notes,
+		);
+
+		assert!(witness.validate().is_ok());
+
+		let circuit = TransferCircuit::new(witness, root);
+		let cs = ConstraintSystem::<Bn254Fr>::new_ref();
+		circuit.generate_constraints(cs.clone()).unwrap();
+		assert!(cs.is_satisfied().unwrap());
+	}
+
+	#[test]
+	fn test_asymmetric_split() {
+		let owner = Bn254Fr::from(100u64);
+		let blinding = Bn254Fr::from(200u64);
+		let spending_key = Bn254Fr::from(300u64);
+
+		let input_notes = [
+			Note::new(900, 0, owner, blinding),
+			Note::new(100, 0, owner, blinding),
+		];
+		let output_notes = [
+			Note::new(100, 0, owner, blinding),
+			Note::new(900, 0, owner, blinding),
+		];
+
+		let (root, path_elements, path_indices) =
+			create_test_merkle_paths(input_notes[0].commitment(), input_notes[1].commitment());
+
+		let witness = TransferWitness::new(
+			input_notes,
+			[spending_key, spending_key],
+			path_elements,
+			path_indices,
+			output_notes,
+		);
+
+		assert!(witness.validate().is_ok());
+
+		let circuit = TransferCircuit::new(witness, root);
+		let cs = ConstraintSystem::<Bn254Fr>::new_ref();
+		circuit.generate_constraints(cs.clone()).unwrap();
+		assert!(cs.is_satisfied().unwrap());
+	}
+
+	// ===== Edge Case Tests =====
+
+	#[test]
+	fn test_max_value_transfer() {
+		let owner = Bn254Fr::from(100u64);
+		let blinding = Bn254Fr::from(200u64);
+		let spending_key = Bn254Fr::from(300u64);
+
+		let input_notes = [
+			Note::new(u64::MAX / 2, 0, owner, blinding),
+			Note::new(u64::MAX / 2, 0, owner, blinding),
+		];
+		let output_notes = [
+			Note::new(u64::MAX / 2, 0, owner, blinding),
+			Note::new(u64::MAX / 2, 0, owner, blinding),
+		];
+
+		let (_root, path_elements, path_indices) =
+			create_test_merkle_paths(input_notes[0].commitment(), input_notes[1].commitment());
+
+		let witness = TransferWitness::new(
+			input_notes,
+			[spending_key, spending_key],
+			path_elements,
+			path_indices,
+			output_notes,
+		);
+
+		assert!(witness.validate().is_ok());
+	}
+
+	#[test]
+	fn test_merkle_path_verification() {
+		let leaf0 = Bn254Fr::from(111u64);
+		let leaf1 = Bn254Fr::from(222u64);
+
+		let (root, paths, indices) = create_test_merkle_paths(leaf0, leaf1);
+
+		// Verify both paths lead to same root
+		let hasher = LightPoseidonHasher;
+		let service = MerkleService::new(hasher);
+
+		let path0_field: Vec<FieldElement> =
+			paths[0].iter().map(|&p| FieldElement::new(p)).collect();
+		let root0 = service.compute_root(
+			&Commitment::new(FieldElement::new(leaf0)),
+			&path0_field,
+			&indices[0],
+		);
+
+		assert_eq!(root0.inner(), root);
+	}
+
+	// ===== Helper Function Tests =====
+
+	#[test]
+	fn test_create_test_merkle_paths() {
+		let leaf0 = Bn254Fr::from(100u64);
+		let leaf1 = Bn254Fr::from(200u64);
+
+		let (root, paths, indices) = create_test_merkle_paths(leaf0, leaf1);
+
+		// Check structure
+		assert_eq!(paths.len(), 2);
+		assert_eq!(indices.len(), 2);
+		assert_eq!(paths[0].len(), TREE_DEPTH);
+		assert_eq!(paths[1].len(), TREE_DEPTH);
+
+		// Check root is non-zero
+		assert_ne!(root, Bn254Fr::from(0u64));
+
+		// Check siblings at level 0
+		assert_eq!(paths[0][0], leaf1);
+		assert_eq!(paths[1][0], leaf0);
+		assert!(!indices[0][0]); // leaf0 is left
+		assert!(indices[1][0]); // leaf1 is right
+	}
+
+	#[test]
+	fn test_create_test_witness_structure() {
+		let (witness, root) = create_test_witness();
+
+		// Check witness structure
+		assert_eq!(witness.input_notes.len(), NUM_INPUTS);
+		assert_eq!(witness.output_notes.len(), NUM_OUTPUTS);
+		assert_eq!(witness.spending_keys.len(), NUM_INPUTS);
+		assert_eq!(witness.merkle_path_elements.len(), NUM_INPUTS);
+		assert_eq!(witness.merkle_path_indices.len(), NUM_INPUTS);
+
+		// Check root is valid
+		assert_ne!(root, Bn254Fr::from(0u64));
+	}
+
+	#[test]
+	fn test_constants() {
+		assert_eq!(NUM_INPUTS, 2);
+		assert_eq!(NUM_OUTPUTS, 2);
+		// TREE_DEPTH is always > 0 by definition
 	}
 }
