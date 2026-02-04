@@ -1,15 +1,18 @@
-//! Memo constants
+//! Constants
 //!
-//! Size and domain separator constants for encrypted memos.
+//! Size constraints and domain separators for encrypted memo operations.
 
-/// Maximum size of encrypted memo in bytes
-/// Layout: 12 (nonce) + 76 (note data) + 16 (MAC) = 104 bytes
+/// Maximum encrypted memo size in bytes
+///
+/// Layout: `nonce(12) + note_data(76) + MAC(16) = 104`
 pub const MAX_ENCRYPTED_MEMO_SIZE: usize = 104;
 
-/// Minimum size (nonce + empty ciphertext + MAC)
+/// Minimum encrypted memo size in bytes
+///
+/// Layout: `nonce(12) + MAC(16) = 28`
 pub const MIN_ENCRYPTED_MEMO_SIZE: usize = 12 + 16;
 
-/// Size of plaintext memo data (before encryption)
+/// Plaintext memo data size (before encryption)
 pub const MEMO_DATA_SIZE: usize = 76;
 
 /// Size of ChaCha20Poly1305 nonce

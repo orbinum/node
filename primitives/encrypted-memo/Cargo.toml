@@ -1,6 +1,6 @@
 [package]
-name = "fp-encrypted-memo"
-version = "0.1.1"
+name = "orbinum-encrypted-memo"
+version = "0.2.0"
 authors = ["Orbinum Network <dev@orbinum.net>"]
 edition = "2021"
 license = "Apache-2.0 OR GPL-3.0-or-later"
@@ -11,42 +11,77 @@ keywords = ["cryptography", "encryption", "privacy", "blockchain", "orbinum"]
 categories = ["cryptography", "no-std"]
 
 [dependencies]
-# Encryption
+# Core cryptography
 chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
 sha2 = { version = "0.10", default-features = false }
 
-# Serialization (optional for runtime integration)
+# Serialization
+hex = { version = "0.4", default-features = false, features = ["alloc"], optional = true }
 parity-scale-codec = { version = "3.6", default-features = false, features = ["derive"], optional = true }
 scale-info = { version = "2.11", default-features = false, features = ["derive"], optional = true }
+serde = { version = "1.0", default-features = false, features = ["derive"], optional = true }
+serde_json = { version = "1.0", default-features = false, optional = true }
 
-# Substrate (optional for runtime integration)
-sp-core = { version = "37", default-features = false, optional = true }
-sp-std = { version = "14", default-features = false, optional = true }
+# Random number generation (encrypt feature)
+rand = { version = "0.8", default-features = false, features = ["std_rng"], optional = true }
 
-# Random (for encryption)
-rand = { version = "0.8", default-features = false, optional = true }
+# ZK proof dependencies (disclosure feature)
+ark-bn254 = { version = "0.5.0", default-features = false, optional = true }
+ark-ff = { version = "0.5.0", default-features = false, optional = true }
+ark-groth16 = { version = "0.5.0", default-features = false, optional = true }
+ark-relations = { version = "0.5.0", default-features = false, optional = true }
+ark-serialize = { version = "0.5.0", default-features = false, optional = true }
+ark-snark = { version = "0.5.0", default-features = false, optional = true }
+ark-std = { version = "0.5.0", default-features = false, features = ["std"], optional = true }
+
+# Local dependencies
+orbinum-zk-core = { path = "../zk-core", default-features = false, optional = true }
+
+# WASM runtime (wasm-witness feature, requires std)
+once_cell = { version = "1.19", optional = true }
+wasmer = { version = "4.2", optional = true }
 
 [dev-dependencies]
+getrandom = { version = "0.2", default-features = false, features = ["js"] }
 hex = "0.4"
-rand = "0.8"
+rand = { version = "0.8", default-features = false, features = ["getrandom"] }
 
 [features]
 default = ["std"]
+
 std = [
 	"chacha20poly1305/std",
 	"sha2/std",
-	"substrate",
+	"parity-scale-codec?/std",
+	"scale-info?/std",
+	"rand?/std",
+	"ark-std?/std",
 	"encrypt",
 ]
-substrate = [
+
+# Encryption with random nonce generation
+encrypt = ["rand"]
+
+# Selective disclosure proof generation
+disclosure = [
+	"serde",
+	"serde_json",
+	"hex",
+	"ark-bn254",
+	"ark-ff",
+	"ark-groth16",
+	"ark-relations",
+	"ark-serialize",
+	"ark-snark",
+	"ark-std",
+	"orbinum-zk-core",
 	"parity-scale-codec",
 	"scale-info",
-	"sp-core",
-	"sp-std",
-	"parity-scale-codec/std",
-	"scale-info/std",
-	"sp-core/std",
-	"sp-std/std",
 ]
-# Feature for encryption with random nonce generation (requires randomness)
-encrypt = ["rand"]
+
+# WASM witness calculator (requires std)
+wasm-witness = [
+	"disclosure",
+	"wasmer",
+	"once_cell",
+]
