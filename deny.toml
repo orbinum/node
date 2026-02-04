@@ -50,6 +50,7 @@ allow = [
 # Exception for crates with deprecated SPDX syntax (from Polkadot SDK)
 [[licenses.exceptions]]
 name = "array-bytes"
+version = "6.2.3"
 allow = ["Apache-2.0", "GPL-3.0-only"]
 
 # Polkadot SDK uses GPL-3.0 with Classpath exception
