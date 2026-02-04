@@ -9,16 +9,13 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use parity_scale_codec::{Decode, Encode};
 #[cfg(feature = "substrate")]
 use scale_info::TypeInfo;
-#[cfg(feature = "substrate")]
-use sp_runtime::RuntimeDebug;
 
 use crate::domain::value_objects::errors::VerifierError;
 use crate::{Bn254, Bn254Fr};
 
 /// A Groth16 proof that can be serialized/deserialized for on-chain storage
-#[derive(Clone, PartialEq, Eq)]
-#[cfg_attr(not(feature = "substrate"), derive(Debug))]
-#[cfg_attr(feature = "substrate", derive(Encode, Decode, TypeInfo, RuntimeDebug))]
+#[derive(Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "substrate", derive(Encode, Decode, TypeInfo))]
 pub struct Proof {
 	/// Serialized proof bytes (compressed format)
 	pub bytes: Vec<u8>,
@@ -92,9 +89,8 @@ impl VerifyingKey {
 }
 
 /// Public inputs for a zero-knowledge proof
-#[derive(Clone, PartialEq, Eq)]
-#[cfg_attr(not(feature = "substrate"), derive(Debug))]
-#[cfg_attr(feature = "substrate", derive(Encode, Decode, TypeInfo, RuntimeDebug))]
+#[derive(Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "substrate", derive(Encode, Decode, TypeInfo))]
 pub struct PublicInputs {
 	/// Field elements representing the public inputs
 	pub inputs: Vec<[u8; 32]>,
