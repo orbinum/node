@@ -13,8 +13,8 @@ impl ProofValidator {
 	) -> Result<(), VerifierError> {
 		if inputs.len() != expected {
 			return Err(VerifierError::InvalidPublicInputCount {
-				expected,
-				got: inputs.len(),
+				expected: expected as u32,
+				got: inputs.len() as u32,
 			});
 		}
 		Ok(())
