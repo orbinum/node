@@ -1,21 +1,21 @@
 # Benchmarks: pallet-zk-verifier
 
-Directorio de benchmarks para medir performance criptográfica y on-chain.
+Benchmark directory for measuring cryptographic and on-chain performance.
 
-## 📁 Estructura
+## 📁 Structure
 
 ```
 benches/
-├── config.rs           # Configuración compartida (Criterion + FRAME)
+├── config.rs           # Shared configuration (Criterion + FRAME)
 ├── groth16_verify.rs   # Criterion benchmarks (off-chain)
-├── run.sh              # Script de ejecución
-└── README.md           # Esta documentación
+├── run.sh              # Execution script
+└── README.md           # This documentation
 ```
 
 ## 🚀 Quick Start
 
 ```bash
-# Fast benchmarks (desarrollo)
+# Fast benchmarks (development)
 ./benches/run.sh fast
 
 # Standard benchmarks (regular)
@@ -24,64 +24,64 @@ benches/
 # Production benchmarks (accuracy)
 ./benches/run.sh production
 
-# FRAME benchmarks (generar weights.rs)
+# FRAME benchmarks (generate weights.rs)
 ./benches/run.sh frame
 ```
 
-## 📊 Tipos de Benchmarks
+## 📊 Benchmark Types
 
 ### 1. Criterion Benchmarks (Off-chain)
 
-**Archivo:** `groth16_verify.rs`  
-**Propósito:** Medir performance criptográfica pura sin overhead FRAME
+**File:** `groth16_verify.rs`
+**Purpose:** Measure pure cryptographic performance without FRAME overhead
 
-**Benchmarks disponibles:**
-- `single_verification` - Tiempo de verificación de un proof
-- `batch_verification` - Throughput con 1, 5, 10, 20, 50 proofs
-- `vk_operations` - Parsing de verification keys (transfer, unshield)
-- `proof_operations` - Parsing de proofs
-- `public_inputs_scaling` - Impacto del número de inputs (1, 2, 4, 8, 16)
-- `e2e_workflow` - Pipeline completo (parse + verify)
+**Available benchmarks:**
+- `single_verification` - Time for single proof verification
+- `batch_verification` - Throughput with 1, 5, 10, 20, 50 proofs
+- `vk_operations` - Verification key parsing (transfer, unshield)
+- `proof_operations` - Proof parsing
+- `public_inputs_scaling` - Impact of input count (1, 2, 4, 8, 16)
+- `e2e_workflow` - Complete pipeline (parse + verify)
 
-**Configuraciones:**
-- `fast`: 10 samples, 2s measurement (desarrollo rápido)
+**Configurations:**
+- `fast`: 10 samples, 2s measurement (rapid development)
 - `standard`: 100 samples, 10s measurement (regular)
-- `production`: 200 samples, 30s measurement (accuracy máxima)
+- `production`: 200 samples, 30s measurement (maximum accuracy)
 
-**Ejecutar:**
+**Execute:**
 ```bash
-# Con configuración por defecto
+# With default configuration
 cargo bench --package pallet-zk-verifier
 
-# Con configuración custom
+# With custom configuration
 CRITERION_CONFIG=production cargo bench --package pallet-zk-verifier
 
-# Benchmark específico
+# Specific benchmark
 cargo bench --package pallet-zk-verifier -- single_verification
 
-# Ver reporte HTML
+# View HTML report
 open target/criterion/report/index.html
 ```
 
 ### 2. FRAME Benchmarks (On-chain)
 
-**Archivo:** `../src/benchmarking.rs`  
-**Propósito:** Calcular pesos (weights) para fees on-chain
+**File:** `../src/benchmarking.rs`
+**Purpose:** Calculate weights for on-chain fees
 
-**Benchmarks disponibles:**
-- `register_verification_key` - Almacenar VK en storage
-- `remove_verification_key` - Eliminar VK de storage
-- `verify_proof` - Verificar proof (⚠️ usa datos mock)
+**Available benchmarks:**
+- `register_verification_key` - Store VK in storage
+- `remove_verification_key` - Remove VK from storage
+- `verify_proof` - Verify proof (⚠️ uses mock data)
 
-**Ejecutar:**
+**Execute:**
 ```bash
-# Build con runtime-benchmarks
+# Build with runtime-benchmarks
 cargo build --release --features runtime-benchmarks
 
-# Generar weights.rs
+# Generate weights.rs
 ./benches/run.sh frame
 
-# O manual:
+# Or manual:
 ./target/release/orbinum-node benchmark pallet \
     --chain dev \
     --pallet pallet_zk_verifier \
@@ -91,11 +91,11 @@ cargo build --release --features runtime-benchmarks
     --output frame/zk-verifier/src/weights.rs
 ```
 
-## 🔧 Configuración
+## 🔧 Configuration
 
-### Módulo `config.rs`
+### Module `config.rs`
 
-Configuración compartida para ambos tipos de benchmarks:
+Shared configuration for both benchmark types:
 
 ```rust
 // Criterion presets
@@ -103,30 +103,30 @@ CriterionConfig::fast()        // 10 samples, 2s
 CriterionConfig::standard()    // 100 samples, 10s
 CriterionConfig::production()  // 200 samples, 30s
 
-// Tamaños de test
+// Test sizes
 BenchmarkSizes::BATCH_SIZES             // [1, 5, 10, 20, 50]
 BenchmarkSizes::PUBLIC_INPUT_COUNTS     // [1, 2, 4, 8, 16]
 
-// Datos de prueba
+// Test data
 test_data::mock_vk_bytes(768)
 test_data::mock_proof_bytes()
 test_data::mock_public_inputs(count)
 ```
 
-### Variables de Entorno
+### Environment Variables
 
 ```bash
-# Configuración Criterion
+# Criterion configuration
 export CRITERION_CONFIG=production
 
-# Output detallado
+# Detailed output
 export RUST_LOG=info
 
-# Colorear output
+# Colorize output
 export CARGO_TERM_COLOR=always
 ```
 
-## 📈 Métricas Esperadas
+## 📈 Expected Metrics
 
 ### Criterion (Off-chain)
 
@@ -144,82 +144,82 @@ e2e_workflow/full_verification_pipeline      ~10-12ms
 ```
 register_verification_key    ~7ms + 3 DB writes
 remove_verification_key      ~10ms + 4 DB writes
-verify_proof                 ~13ms + 3 DB writes (⚠️ sin crypto real)
+verify_proof                 ~13ms + 3 DB writes (⚠️ without real crypto)
 ```
 
-⚠️ **Nota:** Los pesos actuales de `verify_proof` NO incluyen el tiempo de verificación criptográfica real (~8-10ms) porque usan datos mock.
+⚠️ **Note:** Current `verify_proof` weights do NOT include real cryptographic verification time (~8-10ms) because they use mock data.
 
-## 🔄 Workflow Típico
+## 🔄 Typical Workflow
 
-### Desarrollo (iteración rápida)
+### Development (fast iteration)
 
 ```bash
-# 1. Hacer cambios en código
+# 1. Make code changes
 vim src/infrastructure/services/groth16_verifier.rs
 
 # 2. Quick benchmark
 ./benches/run.sh fast
 
-# 3. Ver resultados
+# 3. View results
 ./benches/run.sh report
 ```
 
-### Pre-Release (validación)
+### Pre-Release (validation)
 
 ```bash
-# 1. Guardar baseline
+# 1. Save baseline
 ./benches/run.sh save
 
-# 2. Hacer cambios
+# 2. Make changes
 git checkout feature-optimization
 
-# 3. Comparar
+# 3. Compare
 ./benches/run.sh compare
 
-# 4. Si hay mejora, generar weights
+# 4. If improved, generate weights
 ./benches/run.sh frame
 ```
 
-### Producción (deployment)
+### Production (deployment)
 
 ```bash
-# 1. Ejecutar en hardware de referencia (no laptop)
+# 1. Run on reference hardware (not laptop)
 ssh production-benchmark-server
 
 # 2. Production benchmarks
 CRITERION_CONFIG=production ./benches/run.sh production
 
-# 3. Generar weights finales
+# 3. Generate final weights
 ./benches/run.sh frame
 
-# 4. Commit weights.rs actualizado
+# 4. Commit updated weights.rs
 git add src/weights.rs
 git commit -m "chore: update benchmark weights for v0.x.x"
 ```
 
-## 📊 Interpretación de Resultados
+## 📊 Results Interpretation
 
 ### Criterion HTML Report
 
 ```
 target/criterion/report/index.html
 ├── single_verification/
-│   ├── report/index.html          # Gráficos y estadísticas
-│   ├── base/estimates.json        # Datos crudos
+│   ├── report/index.html          # Graphs and statistics
+│   ├── base/estimates.json        # Raw data
 │   └── ...
 └── ...
 ```
 
-**Métricas clave:**
-- **Mean**: Promedio del tiempo de ejecución
-- **Std Dev**: Desviación estándar (menor = más consistente)
-- **Median**: Valor medio (más robusto que mean)
+**Key metrics:**
+- **Mean**: Average execution time
+- **Std Dev**: Standard deviation (lower = more consistent)
+- **Median**: Middle value (more robust than mean)
 - **MAD**: Median Absolute Deviation
 
-**¿Qué buscar?**
-- Mean < 10ms para single verification ✅
-- Std Dev < 5% del mean ✅
-- Outliers < 2% de los samples ✅
+**What to look for:**
+- Mean < 10ms for single verification ✅
+- Std Dev < 5% of mean ✅
+- Outliers < 2% of samples ✅
 
 ### FRAME weights.rs
 
@@ -228,61 +228,60 @@ fn verify_proof() -> Weight {
     Weight::from_parts(13_000_000, 11684)
     //                  ^^^^^^^^^^  ^^^^^^
     //                  ref_time    proof_size
-    //                  (picosegundos) (bytes)
+    //                  (picoseconds) (bytes)
 }
 ```
 
-**Componentes:**
-- `ref_time`: Tiempo de ejecución (13ms = 13,000,000 picosegundos)
-- `proof_size`: Tamaño de datos leídos de DB (11,684 bytes)
+**Components:**
+- `ref_time`: Execution time (13ms = 13,000,000 picoseconds)
+- `proof_size`: Data read from DB (11,684 bytes)
 
-## ⚠️ Limitaciones Actuales
+## ⚠️ Current Limitations
 
-1. **FRAME `verify_proof` usa datos mock**
-   - Solo mide overhead FRAME (~13ms)
-   - NO mide verificación Groth16 real (~8-10ms)
-   - Peso total esperado: ~21-23ms
+1. **FRAME `verify_proof` uses mock data**
+   - Only measures FRAME overhead (~13ms)
+   - Does NOT measure real Groth16 verification (~8-10ms)
+   - Expected total weight: ~21-23ms
 
-2. **Criterion usa VKs reales pero proofs mock**
-   - VKs: Hardcoded de `fp-zk-verifier` (transfer, unshield)
-   - Proofs: Mock data (no verifican criptográficamente)
-   - TODO: Usar proofs reales cuando circuits estén listos
+2. **Criterion uses real VKs but mock proofs**
+   - VKs: Hardcoded from `fp-zk-verifier` (transfer, unshield)
+   - Proofs: Mock data (don't verify cryptographically)
+   - TODO: Use real proofs when circuits are ready
 
 ## 🛠️ Troubleshooting
 
-### Benchmarks muy lentos
+### Benchmarks too slow
 
 ```bash
-# Verificar que estás en release mode
+# Verify you're in release mode
 cargo bench --package pallet-zk-verifier -- --profile-time 5
 
-# Reducir sample size temporalmente
+# Reduce sample size temporarily
 CRITERION_CONFIG=fast ./benches/run.sh fast
 ```
 
-### Resultados inconsistentes
+### Inconsistent results
 
 ```bash
-# Asegurar que no hay procesos pesados corriendo
+# Ensure no heavy processes are running
 top
 
-# Ejecutar con nice (menor prioridad a otros procesos)
+# Run with nice (lower priority to other processes)
 nice -n -20 cargo bench --package pallet-zk-verifier
 ```
 
-### FRAME benchmarks fallan
+### FRAME benchmarks fail
 
 ```bash
-# Verificar feature está habilitada
+# Verify feature is enabled
 cargo build --release --features runtime-benchmarks
 
-# Verificar node existe
+# Verify node exists
 ls -lh target/release/orbinum-node
 ```
 
-## 📚 Referencias
+## 📚 References
 
 - [Criterion.rs Book](https://bheisler.github.io/criterion.rs/book/)
 - [FRAME Benchmarking](https://docs.substrate.io/test/benchmark/)
-- [../BENCHMARKING.md](../BENCHMARKING.md) - Estrategia completa
-- [../README.md](../README.md) - Documentación del pallet
+- [../README.md](../README.md) - Pallet documentation
