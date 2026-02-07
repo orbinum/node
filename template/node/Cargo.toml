@@ -96,7 +96,9 @@ default = [
 	"rpc-binary-search-estimate",
 	"native-poseidon",
 ]
-native-poseidon = ["orbinum-zk-core/native-poseidon"]
+native-poseidon = [
+	"orbinum-zk-core/native-poseidon",
+]
 rocksdb = [
 	"sc-cli/rocksdb",
 	"sc-service/rocksdb",

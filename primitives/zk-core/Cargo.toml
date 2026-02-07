@@ -1,6 +1,6 @@
 [package]
 name = "orbinum-zk-core"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Orbinum Network <dev@orbinum.net>"]
 edition = "2021"
 license = "Apache-2.0 OR GPL-3.0-or-later"
@@ -31,7 +31,8 @@ light-poseidon-nostd = { version = "0.4.1", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["derive", "alloc"], optional = true }
 
 # Substrate runtime interface for native host function calls (optional)
-sp-runtime-interface = { version = "33.0.0", default-features = false, optional = true }
+# Must match workspace Polkadot SDK version for compatibility
+sp-runtime-interface = { version = "30.0", git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false, optional = true }
 
 [dev-dependencies]
 ark-std = { version = "0.5.0", default-features = false, features = ["std"] }
@@ -49,5 +50,4 @@ std = [
 ]
 
 # Enable native Poseidon host functions for Substrate runtimes
-# Provides ~3x performance improvement over WASM execution
 native-poseidon = ["std", "sp-runtime-interface"]
