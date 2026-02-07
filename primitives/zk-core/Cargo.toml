@@ -32,7 +32,7 @@ serde = { version = "1.0", default-features = false, features = ["derive", "allo
 
 # Substrate runtime interface for native host function calls (optional)
 # Must match workspace Polkadot SDK version for compatibility
-sp-runtime-interface = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false, optional = true }
+sp-runtime-interface = { version = "30.0", git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false, optional = true }
 
 [dev-dependencies]
 ark-std = { version = "0.5.0", default-features = false, features = ["std"] }
