@@ -108,6 +108,7 @@ fn testnet_genesis(
 		},
 		transaction_payment: Default::default(),
 		zk_verifier: Default::default(),
+		shielded_pool: Default::default(),
 	};
 
 	serde_json::to_value(&config).expect("Could not build genesis config.")
