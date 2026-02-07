@@ -66,6 +66,10 @@ pallet-evm-precompile-modexp = { workspace = true }
 pallet-evm-precompile-sha3fips = { workspace = true }
 pallet-evm-precompile-sha3fips-benchmarking = { workspace = true }
 pallet-evm-precompile-simple = { workspace = true }
+
+# Orbinum Privacy
+pallet-shielded-pool = { workspace = true }
+pallet-shielded-pool-runtime-api = { workspace = true }
 pallet-zk-verifier = { workspace = true }
 
 # Polkadot
@@ -133,6 +137,10 @@ std = [
 	"pallet-evm-precompile-curve25519-benchmarking/std",
 	# Orbinum Privacy
 	"pallet-zk-verifier/std",
+	"pallet-shielded-pool/std",
+	"pallet-shielded-pool/poseidon-wasm",
+	"pallet-shielded-pool/native-poseidon",
+	"pallet-shielded-pool-runtime-api/std",
 	# Polkadot
 	"polkadot-runtime-common/std",
 	# Cumulus primitives
@@ -152,5 +160,6 @@ runtime-benchmarks = [
 	"pallet-evm-precompile-curve25519-benchmarking/runtime-benchmarks",
 	"pallet-evm-precompile-sha3fips-benchmarking/runtime-benchmarks",
 	"pallet-zk-verifier/runtime-benchmarks",
+	"pallet-shielded-pool/runtime-benchmarks",
 	"polkadot-runtime-common/runtime-benchmarks",
 ]
