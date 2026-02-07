@@ -345,7 +345,7 @@ mod benchmarks {
 		public_signals_vec.extend_from_slice(&[1u8; 8]); // 8 bytes (revealed_value)
 		public_signals_vec.extend_from_slice(&[0u8; 4]); // 4 bytes (revealed_asset_id)
 		public_signals_vec.extend_from_slice(&[0u8; 32]); // 32 bytes (revealed_owner_hash)
-		let public_signals: BoundedVec<u8, ConstU32<76>> = public_signals_vec.try_into().unwrap();
+		let public_signals: BoundedVec<u8, ConstU32<97>> = public_signals_vec.try_into().unwrap();
 		let partial_data: BoundedVec<u8, ConstU32<256>> = vec![4u8; 128].try_into().unwrap();
 
 		#[extrinsic_call]
