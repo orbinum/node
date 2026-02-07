@@ -254,7 +254,7 @@ impl DisclosureService {
 		who: &<T as frame_system::Config>::AccountId,
 		commitment: Commitment,
 		proof_bytes: BoundedVec<u8, ConstU32<256>>,
-		public_signals: BoundedVec<u8, ConstU32<76>>,
+		public_signals: BoundedVec<u8, ConstU32<97>>,
 		partial_data: BoundedVec<u8, ConstU32<256>>,
 		auditor: Option<&<T as frame_system::Config>::AccountId>,
 	) -> DispatchResult {
