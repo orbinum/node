@@ -893,7 +893,7 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			commitment: Commitment,
 			proof_bytes: BoundedVec<u8, ConstU32<256>>,
-			public_signals: BoundedVec<u8, ConstU32<76>>,
+			public_signals: BoundedVec<u8, ConstU32<97>>,
 			partial_data: BoundedVec<u8, ConstU32<256>>,
 			auditor: Option<T::AccountId>,
 		) -> DispatchResult {
