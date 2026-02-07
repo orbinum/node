@@ -51,10 +51,15 @@ build-release:
 test:
 	cargo test --lib --all
 	cargo test --lib --all --features=runtime-benchmarks
-# Run all unit tests with release profile
+# Run all unit tests with release profile (use CI_DUMMY_VK=1 in CI to skip artifacts)
 test-release:
-	cargo test --release --lib --all
-	cargo test --release --lib --all --features=runtime-benchmarks
+	@if [ "$$CI_DUMMY_VK" = "1" ]; then \
+		cargo test --release --lib --all --features=ci-dummy-vk; \
+		cargo test --release --lib --all --features=runtime-benchmarks,ci-dummy-vk; \
+	else \
+		cargo test --release --lib --all; \
+		cargo test --release --lib --all --features=runtime-benchmarks; \
+	fi
 
 .PHONY: integration-test integration-test-lint
 # Check code format and lint of integration tests
