@@ -140,8 +140,7 @@ jobs:
 
       - name: Build workspace
         run: |
-          cargo build --release --workspace --all-targets --exclude pallet-shielded-pool
-          cargo build --release -p pallet-shielded-pool --all-targets --features ci-dummy-vk
+          cargo build --release --workspace --all-targets
 
       - name: Cache build artifacts for reuse
         uses: actions/cache/save@v5
