@@ -35,6 +35,7 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
+    "Unicode-DFS-2016",
     "Unicode-3.0",        # ICU4X crates (zerovec, yoke, tinystr, etc.)
     "Unlicense",
     "0BSD",
@@ -45,7 +46,6 @@ allow = [
     "CC0-1.0",            # unicode-ident and other crates
     "MPL-2.0",            # webpki-roots
     "BSL-1.0",            # xxhash-rust (Boost Software License 1.0)
-    "CDLA-Permissive-2.0", # webpki-root-certs (Community Data License Agreement)
 ]
 
 # Exception for crates with deprecated SPDX syntax (from Polkadot SDK)
