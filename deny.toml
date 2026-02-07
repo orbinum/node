@@ -46,6 +46,7 @@ allow = [
     "CC0-1.0",            # unicode-ident and other crates
     "MPL-2.0",            # webpki-roots
     "BSL-1.0",            # xxhash-rust (Boost Software License 1.0)
+    "CDLA-Permissive-2.0", # Community Data License Agreement - webpki-root-certs
 ]
 
 # Exception for crates with deprecated SPDX syntax (from Polkadot SDK)
