@@ -252,3 +252,5 @@ jobs:
 
       - name: Run clippy
         run: make clippy-release
+        env:
+          CI_DUMMY_VK: "1"
