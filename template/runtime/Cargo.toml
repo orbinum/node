@@ -66,6 +66,7 @@ pallet-evm-precompile-modexp = { workspace = true }
 pallet-evm-precompile-sha3fips = { workspace = true }
 pallet-evm-precompile-sha3fips-benchmarking = { workspace = true }
 pallet-evm-precompile-simple = { workspace = true }
+pallet-zk-verifier = { workspace = true }
 
 # Polkadot
 polkadot-runtime-common = { workspace = true }
@@ -130,11 +131,14 @@ std = [
 	"pallet-evm-precompile-simple/std",
 	"pallet-evm-precompile-curve25519/std",
 	"pallet-evm-precompile-curve25519-benchmarking/std",
+	# Orbinum Privacy
+	"pallet-zk-verifier/std",
 	# Polkadot
 	"polkadot-runtime-common/std",
 	# Cumulus primitives
 	"cumulus-pallet-weight-reclaim/std",
 ]
+
 runtime-benchmarks = [
 	"frame-benchmarking/runtime-benchmarks",
 	"frame-system-benchmarking/runtime-benchmarks",
@@ -147,5 +151,6 @@ runtime-benchmarks = [
 	"pallet-evm/runtime-benchmarks",
 	"pallet-evm-precompile-curve25519-benchmarking/runtime-benchmarks",
 	"pallet-evm-precompile-sha3fips-benchmarking/runtime-benchmarks",
+	"pallet-zk-verifier/runtime-benchmarks",
 	"polkadot-runtime-common/runtime-benchmarks",
 ]
