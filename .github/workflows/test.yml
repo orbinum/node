@@ -139,7 +139,9 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build workspace
-        run: cargo build --release --workspace --all-targets
+        run: |
+          cargo build --release --workspace --all-targets --exclude pallet-shielded-pool
+          cargo build --release -p pallet-shielded-pool --all-targets --features ci-dummy-vk
 
       - name: Cache build artifacts for reuse
         uses: actions/cache/save@v5
@@ -201,6 +203,7 @@ jobs:
       - name: Run unit tests
         run: make test-release
         env:
+          CI_DUMMY_VK: "1"
           RUSTFLAGS: "-D warnings"
 
   # Step 4b: Clippy (uses cached build, runs in parallel with tests)
