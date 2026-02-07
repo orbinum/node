@@ -236,6 +236,8 @@ pallet-evm-precompile-sha3fips-benchmarking = { path = "frame/evm/precompile/sha
 pallet-evm-precompile-simple = { path = "frame/evm/precompile/simple", default-features = false }
 pallet-evm-test-vector-support = { path = "frame/evm/test-vector-support" }
 pallet-hotfix-sufficients = { path = "frame/hotfix-sufficients", default-features = false }
+pallet-zk-verifier = { path = "frame/zk-verifier", default-features = false }
+
 # Frontier Utility
 precompile-utils = { path = "precompiles", default-features = false }
 # Frontier Template
