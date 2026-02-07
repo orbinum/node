@@ -38,7 +38,7 @@ mod benchmarks {
 	// this conditional compilation can be removed.
 	#[cfg(all(feature = "runtime-benchmarks", not(feature = "ci-dummy-vk")))]
 	const DISCLOSURE_VK_ARK: &[u8] = include_bytes!("../../../artifacts/disclosure_pk.ark");
-	
+
 	#[cfg(any(not(feature = "runtime-benchmarks"), feature = "ci-dummy-vk"))]
 	const DISCLOSURE_VK_ARK: &[u8] = &[0u8; 128]; // Dummy VK for CI/testing
 

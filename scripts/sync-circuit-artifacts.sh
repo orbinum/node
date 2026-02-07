@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Sync Circuit Artifacts Script
-# 
+#
 # Downloads circuit artifacts tarball from circuits repository release
 # and extracts to artifacts/ directory in workspace root.
 #
@@ -121,7 +121,7 @@ log_info "───────────────────────�
 for circuit in "${CIRCUITS[@]}"; do
     wasm_source="${ARTIFACTS_DIR}/build/${circuit}_js/${circuit}.wasm"
     wasm_dest="${ARTIFACTS_DIR}/${circuit}.wasm"
-    
+
     if [ -f "$wasm_source" ]; then
         mv "$wasm_source" "$wasm_dest"
         log_info "  ✓ Moved ${circuit}.wasm to root"
@@ -134,7 +134,7 @@ done
 for circuit in "${CIRCUITS[@]}"; do
     vk_source="${ARTIFACTS_DIR}/build/verification_key_${circuit}.json"
     vk_dest="${ARTIFACTS_DIR}/verification_key_${circuit}.json"
-    
+
     if [ -f "$vk_source" ]; then
         mv "$vk_source" "$vk_dest"
         log_info "  ✓ Moved verification_key_${circuit}.json to root"
@@ -147,7 +147,7 @@ done
 for circuit in "${CIRCUITS[@]}"; do
     ark_source="${ARTIFACTS_DIR}/keys/${circuit}_pk.ark"
     ark_dest="${ARTIFACTS_DIR}/${circuit}_pk.ark"
-    
+
     if [ -f "$ark_source" ]; then
         mv "$ark_source" "$ark_dest"
         log_info "  ✓ Moved ${circuit}_pk.ark to root"
@@ -160,7 +160,7 @@ done
 for circuit in "${CIRCUITS[@]}"; do
     zkey_source="${ARTIFACTS_DIR}/keys/${circuit}_pk.zkey"
     zkey_dest="${ARTIFACTS_DIR}/${circuit}.zkey"
-    
+
     if [ -f "$zkey_source" ]; then
         mv "$zkey_source" "$zkey_dest"
         log_info "  ✓ Moved ${circuit}.zkey to root"
@@ -186,7 +186,7 @@ mkdir -p "$ZK_VERIFIER_VK_DIR"
 for circuit in "${CIRCUITS[@]}"; do
     vk_json="${ARTIFACTS_DIR}/verification_key_${circuit}.json"
     vk_rust="${ZK_VERIFIER_VK_DIR}/${circuit}.rs"
-    
+
     if [ -f "$vk_json" ]; then
         if python3 "${WORKSPACE_ROOT}/scripts/generate-vk-rust.py" "$circuit" "$vk_json" "$vk_rust"; then
             log_info "  ✓ Generated ${circuit}.rs from JSON"
@@ -210,7 +210,7 @@ MISSING_FILES=()
 
 for circuit in "${CIRCUITS[@]}"; do
     log_info "Checking circuit: $circuit"
-    
+
     # Check WASM
     if [ -f "${ARTIFACTS_DIR}/${circuit}.wasm" ]; then
         log_info "  ✓ ${circuit}.wasm ($(du -h "${ARTIFACTS_DIR}/${circuit}.wasm" | cut -f1))"
@@ -218,7 +218,7 @@ for circuit in "${CIRCUITS[@]}"; do
         log_error "  ✗ ${circuit}.wasm missing"
         MISSING_FILES+=("${circuit}.wasm")
     fi
-    
+
     # Check ARK (Proving Key)
     if [ -f "${ARTIFACTS_DIR}/${circuit}_pk.ark" ]; then
         log_info "  ✓ ${circuit}_pk.ark ($(du -h "${ARTIFACTS_DIR}/${circuit}_pk.ark" | cut -f1))"
@@ -226,14 +226,14 @@ for circuit in "${CIRCUITS[@]}"; do
         log_error "  ✗ ${circuit}_pk.ark missing"
         MISSING_FILES+=("${circuit}_pk.ark")
     fi
-    
+
     # Check ZKEY
     if [ -f "${ARTIFACTS_DIR}/${circuit}.zkey" ]; then
         log_info "  ✓ ${circuit}.zkey ($(du -h "${ARTIFACTS_DIR}/${circuit}.zkey" | cut -f1))"
     else
         log_warn "  ⚠ ${circuit}.zkey missing (optional)"
     fi
-    
+
     # Check VK (Verification Key)
     if [ -f "${ARTIFACTS_DIR}/verification_key_${circuit}.json" ]; then
         log_info "  ✓ verification_key_${circuit}.json ($(du -h "${ARTIFACTS_DIR}/verification_key_${circuit}.json" | cut -f1))"
@@ -241,7 +241,7 @@ for circuit in "${CIRCUITS[@]}"; do
         log_error "  ✗ verification_key_${circuit}.json missing"
         MISSING_FILES+=("verification_key_${circuit}.json")
     fi
-    
+
     echo ""
 done
 
