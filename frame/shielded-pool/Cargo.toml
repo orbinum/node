@@ -1,6 +1,6 @@
 [package]
 name = "pallet-shielded-pool"
-version = "0.1.0"
+version = "0.2.0"
 description = "Shielded pool pallet for private transactions using ZK proofs"
 authors = ["Orbinum Team"]
 license = "GPL-3.0-or-later"
