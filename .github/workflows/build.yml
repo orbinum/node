@@ -32,7 +32,7 @@ jobs:
           swap-storage: true
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Install system dependencies
         run: |
           sudo apt-get update
