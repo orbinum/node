@@ -32,7 +32,15 @@ mod benchmarks {
 	use sp_std::vec::Vec;
 
 	// Load real ZK verification keys from artifacts (binary format for no_std compatibility)
+	// Use dummy data if artifacts are not available (e.g., in CI)
+	// NOTE: This is a temporary workaround while selective disclosure is under active development.
+	// Once the disclosure circuit artifacts are stabilized and included in the repository,
+	// this conditional compilation can be removed.
+	#[cfg(all(feature = "runtime-benchmarks", not(feature = "ci-dummy-vk")))]
 	const DISCLOSURE_VK_ARK: &[u8] = include_bytes!("../../../artifacts/disclosure_pk.ark");
+	
+	#[cfg(any(not(feature = "runtime-benchmarks"), feature = "ci-dummy-vk"))]
+	const DISCLOSURE_VK_ARK: &[u8] = &[0u8; 128]; // Dummy VK for CI/testing
 
 	/// Setup disclosure circuit VK in ZkVerifier (required for disclosure benchmarks)
 	fn setup_disclosure_circuit<T>()
