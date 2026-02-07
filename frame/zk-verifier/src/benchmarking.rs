@@ -1,30 +1,15 @@
 //! Benchmarking setup for pallet-zk-verifier
 //!
-//! IMPORTANTE: Estos benchmarks miden el costo ON-CHAIN de extrinsics.
-//! Los pesos generados se usan para calcular fees en producción.
-//!
-//! ## Generar Pesos de Producción
-//!
+//! Run benchmarks with:
 //! ```bash
-//! # 1. Compilar con runtime-benchmarks
 //! cargo build --release --features runtime-benchmarks
-//!
-//! # 2. Ejecutar en HARDWARE DE REFERENCIA (no laptop de desarrollo)
 //! ./target/release/orbinum-node benchmark pallet \
 //!     --chain dev \
 //!     --pallet pallet_zk_verifier \
 //!     --extrinsic '*' \
 //!     --steps 50 \
 //!     --repeat 20 \
-//!     --output frame/zk-verifier/src/weights.rs \
-//!     --template ./scripts/frame-weight-template.hbs
-//! ```
-//!
-//! ## Verificar Performance Criptográfica
-//!
-//! Para medir tiempos de verificación Groth16 puros (sin FRAME):
-//! ```bash
-//! cargo bench --package pallet-zk-verifier
+//!     --output weights.rs
 //! ```
 
 use super::*;
@@ -42,20 +27,20 @@ mod benchmarks {
 	use frame_support::{BoundedVec, pallet_prelude::ConstU32};
 	use sp_std::vec::Vec;
 
-	// Importar configuración compartida
-	// Nota: Estas constantes deben coincidir con benches/config.rs
+	// Import shared configuration
+	// Note: These constants must match benches/config.rs
 	const BENCHMARK_VK_SIZE: usize = 768;
 	const BENCHMARK_PROOF_SIZE: usize = 192;
 	const BENCHMARK_PUBLIC_INPUTS_COUNT: usize = 1;
 
 	/// Generate a valid Groth16 verification key for benchmarking
 	///
-	/// NOTA: Usa datos mock porque no afecta el peso (VK se almacena, no se valida).
-	/// El peso real se mide en storage writes, no en validación de formato.
+	/// NOTE: Uses mock data because it doesn't affect weight (VK is stored, not validated).
+	/// Actual weight is measured in storage writes, not format validation.
 	fn sample_verification_key() -> Vec<u8> {
-		// VK típica de Groth16: 768 bytes (BN254 curve)
-		// Estructura: alpha_g1 (48) + beta_g2 (96) + gamma_g2 (96) + delta_g2 (96) + ic (variable)
-		// Pattern determinístico para reproducibilidad
+		// Typical Groth16 VK: 768 bytes (BN254 curve)
+		// Structure: alpha_g1 (48) + beta_g2 (96) + gamma_g2 (96) + delta_g2 (96) + ic (variable)
+		// Deterministic pattern for reproducibility
 		(0..BENCHMARK_VK_SIZE)
 			.map(|i| ((i % 4) + 1) as u8)
 			.collect()
@@ -63,14 +48,14 @@ mod benchmarks {
 
 	/// Generate mock proof data for benchmarking
 	///
-	/// ⚠️ ADVERTENCIA: Estos datos NO pasan verificación criptográfica real.
-	/// El benchmark mide overhead FRAME (storage, eventos, conversiones).
-	/// Para medir verificación Groth16 real, usar: cargo bench
+	/// WARNING: This data does NOT pass real cryptographic verification.
+	/// The benchmark measures FRAME overhead (storage, events, conversions).
+	/// To measure real Groth16 verification, use: cargo bench
 	fn sample_proof_data() -> (Vec<u8>, Vec<Vec<u8>>) {
-		// Groth16 proof: 192 bytes (3 puntos curva)
+		// Groth16 proof: 192 bytes (3 curve points)
 		let proof_bytes = vec![0x42; BENCHMARK_PROOF_SIZE];
 
-		// Public inputs con patrón determinístico
+		// Public inputs with deterministic pattern
 		let public_inputs = (0..BENCHMARK_PUBLIC_INPUTS_COUNT)
 			.map(|i| {
 				let mut input = vec![0u8; 32];
@@ -145,18 +130,18 @@ mod benchmarks {
 
 	/// Benchmark for `verify_proof`
 	///
-	/// ⚠️ LIMITACIÓN: Este benchmark usa datos mock que NO pasan verificación criptográfica.
-	/// Mide solo el overhead FRAME (storage reads, mappers, eventos).
+	/// ⚠️ LIMITATION: This benchmark uses mock data that does NOT pass cryptographic verification.
+	/// It only measures FRAME overhead (storage reads, mappers, events).
 	///
-	/// El tiempo de verificación Groth16 real (~8-10ms) NO está incluido aquí.
-	/// Para medirlo: cargo bench --package pallet-zk-verifier
+	/// Real Groth16 verification time (~8-10ms) is NOT included here.
+	/// To measure it: cargo bench --package pallet-zk-verifier
 	///
-	/// TODO: Integrar proofs reales cuando circuits estén en producción.
+	/// TODO: Integrate real proofs when circuits are in production.
 	#[benchmark]
 	fn verify_proof() {
 		let circuit_id = CircuitId::TRANSFER;
 
-		// Get mock VK and proof data (NO verifican criptográficamente)
+		// Get mock VK and proof data (do NOT verify cryptographically)
 		let vk_bytes = sample_verification_key();
 		let (proof_bytes, public_inputs) = sample_proof_data();
 

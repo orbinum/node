@@ -53,73 +53,73 @@ print_warning() {
 }
 
 # ============================================================================
-# Criterion Benchmarks (Desarrollo - Off-chain)
+# Criterion Benchmarks (Development - Off-chain)
 # ============================================================================
 
 run_criterion_fast() {
-    print_header "Criterion Benchmarks: Fast (Desarrollo)"
-    print_info "Configuración: 10 samples, 2s measurement"
-    
+    print_header "Criterion Benchmarks: Fast (Development)"
+    print_info "Configuration: 10 samples, 2s measurement"
+
     cd "$PROJECT_ROOT"
     export CRITERION_CONFIG=fast
     cargo bench --package "$PALLET_NAME" --bench groth16_verify
-    
-    print_success "Benchmarks completados"
-    print_info "Ver resultados: ./benches/run.sh report"
+
+    print_success "Benchmarks completed"
+    print_info "View results: ./benches/run.sh report"
 }
 
 run_criterion_standard() {
     print_header "Criterion Benchmarks: Standard"
-    print_info "Configuración: 100 samples, 10s measurement"
-    
+    print_info "Configuration: 100 samples, 10s measurement"
+
     cd "$PROJECT_ROOT"
     export CRITERION_CONFIG=standard
     cargo bench --package "$PALLET_NAME" --bench groth16_verify
-    
-    print_success "Benchmarks completados"
-    print_info "Ver resultados: ./benches/run.sh report"
+
+    print_success "Benchmarks completed"
+    print_info "View results: ./benches/run.sh report"
 }
 
 run_criterion_production() {
     print_header "Criterion Benchmarks: Production (Accuracy)"
-    print_info "Configuración: 200 samples, 30s measurement"
-    print_warning "Este proceso puede tomar 10-15 minutos"
-    
+    print_info "Configuration: 200 samples, 30s measurement"
+    print_warning "This process may take 10-15 minutes"
+
     cd "$PROJECT_ROOT"
     export CRITERION_CONFIG=production
     cargo bench --package "$PALLET_NAME" --bench groth16_verify
-    
-    print_success "Benchmarks completados"
-    print_info "Ver resultados: ./benches/run.sh report"
+
+    print_success "Benchmarks completed"
+    print_info "View results: ./benches/run.sh report"
 }
 
 # ============================================================================
-# FRAME Benchmarks (Producción - On-chain Weights)
+# FRAME Benchmarks (Production - On-chain Weights)
 # ============================================================================
 
 run_frame_benchmarks() {
-    print_header "FRAME Benchmarks: Generando Weights (Producción)"
-    print_warning "IMPORTANTE: Ejecutar en hardware de referencia, NO en laptop"
-    print_info "Estos benchmarks generan los pesos para calcular fees on-chain"
-    
+    print_header "FRAME Benchmarks: Generating Weights (Production)"
+    print_warning "IMPORTANT: Run on reference hardware, NOT on laptop"
+    print_info "These benchmarks generate weights to calculate on-chain fees"
+
     cd "$PROJECT_ROOT"
-    
-    # Verificar que estamos en el directorio correcto
+
+    # Verify we're in the correct directory
     if [ ! -f "Cargo.toml" ]; then
-        print_error "No se encuentra Cargo.toml. Ejecutar desde frame/zk-verifier/"
+        print_error "Cargo.toml not found. Run from frame/zk-verifier/"
     fi
-    
-    # 1. Compilar con runtime-benchmarks
-    print_info "Paso 1/2: Compilando con feature runtime-benchmarks..."
+
+    # 1. Build with runtime-benchmarks
+    print_info "Step 1/2: Building with runtime-benchmarks feature..."
     cargo build --release --features runtime-benchmarks
-    
+
     if [ ! -f "../../../target/release/orbinum-node" ]; then
-        print_error "No se encuentra el binario orbinum-node"
+        print_error "orbinum-node binary not found"
     fi
-    
-    # 2. Ejecutar benchmarks FRAME
-    print_info "Paso 2/2: Ejecutando FRAME benchmarks..."
-    
+
+    # 2. Run FRAME benchmarks
+    print_info "Step 2/2: Running FRAME benchmarks..."
+
     ../../../target/release/orbinum-node benchmark pallet \
         --chain dev \
         --pallet "$PALLET_NAME" \
@@ -128,40 +128,40 @@ run_frame_benchmarks() {
         --repeat 20 \
         --output src/weights.rs \
         --template ../../../scripts/frame-weight-template.hbs
-    
-    print_success "Weights generados en: src/weights.rs"
-    print_warning "REVISAR los pesos generados antes de commit!"
+
+    print_success "Weights generated at: src/weights.rs"
+    print_warning "REVIEW generated weights before committing!"
 }
 
 # ============================================================================
-# Utilidades
+# Utilities
 # ============================================================================
 
 clean_benchmarks() {
-    print_header "Limpiando Resultados de Benchmarks"
-    
+    print_header "Cleaning Benchmark Results"
+
     cd "$PROJECT_ROOT"
-    
+
     if [ -d "$BENCHMARK_DIR" ]; then
         rm -rf "$BENCHMARK_DIR"
-        print_success "Resultados Criterion eliminados"
+        print_success "Criterion results removed"
     fi
-    
+
     if [ -f "src/weights.rs.bak" ]; then
         rm -f src/weights.rs.bak
-        print_success "Backup de weights eliminado"
+        print_success "Weights backup removed"
     fi
 }
 
 open_report() {
     cd "$PROJECT_ROOT"
-    
+
     if [ ! -d "$BENCHMARK_DIR" ]; then
-        print_error "No hay resultados. Ejecutar primero: ./benches/run.sh criterion-standard"
+        print_error "No results found. Run first: ./benches/run.sh criterion-standard"
     fi
-    
-    print_info "Abriendo reporte HTML..."
-    
+
+    print_info "Opening HTML report..."
+
     if command -v open &> /dev/null; then
         # macOS
         open "$BENCHMARK_DIR/report/index.html"
@@ -169,28 +169,28 @@ open_report() {
         # Linux
         xdg-open "$BENCHMARK_DIR/report/index.html"
     else
-        print_info "Abrir manualmente: $BENCHMARK_DIR/report/index.html"
+        print_info "Open manually: $BENCHMARK_DIR/report/index.html"
     fi
 }
 
 compare_baseline() {
-    print_header "Comparando con Baseline"
-    
+    print_header "Comparing with Baseline"
+
     cd "$PROJECT_ROOT"
     cargo bench --package "$PALLET_NAME" -- --save-baseline current
-    
-    print_success "Baseline guardado como 'current'"
-    print_info "Para comparar: cargo bench -- --baseline current"
+
+    print_success "Baseline saved as 'current'"
+    print_info "To compare: cargo bench -- --baseline current"
 }
 
 run_all() {
-    print_header "Ejecutando Todos los Benchmarks"
-    
+    print_header "Running All Benchmarks"
+
     run_criterion_standard
     echo ""
-    
-    print_info "FRAME benchmarks omitidos (requieren hardware de referencia)"
-    print_info "Para ejecutar: ./benches/run.sh frame"
+
+    print_info "FRAME benchmarks skipped (require reference hardware)"
+    print_info "To run: ./benches/run.sh frame"
 }
 
 show_help() {
@@ -199,25 +199,25 @@ ${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━�
   ${GREEN}Benchmark Runner - pallet-zk-verifier${NC}
 ${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}
 
-${YELLOW}CRITERION BENCHMARKS${NC} (Desarrollo - Performance Criptográfica)
-  ${GREEN}criterion-fast${NC}      Rápido (10 samples, 2s) - Desarrollo
-  ${GREEN}criterion-standard${NC}  Estándar (100 samples, 10s) - Regular
-  ${GREEN}criterion-prod${NC}      Producción (200 samples, 30s) - Accuracy
+${YELLOW}CRITERION BENCHMARKS${NC} (Development - Cryptographic Performance)
+  ${GREEN}criterion-fast${NC}      Fast (10 samples, 2s) - Development
+  ${GREEN}criterion-standard${NC}  Standard (100 samples, 10s) - Regular
+  ${GREEN}criterion-prod${NC}      Production (200 samples, 30s) - Accuracy
 
-${YELLOW}FRAME BENCHMARKS${NC} (Producción - Generar Weights On-chain)
-  ${GREEN}frame${NC}               Generar weights.rs (solo en HW referencia)
+${YELLOW}FRAME BENCHMARKS${NC} (Production - Generate On-chain Weights)
+  ${GREEN}frame${NC}               Generate weights.rs (reference HW only)
 
-${YELLOW}UTILIDADES${NC}
-  ${GREEN}clean${NC}               Limpiar resultados
-  ${GREEN}report${NC}              Abrir reporte HTML Criterion
-  ${GREEN}compare${NC}             Comparar con baseline
-  ${GREEN}all${NC}                 Ejecutar todos los Criterion benchmarks
+${YELLOW}UTILITIES${NC}
+  ${GREEN}clean${NC}               Clean results
+  ${GREEN}report${NC}              Open Criterion HTML report
+  ${GREEN}compare${NC}             Compare with baseline
+  ${GREEN}all${NC}                 Run all Criterion benchmarks
 
-${YELLOW}EJEMPLOS${NC}
-  ./benches/run.sh criterion-fast    # Desarrollo rápido
-  ./benches/run.sh frame            # Generar weights
+${YELLOW}EXAMPLES${NC}
+  ./benches/run.sh criterion-fast    # Fast development
+  ./benches/run.sh frame            # Generate weights
 
-${YELLOW}MÁS INFO${NC}
+${YELLOW}MORE INFO${NC}
   benches/README.md
 EOF
 }
@@ -255,7 +255,7 @@ case "${1:-criterion-standard}" in
         show_help
         ;;
     *)
-        print_error "Comando desconocido: $1"
+        print_error "Unknown command: $1"
         echo ""
         show_help
         ;;

@@ -30,7 +30,7 @@ impl pallet_zk_verifier::Config for Test {
 	type MaxVerificationKeySize = MaxVerificationKeySize;
 	type MaxProofSize = MaxProofSize;
 	type MaxPublicInputs = MaxPublicInputs;
-	type WeightInfo = ();
+	type WeightInfo = crate::weights::SubstrateWeight<Test>;
 }
 
 /// Build genesis storage for testing
