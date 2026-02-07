@@ -1,0 +1,19 @@
+[package]
+name = "pallet-shielded-pool-rpc"
+version = "0.1.0"
+authors = ["Orbinum Team"]
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+hex = "0.4"
+jsonrpsee = { version = "0.24.9", features = ["server", "macros", "client"] }
+log = "0.4"
+pallet-shielded-pool = { path = ".." }
+pallet-shielded-pool-runtime-api = { path = "../runtime-api" }
+parity-scale-codec = { version = "3.6", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+sp-api = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
+sp-blockchain = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
+sp-core = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
+sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }

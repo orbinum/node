@@ -1,0 +1,90 @@
+[package]
+name = "pallet-shielded-pool"
+version = "0.1.0"
+description = "Shielded pool pallet for private transactions using ZK proofs"
+authors = ["Orbinum Team"]
+license = "GPL-3.0-or-later"
+edition = "2024"
+repository = "https://github.com/orbinum/orbinum-node"
+readme = "README.md"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+# Parity scale codec
+parity-scale-codec = { version = "3.6", default-features = false, features = ["derive"] }
+scale-info = { version = "2.11", default-features = false, features = ["derive"] }
+
+# Cache for zero hashes (no-std compatible with alloc)
+once_cell = { version = "1.19", default-features = false, features = ["alloc"] }
+
+# Substrate primitives
+sp-core = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+sp-io = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+sp-std = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+
+# FRAME dependencies
+frame-benchmarking = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false, optional = true }
+frame-support = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+frame-system = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+
+# Local dependencies
+orbinum-encrypted-memo = { path = "../../primitives/encrypted-memo", default-features = false }
+orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
+orbinum-zk-verifier = { path = "../../primitives/zk-verifier", default-features = false }
+pallet-zk-verifier = { path = "../zk-verifier", default-features = false }
+
+# Arkworks dependencies (conditional, only for poseidon-wasm feature)
+ark-bn254 = { version = "0.5.0", default-features = false, optional = true }
+ark-ff = { version = "0.5.0", default-features = false, optional = true }
+
+[dev-dependencies]
+ark-bn254 = { version = "0.5.0", default-features = false }
+ark-ff = { version = "0.5.0", default-features = false }
+orbinum-encrypted-memo = { path = "../../primitives/encrypted-memo", default-features = false }
+orbinum-zk-circuits = { path = "../../primitives/zk-circuits", default-features = false }
+orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
+pallet-balances = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
+pallet-zk-verifier = { path = "../zk-verifier", default-features = false }
+sp-core = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
+sp-io = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
+
+[features]
+default = ["std"]
+std = [
+	"parity-scale-codec/std",
+	"scale-info/std",
+	"sp-core/std",
+	"sp-io/std",
+	"sp-runtime/std",
+	"sp-std/std",
+	"frame-support/std",
+	"frame-system/std",
+	"frame-benchmarking?/std",
+	"orbinum-zk-verifier/std",
+	"orbinum-zk-core/std",
+	"orbinum-encrypted-memo/std",
+	"pallet-zk-verifier/std",
+	"ark-bn254?/std",
+	"ark-ff?/std",
+	"once_cell/std",
+]
+# Feature to enable Poseidon hash in WASM runtime (ZK-friendly)
+# When disabled, uses Blake2 for backward compatibility
+poseidon-wasm = ["ark-bn254", "ark-ff"]
+
+# Enable native Poseidon host functions
+# Requires poseidon-wasm feature + std environment
+native-poseidon = ["poseidon-wasm", "std", "orbinum-zk-core/native-poseidon"]
+
+runtime-benchmarks = [
+	"frame-benchmarking/runtime-benchmarks",
+	"frame-support/runtime-benchmarks",
+	"frame-system/runtime-benchmarks",
+]
+try-runtime = [
+	"frame-support/try-runtime",
+	"frame-system/try-runtime",
+]
