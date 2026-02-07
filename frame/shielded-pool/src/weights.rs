@@ -154,7 +154,7 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		Weight::from_parts(500_000, 0).saturating_add(T::DbWeight::get().reads_writes(4, 2))
 	}
 	fn batch_submit_disclosure_proofs(n: u32) -> Weight {
-		// Base cost for 1 proof is ~500k. 
+		// Base cost for 1 proof is ~500k.
 		// With pairing batching, subsequent proofs are much cheaper.
 		// Formula: base_verified + (n-1) * optimized_verified + per_submission_storage
 		let base_weight = 500_000;
