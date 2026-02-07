@@ -49,4 +49,8 @@ pub use application::{
 
 // Re-export infrastructure implementations
 pub use infrastructure::crypto::poseidon_hasher::LightPoseidonHasher;
+
+#[cfg(feature = "native-poseidon")]
+pub use infrastructure::crypto::native_poseidon_hasher::NativePoseidonHasher;
+
 pub use infrastructure::repositories::in_memory_merkle_repository::InMemoryMerkleRepository;
