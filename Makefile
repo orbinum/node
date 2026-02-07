@@ -22,13 +22,9 @@ fmt:
 # Run rust clippy with debug profile
 clippy:
 	SKIP_WASM_BUILD=1 cargo clippy --all --all-targets --features=runtime-benchmarks,try-runtime -- -D warnings
-# Run rust clippy with release profile (use CI_DUMMY_VK=1 in CI to skip artifacts)
+# Run rust clippy with release profile
 clippy-release:
-	@if [ "$$CI_DUMMY_VK" = "1" ]; then \
-		SKIP_WASM_BUILD=1 cargo clippy --release --all --all-targets --features=runtime-benchmarks,try-runtime,ci-dummy-vk -- -D warnings; \
-	else \
-		SKIP_WASM_BUILD=1 cargo clippy --release --all --all-targets --features=runtime-benchmarks,try-runtime -- -D warnings; \
-	fi
+	SKIP_WASM_BUILD=1 cargo clippy --release --all --all-targets --features=runtime-benchmarks,try-runtime -- -D warnings
 
 .PHONY: check check-release
 # Check code with debug profile
@@ -51,15 +47,10 @@ build-release:
 test:
 	cargo test --lib --all
 	cargo test --lib --all --features=runtime-benchmarks
-# Run all unit tests with release profile (use CI_DUMMY_VK=1 in CI to skip artifacts)
+# Run all unit tests with release profile
 test-release:
-	@if [ "$$CI_DUMMY_VK" = "1" ]; then \
-		cargo test --release --lib --all --features=ci-dummy-vk; \
-		cargo test --release --lib --all --features=runtime-benchmarks,ci-dummy-vk; \
-	else \
-		cargo test --release --lib --all; \
-		cargo test --release --lib --all --features=runtime-benchmarks; \
-	fi
+	cargo test --release --lib --all
+	cargo test --release --lib --all --features=runtime-benchmarks
 
 .PHONY: integration-test integration-test-lint
 # Check code format and lint of integration tests
