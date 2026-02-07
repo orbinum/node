@@ -2,43 +2,43 @@
 //!
 //! ## Purpose
 //!
-//! Estos benchmarks miden la performance criptográfica pura del verifier Groth16,
-//! sin el overhead de FRAME. Son útiles para:
-//! - Optimizar la implementación criptográfica
-//! - Comparar diferentes estrategias de verificación
-//! - Medir el impacto de cambios en el código
+//! These benchmarks measure the pure cryptographic performance of the Groth16 verifier,
+//! without FRAME overhead. They are useful for:
+//! - Optimizing cryptographic implementation
+//! - Comparing different verification strategies
+//! - Measuring the impact of code changes
 //!
-//! ## Ejecutar
+//! ## Run
 //!
 //! ```bash
-//! # Todos los benchmarks
+//! # All benchmarks
 //! cargo bench --package pallet-zk-verifier
 //!
-//! # Benchmark específico
+//! # Specific benchmark
 //! cargo bench --package pallet-zk-verifier -- single_verification
 //!
-//! # Con configuración custom
+//! # With custom configuration
 //! CRITERION_CONFIG=production cargo bench --package pallet-zk-verifier
 //!
-//! # Ver resultados HTML
+//! # View HTML results
 //! open target/criterion/report/index.html
 //! ```
 //!
-//! ## Estructura
+//! ## Structure
 //!
-//! 1. **Single Verification**: Tiempo de verificación de un proof
-//! 2. **Batch Verification**: Throughput con múltiples proofs
-//! 3. **VK Parsing**: Tiempo de parsing/deserialización de VK
-//! 4. **Proof Parsing**: Tiempo de parsing de proof
-//! 5. **Public Inputs Scaling**: Impacto del número de inputs
-//! 6. **Memory Usage**: Footprint en memoria
+//! 1. **Single Verification**: Proof verification time
+//! 2. **Batch Verification**: Throughput with multiple proofs
+//! 3. **VK Parsing**: VK parsing/deserialization time
+//! 4. **Proof Parsing**: Proof parsing time
+//! 5. **Public Inputs Scaling**: Impact of number of inputs
+//! 6. **Memory Usage**: Memory footprint
 //!
-//! ## Configuración
+//! ## Configuration
 //!
-//! El módulo `config` provee presets de Criterion:
-//! - `fast()`: Desarrollo rápido (10 samples, 2s)
+//! The `config` module provides Criterion presets:
+//! - `fast()`: Fast development (10 samples, 2s)
 //! - `standard()`: Regular (100 samples, 10s)
-//! - `production()`: Producción (200 samples, 30s)
+//! - `production()`: Production (200 samples, 30s)
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
@@ -46,7 +46,7 @@ mod config;
 use config::{BenchmarkSizes, CriterionConfig};
 
 // ============================================================================
-// Datos de Prueba Reales (usando VKs hardcodeadas del primitivo)
+// Real Test Data (using hardcoded VKs from primitives)
 // ============================================================================
 
 use orbinum_zk_verifier::{
@@ -57,13 +57,13 @@ use orbinum_zk_verifier::{
 	},
 };
 
-/// Genera datos de prueba reales usando VKs hardcodeadas
+/// Generate real test data using hardcoded VKs
 fn generate_real_test_data() -> (Vec<u8>, Vec<u8>, Vec<[u8; 32]>) {
-	// VK real del transfer circuit (hardcoded en primitives)
+	// Real VK from transfer circuit (hardcoded in primitives)
 	let vk_bytes = get_transfer_vk_bytes().to_vec();
 
-	// Para proof y public inputs, usamos datos mock pero con formato válido
-	// TODO: Cuando tengamos proofs reales de circuits, usar esos
+	// For proof and public inputs, we use mock data with valid format
+	// TODO: When we have real proofs from circuits, use those
 	let proof_bytes = config::test_data::mock_proof_bytes();
 	let public_inputs = vec![
 		config::test_data::mock_single_public_input()
@@ -84,24 +84,24 @@ fn bench_single_verification(c: &mut Criterion) {
 
 	let (vk_bytes, proof_bytes, public_input_bytes) = generate_real_test_data();
 
-	// Pre-parse structures (fuera del benchmark)
+	// Pre-parse structures (outside benchmark)
 	let vk = VerifyingKey::new(vk_bytes.clone());
 	let proof = Proof::new(proof_bytes.clone());
 	let public_inputs = PublicInputs::new(public_input_bytes.clone());
 
 	group.bench_function("groth16_verify", |b| {
 		b.iter(|| {
-			// Solo medir el tiempo de verificación
+			// Only measure verification time
 			let _result = Groth16Verifier::verify(
 				black_box(&vk),
 				black_box(&public_inputs),
 				black_box(&proof),
 			);
-			// Nota: Puede fallar porque son datos mock, pero medimos el tiempo
+			// Note: May fail because they are mock data, but we measure the time
 		});
 	});
 
-	// Benchmark con parsing incluido
+	// Benchmark with parsing included
 	group.bench_function("groth16_verify_with_parsing", |b| {
 		b.iter(|| {
 			let vk = VerifyingKey::new(black_box(vk_bytes.clone()));
@@ -126,7 +126,7 @@ fn bench_batch_verification(c: &mut Criterion) {
 	let vk = VerifyingKey::new(vk_bytes);
 
 	for &batch_size in BenchmarkSizes::BATCH_SIZES {
-		// Pre-generar todos los proofs
+		// Pre-generate all proofs
 		let proofs: Vec<_> = (0..batch_size)
 			.map(|_| {
 				let proof = Proof::new(proof_bytes.clone());
@@ -164,7 +164,7 @@ fn bench_vk_operations(c: &mut Criterion) {
 	let mut group = c.benchmark_group("vk_operations");
 	group.sample_size(200);
 
-	// Test con ambas VKs (transfer y unshield)
+	// Test with both VKs (transfer and unshield)
 	let transfer_vk_bytes = get_transfer_vk_bytes().to_vec();
 	let unshield_vk_bytes = get_unshield_vk_bytes().to_vec();
 
@@ -254,17 +254,17 @@ fn bench_e2e_workflow(c: &mut Criterion) {
 
 	group.bench_function("full_verification_pipeline", |b| {
 		b.iter(|| {
-			// Simula el flujo completo que haría un usuario
-			// 1. Parsear VK (puede estar cached en producción)
+			// Simulate the full flow a user would perform
+			// 1. Parse VK (may be cached in production)
 			let vk = VerifyingKey::new(black_box(vk_bytes.clone()));
 
-			// 2. Parsear proof (siempre nuevo)
+			// 2. Parse proof (always new)
 			let proof = Proof::new(black_box(proof_bytes.clone()));
 
-			// 3. Parsear public inputs (siempre nuevos)
+			// 3. Parse public inputs (always new)
 			let public_inputs = PublicInputs::new(black_box(public_input_bytes.clone()));
 
-			// 4. Verificar
+			// 4. Verify
 			let _result = Groth16Verifier::verify(&vk, &public_inputs, &proof);
 		});
 	});
@@ -277,7 +277,7 @@ fn bench_e2e_workflow(c: &mut Criterion) {
 // ============================================================================
 
 fn get_criterion_config() -> Criterion {
-	// Leer configuración desde env var o usar standard
+	// Read configuration from env var or use standard
 	match std::env::var("CRITERION_CONFIG").as_deref() {
 		Ok("fast") => CriterionConfig::fast(),
 		Ok("production") => CriterionConfig::production(),
