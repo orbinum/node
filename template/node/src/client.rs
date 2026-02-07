@@ -47,6 +47,7 @@ pub trait RuntimeApiCollection<
 	+ sp_consensus_grandpa::GrandpaApi<Block>
 	+ frame_system_rpc_runtime_api::AccountNonceApi<Block, AccountId, Nonce>
 	+ pallet_transaction_payment_rpc_runtime_api::TransactionPaymentApi<Block, Balance>
+	+ pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi<Block>
 {
 }
 
@@ -63,6 +64,7 @@ where
 		+ sp_consensus_aura::AuraApi<Block, AuraId>
 		+ sp_consensus_grandpa::GrandpaApi<Block>
 		+ frame_system_rpc_runtime_api::AccountNonceApi<Block, AccountId, Nonce>
-		+ pallet_transaction_payment_rpc_runtime_api::TransactionPaymentApi<Block, Balance>,
+		+ pallet_transaction_payment_rpc_runtime_api::TransactionPaymentApi<Block, Balance>
+		+ pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi<Block>,
 {
 }

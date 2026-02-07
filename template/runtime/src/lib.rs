@@ -48,6 +48,7 @@ use frame_support::{
 	parameter_types,
 	traits::{ConstBool, ConstU32, ConstU64, ConstU8, FindAuthor, OnFinalize, OnTimestampSet},
 	weights::{constants::WEIGHT_REF_TIME_PER_MILLIS, IdentityFee, Weight},
+	PalletId,
 };
 use pallet_transaction_payment::FungibleAdapter;
 use polkadot_runtime_common::SlowAdjustingFeeUpdate;
@@ -464,6 +465,27 @@ impl pallet_zk_verifier::Config for Runtime {
 	type WeightInfo = pallet_zk_verifier::weights::SubstrateWeight<Runtime>;
 }
 
+parameter_types! {
+	/// Pool account that holds all shielded tokens
+	pub const ShieldedPoolPalletId: PalletId = PalletId(*b"shld/pol");
+}
+
+impl pallet_shielded_pool::Config for Runtime {
+	/// Native currency (ORB) for shield/unshield operations
+	type Currency = Balances;
+	/// Groth16 proof verifier for unshield/transfer operations
+	type ZkVerifier = ZkVerifier;
+	/// PalletId for the pool account
+	type PalletId = ShieldedPoolPalletId;
+	/// Merkle tree depth: 2^20 = 1M notes max (see MERKLE_TREE_SCALABILITY.md)
+	type MaxTreeDepth = ConstU32<20>;
+	/// Historic roots: allows proofs against past states (30s window)
+	type MaxHistoricRoots = ConstU32<100>;
+	/// Minimum shield amount: prevents spam, 1 ORB = 1e12 planck
+	type MinShieldAmount = ConstU128<1_000_000_000_000>;
+	type WeightInfo = pallet_shielded_pool::weights::SubstrateWeight<Runtime>;
+}
+
 // Create the runtime by composing the FRAME pallets that were previously configured.
 #[frame_support::runtime]
 mod runtime {
@@ -519,6 +541,9 @@ mod runtime {
 
 	#[runtime::pallet_index(12)]
 	pub type ZkVerifier = pallet_zk_verifier;
+
+	#[runtime::pallet_index(13)]
+	pub type ShieldedPool = pallet_shielded_pool;
 }
 
 #[derive(Clone)]
@@ -614,6 +639,7 @@ mod benches {
 		[pallet_evm_precompile_curve25519, EVMPrecompileCurve25519Bench::<Runtime>]
 		[pallet_evm_precompile_sha3fips, EVMPrecompileSha3FIPSBench::<Runtime>]
 		[pallet_zk_verifier, ZkVerifier]
+		[pallet_shielded_pool, ShieldedPool]
 	);
 }
 
@@ -1041,6 +1067,23 @@ impl_runtime_apis! {
 			UncheckedExtrinsic::new_bare(
 				pallet_ethereum::Call::<Runtime>::transact { transaction }.into(),
 			)
+		}
+	}
+
+	// ShieldedPool Runtime API implementation
+	impl pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi<Block> for Runtime {
+		fn get_merkle_tree_info() -> (pallet_shielded_pool::Hash, u32, u32) {
+			ShieldedPool::get_merkle_tree_info()
+		}
+
+		fn get_merkle_proof(leaf_index: u32) -> Option<pallet_shielded_pool::DefaultMerklePath> {
+			ShieldedPool::get_merkle_proof(leaf_index)
+		}
+
+		fn get_merkle_proof_for_commitment(
+			commitment: pallet_shielded_pool::Hash,
+		) -> Option<(u32, pallet_shielded_pool::DefaultMerklePath)> {
+			ShieldedPool::get_merkle_proof_for_commitment(commitment)
 		}
 	}
 

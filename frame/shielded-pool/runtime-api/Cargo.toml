@@ -1,0 +1,27 @@
+[package]
+name = "pallet-shielded-pool-runtime-api"
+version = "0.1.0"
+authors = ["Orbinum Team"]
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+pallet-shielded-pool = { path = "..", default-features = false }
+parity-scale-codec = { version = "3.6", default-features = false, features = ["derive"] }
+scale-info = { version = "2.11", default-features = false, features = ["derive"] }
+sp-api = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+sp-core = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+sp-std = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+
+[features]
+default = ["std"]
+std = [
+	"parity-scale-codec/std",
+	"scale-info/std",
+	"pallet-shielded-pool/std",
+	"sp-api/std",
+	"sp-std/std",
+	"sp-core/std",
+	"sp-runtime/std",
+]
