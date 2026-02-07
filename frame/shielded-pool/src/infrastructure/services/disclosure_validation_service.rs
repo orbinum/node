@@ -149,19 +149,19 @@ impl DisclosureValidationService {
 		// 1. Commitment (32 bytes)
 		public_signals.extend_from_slice(&commitment.0);
 
-		// 2. Viewing key hash (32 bytes)
+		// 2. Viewing key hash (32 bytes) - use dummy hash in test mode
 		let vk_hash = sp_io::hashing::blake2_256(disclosed_data.as_slice());
 		public_signals.extend_from_slice(&vk_hash);
 
-		// 3. Mask bitmap (1 byte) - 0x0F reveals value, asset_id, owner
-		public_signals.push(0x0F);
+		// 3. Mask bitmap (1 byte) - 0x07 reveals value, asset_id, owner (not blinding)
+		public_signals.push(0x07);
 
 		// 4. Revealed owner hash (32 bytes)
 		let owner_hash = sp_io::hashing::blake2_256(disclosed_data.as_slice());
 		public_signals.extend_from_slice(&owner_hash);
 
-		// Convert to bounded vec
-		let public_signals_bounded: BoundedVec<u8, ConstU32<76>> = public_signals
+		// Convert to bounded vec (97 bytes total)
+		let public_signals_bounded: BoundedVec<u8, ConstU32<97>> = public_signals
 			.try_into()
 			.map_err(|_| Error::<T>::InvalidPublicSignals)?;
 
