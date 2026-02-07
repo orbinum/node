@@ -31,39 +31,35 @@ mod benchmarks {
 	use crate::{Auditor, BatchDisclosureSubmission, DisclosureCondition};
 	use sp_std::vec::Vec;
 
-	// Load real ZK verification keys from artifacts (binary format for no_std compatibility)
-	// Use dummy data if artifacts are not available (e.g., in CI)
-	// NOTE: This is a temporary workaround while selective disclosure is under active development.
-	// Once the disclosure circuit artifacts are stabilized and included in the repository,
-	// this conditional compilation can be removed.
-	#[cfg(all(feature = "runtime-benchmarks", not(feature = "ci-dummy-vk")))]
-	const DISCLOSURE_VK_ARK: &[u8] = include_bytes!("../../../artifacts/disclosure_pk.ark");
+	// NOTE: Disclosure benchmarks están deshabilitados temporalmente mientras
+	// se completa el desarrollo del circuito de disclosure.
+	// Una vez que los artifacts de disclosure estén listos, se pueden reactivar estos benchmarks.
 
-	#[cfg(any(not(feature = "runtime-benchmarks"), feature = "ci-dummy-vk"))]
-	const DISCLOSURE_VK_ARK: &[u8] = &[0u8; 128]; // Dummy VK for CI/testing
+	// TODO: Reactivar cuando disclosure esté listo
+	// const DISCLOSURE_VK_ARK: &[u8] = include_bytes!("../../../artifacts/disclosure_pk.ark");
 
-	/// Setup disclosure circuit VK in ZkVerifier (required for disclosure benchmarks)
-	fn setup_disclosure_circuit<T>()
-	where
-		T: Config + pallet_zk_verifier::Config,
-	{
-		use pallet_zk_verifier::{CircuitId, ProofSystem};
-
-		// Register disclosure circuit VK in ZkVerifier
-		let circuit_id = CircuitId(3); // DISCLOSURE circuit ID
-		let version = 1u32;
-		let vk_bytes = DISCLOSURE_VK_ARK.to_vec();
-
-		// Create VK info and insert directly into storage
-		let vk_info = pallet_zk_verifier::VerificationKeyInfo {
-			key_data: vk_bytes.try_into().unwrap_or_default(),
-			system: ProofSystem::Groth16,
-			registered_at: frame_system::Pallet::<T>::block_number(),
-		};
-
-		pallet_zk_verifier::VerificationKeys::<T>::insert(circuit_id, version, vk_info);
-		pallet_zk_verifier::ActiveCircuitVersion::<T>::insert(circuit_id, version);
-	}
+	// /// Setup disclosure circuit VK in ZkVerifier (required for disclosure benchmarks)
+	// fn setup_disclosure_circuit<T>()
+	// where
+	// 	T: Config + pallet_zk_verifier::Config,
+	// {
+	// 	use pallet_zk_verifier::{CircuitId, ProofSystem};
+	//
+	// 	// Register disclosure circuit VK in ZkVerifier
+	// 	let circuit_id = CircuitId(3); // DISCLOSURE circuit ID
+	// 	let version = 1u32;
+	// 	let vk_bytes = DISCLOSURE_VK_ARK.to_vec();
+	//
+	// 	// Create VK info and insert directly into storage
+	// 	let vk_info = pallet_zk_verifier::VerificationKeyInfo {
+	// 		key_data: vk_bytes.try_into().unwrap_or_default(),
+	// 		system: ProofSystem::Groth16,
+	// 		registered_at: frame_system::Pallet::<T>::block_number(),
+	// 	};
+	//
+	// 	pallet_zk_verifier::VerificationKeys::<T>::insert(circuit_id, version, vk_info);
+	// 	pallet_zk_verifier::ActiveCircuitVersion::<T>::insert(circuit_id, version);
+	// }
 
 	fn setup_benchmark_env<T: Config>() -> (T::AccountId, u32) {
 		let caller: T::AccountId = whitelisted_caller();
@@ -243,62 +239,63 @@ mod benchmarks {
 		request_disclosure(RawOrigin::Signed(auditor), target, reason, None);
 	}
 
-	#[benchmark(skip_meta)]
-	fn approve_disclosure() {
-		setup_disclosure_circuit::<T>();
-		let target: T::AccountId = whitelisted_caller();
-		let auditor: T::AccountId = account("auditor", 0, 0);
-		let commitment = Commitment([11u8; 32]);
-
-		// Setup: Create audit policy with Always condition (always passes)
-		let auditors = vec![Auditor::Account(auditor.clone())].try_into().unwrap();
-		let conditions = vec![DisclosureCondition::Always].try_into().unwrap();
-		let _ = Pallet::<T>::set_audit_policy(
-			RawOrigin::Signed(target.clone()).into(),
-			auditors,
-			conditions,
-			None,
-		);
-
-		// Setup request in storage
-		crate::pallet::DisclosureRequests::<T>::insert(
-			&target,
-			&auditor,
-			DisclosureRequest {
-				target: target.clone(),
-				auditor: auditor.clone(),
-				reason: vec![1u8; 32].try_into().unwrap(),
-				evidence: None,
-				requested_at: frame_system::Pallet::<T>::block_number(),
-			},
-		);
-
-		// Setup: Register disclosure circuit VK in ZkVerifier
-		setup_disclosure_circuit::<T>();
-
-		// Setup: Insert commitment in storage (required for validation)
-		let memo_bytes = vec![0u8; 256];
-		let encrypted_memo = FrameEncryptedMemo(memo_bytes.try_into().unwrap());
-		crate::pallet::CommitmentMemos::<T>::insert(commitment, encrypted_memo);
-
-		// Public signals: commitment(32) + revealed_value(8) + revealed_asset_id(4) + revealed_owner_hash(32) = 76 bytes
-		let mut public_signals = Vec::new();
-		public_signals.extend_from_slice(&commitment.0); // 32 bytes
-		public_signals.extend_from_slice(&[1u8; 8]); // 8 bytes
-		public_signals.extend_from_slice(&[0u8; 4]); // 4 bytes
-		public_signals.extend_from_slice(&[0u8; 32]); // 32 bytes
-		let zk_proof = vec![0u8; 256].try_into().unwrap();
-		let disclosed_data = public_signals.try_into().unwrap();
-
-		#[extrinsic_call]
-		approve_disclosure(
-			RawOrigin::Signed(target),
-			auditor,
-			commitment,
-			zk_proof,
-			disclosed_data,
-		);
-	}
+	// TODO: Reactivar cuando disclosure esté listo
+	// #[benchmark(skip_meta)]
+	// fn approve_disclosure() {
+	// 	setup_disclosure_circuit::<T>();
+	// 	let target: T::AccountId = whitelisted_caller();
+	// 	let auditor: T::AccountId = account("auditor", 0, 0);
+	// 	let commitment = Commitment([11u8; 32]);
+	//
+	// 	// Setup: Create audit policy with Always condition (always passes)
+	// 	let auditors = vec![Auditor::Account(auditor.clone())].try_into().unwrap();
+	// 	let conditions = vec![DisclosureCondition::Always].try_into().unwrap();
+	// 	let _ = Pallet::<T>::set_audit_policy(
+	// 		RawOrigin::Signed(target.clone()).into(),
+	// 		auditors,
+	// 		conditions,
+	// 		None,
+	// 	);
+	//
+	// 	// Setup request in storage
+	// 	crate::pallet::DisclosureRequests::<T>::insert(
+	// 		&target,
+	// 		&auditor,
+	// 		DisclosureRequest {
+	// 			target: target.clone(),
+	// 			auditor: auditor.clone(),
+	// 			reason: vec![1u8; 32].try_into().unwrap(),
+	// 			evidence: None,
+	// 			requested_at: frame_system::Pallet::<T>::block_number(),
+	// 		},
+	// 	);
+	//
+	// 	// Setup: Register disclosure circuit VK in ZkVerifier
+	// 	setup_disclosure_circuit::<T>();
+	//
+	// 	// Setup: Insert commitment in storage (required for validation)
+	// 	let memo_bytes = vec![0u8; 256];
+	// 	let encrypted_memo = FrameEncryptedMemo(memo_bytes.try_into().unwrap());
+	// 	crate::pallet::CommitmentMemos::<T>::insert(commitment, encrypted_memo);
+	//
+	// 	// Public signals: commitment(32) + revealed_value(8) + revealed_asset_id(4) + revealed_owner_hash(32) = 76 bytes
+	// 	let mut public_signals = Vec::new();
+	// 	public_signals.extend_from_slice(&commitment.0); // 32 bytes
+	// 	public_signals.extend_from_slice(&[1u8; 8]); // 8 bytes
+	// 	public_signals.extend_from_slice(&[0u8; 4]); // 4 bytes
+	// 	public_signals.extend_from_slice(&[0u8; 32]); // 32 bytes
+	// 	let zk_proof = vec![0u8; 256].try_into().unwrap();
+	// 	let disclosed_data = public_signals.try_into().unwrap();
+	//
+	// 	#[extrinsic_call]
+	// 	approve_disclosure(
+	// 		RawOrigin::Signed(target),
+	// 		auditor,
+	// 		commitment,
+	// 		zk_proof,
+	// 		disclosed_data,
+	// 	);
+	// }
 
 	#[benchmark]
 	fn reject_disclosure() {
@@ -323,78 +320,80 @@ mod benchmarks {
 		reject_disclosure(RawOrigin::Signed(target), auditor, reason);
 	}
 
-	#[benchmark(skip_meta)]
-	fn submit_disclosure() {
-		setup_disclosure_circuit::<T>();
-		let (caller, _) = setup_benchmark_env::<T>();
-		let commitment = Commitment([22u8; 32]);
+	// TODO: Reactivar cuando disclosure esté listo
+	// #[benchmark(skip_meta)]
+	// fn submit_disclosure() {
+	// 	setup_disclosure_circuit::<T>();
+	// 	let (caller, _) = setup_benchmark_env::<T>();
+	// 	let commitment = Commitment([22u8; 32]);
+	//
+	// 	// Setup: Use real VK from artifacts (binary format for no_std compatibility)
+	// 	let vk_bytes: BoundedVec<u8, ConstU32<4096>> =
+	// 		DISCLOSURE_VK_ARK.to_vec().try_into().unwrap();
+	// 	DisclosureVerifyingKey::<T>::put(vk_bytes);
+	// 	CommitmentMemos::<T>::insert(
+	// 		commitment,
+	// 		FrameEncryptedMemo(vec![0u8; 104].try_into().unwrap()),
+	// 	);
+	//
+	// 	let proof_bytes: BoundedVec<u8, ConstU32<256>> = vec![0u8; 256].try_into().unwrap();
+	// 	// Public signals: commitment(32) + revealed_value(8) + revealed_asset_id(4) + revealed_owner_hash(32) = 76 bytes
+	// 	let mut public_signals_vec = Vec::new();
+	// 	public_signals_vec.extend_from_slice(&commitment.0); // 32 bytes
+	// 	public_signals_vec.extend_from_slice(&[1u8; 8]); // 8 bytes (revealed_value)
+	// 	public_signals_vec.extend_from_slice(&[0u8; 4]); // 4 bytes (revealed_asset_id)
+	// 	public_signals_vec.extend_from_slice(&[0u8; 32]); // 32 bytes (revealed_owner_hash)
+	// 	let public_signals: BoundedVec<u8, ConstU32<97>> = public_signals_vec.try_into().unwrap();
+	// 	let partial_data: BoundedVec<u8, ConstU32<256>> = vec![4u8; 128].try_into().unwrap();
+	//
+	// 	#[extrinsic_call]
+	// 	submit_disclosure(
+	// 		RawOrigin::Signed(caller),
+	// 		commitment,
+	// 		proof_bytes,
+	// 		public_signals,
+	// 		partial_data,
+	// 		None,
+	// 	);
+	// }
 
-		// Setup: Use real VK from artifacts (binary format for no_std compatibility)
-		let vk_bytes: BoundedVec<u8, ConstU32<4096>> =
-			DISCLOSURE_VK_ARK.to_vec().try_into().unwrap();
-		DisclosureVerifyingKey::<T>::put(vk_bytes);
-		CommitmentMemos::<T>::insert(
-			commitment,
-			FrameEncryptedMemo(vec![0u8; 104].try_into().unwrap()),
-		);
-
-		let proof_bytes: BoundedVec<u8, ConstU32<256>> = vec![0u8; 256].try_into().unwrap();
-		// Public signals: commitment(32) + revealed_value(8) + revealed_asset_id(4) + revealed_owner_hash(32) = 76 bytes
-		let mut public_signals_vec = Vec::new();
-		public_signals_vec.extend_from_slice(&commitment.0); // 32 bytes
-		public_signals_vec.extend_from_slice(&[1u8; 8]); // 8 bytes (revealed_value)
-		public_signals_vec.extend_from_slice(&[0u8; 4]); // 4 bytes (revealed_asset_id)
-		public_signals_vec.extend_from_slice(&[0u8; 32]); // 32 bytes (revealed_owner_hash)
-		let public_signals: BoundedVec<u8, ConstU32<97>> = public_signals_vec.try_into().unwrap();
-		let partial_data: BoundedVec<u8, ConstU32<256>> = vec![4u8; 128].try_into().unwrap();
-
-		#[extrinsic_call]
-		submit_disclosure(
-			RawOrigin::Signed(caller),
-			commitment,
-			proof_bytes,
-			public_signals,
-			partial_data,
-			None,
-		);
-	}
-
-	#[benchmark(skip_meta)]
-	fn batch_submit_disclosure_proofs(n: Linear<1, 10>) {
-		setup_disclosure_circuit::<T>();
-		let (caller, _) = setup_benchmark_env::<T>();
-		// Setup: Use real VK from artifacts (binary format for no_std compatibility)
-		let vk_bytes: BoundedVec<u8, ConstU32<4096>> =
-			DISCLOSURE_VK_ARK.to_vec().try_into().unwrap();
-		DisclosureVerifyingKey::<T>::put(vk_bytes);
-
-		let mut submissions = Vec::new();
-		for i in 0..n {
-			let commitment = Commitment([i as u8; 32]); // FIXED: was 33
-			CommitmentMemos::<T>::insert(
-				commitment,
-				FrameEncryptedMemo(vec![0u8; 104].try_into().unwrap()),
-			);
-
-			// Public signals: commitment(32) + revealed_value(8) + revealed_asset_id(4) + revealed_owner_hash(32) = 76 bytes
-			let mut signals = Vec::new();
-			signals.extend_from_slice(&commitment.0); // 32 bytes
-			signals.extend_from_slice(&[1u8; 8]); // 8 bytes (revealed_value)
-			signals.extend_from_slice(&[0u8; 4]); // 4 bytes (revealed_asset_id)
-			signals.extend_from_slice(&[0u8; 32]); // 32 bytes (revealed_owner_hash)
-
-			submissions.push(BatchDisclosureSubmission {
-				commitment,
-				proof: vec![0u8; 256].try_into().unwrap(),
-				public_signals: signals.try_into().unwrap(),
-				disclosed_data: vec![0u8; 256].try_into().unwrap(),
-			});
-		}
-		let submissions_vec: BoundedVec<_, ConstU32<10>> = submissions.try_into().unwrap();
-
-		#[extrinsic_call]
-		batch_submit_disclosure_proofs(RawOrigin::Signed(caller), submissions_vec);
-	}
+	// TODO: Reactivar cuando disclosure esté listo
+	// #[benchmark(skip_meta)]
+	// fn batch_submit_disclosure_proofs(n: Linear<1, 10>) {
+	// 	setup_disclosure_circuit::<T>();
+	// 	let (caller, _) = setup_benchmark_env::<T>();
+	// 	// Setup: Use real VK from artifacts (binary format for no_std compatibility)
+	// 	let vk_bytes: BoundedVec<u8, ConstU32<4096>> =
+	// 		DISCLOSURE_VK_ARK.to_vec().try_into().unwrap();
+	// 	DisclosureVerifyingKey::<T>::put(vk_bytes);
+	//
+	// 	let mut submissions = Vec::new();
+	// 	for i in 0..n {
+	// 		let commitment = Commitment([i as u8; 32]); // FIXED: was 33
+	// 		CommitmentMemos::<T>::insert(
+	// 			commitment,
+	// 			FrameEncryptedMemo(vec![0u8; 104].try_into().unwrap()),
+	// 		);
+	//
+	// 		// Public signals: commitment(32) + revealed_value(8) + revealed_asset_id(4) + revealed_owner_hash(32) = 76 bytes
+	// 		let mut signals = Vec::new();
+	// 		signals.extend_from_slice(&commitment.0); // 32 bytes
+	// 		signals.extend_from_slice(&[1u8; 8]); // 8 bytes (revealed_value)
+	// 		signals.extend_from_slice(&[0u8; 4]); // 4 bytes (revealed_asset_id)
+	// 		signals.extend_from_slice(&[0u8; 32]); // 32 bytes (revealed_owner_hash)
+	//
+	// 		submissions.push(BatchDisclosureSubmission {
+	// 			commitment,
+	// 			proof: vec![0u8; 256].try_into().unwrap(),
+	// 			public_signals: signals.try_into().unwrap(),
+	// 			disclosed_data: vec![0u8; 256].try_into().unwrap(),
+	// 		});
+	// 	}
+	// 	let submissions_vec: BoundedVec<_, ConstU32<10>> = submissions.try_into().unwrap();
+	//
+	// 	#[extrinsic_call]
+	// 	batch_submit_disclosure_proofs(RawOrigin::Signed(caller), submissions_vec);
+	// }
 
 	#[benchmark]
 	fn register_asset() {
