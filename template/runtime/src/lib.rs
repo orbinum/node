@@ -113,19 +113,16 @@ pub type SignedBlock = generic::SignedBlock<Block>;
 pub type BlockId = generic::BlockId<Block>;
 
 /// The SignedExtension to the basic transaction logic.
-pub type SignedExtra = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
-	Runtime,
-	(
-		frame_system::CheckNonZeroSender<Runtime>,
-		frame_system::CheckSpecVersion<Runtime>,
-		frame_system::CheckTxVersion<Runtime>,
-		frame_system::CheckGenesis<Runtime>,
-		frame_system::CheckEra<Runtime>,
-		frame_system::CheckNonce<Runtime>,
-		frame_system::CheckWeight<Runtime>,
-		pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
-	),
->;
+pub type SignedExtra = (
+	frame_system::CheckNonZeroSender<Runtime>,
+	frame_system::CheckSpecVersion<Runtime>,
+	frame_system::CheckTxVersion<Runtime>,
+	frame_system::CheckGenesis<Runtime>,
+	frame_system::CheckEra<Runtime>,
+	frame_system::CheckNonce<Runtime>,
+	frame_system::CheckWeight<Runtime>,
+	pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
+);
 
 /// Unchecked extrinsic type as expected by this runtime.
 pub type UncheckedExtrinsic =
@@ -455,6 +452,18 @@ pub mod pallet_manual_seal {
 
 impl pallet_manual_seal::Config for Runtime {}
 
+impl pallet_zk_verifier::Config for Runtime {
+	/// Only root can register/update verification keys
+	type AdminOrigin = frame_system::EnsureRoot<AccountId>;
+	/// Max VK size: 10MB (transfer_pk.ark: 8.3MB is the largest)
+	type MaxVerificationKeySize = ConstU32<10485760>;
+	/// Max proof size: 1KB (Groth16 proofs ~256-512 bytes)
+	type MaxProofSize = ConstU32<1024>;
+	/// Max public inputs: 32 field elements per circuit
+	type MaxPublicInputs = ConstU32<32>;
+	type WeightInfo = pallet_zk_verifier::weights::SubstrateWeight<Runtime>;
+}
+
 // Create the runtime by composing the FRAME pallets that were previously configured.
 #[frame_support::runtime]
 mod runtime {
@@ -507,6 +516,9 @@ mod runtime {
 
 	#[runtime::pallet_index(11)]
 	pub type ManualSeal = pallet_manual_seal;
+
+	#[runtime::pallet_index(12)]
+	pub type ZkVerifier = pallet_zk_verifier;
 }
 
 #[derive(Clone)]
@@ -601,6 +613,7 @@ mod benches {
 		[pallet_evm, EVM]
 		[pallet_evm_precompile_curve25519, EVMPrecompileCurve25519Bench::<Runtime>]
 		[pallet_evm_precompile_sha3fips, EVMPrecompileSha3FIPSBench::<Runtime>]
+		[pallet_zk_verifier, ZkVerifier]
 	);
 }
 

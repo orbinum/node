@@ -93,6 +93,7 @@ pub fn new_test_ext() -> BasicExternalities {
 		manual_seal: Default::default(),
 		ethereum: Default::default(),
 		evm: Default::default(),
+		zk_verifier: Default::default(),
 	}
 	.build_storage()
 	.unwrap();
