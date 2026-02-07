@@ -22,9 +22,13 @@ fmt:
 # Run rust clippy with debug profile
 clippy:
 	SKIP_WASM_BUILD=1 cargo clippy --all --all-targets --features=runtime-benchmarks,try-runtime -- -D warnings
-# Run rust clippy with release profile
+# Run rust clippy with release profile (use CI_DUMMY_VK=1 in CI to skip artifacts)
 clippy-release:
-	SKIP_WASM_BUILD=1 cargo clippy --release --all --all-targets --features=runtime-benchmarks,try-runtime -- -D warnings
+	@if [ "$$CI_DUMMY_VK" = "1" ]; then \
+		SKIP_WASM_BUILD=1 cargo clippy --release --all --all-targets --features=runtime-benchmarks,try-runtime,ci-dummy-vk -- -D warnings; \
+	else \
+		SKIP_WASM_BUILD=1 cargo clippy --release --all --all-targets --features=runtime-benchmarks,try-runtime -- -D warnings; \
+	fi
 
 .PHONY: check check-release
 # Check code with debug profile
