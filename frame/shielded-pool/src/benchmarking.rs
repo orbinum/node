@@ -23,8 +23,8 @@ use alloc::vec;
 mod benchmarks {
 	use super::*;
 	use crate::pallet::{
-		Assets, /* CommitmentMemos, DisclosureVerifyingKey, */ HistoricPoseidonRoots, NextAssetId,
-		PoolBalancePerAsset,
+		Assets, /* CommitmentMemos, DisclosureVerifyingKey, */ HistoricPoseidonRoots,
+		NextAssetId, PoolBalancePerAsset,
 	};
 	use crate::{Auditor, /* BatchDisclosureSubmission, */ DisclosureCondition};
 	use crate::{FrameEncryptedMemo, domain::entities::audit::DisclosureRequest};
