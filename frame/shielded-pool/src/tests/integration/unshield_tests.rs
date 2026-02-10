@@ -2,8 +2,7 @@
 //!
 //! Tests for withdrawing tokens from the shielded pool to public accounts.
 
-use crate::tests::helpers::*;
-use crate::{Error, Event, mock::*};
+use crate::{Error, Event, mock::*, tests::helpers::*};
 use frame_support::{BoundedVec, assert_noop, assert_ok, pallet_prelude::ConstU32};
 
 #[test]
