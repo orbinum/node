@@ -3,8 +3,7 @@
 //! Tests for multi-asset support including registration, verification,
 //! and cross-asset operations.
 
-use crate::tests::helpers::*;
-use crate::{Error, Event, mock::*};
+use crate::{Error, Event, mock::*, tests::helpers::*};
 use frame_support::{BoundedVec, assert_noop, assert_ok};
 
 #[test]
