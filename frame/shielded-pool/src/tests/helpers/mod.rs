@@ -13,6 +13,11 @@ pub fn sample_commitment() -> Commitment {
 	Commitment([1u8; 32])
 }
 
+/// Generate a second different sample commitment for testing
+pub fn sample_commitment_2() -> Commitment {
+	Commitment([2u8; 32])
+}
+
 /// Generate a sample nullifier for testing
 pub fn sample_nullifier() -> Nullifier {
 	Nullifier([2u8; 32])
