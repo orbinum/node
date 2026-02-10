@@ -1,8 +1,7 @@
 //! Genesis Configuration - Initial chain state setup
 
 use crate::{
-	domain::entities::AssetMetadata,
-	domain::value_objects::Hash,
+	domain::{entities::AssetMetadata, value_objects::Hash},
 	pallet::{
 		Assets, Config, HistoricPoseidonRoots, HistoricRootsOrder, NextAssetId, PoseidonRoot,
 	},
