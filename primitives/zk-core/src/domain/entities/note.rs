@@ -3,10 +3,10 @@
 //! Private value representation in the shielded pool, containing value,
 //! asset information, and cryptographic commitment data.
 
-use crate::domain::ports::PoseidonHasher;
-use crate::domain::services::{CommitmentService, NullifierService};
-use crate::domain::value_objects::{
-	Blinding, Commitment, FieldElement, Nullifier, OwnerPubkey, SpendingKey,
+use crate::domain::{
+	ports::PoseidonHasher,
+	services::{CommitmentService, NullifierService},
+	value_objects::{Blinding, Commitment, FieldElement, Nullifier, OwnerPubkey, SpendingKey},
 };
 
 /// Private note in the shielded pool

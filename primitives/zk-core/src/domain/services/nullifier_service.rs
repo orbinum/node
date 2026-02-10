@@ -2,8 +2,10 @@
 //!
 //! Domain service for computing nullifiers that prevent double-spending.
 
-use crate::domain::ports::PoseidonHasher;
-use crate::domain::value_objects::{Commitment, Nullifier, SpendingKey};
+use crate::domain::{
+	ports::PoseidonHasher,
+	value_objects::{Commitment, Nullifier, SpendingKey},
+};
 
 /// Domain service for computing nullifiers
 ///
@@ -37,8 +39,7 @@ impl<H: PoseidonHasher> NullifierService<H> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::domain::ports::PoseidonHasher;
-	use crate::domain::value_objects::FieldElement;
+	use crate::domain::{ports::PoseidonHasher, value_objects::FieldElement};
 	use ark_bn254::Fr;
 	extern crate alloc;
 
