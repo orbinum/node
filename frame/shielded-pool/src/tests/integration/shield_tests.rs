@@ -87,3 +87,72 @@ fn shield_fails_insufficient_balance() {
 		);
 	});
 }
+
+#[test]
+fn shield_fails_with_duplicate_commitment() {
+	new_test_ext().execute_with(|| {
+		let depositor = 1;
+		let amount = 1000u128;
+		let commitment = sample_commitment();
+		let encrypted_memo = sample_encrypted_memo();
+
+		// First shield should succeed
+		assert_ok!(ShieldedPool::shield(
+			RuntimeOrigin::signed(depositor),
+			0, // native asset
+			amount,
+			commitment,
+			encrypted_memo.clone(),
+		));
+
+		// Check tree size increased
+		assert_eq!(crate::MerkleTreeSize::<Test>::get(), 1);
+
+		// Try to shield with the same commitment again
+		assert_noop!(
+			ShieldedPool::shield(
+				RuntimeOrigin::signed(depositor),
+				0, // native asset
+				amount,
+				commitment, // Same commitment
+				encrypted_memo
+			),
+			Error::<Test>::CommitmentAlreadyExists
+		);
+
+		// Tree size should still be 1 (second shield failed)
+		assert_eq!(crate::MerkleTreeSize::<Test>::get(), 1);
+	});
+}
+
+#[test]
+fn shield_allows_different_commitments() {
+	new_test_ext().execute_with(|| {
+		let depositor = 1;
+		let amount = 1000u128;
+		let commitment1 = sample_commitment();
+		let commitment2 = sample_commitment_2();
+		let encrypted_memo = sample_encrypted_memo();
+
+		// First shield
+		assert_ok!(ShieldedPool::shield(
+			RuntimeOrigin::signed(depositor),
+			0,
+			amount,
+			commitment1,
+			encrypted_memo.clone(),
+		));
+
+		// Second shield with different commitment should succeed
+		assert_ok!(ShieldedPool::shield(
+			RuntimeOrigin::signed(depositor),
+			0,
+			amount,
+			commitment2,
+			encrypted_memo,
+		));
+
+		// Tree size should be 2
+		assert_eq!(crate::MerkleTreeSize::<Test>::get(), 2);
+	});
+}
