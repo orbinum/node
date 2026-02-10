@@ -46,12 +46,14 @@ pub mod infrastructure;
 // ============================================================================
 
 // Core types
-pub use domain::entities::constants::{
-	KEY_DOMAIN, MAC_SIZE, MAX_ENCRYPTED_MEMO_SIZE, MEMO_DATA_SIZE, MIN_ENCRYPTED_MEMO_SIZE,
-	NONCE_SIZE,
+pub use domain::entities::{
+	constants::{
+		KEY_DOMAIN, MAC_SIZE, MAX_ENCRYPTED_MEMO_SIZE, MEMO_DATA_SIZE, MIN_ENCRYPTED_MEMO_SIZE,
+		NONCE_SIZE,
+	},
+	error::MemoError,
+	types::{EdDSAKey, MemoData, NullifierKey, ViewingKey},
 };
-pub use domain::entities::error::MemoError;
-pub use domain::entities::types::{EdDSAKey, MemoData, NullifierKey, ViewingKey};
 
 // Aggregates
 pub use domain::aggregates::keyset::KeySet;
