@@ -3,18 +3,19 @@
 //! Generates ZK proofs for selective disclosure of encrypted memos.
 //! Security: Commitment binding, selective hiding, viewing key verification, non-malleability.
 
-use crate::{
-	domain::aggregates::disclosure::{DisclosureMask, DisclosureProof, DisclosurePublicSignals},
-	domain::entities::{error::MemoError, types::MemoData},
+use crate::domain::{
+	aggregates::disclosure::{DisclosureMask, DisclosureProof, DisclosurePublicSignals},
+	entities::{error::MemoError, types::MemoData},
 };
 use alloc::vec::Vec;
 
 // ZK primitives
 use ark_bn254::Fr as Bn254Fr;
 use ark_ff::{BigInteger, PrimeField};
-use orbinum_zk_core::domain::ports::PoseidonHasher;
-use orbinum_zk_core::domain::value_objects::FieldElement;
-use orbinum_zk_core::infrastructure::crypto::LightPoseidonHasher;
+use orbinum_zk_core::{
+	domain::{ports::PoseidonHasher, value_objects::FieldElement},
+	infrastructure::crypto::LightPoseidonHasher,
+};
 
 /// Generates disclosure proof with explicit proving key and WASM
 ///
@@ -205,8 +206,7 @@ fn generate_groth16_proof_with_key(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::domain::aggregates::disclosure::DisclosureMask;
-	use crate::domain::entities::types::MemoData;
+	use crate::domain::{aggregates::disclosure::DisclosureMask, entities::types::MemoData};
 
 	// ===== DisclosureWitness Tests =====
 
