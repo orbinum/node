@@ -44,13 +44,12 @@ extern crate alloc;
 
 pub use pallet::*;
 
-// Clean Architecture Layers (módulos internos, NO re-exportar)
 pub mod application;
 pub mod domain;
 pub mod infrastructure;
 pub mod presentation;
 
-// Supporting modules (internos)
+// Supporting modules (internal)
 mod types;
 pub mod weights;
 
@@ -63,14 +62,9 @@ mod tests;
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
 
-// ============================================================================
-// PUBLIC API - Clean Architecture Ports (Contratos para otros pallets)
-// ============================================================================
-
-/// Puerto de dominio para verificación ZK (el ÚNICO contrato público)
+/// Domain port for ZK verification (the ONLY public contract)
 pub use domain::services::ZkVerifierPort;
 
-// Re-export tipos FRAME necesarios para el pallet runtime
 pub use types::{
 	CircuitId, CircuitMetadata, ProofSystem, VerificationKeyInfo, VerificationStatistics,
 };
@@ -301,11 +295,11 @@ pub mod pallet {
 }
 
 // ============================================================================
-// ZkVerifierPort Trait Implementation (Clean Architecture Port)
+// ZkVerifierPort Trait Implementation
 // ============================================================================
 
 impl<T: Config> ZkVerifierPort for Pallet<T> {
-	/// Verificar una prueba de transferencia privada
+	/// Verify a private transfer proof
 	fn verify_transfer_proof(
 		proof: &[u8],
 		merkle_root: &[u8; 32],
@@ -321,10 +315,9 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 				services::Groth16Verifier,
 			},
 		};
-		use alloc::boxed::Box;
-		use alloc::vec::Vec;
+		use alloc::{boxed::Box, vec::Vec};
 
-		// Construir public inputs: [merkle_root, nullifier1, nullifier2, commitment1, commitment2]
+		// Build public inputs: [merkle_root, nullifier1, nullifier2, commitment1, commitment2]
 		let mut public_inputs = Vec::new();
 		public_inputs.push(merkle_root.to_vec());
 		for nullifier in nullifiers {
@@ -334,7 +327,7 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 			public_inputs.push(commitment.to_vec());
 		}
 
-		// Crear command para el use case
+		// Create command for the use case
 		let command = VerifyProofCommand {
 			circuit_id: DomainCircuitId::new(CircuitId::TRANSFER.0),
 			version,
@@ -342,7 +335,7 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 			public_inputs,
 		};
 
-		// Ejecutar use case
+		// Execute use case
 		let vk_repository = FrameVkRepository::<T>::new();
 		let statistics = FrameStatisticsRepository::<T>::new();
 		let validator = Box::new(Groth16Verifier);
@@ -353,7 +346,7 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 			.map_err(Self::map_application_error_to_dispatch)
 	}
 
-	/// Verificar una prueba de unshield (retiro del pool)
+	/// Verify an unshield proof (pool withdrawal)
 	fn verify_unshield_proof(
 		proof: &[u8],
 		merkle_root: &[u8; 32],
@@ -383,7 +376,7 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 			amount_bytes.to_vec(),
 		];
 
-		// Crear command para el use case
+		// Create command for the use case
 		let command = VerifyProofCommand {
 			circuit_id: DomainCircuitId::new(CircuitId::UNSHIELD.0),
 			version,
@@ -391,7 +384,7 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 			public_inputs,
 		};
 
-		// Ejecutar use case
+		// Execute use case
 		let vk_repository = FrameVkRepository::<T>::new();
 		let statistics = FrameStatisticsRepository::<T>::new();
 		let validator = Box::new(Groth16Verifier);
@@ -402,7 +395,7 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 			.map_err(Self::map_application_error_to_dispatch)
 	}
 
-	/// Verificar una prueba de disclosure (selective disclosure)
+	/// Verify a disclosure proof (selective disclosure)
 	fn verify_disclosure_proof(
 		proof: &[u8],
 		public_signals: &[u8],
@@ -426,7 +419,7 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 			));
 		}
 
-		// Separar en 4 inputs para el verifier
+		// Separate into 4 inputs for the verifier
 		use alloc::vec;
 		let public_inputs = vec![
 			public_signals[0..32].to_vec(),  // commitment
@@ -435,7 +428,7 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 			public_signals[44..76].to_vec(), // revealed_owner_hash
 		];
 
-		// Crear command para el use case con circuit ID "disclosure"
+		// Create command for the use case with circuit ID "disclosure"
 		let command = VerifyProofCommand {
 			circuit_id: DomainCircuitId::new(CircuitId::DISCLOSURE.0),
 			version,
@@ -454,7 +447,7 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 			.map_err(Self::map_application_error_to_dispatch)
 	}
 
-	/// Verificar múltiples pruebas de disclosure en batch (optimizado)
+	/// Verify multiple disclosure proofs in batch (optimized)
 	fn batch_verify_disclosure_proofs(
 		proofs: &[sp_std::vec::Vec<u8>],
 		public_signals: &[sp_std::vec::Vec<u8>],
@@ -557,7 +550,7 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 }
 
 impl<T: Config> Pallet<T> {
-	/// Helper para convertir ApplicationError a DispatchError
+	/// Helper to convert ApplicationError to DispatchError
 	fn map_application_error_to_dispatch(
 		err: crate::application::errors::ApplicationError,
 	) -> sp_runtime::DispatchError {
