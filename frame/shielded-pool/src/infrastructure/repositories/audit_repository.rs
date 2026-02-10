@@ -1,10 +1,10 @@
 //! Audit Repository - Encapsulates audit and disclosure storage access
 
 use crate::{
-	domain::value_objects::Hash,
 	domain::{
 		Commitment,
 		entities::audit::{AuditPolicy, AuditTrail, DisclosureProof, DisclosureRequest},
+		value_objects::Hash,
 	},
 	pallet::{
 		AuditPolicies, AuditTrailStorage, BalanceOf, Config, DisclosureProofs, DisclosureRequests,
