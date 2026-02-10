@@ -56,8 +56,7 @@ impl From<OwnerPubkey> for Fr {
 mod tests {
 	use super::*;
 	extern crate alloc;
-	use alloc::format;
-	use alloc::vec;
+	use alloc::{format, vec};
 
 	// ===== Construction Tests =====
 
