@@ -2,8 +2,7 @@
 //!
 //! Tests for transferring tokens privately within the shielded pool.
 
-use crate::tests::helpers::*;
-use crate::{Commitment, Error, Event, Nullifier, mock::*};
+use crate::{Commitment, Error, Event, Nullifier, mock::*, tests::helpers::*};
 use frame_support::{BoundedVec, assert_noop, assert_ok, pallet_prelude::ConstU32};
 
 #[test]
