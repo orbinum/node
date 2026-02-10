@@ -23,7 +23,7 @@ serde = { version = "1.0", default-features = false, features = ["derive"], opti
 serde_json = { version = "1.0", default-features = false, optional = true }
 
 # Random number generation (always required for secure encryption)
-getrandom = { version = "0.2", default-features = false }
+getrandom = { version = "0.2", default-features = false, features = ["js"] }
 
 # ZK proof dependencies (disclosure feature)
 ark-bn254 = { version = "0.5.0", default-features = false, optional = true }
