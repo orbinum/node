@@ -50,16 +50,21 @@ pub fn decrypt_memo(
 	MemoData::from_bytes(&plaintext)
 }
 
-/// Encrypts memo data with provided nonce
+/// Encrypts memo data with auto-generated random nonce
 ///
 /// Returns: nonce(12) || ciphertext(76+16)
-/// WARNING: Nonce MUST be unique and never reused.
+/// Security: Nonce is cryptographically random and unique for each encryption.
 pub fn encrypt_memo(
 	memo: &MemoData,
 	commitment: &[u8; 32],
 	recipient_viewing_key: &[u8; 32],
-	nonce: &[u8; 12],
 ) -> Result<Vec<u8>, MemoError> {
+	use rand::RngCore;
+
+	// Generate random nonce (12 bytes for ChaCha20Poly1305)
+	let mut nonce = [0u8; 12];
+	rand::thread_rng().fill_bytes(&mut nonce);
+
 	// Derive encryption key
 	let key = derive_encryption_key(recipient_viewing_key, commitment);
 
@@ -68,34 +73,17 @@ pub fn encrypt_memo(
 
 	// Create cipher and encrypt
 	let cipher = ChaCha20Poly1305::new((&key).into());
-	let nonce_obj = Nonce::from_slice(nonce);
+	let nonce_obj = Nonce::from_slice(&nonce);
 	let ciphertext = cipher
 		.encrypt(nonce_obj, plaintext.as_ref())
 		.map_err(|_| MemoError::EncryptionFailed)?;
 
 	// Return nonce || ciphertext
 	let mut result = Vec::with_capacity(12 + ciphertext.len());
-	result.extend_from_slice(nonce);
+	result.extend_from_slice(&nonce);
 	result.extend_from_slice(&ciphertext);
 
 	Ok(result)
-}
-
-/// Encrypts memo with auto-generated random nonce
-///
-/// Recommended method. Requires encrypt feature.
-#[cfg(feature = "encrypt")]
-pub fn encrypt_memo_random(
-	memo: &MemoData,
-	commitment: &[u8; 32],
-	recipient_viewing_key: &[u8; 32],
-) -> Result<Vec<u8>, MemoError> {
-	use rand::RngCore;
-
-	let mut nonce = [0u8; 12];
-	rand::thread_rng().fill_bytes(&mut nonce);
-
-	encrypt_memo(memo, commitment, recipient_viewing_key, &nonce)
 }
 
 /// Attempts decryption, returns None on failure
@@ -126,9 +114,8 @@ mod tests {
 		let memo = MemoData::new(1000, [1u8; 32], [2u8; 32], 0);
 		let commitment = [3u8; 32];
 		let viewing_key = [4u8; 32];
-		let nonce = [5u8; 12];
 
-		let result = encrypt_memo(&memo, &commitment, &viewing_key, &nonce);
+		let result = encrypt_memo(&memo, &commitment, &viewing_key);
 
 		assert!(result.is_ok());
 		let encrypted = result.unwrap();
@@ -141,41 +128,37 @@ mod tests {
 		let memo = MemoData::new(500, [10u8; 32], [20u8; 32], 1);
 		let commitment = [30u8; 32];
 		let viewing_key = [40u8; 32];
-		let nonce = [99u8; 12];
 
-		let encrypted = encrypt_memo(&memo, &commitment, &viewing_key, &nonce).unwrap();
+		let encrypted = encrypt_memo(&memo, &commitment, &viewing_key).unwrap();
 
-		// First 12 bytes should be nonce
-		assert_eq!(&encrypted[0..12], &nonce);
+		// First 12 bytes should be random nonce
+		assert_eq!(encrypted.len(), 12 + 76 + 16); // nonce + plaintext + tag
 	}
 
 	#[test]
-	fn test_encrypt_memo_deterministic_with_same_nonce() {
+	fn test_encrypt_memo_random_nonces() {
 		let memo = MemoData::new(100, [1u8; 32], [2u8; 32], 0);
 		let commitment = [3u8; 32];
 		let viewing_key = [4u8; 32];
-		let nonce = [5u8; 12];
 
-		let encrypted1 = encrypt_memo(&memo, &commitment, &viewing_key, &nonce).unwrap();
-		let encrypted2 = encrypt_memo(&memo, &commitment, &viewing_key, &nonce).unwrap();
+		let encrypted1 = encrypt_memo(&memo, &commitment, &viewing_key).unwrap();
+		let encrypted2 = encrypt_memo(&memo, &commitment, &viewing_key).unwrap();
 
-		// Same inputs should produce same output
-		assert_eq!(encrypted1, encrypted2);
-	}
-
-	#[test]
-	fn test_encrypt_memo_different_nonces() {
-		let memo = MemoData::new(100, [1u8; 32], [2u8; 32], 0);
-		let commitment = [3u8; 32];
-		let viewing_key = [4u8; 32];
-		let nonce1 = [5u8; 12];
-		let nonce2 = [6u8; 12];
-
-		let encrypted1 = encrypt_memo(&memo, &commitment, &viewing_key, &nonce1).unwrap();
-		let encrypted2 = encrypt_memo(&memo, &commitment, &viewing_key, &nonce2).unwrap();
-
-		// Different nonces should produce different ciphertexts
+		// Random nonces should produce different outputs
 		assert_ne!(encrypted1, encrypted2);
+	}
+
+	#[test]
+	fn test_encrypt_memo_nonce_randomness() {
+		let memo = MemoData::new(100, [1u8; 32], [2u8; 32], 0);
+		let commitment = [3u8; 32];
+		let viewing_key = [4u8; 32];
+
+		let encrypted1 = encrypt_memo(&memo, &commitment, &viewing_key).unwrap();
+		let encrypted2 = encrypt_memo(&memo, &commitment, &viewing_key).unwrap();
+
+		// Check that nonces are different (first 12 bytes)
+		assert_ne!(&encrypted1[..12], &encrypted2[..12]);
 	}
 
 	#[test]
@@ -183,9 +166,8 @@ mod tests {
 		let memo = MemoData::new(0, [0u8; 32], [0u8; 32], 0);
 		let commitment = [0u8; 32];
 		let viewing_key = [0u8; 32];
-		let nonce = [0u8; 12];
 
-		let result = encrypt_memo(&memo, &commitment, &viewing_key, &nonce);
+		let result = encrypt_memo(&memo, &commitment, &viewing_key);
 		assert!(result.is_ok());
 	}
 
@@ -194,9 +176,8 @@ mod tests {
 		let memo = MemoData::new(u64::MAX, [255u8; 32], [255u8; 32], u32::MAX);
 		let commitment = [255u8; 32];
 		let viewing_key = [255u8; 32];
-		let nonce = [255u8; 12];
 
-		let result = encrypt_memo(&memo, &commitment, &viewing_key, &nonce);
+		let result = encrypt_memo(&memo, &commitment, &viewing_key);
 		assert!(result.is_ok());
 	}
 
@@ -207,9 +188,8 @@ mod tests {
 		let memo = MemoData::new(1000, [1u8; 32], [2u8; 32], 0);
 		let commitment = [3u8; 32];
 		let viewing_key = [4u8; 32];
-		let nonce = [5u8; 12];
 
-		let encrypted = encrypt_memo(&memo, &commitment, &viewing_key, &nonce).unwrap();
+		let encrypted = encrypt_memo(&memo, &commitment, &viewing_key).unwrap();
 		let decrypted = decrypt_memo(&encrypted, &commitment, &viewing_key).unwrap();
 
 		assert_eq!(decrypted, memo);
@@ -220,9 +200,8 @@ mod tests {
 		let original = MemoData::new(500, [10u8; 32], [20u8; 32], 1);
 		let commitment = [30u8; 32];
 		let viewing_key = [40u8; 32];
-		let nonce = [50u8; 12];
 
-		let encrypted = encrypt_memo(&original, &commitment, &viewing_key, &nonce).unwrap();
+		let encrypted = encrypt_memo(&original, &commitment, &viewing_key).unwrap();
 		let decrypted = decrypt_memo(&encrypted, &commitment, &viewing_key).unwrap();
 
 		assert_eq!(decrypted.value, original.value);
@@ -237,9 +216,8 @@ mod tests {
 		let commitment = [3u8; 32];
 		let viewing_key = [4u8; 32];
 		let wrong_key = [99u8; 32];
-		let nonce = [5u8; 12];
 
-		let encrypted = encrypt_memo(&memo, &commitment, &viewing_key, &nonce).unwrap();
+		let encrypted = encrypt_memo(&memo, &commitment, &viewing_key).unwrap();
 		let result = decrypt_memo(&encrypted, &commitment, &wrong_key);
 
 		assert!(result.is_err());
@@ -256,9 +234,8 @@ mod tests {
 		let commitment = [3u8; 32];
 		let wrong_commitment = [99u8; 32];
 		let viewing_key = [4u8; 32];
-		let nonce = [5u8; 12];
 
-		let encrypted = encrypt_memo(&memo, &commitment, &viewing_key, &nonce).unwrap();
+		let encrypted = encrypt_memo(&memo, &commitment, &viewing_key).unwrap();
 		let result = decrypt_memo(&encrypted, &wrong_commitment, &viewing_key);
 
 		assert!(result.is_err());
@@ -301,57 +278,13 @@ mod tests {
 		let memo = MemoData::new(1000, [1u8; 32], [2u8; 32], 0);
 		let commitment = [3u8; 32];
 		let viewing_key = [4u8; 32];
-		let nonce = [5u8; 12];
 
-		let mut encrypted = encrypt_memo(&memo, &commitment, &viewing_key, &nonce).unwrap();
+		let mut encrypted = encrypt_memo(&memo, &commitment, &viewing_key).unwrap();
 		// Tamper with ciphertext
 		encrypted[20] ^= 0xFF;
 
 		let result = decrypt_memo(&encrypted, &commitment, &viewing_key);
 		assert!(result.is_err());
-	}
-
-	// ===== encrypt_memo_random Tests =====
-
-	#[cfg(feature = "encrypt")]
-	#[test]
-	fn test_encrypt_memo_random() {
-		let memo = MemoData::new(1000, [1u8; 32], [2u8; 32], 0);
-		let commitment = [3u8; 32];
-		let viewing_key = [4u8; 32];
-
-		let result = encrypt_memo_random(&memo, &commitment, &viewing_key);
-
-		assert!(result.is_ok());
-		let encrypted = result.unwrap();
-		assert!(encrypted.len() >= MIN_ENCRYPTED_MEMO_SIZE);
-	}
-
-	#[cfg(feature = "encrypt")]
-	#[test]
-	fn test_encrypt_memo_random_different_nonces() {
-		let memo = MemoData::new(100, [1u8; 32], [2u8; 32], 0);
-		let commitment = [3u8; 32];
-		let viewing_key = [4u8; 32];
-
-		let encrypted1 = encrypt_memo_random(&memo, &commitment, &viewing_key).unwrap();
-		let encrypted2 = encrypt_memo_random(&memo, &commitment, &viewing_key).unwrap();
-
-		// Should have different nonces (first 12 bytes)
-		assert_ne!(&encrypted1[0..12], &encrypted2[0..12]);
-	}
-
-	#[cfg(feature = "encrypt")]
-	#[test]
-	fn test_encrypt_memo_random_roundtrip() {
-		let original = MemoData::new(500, [10u8; 32], [20u8; 32], 1);
-		let commitment = [30u8; 32];
-		let viewing_key = [40u8; 32];
-
-		let encrypted = encrypt_memo_random(&original, &commitment, &viewing_key).unwrap();
-		let decrypted = decrypt_memo(&encrypted, &commitment, &viewing_key).unwrap();
-
-		assert_eq!(decrypted, original);
 	}
 
 	// ===== try_decrypt_memo Tests =====
@@ -361,9 +294,8 @@ mod tests {
 		let memo = MemoData::new(1000, [1u8; 32], [2u8; 32], 0);
 		let commitment = [3u8; 32];
 		let viewing_key = [4u8; 32];
-		let nonce = [5u8; 12];
 
-		let encrypted = encrypt_memo(&memo, &commitment, &viewing_key, &nonce).unwrap();
+		let encrypted = encrypt_memo(&memo, &commitment, &viewing_key).unwrap();
 		let result = try_decrypt_memo(&encrypted, &commitment, &viewing_key);
 
 		assert!(result.is_some());
@@ -376,9 +308,8 @@ mod tests {
 		let commitment = [3u8; 32];
 		let viewing_key = [4u8; 32];
 		let wrong_key = [99u8; 32];
-		let nonce = [5u8; 12];
 
-		let encrypted = encrypt_memo(&memo, &commitment, &viewing_key, &nonce).unwrap();
+		let encrypted = encrypt_memo(&memo, &commitment, &viewing_key).unwrap();
 		let result = try_decrypt_memo(&encrypted, &commitment, &wrong_key);
 
 		assert!(result.is_none());
@@ -403,11 +334,9 @@ mod tests {
 		let commitment = [5u8; 32];
 		let vk1 = [6u8; 32];
 		let vk2 = [7u8; 32];
-		let nonce1 = [8u8; 12];
-		let nonce2 = [9u8; 12];
 
-		let encrypted1 = encrypt_memo(&memo1, &commitment, &vk1, &nonce1).unwrap();
-		let encrypted2 = encrypt_memo(&memo2, &commitment, &vk2, &nonce2).unwrap();
+		let encrypted1 = encrypt_memo(&memo1, &commitment, &vk1).unwrap();
+		let encrypted2 = encrypt_memo(&memo2, &commitment, &vk2).unwrap();
 
 		// Each key can only decrypt its own memo
 		assert_eq!(decrypt_memo(&encrypted1, &commitment, &vk1).unwrap(), memo1);
@@ -421,9 +350,8 @@ mod tests {
 		let memo = MemoData::new(1000, [1u8; 32], [2u8; 32], 0);
 		let commitment = [3u8; 32];
 		let viewing_key = [4u8; 32];
-		let nonce = [5u8; 12];
 
-		let encrypted = encrypt_memo(&memo, &commitment, &viewing_key, &nonce).unwrap();
+		let encrypted = encrypt_memo(&memo, &commitment, &viewing_key).unwrap();
 
 		// Should be: 12 (nonce) + 76 (plaintext) + 16 (auth tag) = 104 bytes
 		assert_eq!(encrypted.len(), 12 + 76 + 16);
@@ -440,10 +368,9 @@ mod tests {
 
 		let commitment = [42u8; 32];
 		let viewing_key = [99u8; 32];
-		let nonce = [7u8; 12];
 
 		for original in test_cases {
-			let encrypted = encrypt_memo(&original, &commitment, &viewing_key, &nonce).unwrap();
+			let encrypted = encrypt_memo(&original, &commitment, &viewing_key).unwrap();
 			let decrypted = decrypt_memo(&encrypted, &commitment, &viewing_key).unwrap();
 			assert_eq!(decrypted, original);
 		}
@@ -460,10 +387,8 @@ mod tests {
 		let owned_memo = MemoData::new(1000, [1u8; 32], [2u8; 32], 0);
 		let other_memo = MemoData::new(500, [3u8; 32], [4u8; 32], 0);
 
-		let owned_encrypted =
-			encrypt_memo(&owned_memo, &commitment, &wallet_vk, &[1u8; 12]).unwrap();
-		let other_encrypted =
-			encrypt_memo(&other_memo, &commitment, &other_vk, &[2u8; 12]).unwrap();
+		let owned_encrypted = encrypt_memo(&owned_memo, &commitment, &wallet_vk).unwrap();
+		let other_encrypted = encrypt_memo(&other_memo, &commitment, &other_vk).unwrap();
 
 		// Wallet can only decrypt owned notes
 		assert!(try_decrypt_memo(&owned_encrypted, &commitment, &wallet_vk).is_some());

@@ -29,7 +29,7 @@ orbinum-encrypted-memo = { version = "0.2", features = ["disclosure"] }
 
 ```rust
 use orbinum_encrypted_memo::{
-    domain::entities::types::{MemoData, ViewingKey, Commitment, Nonce},
+    domain::entities::types::{MemoData, ViewingKey, Commitment},
     domain::services::encryption::{encrypt_memo, decrypt_memo},
 };
 
@@ -41,9 +41,8 @@ let memo = MemoData::new(
     0,              // asset_id
 );
 
-// Encrypt for recipient
-let nonce = Nonce::random();
-let encrypted = encrypt_memo(&memo, &commitment, &recipient_vk, &nonce)?;
+// Encrypt for recipient (random nonce generated automatically)
+let encrypted = encrypt_memo(&memo, &commitment, &recipient_vk)?;
 
 // Recipient decrypts
 let decrypted = decrypt_memo(&encrypted, &commitment, &my_viewing_key)?;

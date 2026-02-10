@@ -20,7 +20,7 @@
 //!
 //! let keys = KeySet::from_spending_key(&spending_key);
 //! let memo = MemoData::new(1000, owner_pk, blinding, 0);
-//! let encrypted = encrypt_memo(&memo, &commitment, &recipient_vk, &nonce)?;
+//! let encrypted = encrypt_memo(&memo, &commitment, &recipient_vk)?;
 //! let decrypted = decrypt_memo(&encrypted, &commitment, &keys.viewing_key)?;
 //! ```
 
@@ -61,8 +61,10 @@ pub use domain::aggregates::keyset::KeySet;
 // Encryption services
 pub use domain::services::encryption::{decrypt_memo, encrypt_memo, try_decrypt_memo};
 
-#[cfg(feature = "encrypt")]
-pub use domain::services::encryption::encrypt_memo_random;
+// Note: encrypt_memo already generates random nonces automatically
+// No separate encrypt_memo_random function needed
+// #[cfg(feature = "encrypt")]
+// pub use domain::services::encryption::encrypt_memo_random;
 
 // Key derivation services
 pub use domain::services::key_derivation::{
