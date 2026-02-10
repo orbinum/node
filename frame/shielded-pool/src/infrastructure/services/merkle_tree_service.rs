@@ -24,56 +24,24 @@ impl MerkleTreeService {
 		// Increment tree size BEFORE computing roots (needed for get_all_leaves)
 		MerkleRepository::set_tree_size::<T>(index.saturating_add(1));
 
-		// Update Blake2 Merkle root (backward compatibility)
-		let old_blake2_root = MerkleRepository::get_root::<T>();
-		let new_blake2_root = Self::compute_blake2_merkle_root::<T>();
-		MerkleRepository::set_root::<T>(new_blake2_root);
-
-		// Update Poseidon root if feature enabled
-		#[cfg(feature = "poseidon-wasm")]
-		let new_poseidon_root = {
-			let root = Self::compute_poseidon_merkle_root::<T>();
-			MerkleRepository::set_poseidon_root::<T>(root);
-			root
-		};
+		// Update Poseidon root (only system used now)
+		let new_poseidon_root = Self::compute_poseidon_merkle_root::<T>();
+		MerkleRepository::set_poseidon_root::<T>(new_poseidon_root);
 
 		// Add to historic roots with pruning if necessary
-		#[cfg(feature = "poseidon-wasm")]
-		Self::add_dual_historic_roots::<T>(new_blake2_root, new_poseidon_root);
+		Self::add_poseidon_historic_root::<T>(new_poseidon_root);
 
-		#[cfg(not(feature = "poseidon-wasm"))]
-		Self::add_historic_root::<T>(new_blake2_root);
-
-		// Emit root update event (use active root for event)
-		#[cfg(feature = "poseidon-wasm")]
-		let new_root = new_poseidon_root;
-
-		#[cfg(not(feature = "poseidon-wasm"))]
-		let new_root = new_blake2_root;
-
+		// Emit root update event
 		Pallet::<T>::deposit_event(Event::MerkleRootUpdated {
-			old_root: old_blake2_root,
-			new_root,
+			old_root: [0u8; 32], // Not tracking old root anymore
+			new_root: new_poseidon_root,
 			tree_size: index.saturating_add(1),
 		});
 
 		Ok(index)
 	}
 
-	/// Compute Blake2 Merkle root (backward compatibility)
-	fn compute_blake2_merkle_root<T: Config>() -> Hash {
-		let leaves = MerkleRepository::get_all_leaves::<T>();
-
-		if leaves.is_empty() {
-			return [0u8; 32];
-		}
-
-		// Force Blake2 computation
-		crate::infrastructure::merkle_tree::compute_root_from_leaves_blake2::<20>(&leaves)
-	}
-
-	/// Compute Poseidon Merkle root (when feature enabled)
-	#[cfg(feature = "poseidon-wasm")]
+	/// Compute Poseidon Merkle root (primary system)
 	fn compute_poseidon_merkle_root<T: Config>() -> Hash {
 		let leaves = MerkleRepository::get_all_leaves::<T>();
 
@@ -85,9 +53,8 @@ impl MerkleTreeService {
 		crate::infrastructure::merkle_tree::compute_root_from_leaves_poseidon::<20>(&leaves)
 	}
 
-	/// Add a historic root with FIFO pruning (Blake2 only, used when poseidon-wasm disabled)
-	#[cfg(not(feature = "poseidon-wasm"))]
-	fn add_historic_root<T: Config>(root: Hash) {
+	/// Add a Poseidon historic root with FIFO pruning
+	fn add_poseidon_historic_root<T: Config>(poseidon_root: Hash) {
 		// Get current order list using repository
 		let mut order = MerkleRepository::get_historic_roots_order::<T>();
 
@@ -95,45 +62,18 @@ impl MerkleTreeService {
 		if order.len() >= T::MaxHistoricRoots::get() as usize {
 			// Remove the oldest root (first in the list)
 			if let Some(oldest_root) = order.first().copied() {
-				// Remove from historic roots using repository
-				MerkleRepository::remove_historic_root::<T>(&oldest_root);
+				// Remove from Poseidon historic roots
+				MerkleRepository::remove_poseidon_historic_root::<T>(&oldest_root);
 				// Remove from order list
 				order.remove(0);
 			}
 		}
 
-		// Add the new root using repository
-		MerkleRepository::add_historic_root::<T>(root);
+		// Add the new Poseidon root
+		MerkleRepository::add_historic_poseidon_root::<T>(poseidon_root);
 
 		// Try to add to order list (should always succeed after pruning)
-		let _ = order.try_push(root);
-
-		// Update storage using repository
-		MerkleRepository::set_historic_roots_order::<T>(order);
-	}
-
-	/// Add dual historic roots (Blake2 + Poseidon) with FIFO pruning
-	#[cfg(feature = "poseidon-wasm")]
-	fn add_dual_historic_roots<T: Config>(blake2_root: Hash, poseidon_root: Hash) {
-		// Get current order list using repository
-		let mut order = MerkleRepository::get_historic_roots_order::<T>();
-
-		// Check if we need to prune the oldest root
-		if order.len() >= T::MaxHistoricRoots::get() as usize {
-			// Remove the oldest root (first in the list)
-			if let Some(oldest_root) = order.first().copied() {
-				// Remove from historic roots using repository
-				MerkleRepository::remove_historic_root::<T>(&oldest_root);
-				// Remove from order list
-				order.remove(0);
-			}
-		}
-
-		// Add both roots using repository
-		MerkleRepository::add_dual_historic_roots::<T>(blake2_root, poseidon_root);
-
-		// Try to add to order list (we store Blake2 root as index for both)
-		let _ = order.try_push(blake2_root);
+		let _ = order.try_push(poseidon_root);
 
 		// Update storage using repository
 		MerkleRepository::set_historic_roots_order::<T>(order);
