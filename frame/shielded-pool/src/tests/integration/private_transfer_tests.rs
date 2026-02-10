@@ -20,7 +20,7 @@ fn private_transfer_works() {
 		));
 
 		// Get the current root
-		let merkle_root = crate::MerkleRoot::<Test>::get();
+		let merkle_root = crate::PoseidonRoot::<Test>::get();
 
 		let nullifiers: BoundedVec<Nullifier, ConstU32<2>> =
 			vec![sample_nullifier()].try_into().unwrap();
@@ -110,7 +110,7 @@ fn private_transfer_fails_nullifier_reuse() {
 		));
 
 		// Get the current root
-		let merkle_root = crate::MerkleRoot::<Test>::get();
+		let merkle_root = crate::PoseidonRoot::<Test>::get();
 
 		// Mark a nullifier as used (value is block number)
 		let nullifier = sample_nullifier();
