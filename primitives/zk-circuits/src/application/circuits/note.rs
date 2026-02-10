@@ -12,8 +12,10 @@ use crate::infrastructure::native_crypto::{
 	poseidon_hash_2 as poseidon_hash_2_native, poseidon_hash_4 as poseidon_hash_4_native,
 };
 // Import gadgets for R1CS
-use crate::infrastructure::gadgets::poseidon::{poseidon_hash_2, poseidon_hash_4};
-use crate::Bn254Fr;
+use crate::{
+	infrastructure::gadgets::poseidon::{poseidon_hash_2, poseidon_hash_4},
+	Bn254Fr,
+};
 
 // ============================================================================
 // Note Commitment
