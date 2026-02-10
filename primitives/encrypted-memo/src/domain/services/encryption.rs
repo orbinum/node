@@ -59,11 +59,9 @@ pub fn encrypt_memo(
 	commitment: &[u8; 32],
 	recipient_viewing_key: &[u8; 32],
 ) -> Result<Vec<u8>, MemoError> {
-	use rand::RngCore;
-
 	// Generate random nonce (12 bytes for ChaCha20Poly1305)
 	let mut nonce = [0u8; 12];
-	rand::thread_rng().fill_bytes(&mut nonce);
+	getrandom::getrandom(&mut nonce).map_err(|_| MemoError::EncryptionFailed)?;
 
 	// Derive encryption key
 	let key = derive_encryption_key(recipient_viewing_key, commitment);
