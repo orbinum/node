@@ -80,6 +80,7 @@ fp-account = { workspace = true }
 fp-dynamic-fee = { workspace = true, features = ["default"] }
 fp-evm = { workspace = true, features = ["default"] }
 fp-rpc = { workspace = true, features = ["default"] }
+
 # Orbinum: ZK primitives with native Poseidon host interface
 orbinum-runtime = { workspace = true, features = ["std"] }
 orbinum-zk-core = { workspace = true, features = ["std"] }
