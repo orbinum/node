@@ -2,10 +2,8 @@
 //!
 //! Tests for historic Merkle root tracking and pruning.
 
-use crate::tests::helpers::*;
-use crate::{Commitment, Nullifier, mock::*};
-use frame_support::pallet_prelude::ConstU32;
-use frame_support::{BoundedVec, assert_ok};
+use crate::{Commitment, Nullifier, mock::*, tests::helpers::*};
+use frame_support::{BoundedVec, assert_ok, pallet_prelude::ConstU32};
 
 // ============================================================================
 
