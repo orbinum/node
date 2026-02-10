@@ -334,8 +334,8 @@ pub fn compute_root_from_leaves_poseidon<const DEPTH: usize>(leaves: &[Hash]) ->
 		if current_level.len() == 1 && level + 1 < DEPTH {
 			// Continue hashing the single node with zeros up to DEPTH
 			let mut root = current_level[0];
-			for remaining_level in (level + 1)..DEPTH {
-				root = hash_pair_poseidon(&root, &zero_hashes[remaining_level]);
+			for zero_hash in zero_hashes.iter().skip(level + 1).take(DEPTH - level - 1) {
+				root = hash_pair_poseidon(&root, zero_hash);
 			}
 			return root;
 		}
