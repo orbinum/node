@@ -98,7 +98,7 @@ impl PrivateTransferUseCase {
 
 	/// Get current Merkle root
 	pub fn get_current_merkle_root<T: Config>() -> [u8; 32] {
-		MerkleRepository::get_root::<T>()
+		MerkleRepository::get_poseidon_root::<T>()
 	}
 
 	/// Get Merkle tree size
