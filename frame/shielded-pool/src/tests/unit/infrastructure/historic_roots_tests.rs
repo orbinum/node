@@ -33,7 +33,7 @@ fn historic_roots_pruning_works() {
 				commitment,
 				sample_encrypted_memo_with_seed(i),
 			));
-			roots.push(crate::MerkleRoot::<Test>::get());
+			roots.push(crate::PoseidonRoot::<Test>::get());
 		}
 
 		// Should have genesis + new unique roots (may be less than 6 if there are duplicates)
@@ -51,7 +51,7 @@ fn historic_roots_pruning_works() {
 
 		// All new roots should exist
 		for root in &roots {
-			assert!(crate::HistoricRoots::<Test>::contains_key(root));
+			assert!(crate::HistoricPoseidonRoots::<Test>::contains_key(root));
 			assert!(order.contains(root));
 		}
 
@@ -92,7 +92,7 @@ fn historic_roots_fifo_order_maintained() {
 				commitment,
 				sample_encrypted_memo_with_seed(i),
 			));
-			all_roots.push(crate::MerkleRoot::<Test>::get());
+			all_roots.push(crate::PoseidonRoot::<Test>::get());
 		}
 
 		let order = crate::HistoricRootsOrder::<Test>::get();
@@ -109,7 +109,7 @@ fn historic_roots_fifo_order_maintained() {
 
 		// All new roots should exist in storage
 		for root in &all_roots {
-			assert!(crate::HistoricRoots::<Test>::contains_key(root));
+			assert!(crate::HistoricPoseidonRoots::<Test>::contains_key(root));
 		}
 
 		// Verify FIFO - last root inserted should be at the end
@@ -138,7 +138,7 @@ fn historic_root_from_private_transfer_tracked() {
 			sample_encrypted_memo(),
 		));
 
-		let merkle_root = crate::MerkleRoot::<Test>::get();
+		let merkle_root = crate::PoseidonRoot::<Test>::get();
 		let initial_order_len = crate::HistoricRootsOrder::<Test>::get().len();
 
 		// Do a private transfer which will update the tree and create new roots
@@ -170,8 +170,10 @@ fn historic_root_from_private_transfer_tracked() {
 		assert_eq!(new_order.len(), initial_order_len + 2);
 
 		// Current root should be in historic roots
-		let current_root = crate::MerkleRoot::<Test>::get();
-		assert!(crate::HistoricRoots::<Test>::contains_key(current_root));
+		let current_root = crate::PoseidonRoot::<Test>::get();
+		assert!(crate::HistoricPoseidonRoots::<Test>::contains_key(
+			current_root
+		));
 	});
 }
 
@@ -210,7 +212,7 @@ fn historic_roots_no_duplicate_roots() {
 		// Verify all roots in order exist in storage
 		for root in order.iter() {
 			assert!(
-				crate::HistoricRoots::<Test>::contains_key(root),
+				crate::HistoricPoseidonRoots::<Test>::contains_key(root),
 				"Root in order not found in storage"
 			);
 		}
@@ -237,15 +239,15 @@ fn historic_roots_current_root_always_known() {
 			));
 
 			// After each shield, current root should be known
-			let current_root = crate::MerkleRoot::<Test>::get();
+			let current_root = crate::PoseidonRoot::<Test>::get();
 			assert!(
-				crate::HistoricRoots::<Test>::contains_key(current_root),
+				crate::HistoricPoseidonRoots::<Test>::contains_key(current_root),
 				"Current root not in historic roots after shield {i}"
 			);
 		}
 
 		// Private transfer
-		let merkle_root = crate::MerkleRoot::<Test>::get();
+		let merkle_root = crate::PoseidonRoot::<Test>::get();
 		let nullifiers: BoundedVec<Nullifier, ConstU32<2>> =
 			vec![sample_nullifier()].try_into().unwrap();
 		let commitments: BoundedVec<Commitment, ConstU32<2>> =
@@ -264,9 +266,9 @@ fn historic_roots_current_root_always_known() {
 		));
 
 		// After private transfer, current root should still be known
-		let current_root = crate::MerkleRoot::<Test>::get();
+		let current_root = crate::PoseidonRoot::<Test>::get();
 		assert!(
-			crate::HistoricRoots::<Test>::contains_key(current_root),
+			crate::HistoricPoseidonRoots::<Test>::contains_key(current_root),
 			"Current root not in historic roots after private transfer"
 		);
 	});
@@ -281,7 +283,9 @@ fn historic_roots_genesis_initialization() {
 
 		// Verify genesis root is the empty tree root
 		let genesis_root = [0u8; 32];
-		assert!(crate::HistoricRoots::<Test>::contains_key(genesis_root));
+		assert!(crate::HistoricPoseidonRoots::<Test>::contains_key(
+			genesis_root
+		));
 		assert_eq!(order_before[0], genesis_root);
 
 		// After first shield, should have a new root
@@ -303,7 +307,7 @@ fn historic_roots_genesis_initialization() {
 		);
 
 		// The current root should be in the order
-		let current_root = crate::MerkleRoot::<Test>::get();
+		let current_root = crate::PoseidonRoot::<Test>::get();
 		assert!(
 			order_after.contains(&current_root),
 			"Current root should be in historic roots"
@@ -311,7 +315,7 @@ fn historic_roots_genesis_initialization() {
 
 		// Root should be in storage
 		assert!(
-			crate::HistoricRoots::<Test>::contains_key(current_root),
+			crate::HistoricPoseidonRoots::<Test>::contains_key(current_root),
 			"First root should be in historic roots storage"
 		);
 	});
