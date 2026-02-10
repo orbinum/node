@@ -17,7 +17,7 @@ fn commitment_from_u32(value: u32) -> Commitment {
 }
 
 // ============================================================================
-// Stress Tests - Blake2 Only (Sin poseidon-wasm)
+// Stress Tests - Poseidon Native (Con native-poseidon siempre habilitado)
 // ============================================================================
 
 #[test]
@@ -192,22 +192,12 @@ fn stress_test_dual_roots_100_shields() {
 				sample_encrypted_memo(),
 			));
 
-			// Verify both roots exist and are different
-			let blake2_root = crate::MerkleRoot::<Test>::get();
 			let poseidon_root =
 				crate::PoseidonRoot::<Test>::get().expect("Poseidon root should exist");
 
 			assert_ne!(
-				blake2_root, [0u8; 32],
-				"Blake2 root should be non-zero at shield {i}"
-			);
-			assert_ne!(
 				poseidon_root, [0u8; 32],
 				"Poseidon root should be non-zero at shield {i}"
-			);
-			assert_ne!(
-				blake2_root, poseidon_root,
-				"Roots should differ at shield {i}"
 			);
 		}
 
