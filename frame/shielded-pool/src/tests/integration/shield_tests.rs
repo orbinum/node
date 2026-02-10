@@ -2,8 +2,7 @@
 //!
 //! Tests for depositing public tokens into the shielded pool.
 
-use crate::tests::helpers::*;
-use crate::{Error, Event, mock::*};
+use crate::{Error, Event, mock::*, tests::helpers::*};
 use frame_support::{assert_noop, assert_ok};
 
 #[test]
