@@ -1,8 +1,10 @@
 //! Merkle Tree Service - Manages Merkle tree operations
 
 use crate::{
-	domain::Commitment,
-	domain::value_objects::{DefaultMerklePath, Hash},
+	domain::{
+		Commitment,
+		value_objects::{DefaultMerklePath, Hash},
+	},
 	infrastructure::repositories::MerkleRepository,
 	pallet::{Config, Error, Event, Pallet},
 };
