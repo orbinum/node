@@ -27,7 +27,7 @@ impl ProofValidator for Groth16Verifier {
 			Ok(true)
 		}
 
-		// Real verification in production using fp-zk-verifier via adapters
+		// Real verification in production using orbinum-zk-verifier via adapters
 		#[cfg(not(any(feature = "runtime-benchmarks", test)))]
 		{
 			use crate::infrastructure::adapters::{
@@ -158,11 +158,7 @@ impl ZkVerifierPort for Groth16Verifier {
 			#[cfg(feature = "std")]
 			{
 				log::debug!(
-					"Disclosure proof verification - commitment: {:?}, revealed_value: {}, revealed_asset_id: {}, revealed_owner_hash: {:?}",
-					commitment,
-					revealed_value,
-					revealed_asset_id,
-					revealed_owner_hash
+					"Disclosure proof verification - commitment: {commitment:?}, revealed_value: {revealed_value}, revealed_asset_id: {revealed_asset_id}, revealed_owner_hash: {revealed_owner_hash:?}"
 				);
 			}
 
