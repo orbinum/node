@@ -104,28 +104,56 @@ impl MerkleTreeService {
 			return None;
 		}
 
-		// Build the Merkle path by computing siblings
+		// Build the Merkle path properly by reconstructing the tree level by level
 		let mut siblings = [[0u8; 32]; 20];
 		let mut indices = [0u8; 20];
-		let mut index = leaf_index as usize;
 
-		// For each level, compute the sibling
+		// Start with all leaves at level 0
+		let mut current_level: sp_std::vec::Vec<Hash> = leaves;
+		let mut target_index = leaf_index as usize;
+
+		// Build the tree level by level
 		for level in 0..20 {
-			let sibling_index = if index % 2 == 0 { index + 1 } else { index - 1 };
-
-			// Determine if we're on the left (0) or right (1)
-			indices[level] = (index % 2) as u8;
-
-			// Get the sibling hash
-			if sibling_index < leaves.len() {
-				siblings[level] = leaves[sibling_index];
-			} else {
-				// Use zero hash if sibling doesn't exist
-				siblings[level] = crate::infrastructure::merkle_tree::zero_hash_at_level(level);
+			// Pad current level to even length with zero hashes if needed
+			if current_level.len() % 2 != 0 {
+				let zero_hash = crate::infrastructure::merkle_tree::zero_hash_at_level(level);
+				current_level.push(zero_hash);
 			}
 
-			// Move to parent level
-			index /= 2;
+			// Determine sibling index and position
+			let sibling_index = if target_index % 2 == 0 {
+				indices[level] = 0; // We're on the left
+				target_index + 1
+			} else {
+				indices[level] = 1; // We're on the right
+				target_index - 1
+			};
+
+			// Get the sibling hash
+			siblings[level] = if sibling_index < current_level.len() {
+				current_level[sibling_index]
+			} else {
+				crate::infrastructure::merkle_tree::zero_hash_at_level(level)
+			};
+
+			// Compute next level by hashing pairs
+			let mut next_level = sp_std::vec::Vec::new();
+			for i in (0..current_level.len()).step_by(2) {
+				let left = current_level[i];
+				let right = if i + 1 < current_level.len() {
+					current_level[i + 1]
+				} else {
+					crate::infrastructure::merkle_tree::zero_hash_at_level(level)
+				};
+
+				// Hash the pair using Poseidon
+				let pair_hash =
+					crate::infrastructure::merkle_tree::hash_pair_poseidon(&left, &right);
+				next_level.push(pair_hash);
+			}
+
+			current_level = next_level;
+			target_index /= 2;
 		}
 
 		Some(DefaultMerklePath { siblings, indices })
