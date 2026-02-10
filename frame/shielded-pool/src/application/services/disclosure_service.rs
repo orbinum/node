@@ -1,14 +1,16 @@
 //! Disclosure service - Handles selective disclosure operations
 
 use crate::{
-	domain::Commitment,
-	domain::entities::audit::{AuditPolicy, AuditTrail, DisclosureProof, DisclosureRequest},
-	domain::value_objects::audit::{Auditor, DisclosureCondition},
-	pallet::{
-		AuditPolicies, AuditTrailStorage, BalanceOf, CommitmentMemos, DisclosureProofs,
-		DisclosureRequests, DisclosureVerifyingKey, LastDisclosureTimestamp, NextAuditTrailId,
+	domain::{
+		Commitment,
+		entities::audit::{AuditPolicy, AuditTrail, DisclosureProof, DisclosureRequest},
+		value_objects::audit::{Auditor, DisclosureCondition},
 	},
-	pallet::{Config, Error, Event, Pallet},
+	pallet::{
+		AuditPolicies, AuditTrailStorage, BalanceOf, CommitmentMemos, Config, DisclosureProofs,
+		DisclosureRequests, DisclosureVerifyingKey, Error, Event, LastDisclosureTimestamp,
+		NextAuditTrailId, Pallet,
+	},
 };
 use frame_support::{BoundedVec, ensure, pallet_prelude::*};
 use frame_system;

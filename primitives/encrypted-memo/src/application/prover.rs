@@ -6,7 +6,7 @@
 
 use crate::{
 	application::disclosure::DisclosureWitness,
-	domain::aggregates::disclosure::DisclosurePublicSignals, domain::entities::error::MemoError,
+	domain::{aggregates::disclosure::DisclosurePublicSignals, entities::error::MemoError},
 };
 use alloc::vec::Vec;
 

@@ -1,7 +1,6 @@
 //! Tests for disclosure_proof
 
-use crate::domain::entities::Commitment;
-use crate::domain::entities::audit::DisclosureProof;
+use crate::domain::entities::{Commitment, audit::DisclosureProof};
 use frame_support::BoundedVec;
 
 #[test]

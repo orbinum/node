@@ -2,8 +2,11 @@
 
 use crate::{
 	domain::{Commitment, Nullifier},
-	infrastructure::frame_types::{EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE},
-	pallet::{CommitmentMemos, Config, Error, Event, HistoricRoots, NullifierSet, Pallet},
+	infrastructure::{
+		frame_types::{EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE},
+		repositories::MerkleRepository,
+	},
+	pallet::{CommitmentMemos, Config, Error, Event, NullifierSet, Pallet},
 };
 use frame_support::{BoundedVec, pallet_prelude::*};
 use frame_system;
@@ -35,9 +38,9 @@ impl TransferService {
 			);
 		}
 
-		// 3. Verify Merkle root is known
+		// 3. Verify Merkle root is known (Poseidon only)
 		ensure!(
-			HistoricRoots::<T>::get(merkle_root),
+			MerkleRepository::is_known_root::<T>(&merkle_root),
 			Error::<T>::UnknownMerkleRoot
 		);
 

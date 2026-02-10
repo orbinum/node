@@ -2,9 +2,12 @@
 //!
 //! Tests for encrypted memo functionality.
 
-use crate::infrastructure::frame_types::{EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE};
-use crate::tests::helpers::*;
-use crate::{Commitment, Error, mock::*};
+use crate::{
+	Commitment, Error,
+	infrastructure::frame_types::{EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE},
+	mock::*,
+	tests::helpers::*,
+};
 use frame_support::{BoundedVec, assert_noop, assert_ok};
 
 // ============================================================================

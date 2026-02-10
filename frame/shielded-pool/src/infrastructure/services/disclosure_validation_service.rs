@@ -4,13 +4,11 @@
 //! including cryptographic verification, access control, and rate limiting.
 
 use crate::{
-	domain::Commitment,
-	domain::value_objects::audit::Auditor,
+	domain::{Commitment, value_objects::audit::Auditor},
 	pallet::{
-		AuditPolicies, CommitmentMemos, DisclosureRequests, DisclosureVerifyingKey,
+		AuditPolicies, CommitmentMemos, Config, DisclosureRequests, DisclosureVerifyingKey, Error,
 		LastDisclosureTimestamp,
 	},
-	pallet::{Config, Error},
 };
 use frame_support::{ensure, pallet_prelude::*};
 use frame_system::{self, pallet_prelude::BlockNumberFor};

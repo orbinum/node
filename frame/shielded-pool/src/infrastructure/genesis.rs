@@ -1,27 +1,22 @@
 //! Genesis Configuration - Initial chain state setup
 
 use crate::{
-	domain::entities::AssetMetadata,
-	domain::value_objects::Hash,
-	pallet::{Assets, Config, HistoricRoots, HistoricRootsOrder, MerkleRoot, NextAssetId},
+	domain::{entities::AssetMetadata, value_objects::Hash},
+	pallet::{
+		Assets, Config, HistoricPoseidonRoots, HistoricRootsOrder, NextAssetId, PoseidonRoot,
+	},
 };
-
-#[cfg(feature = "poseidon-wasm")]
-use crate::pallet::PoseidonRoot;
 use frame_support::{pallet_prelude::*, traits::Get};
 use sp_runtime::traits::AccountIdConversion;
 
 /// Helper function to initialize genesis state
 /// Called from the GenesisConfig in lib.rs
 pub fn initialize_genesis<T: Config>(initial_root: Hash) {
-	// Initialize Merkle tree with genesis root
-	MerkleRoot::<T>::put(initial_root);
-
-	// Initialize Poseidon root if feature is enabled
-	#[cfg(feature = "poseidon-wasm")]
+	// Initialize Poseidon Merkle tree with genesis root
 	PoseidonRoot::<T>::put(initial_root);
 
-	HistoricRoots::<T>::insert(initial_root, true);
+	// Add genesis root to historic roots
+	HistoricPoseidonRoots::<T>::insert(initial_root, true);
 
 	// Initialize the order list with the genesis root
 	let mut order = BoundedVec::new();

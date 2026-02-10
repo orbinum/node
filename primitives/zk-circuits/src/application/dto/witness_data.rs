@@ -2,8 +2,7 @@
 //!
 //! Data structures for circuit private witness (secret inputs).
 
-use crate::application::circuits::note::Note;
-use crate::Bn254Fr;
+use crate::{application::circuits::note::Note, Bn254Fr};
 use alloc::vec::Vec;
 use orbinum_zk_core::domain::value_objects::SpendingKey;
 

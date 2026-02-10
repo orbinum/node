@@ -1,7 +1,7 @@
 //! Sparse Merkle Tree implementation for the Shielded Pool
 //!
 //! This module provides an incremental Merkle tree optimized for on-chain storage.
-//! Uses Blake2b-256 by default, or Poseidon hash with `poseidon-wasm` feature (ZK-friendly).
+//! Uses Poseidon hash with native host functions (ZK-friendly).
 //!
 //! ## Design
 //!
@@ -20,11 +20,10 @@
 //! ```
 
 use crate::domain::value_objects::{Hash, MerklePath};
+use alloc::boxed::Box;
+use ark_ff::BigInteger;
 use frame_support::pallet_prelude::*;
 use sp_std::vec::Vec;
-
-#[cfg(feature = "poseidon-wasm")]
-use alloc::boxed::Box;
 
 /// Default hash for empty nodes at each level
 /// These are precomputed as H(zero, zero) for each level
@@ -40,8 +39,7 @@ pub fn zero_hash_at_level(level: usize) -> [u8; 32] {
 
 /// Precomputed zero hashes for common depths (up to 20)
 ///
-/// For Blake2: These are placeholders (computed at runtime via zero_hash_at_level)
-/// For Poseidon: These should be precomputed for efficiency
+/// For Poseidon: These are computed at runtime and cached for efficiency
 ///
 /// ## Structure
 /// - Level 0: empty leaf (0x00...00)
@@ -59,76 +57,49 @@ const fn compute_zero_hashes() -> [[u8; 32]; 21] {
 ///
 /// Uses `once_cell::race::OnceBox` which works in no-std with alloc feature.
 /// The first call computes all hashes, subsequent calls return cached values.
-#[cfg(feature = "poseidon-wasm")]
 static ZERO_HASHES_POSEIDON: once_cell::race::OnceBox<[[u8; 32]; 21]> =
 	once_cell::race::OnceBox::new();
 
 /// Get precomputed zero hash at level (optimized with cache)
 ///
-/// - Poseidon: Uses lazy-initialized cache (computed once, reused)
-/// - Blake2: Direct runtime computation (already very fast)
+/// Uses lazy-initialized cache with Poseidon (computed once, reused)
 #[inline]
 pub fn get_zero_hash_cached(level: usize) -> [u8; 32] {
-	#[cfg(feature = "poseidon-wasm")]
-	{
-		if level < 21 {
-			let cache = ZERO_HASHES_POSEIDON.get_or_init(|| {
-				let mut hashes = [[0u8; 32]; 21];
-				hashes[0] = [0u8; 32]; // empty leaf
-				for i in 1..21 {
-					hashes[i] = hash_pair(&hashes[i - 1], &hashes[i - 1]);
-				}
-				Box::new(hashes)
-			});
-			return cache[level];
-		}
+	if level < 21 {
+		let cache = ZERO_HASHES_POSEIDON.get_or_init(|| {
+			let mut hashes = [[0u8; 32]; 21];
+			hashes[0] = [0u8; 32]; // empty leaf
+			for i in 1..21 {
+				hashes[i] = hash_pair_poseidon(&hashes[i - 1], &hashes[i - 1]);
+			}
+			Box::new(hashes)
+		});
+		return cache[level];
 	}
 
-	// Fallback: direct computation for Blake2 or deep levels
+	// Fallback: direct computation for deep levels
 	zero_hash_at_level(level)
 }
 
-/// Hash two nodes together
+/// Hash two nodes together using Poseidon
 ///
-/// - With `poseidon-wasm` feature: Uses Poseidon hash (ZK-friendly, ~300 constraints)
-/// - Without feature: Uses Blake2b-256 (backward compatibility)
-///
-/// ## Poseidon Implementation
-///
-/// Converts bytes to BN254 field elements, hashes with Poseidon, converts back.
+/// Uses Poseidon hash (ZK-friendly, ~300 constraints)
 /// Compatible with circomlib Poseidon(2) used in ZK circuits.
 #[inline]
-/// Hash pair usando Blake2 (siempre disponible para backward compatibility)
-pub fn hash_pair_blake2(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
-	let mut combined = [0u8; 64];
-	combined[..32].copy_from_slice(left);
-	combined[32..].copy_from_slice(right);
-	sp_io::hashing::blake2_256(&combined)
-}
-
-/// Hash pair usando Poseidon (solo con feature poseidon-wasm)
+/// Hash pair usando Poseidon con implementación nativa
 ///
-/// Clean Architecture: Usa PoseidonHasher port con diferentes implementaciones:
-/// - NativePoseidonHasher: Host functions (~3x faster)
-/// - LightPoseidonHasher: WASM implementation (fallback)
-#[cfg(feature = "poseidon-wasm")]
+/// Clean Architecture: Usa NativePoseidonHasher port (~3x más rápido vía host functions)
 pub fn hash_pair_poseidon(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
 	use ark_bn254::Fr as Bn254Fr;
-	use ark_ff::{BigInteger, PrimeField};
+	use ark_ff::PrimeField;
 	use orbinum_zk_core::domain::{ports::PoseidonHasher, value_objects::FieldElement};
 
 	// Convert bytes to field elements (little-endian mod order)
 	let left_fr = Bn254Fr::from_le_bytes_mod_order(left);
 	let right_fr = Bn254Fr::from_le_bytes_mod_order(right);
 
-	// Select hasher implementation based on feature flag
-	// Native: ~3x faster via host functions
-	// WASM: Fallback for testing or when native not available
-	#[cfg(feature = "native-poseidon")]
+	// Usa siempre NativePoseidonHasher (~3x faster via host functions)
 	let hasher = orbinum_zk_core::NativePoseidonHasher;
-
-	#[cfg(not(feature = "native-poseidon"))]
-	let hasher = orbinum_zk_core::LightPoseidonHasher;
 
 	// Hash using the domain port (Clean Architecture)
 	let hash_fr = hasher.hash_2([FieldElement::new(left_fr), FieldElement::new(right_fr)]);
@@ -141,17 +112,9 @@ pub fn hash_pair_poseidon(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
 	hash_bytes
 }
 
-/// Legacy hash_pair - usa Poseidon si está disponible, Blake2 de lo contrario
+/// Hash pair - siempre usa Poseidon nativo
 pub fn hash_pair(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
-	#[cfg(feature = "poseidon-wasm")]
-	{
-		hash_pair_poseidon(left, right)
-	}
-
-	#[cfg(not(feature = "poseidon-wasm"))]
-	{
-		hash_pair_blake2(left, right)
-	}
+	hash_pair_poseidon(left, right)
 }
 
 /// Incremental Merkle Tree
@@ -334,123 +297,47 @@ impl<const DEPTH: usize> IncrementalMerkleTree<DEPTH> {
 	}
 }
 
-/// Compute the Merkle root from a set of leaves using Blake2
-pub fn compute_root_from_leaves_blake2<const DEPTH: usize>(leaves: &[Hash]) -> Hash {
-	if leaves.is_empty() {
-		// Return empty tree root
-		let mut current = [0u8; 32];
-		for _ in 0..DEPTH {
-			current = hash_pair_blake2(&current, &current);
-		}
-		return current;
-	}
-
-	let mut current_level: Vec<Hash> = leaves.to_vec();
-
-	// Compute up the tree
-	for level in 0..DEPTH {
-		// Pad to even length
-		if current_level.len() % 2 != 0 {
-			let mut zero = [0u8; 32];
-			for _ in 0..level {
-				zero = hash_pair_blake2(&zero, &zero);
-			}
-			current_level.push(zero);
-		}
-
-		// Compute next level
-		let mut next_level = Vec::new();
-		for chunk in current_level.chunks(2) {
-			let left = chunk[0];
-			let right = if chunk.len() > 1 {
-				chunk[1]
-			} else {
-				let mut zero = [0u8; 32];
-				for _ in 0..level {
-					zero = hash_pair_blake2(&zero, &zero);
-				}
-				zero
-			};
-			next_level.push(hash_pair_blake2(&left, &right));
-		}
-		current_level = next_level;
-
-		if current_level.len() == 1 {
-			// We might have reached the root early, but we need to continue
-			// hashing with zeros to reach the correct depth
-			if level + 1 < DEPTH {
-				let mut zero = [0u8; 32];
-				for _ in 0..=level {
-					zero = hash_pair_blake2(&zero, &zero);
-				}
-				for _ in (level + 1)..DEPTH {
-					current_level[0] = hash_pair_blake2(&current_level[0], &zero);
-					zero = hash_pair_blake2(&zero, &zero);
-				}
-				break;
-			}
-		}
-	}
-
-	current_level.first().copied().unwrap_or([0u8; 32])
-}
-
 /// Compute the Merkle root from a set of leaves using Poseidon
-#[cfg(feature = "poseidon-wasm")]
 pub fn compute_root_from_leaves_poseidon<const DEPTH: usize>(leaves: &[Hash]) -> Hash {
 	if leaves.is_empty() {
-		// Return empty tree root
-		let mut current = [0u8; 32];
-		for _ in 0..DEPTH {
-			current = hash_pair_poseidon(&current, &current);
-		}
-		return current;
+		return [0u8; 32];
+	}
+
+	// Precompute zero hashes for all levels
+	let mut zero_hashes = [[0u8; 32]; 21]; // Support up to depth 20
+	zero_hashes[0] = [0u8; 32];
+	for i in 1..=20 {
+		zero_hashes[i] = hash_pair_poseidon(&zero_hashes[i - 1], &zero_hashes[i - 1]);
 	}
 
 	let mut current_level: Vec<Hash> = leaves.to_vec();
 
-	// Compute up the tree
+	// Build tree level by level
 	for level in 0..DEPTH {
-		// Pad to even length
+		// Pad to even length with zero hash for this level
 		if current_level.len() % 2 != 0 {
-			let mut zero = [0u8; 32];
-			for _ in 0..level {
-				zero = hash_pair_poseidon(&zero, &zero);
-			}
-			current_level.push(zero);
+			current_level.push(zero_hashes[level]);
 		}
 
-		// Compute next level
+		// Hash pairs to create next level
 		let mut next_level = Vec::new();
-		for chunk in current_level.chunks(2) {
-			let left = chunk[0];
-			let right = if chunk.len() > 1 {
-				chunk[1]
-			} else {
-				let mut zero = [0u8; 32];
-				for _ in 0..level {
-					zero = hash_pair_poseidon(&zero, &zero);
-				}
-				zero
-			};
+		for i in (0..current_level.len()).step_by(2) {
+			let left = current_level[i];
+			let right = current_level[i + 1];
 			next_level.push(hash_pair_poseidon(&left, &right));
 		}
+
 		current_level = next_level;
 
-		if current_level.len() == 1 {
-			// We might have reached the root early, but we need to continue
-			// hashing with zeros to reach the correct depth
-			if level + 1 < DEPTH {
-				let mut zero = [0u8; 32];
-				for _ in 0..=level {
-					zero = hash_pair_poseidon(&zero, &zero);
-				}
-				for _ in (level + 1)..DEPTH {
-					current_level[0] = hash_pair_poseidon(&current_level[0], &zero);
-					zero = hash_pair_poseidon(&zero, &zero);
-				}
-				break;
+		// For sparse Merkle tree with fixed depth, we must continue hashing
+		// with zeros until we reach exactly the root level (DEPTH)
+		if current_level.len() == 1 && level + 1 < DEPTH {
+			// Continue hashing the single node with zeros up to DEPTH
+			let mut root = current_level[0];
+			for zero_hash in zero_hashes.iter().skip(level + 1).take(DEPTH - level - 1) {
+				root = hash_pair_poseidon(&root, zero_hash);
 			}
+			return root;
 		}
 	}
 

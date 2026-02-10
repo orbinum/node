@@ -3,12 +3,14 @@
 //! This module provides the core verification logic for Groth16 proofs
 //! using the BN254 elliptic curve.
 
-use crate::domain::value_objects::{
-	circuit_constants::{BASE_VERIFICATION_COST, PER_INPUT_COST},
-	errors::VerifierError,
-	proof_types::{Proof, PublicInputs, VerifyingKey},
+use crate::{
+	domain::value_objects::{
+		circuit_constants::{BASE_VERIFICATION_COST, PER_INPUT_COST},
+		errors::VerifierError,
+		proof_types::{Proof, PublicInputs, VerifyingKey},
+	},
+	Bn254,
 };
-use crate::Bn254;
 use ark_groth16::{Groth16, PreparedVerifyingKey};
 
 /// Groth16 proof verifier
@@ -105,8 +107,7 @@ impl Groth16Verifier {
 		// arkworks 0.5.0: mul_bigint is in PrimeGroup trait
 		use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup, PrimeGroup};
 		use ark_ff::{Field, PrimeField};
-		use ark_std::rand::SeedableRng;
-		use ark_std::{UniformRand, Zero};
+		use ark_std::{rand::SeedableRng, UniformRand, Zero};
 
 		if public_inputs.len() != proofs.len() {
 			return Err(VerifierError::VerificationFailed);
@@ -187,8 +188,10 @@ impl Groth16Verifier {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::domain::value_objects::circuit_constants::{BASE_VERIFICATION_COST, PER_INPUT_COST};
-	use crate::infrastructure::storage::verification_keys;
+	use crate::{
+		domain::value_objects::circuit_constants::{BASE_VERIFICATION_COST, PER_INPUT_COST},
+		infrastructure::storage::verification_keys,
+	};
 	use ark_bn254::Fr as Bn254Fr;
 	use ark_ff::{BigInteger, PrimeField};
 	use ark_serialize::CanonicalSerialize;

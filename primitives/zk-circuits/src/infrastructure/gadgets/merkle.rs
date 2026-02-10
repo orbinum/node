@@ -70,13 +70,16 @@ pub fn verify_merkle_proof(
 mod tests {
 	use super::*;
 	extern crate alloc;
-	use alloc::vec;
-	use alloc::vec::Vec;
+	use alloc::{vec, vec::Vec};
 	use ark_r1cs_std::{alloc::AllocVar, R1CSVar};
 	use ark_relations::r1cs::ConstraintSystem;
-	use orbinum_zk_core::domain::services::MerkleService;
-	use orbinum_zk_core::domain::value_objects::{Commitment, FieldElement};
-	use orbinum_zk_core::infrastructure::crypto::LightPoseidonHasher;
+	use orbinum_zk_core::{
+		domain::{
+			services::MerkleService,
+			value_objects::{Commitment, FieldElement},
+		},
+		infrastructure::crypto::LightPoseidonHasher,
+	};
 
 	// ===== merkle_tree_verifier Tests =====
 

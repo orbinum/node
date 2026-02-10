@@ -42,7 +42,7 @@ fn shield_batch_works() {
 		assert_eq!(tree_size, 5);
 
 		// Verify root is non-zero
-		let root = crate::MerkleRoot::<Test>::get();
+		let root = crate::PoseidonRoot::<Test>::get();
 		assert_ne!(root, [0u8; 32]);
 	});
 }
@@ -297,42 +297,5 @@ fn shield_batch_empty_batch_works() {
 		// Verify nothing changed
 		let tree_size = crate::MerkleTreeSize::<Test>::get();
 		assert_eq!(tree_size, 0);
-	});
-}
-
-#[test]
-#[cfg(feature = "poseidon-wasm")]
-fn shield_batch_works_with_poseidon() {
-	new_test_ext().execute_with(|| {
-		let account = 1;
-		let asset_id = 0u32;
-		let amount = 100u128;
-
-		// Create batch
-		let operations: BoundedVec<_, _> = (0..10)
-			.map(|i| {
-				(
-					asset_id,
-					amount,
-					commitment_from_u32(i),
-					sample_encrypted_memo(),
-				)
-			})
-			.collect::<Vec<_>>()
-			.try_into()
-			.unwrap();
-
-		assert_ok!(ShieldedPool::shield_batch(
-			RuntimeOrigin::signed(account),
-			operations
-		));
-
-		// Verify both roots exist
-		let blake2_root = crate::MerkleRoot::<Test>::get();
-		assert_ne!(blake2_root, [0u8; 32]);
-
-		let poseidon_root = crate::PoseidonRoot::<Test>::get();
-		assert!(poseidon_root.is_some());
-		assert_ne!(poseidon_root.unwrap(), [0u8; 32]);
 	});
 }

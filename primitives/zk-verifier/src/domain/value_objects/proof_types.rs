@@ -10,8 +10,7 @@ use parity_scale_codec::{Decode, Encode};
 #[cfg(feature = "substrate")]
 use scale_info::TypeInfo;
 
-use crate::domain::value_objects::errors::VerifierError;
-use crate::{Bn254, Bn254Fr};
+use crate::{domain::value_objects::errors::VerifierError, Bn254, Bn254Fr};
 
 /// A Groth16 proof that can be serialized/deserialized for on-chain storage
 #[derive(Clone, PartialEq, Eq, Debug)]

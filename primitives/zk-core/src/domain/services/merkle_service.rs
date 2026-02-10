@@ -3,8 +3,10 @@
 //! Domain service for Merkle tree operations including root computation
 //! and proof verification.
 
-use crate::domain::ports::PoseidonHasher;
-use crate::domain::value_objects::{Commitment, FieldElement};
+use crate::domain::{
+	ports::PoseidonHasher,
+	value_objects::{Commitment, FieldElement},
+};
 
 /// Domain service for Merkle tree operations
 ///
@@ -63,8 +65,7 @@ mod tests {
 	use super::*;
 	use ark_bn254::Fr;
 	extern crate alloc;
-	use alloc::vec;
-	use alloc::vec::Vec;
+	use alloc::{vec, vec::Vec};
 
 	// ===== Mock Hashers =====
 

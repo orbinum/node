@@ -1,30 +1,25 @@
 //! ZK Verifier Port (Interface)
 //!
-//! Este trait define el puerto (en términos de arquitectura hexagonal) para
-//! la verificación de pruebas ZK. Otros pallets pueden usar este trait
-//! como dependencia sin acoplarse a la implementación concreta.
+//! This trait defines the port (in hexagonal architecture terms) for
+//! ZK proof verification. Other pallets can use this trait as a dependency
+//! without coupling to the concrete implementation.
 
 use sp_runtime::DispatchError;
 
-/// Puerto de dominio para verificación de pruebas ZK
-///
-/// Este trait sigue los principios de Clean Architecture + DDD:
-/// - Define la interfaz en la capa de dominio
-/// - Las implementaciones están en la capa de infraestructura
-/// - Otros pallets dependen de la abstracción, no de la implementación
+/// Domain port for ZK proof verification
 pub trait ZkVerifierPort {
-	/// Verificar una prueba de transferencia privada
+	/// Verify a private transfer proof
 	///
-	/// # Argumentos
-	/// * `proof` - Bytes de la prueba serializada
-	/// * `merkle_root` - Raíz del Merkle tree usado en la prueba
-	/// * `nullifiers` - Nullifiers de las notas consumidas
-	/// * `commitments` - Commitments de las nuevas notas creadas
+	/// # Arguments
+	/// * `proof` - Serialized proof bytes
+	/// * `merkle_root` - Merkle tree root used in the proof
+	/// * `nullifiers` - Nullifiers of consumed notes
+	/// * `commitments` - Commitments of newly created notes
 	///
-	/// # Retorna
-	/// * `Ok(true)` si la prueba es válida
-	/// * `Ok(false)` si la prueba es inválida
-	/// * `Err` si ocurre un error durante la verificación
+	/// # Returns
+	/// * `Ok(true)` if the proof is valid
+	/// * `Ok(false)` if the proof is invalid
+	/// * `Err` if an error occurs during verification
 	fn verify_transfer_proof(
 		proof: &[u8],
 		merkle_root: &[u8; 32],
@@ -33,19 +28,21 @@ pub trait ZkVerifierPort {
 		version: Option<u32>,
 	) -> Result<bool, DispatchError>;
 
-	/// Verificar una prueba de unshield (retiro del pool)
+	/// Verify an unshield proof (pool withdrawal)
 	///
-	/// # Argumentos
-	/// * `proof` - Bytes de la prueba serializada
-	/// * `merkle_root` - Raíz del Merkle tree usado en la prueba
-	/// * `nullifier` - Nullifier de la nota consumida
-	/// * `amount` - Cantidad a retirar (parte del input público)
-	/// * `version` - Versión del circuito (None para la versión activa)
+	/// # Arguments
+	/// * `proof` - Serialized proof bytes
+	/// * `merkle_root` - Merkle tree root used in the proof
+	/// * `nullifier` - Nullifier of the consumed note
+	/// * `amount` - Amount to withdraw (part of public input)
+	/// * `recipient` - Recipient address (20 bytes for H160)
+	/// * `asset_id` - Asset ID (u32)
+	/// * `version` - Circuit version (None for active version)
 	///
-	/// # Retorna
-	/// * `Ok(true)` si la prueba es válida
-	/// * `Ok(false)` si la prueba es inválida
-	/// * `Err` si ocurre un error durante la verificación
+	/// # Returns
+	/// * `Ok(true)` if the proof is valid
+	/// * `Ok(false)` if the proof is invalid
+	/// * `Err` if an error occurs during verification
 	fn verify_unshield_proof(
 		proof: &[u8],
 		merkle_root: &[u8; 32],
@@ -54,29 +51,29 @@ pub trait ZkVerifierPort {
 		version: Option<u32>,
 	) -> Result<bool, DispatchError>;
 
-	/// Verificar una prueba de disclosure (selective disclosure)
+	/// Verify a disclosure proof (selective disclosure)
 	///
-	/// # Argumentos
-	/// * `proof` - Bytes de la prueba Groth16 serializada
-	/// * `public_signals` - Public signals del disclosure
-	/// * `version` - Versión del circuito (None para la versión activa)
+	/// # Arguments
+	/// * `proof` - Serialized Groth16 proof bytes
+	/// * `public_signals` - Public signals of the disclosure
+	/// * `version` - Circuit version (None for active version)
 	///
-	/// # Retorna
-	/// * `Ok(true)` si la prueba es válida
-	/// * `Ok(false)` si la prueba es inválida
-	/// * `Err` si ocurre un error durante la verificación
+	/// # Returns
+	/// * `Ok(true)` if the proof is valid
+	/// * `Ok(false)` if the proof is invalid
+	/// * `Err` if an error occurs during verification
 	fn verify_disclosure_proof(
 		proof: &[u8],
 		public_signals: &[u8],
 		version: Option<u32>,
 	) -> Result<bool, DispatchError>;
 
-	/// Verificar múltiples pruebas de disclosure en batch (optimizado)
+	/// Verify multiple disclosure proofs in batch (optimized)
 	///
-	/// # Argumentos
-	/// * `proofs` - Vector de pruebas Groth16 serializadas
-	/// * `public_signals` - Vector de public signals (uno por proof)
-	/// * `version` - Versión del circuito (None para la versión activa)
+	/// # Arguments
+	/// * `proofs` - Vector of serialized Groth16 proofs
+	/// * `public_signals` - Vector of public signals (one per proof)
+	/// * `version` - Circuit version (None for active version)
 	///   ...
 	fn batch_verify_disclosure_proofs(
 		proofs: &[sp_std::vec::Vec<u8>],

@@ -1,11 +1,10 @@
 //! Merkle Repository - Encapsulates Merkle tree storage access
 
 use crate::{
-	domain::Commitment,
-	domain::value_objects::Hash,
+	domain::{Commitment, value_objects::Hash},
 	pallet::{
-		Config, HistoricPoseidonRoots, HistoricRoots, HistoricRootsOrder, MerkleLeaves, MerkleRoot,
-		MerkleTreeSize, PoseidonRoot,
+		Config, HistoricPoseidonRoots, HistoricRootsOrder, MerkleLeaves, MerkleTreeSize,
+		PoseidonRoot,
 	},
 };
 use frame_support::pallet_prelude::*;
@@ -14,35 +13,14 @@ use frame_support::pallet_prelude::*;
 pub struct MerkleRepository;
 
 impl MerkleRepository {
-	/// Get current Blake2 Merkle root
-	pub fn get_root<T: Config>() -> Hash {
-		MerkleRoot::<T>::get()
-	}
-
-	/// Set new Blake2 Merkle root
-	pub fn set_root<T: Config>(root: Hash) {
-		MerkleRoot::<T>::put(root);
-	}
-
 	/// Get current Poseidon Merkle root
-	pub fn get_poseidon_root<T: Config>() -> Option<Hash> {
+	pub fn get_poseidon_root<T: Config>() -> Hash {
 		PoseidonRoot::<T>::get()
 	}
 
 	/// Set new Poseidon Merkle root
 	pub fn set_poseidon_root<T: Config>(root: Hash) {
 		PoseidonRoot::<T>::put(root);
-	}
-
-	/// Get active root (Poseidon if available, Blake2 fallback)
-	#[cfg(feature = "poseidon-wasm")]
-	pub fn get_active_root<T: Config>() -> Hash {
-		Self::get_poseidon_root::<T>().unwrap_or_else(|| Self::get_root::<T>())
-	}
-
-	#[cfg(not(feature = "poseidon-wasm"))]
-	pub fn get_active_root<T: Config>() -> Hash {
-		Self::get_root::<T>()
 	}
 
 	/// Get current tree size
@@ -65,63 +43,24 @@ impl MerkleRepository {
 		MerkleLeaves::<T>::insert(index, commitment);
 	}
 
-	/// Check if Blake2 root is known (historic or current)
-	pub fn is_known_blake2_root<T: Config>(root: &Hash) -> bool {
-		HistoricRoots::<T>::get(root)
-	}
-
 	/// Check if Poseidon root is known (historic or current)
 	pub fn is_known_poseidon_root<T: Config>(root: &Hash) -> bool {
 		HistoricPoseidonRoots::<T>::get(root)
 	}
 
-	/// Check if root is known (checks both Blake2 and Poseidon)
-	/// This allows gradual migration and backward compatibility
+	/// Check if root is known (Poseidon only)
 	pub fn is_known_root<T: Config>(root: &Hash) -> bool {
-		// Check Blake2 roots (legacy)
-		if Self::is_known_blake2_root::<T>(root) {
-			return true;
-		}
-
-		// Check Poseidon roots (if feature enabled)
-		#[cfg(feature = "poseidon-wasm")]
-		{
-			if Self::is_known_poseidon_root::<T>(root) {
-				return true;
-			}
-		}
-
-		false
+		// Only check Poseidon roots (Blake2 legacy removed)
+		Self::is_known_poseidon_root::<T>(root)
 	}
 
-	/// Add Blake2 root to historic roots
-	pub fn add_historic_blake2_root<T: Config>(root: Hash) {
-		HistoricRoots::<T>::insert(root, true);
-	}
-
-	/// Add Poseidon root to historic roots
+	/// Add Poseidon root to historic roots (Poseidon-only system)
 	pub fn add_historic_poseidon_root<T: Config>(root: Hash) {
 		HistoricPoseidonRoots::<T>::insert(root, true);
 	}
 
-	/// Add root to historic roots (maintains both if poseidon-wasm enabled)
-	pub fn add_historic_root<T: Config>(root: Hash) {
-		Self::add_historic_blake2_root::<T>(root);
-	}
-
-	/// Add dual roots to historic storage
-	/// Used when poseidon-wasm is enabled to maintain both roots
-	#[cfg(feature = "poseidon-wasm")]
-	pub fn add_dual_historic_roots<T: Config>(blake2_root: Hash, poseidon_root: Hash) {
-		Self::add_historic_blake2_root::<T>(blake2_root);
-		Self::add_historic_poseidon_root::<T>(poseidon_root);
-	}
-
-	/// Remove root from historic roots (removes from both storages)
-	pub fn remove_historic_root<T: Config>(root: &Hash) {
-		HistoricRoots::<T>::remove(root);
-
-		#[cfg(feature = "poseidon-wasm")]
+	/// Remove Poseidon root from historic roots
+	pub fn remove_poseidon_historic_root<T: Config>(root: &Hash) {
 		HistoricPoseidonRoots::<T>::remove(root);
 	}
 

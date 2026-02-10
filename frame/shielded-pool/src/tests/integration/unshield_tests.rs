@@ -2,8 +2,7 @@
 //!
 //! Tests for withdrawing tokens from the shielded pool to public accounts.
 
-use crate::tests::helpers::*;
-use crate::{Error, Event, mock::*};
+use crate::{Error, Event, mock::*, tests::helpers::*};
 use frame_support::{BoundedVec, assert_noop, assert_ok, pallet_prelude::ConstU32};
 
 #[test]
@@ -44,7 +43,7 @@ fn unshield_fails_nullifier_reuse() {
 			sample_encrypted_memo(),
 		));
 
-		let merkle_root = crate::MerkleRoot::<Test>::get();
+		let merkle_root = crate::PoseidonRoot::<Test>::get();
 
 		// Mark nullifier as used (value is block number)
 		let nullifier = sample_nullifier();
@@ -82,7 +81,7 @@ fn unshield_fails_insufficient_pool_balance() {
 			sample_encrypted_memo(),
 		));
 
-		let merkle_root = crate::MerkleRoot::<Test>::get();
+		let merkle_root = crate::PoseidonRoot::<Test>::get();
 		let nullifier = sample_nullifier();
 		let amount = 5000u128; // More than pool balance (1000)
 		let recipient = 2;
@@ -117,7 +116,7 @@ fn unshield_works() {
 			sample_encrypted_memo(),
 		));
 
-		let merkle_root = crate::MerkleRoot::<Test>::get();
+		let merkle_root = crate::PoseidonRoot::<Test>::get();
 		let nullifier = sample_nullifier();
 		let unshield_amount = 500u128;
 		let recipient = 2;

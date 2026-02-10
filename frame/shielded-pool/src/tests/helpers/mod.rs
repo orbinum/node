@@ -2,14 +2,20 @@
 //!
 //! This module provides common test utilities and sample data generators.
 
-use crate::domain::value_objects::Hash;
-use crate::domain::{Commitment, Nullifier};
-use crate::infrastructure::frame_types::{EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE};
+use crate::{
+	domain::{Commitment, Nullifier, value_objects::Hash},
+	infrastructure::frame_types::{EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE},
+};
 use frame_support::BoundedVec;
 
 /// Generate a sample commitment for testing
 pub fn sample_commitment() -> Commitment {
 	Commitment([1u8; 32])
+}
+
+/// Generate a second different sample commitment for testing
+pub fn sample_commitment_2() -> Commitment {
+	Commitment([2u8; 32])
 }
 
 /// Generate a sample nullifier for testing

@@ -3,8 +3,7 @@
 //! Tests for multi-asset support including registration, verification,
 //! and cross-asset operations.
 
-use crate::tests::helpers::*;
-use crate::{Error, Event, mock::*};
+use crate::{Error, Event, mock::*, tests::helpers::*};
 use frame_support::{BoundedVec, assert_noop, assert_ok};
 
 #[test]
@@ -333,7 +332,7 @@ fn unshield_tracks_balance_per_asset() {
 
 		// Mock unshield (would normally require valid proof)
 		// For test purposes, we manually update the state
-		crate::HistoricRoots::<Test>::insert(sample_merkle_root(), true);
+		crate::HistoricPoseidonRoots::<Test>::insert(sample_merkle_root(), true);
 
 		// Note: Real unshield would verify proof, but for testing balance tracking
 		// we focus on the balance update logic

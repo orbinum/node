@@ -1,21 +1,28 @@
 //! # Orbinum ZK Core
 //!
-//! Core cryptographic primitives for Zero-Knowledge proofs in Orbinum Network.
+//! Poseidon-based cryptographic primitives for Zero-Knowledge proofs in Orbinum Network.
 //!
-//! This crate provides the fundamental building blocks for ZK-SNARK based private
-//! transactions, following Clean Architecture principles with strict separation
-//! between domain logic, application use cases, and infrastructure implementations.
+//! This crate provides ZK-SNARK foundations using Poseidon hash functions for optimal
+//! circuit efficiency and compatibility with circomlib. Follows Clean Architecture
+//! principles with strict separation between domain logic, application use cases,
+//! and infrastructure implementations.
 //!
 //! ## Architecture
 //!
-//! - **Domain**: Pure business logic with cryptographic primitives
-//! - **Application**: Use cases for note creation, commitment computation, etc.
-//! - **Infrastructure**: Concrete implementations (Poseidon hasher, repositories)
+//! - **Domain**: Pure business logic with Poseidon-based cryptographic primitives
+//! - **Application**: Use cases for note creation, commitment computation, nullifiers
+//! - **Infrastructure**: Concrete Poseidon implementations and storage adapters
 //!
 //! ## Features
 //!
 //! - `std`: Enable standard library support (default)
-//! - `native-poseidon`: Enable native Poseidon host functions for 3x performance boost
+//! - `poseidon-native`: Enable native Poseidon host functions for 3x performance boost (default)
+//! - `native-poseidon`: Legacy alias for `poseidon-native` (deprecated)
+//!
+//! ## Hash Functions
+//!
+//! **Poseidon Only**: This crate exclusively uses Poseidon hash functions for all
+//! cryptographic operations, ensuring ZK-circuit compatibility and optimal proof generation.
 //!
 //! ## No-std Support
 //!
@@ -50,7 +57,7 @@ pub use application::{
 // Re-export infrastructure implementations
 pub use infrastructure::crypto::poseidon_hasher::LightPoseidonHasher;
 
-#[cfg(feature = "native-poseidon")]
+#[cfg(feature = "poseidon-native")]
 pub use infrastructure::crypto::native_poseidon_hasher::NativePoseidonHasher;
 
 pub use infrastructure::repositories::in_memory_merkle_repository::InMemoryMerkleRepository;

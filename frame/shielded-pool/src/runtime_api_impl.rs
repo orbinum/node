@@ -14,7 +14,7 @@ impl<T: Config> Pallet<T> {
 	/// - Current tree size (number of leaves)
 	/// - Maximum tree depth
 	pub fn get_merkle_tree_info() -> (Hash, u32, u32) {
-		let root = crate::infrastructure::repositories::MerkleRepository::get_root::<T>();
+		let root = crate::infrastructure::repositories::MerkleRepository::get_poseidon_root::<T>();
 		let size = crate::infrastructure::repositories::MerkleRepository::get_tree_size::<T>();
 		let depth = T::MaxTreeDepth::get();
 

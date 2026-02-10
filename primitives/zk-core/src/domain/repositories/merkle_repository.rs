@@ -102,8 +102,7 @@ mod tests {
 	use super::*;
 	use ark_bn254::Fr;
 	extern crate alloc;
-	use alloc::string::ToString;
-	use alloc::{format, vec};
+	use alloc::{format, string::ToString, vec};
 
 	// ===== MerklePath Construction Tests =====
 

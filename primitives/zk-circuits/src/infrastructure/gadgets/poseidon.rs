@@ -7,11 +7,13 @@ use alloc::vec::Vec;
 use ark_r1cs_std::{alloc::AllocVar, fields::fp::FpVar, R1CSVar};
 use ark_relations::r1cs::{ConstraintSystemRef, SynthesisError};
 
-use crate::infrastructure::native_crypto::{
-	poseidon_hash as native_hash, poseidon_hash_2 as native_hash_2,
-	poseidon_hash_4 as native_hash_4,
+use crate::{
+	infrastructure::native_crypto::{
+		poseidon_hash as native_hash, poseidon_hash_2 as native_hash_2,
+		poseidon_hash_4 as native_hash_4,
+	},
+	Bn254Fr,
 };
-use crate::Bn254Fr;
 
 // ============================================================================
 // Circuit Gadgets (with R1CS constraints)

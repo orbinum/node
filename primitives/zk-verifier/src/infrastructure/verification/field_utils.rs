@@ -1,7 +1,6 @@
 //! Utility functions for ZK proof handling
 
-use crate::domain::value_objects::errors::VerifierError;
-use crate::Bn254Fr;
+use crate::{domain::value_objects::errors::VerifierError, Bn254Fr};
 use ark_ff::{BigInteger, PrimeField};
 
 /// Convert a field element to bytes (big-endian)

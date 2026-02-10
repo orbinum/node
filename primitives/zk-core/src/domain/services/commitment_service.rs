@@ -2,8 +2,10 @@
 //!
 //! Domain service for creating cryptographic commitments from note components.
 
-use crate::domain::ports::PoseidonHasher;
-use crate::domain::value_objects::{Blinding, Commitment, FieldElement, OwnerPubkey};
+use crate::domain::{
+	ports::PoseidonHasher,
+	value_objects::{Blinding, Commitment, FieldElement, OwnerPubkey},
+};
 
 /// Domain service for creating commitments
 ///

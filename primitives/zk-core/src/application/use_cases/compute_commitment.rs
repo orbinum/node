@@ -101,8 +101,7 @@ mod tests {
 	use crate::domain::value_objects::{Blinding, FieldElement, OwnerPubkey};
 	use ark_bn254::Fr;
 	extern crate alloc;
-	use alloc::format;
-	use alloc::string::ToString;
+	use alloc::{format, string::ToString};
 
 	#[derive(Clone)]
 	struct MockHasher;

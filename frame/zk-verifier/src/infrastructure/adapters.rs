@@ -1,14 +1,14 @@
 //! Adapters - Hexagonal Architecture Port Adapters
 //!
-//! Los adapters convierten entre:
-//! - Tipos de dominio (puros, independientes)
-//! - Tipos de primitivos (orbinum-zk-verifier, orbinum-zk-core)
+//! Adapters convert between:
+//! - Domain types (pure, independent)
+//! - Primitive types (orbinum-zk-verifier, orbinum-zk-core)
 //!
-//! Esto mantiene el dominio libre de dependencias externas.
+//! This keeps the domain free of external dependencies.
 
 use alloc::vec::Vec;
 
-/// Re-exports de primitivos SOLO para uso en infrastructure layer
+/// Re-exports of primitives ONLY for use in infrastructure layer
 pub mod primitives {
 	// orbinum-zk-verifier types
 	pub use orbinum_zk_verifier::{
@@ -35,11 +35,11 @@ pub mod primitives {
 	};
 }
 
-/// Adapter para acceder a Disclosure VK
+/// Adapter to access Disclosure VK
 pub struct DisclosureVkAdapter;
 
 impl DisclosureVkAdapter {
-	/// Obtiene la verification key de disclosure hardcodeada
+	/// Retrieves the hardcoded disclosure verification key
 	pub fn get_disclosure_vk() -> primitives::PrimitiveVerifyingKey {
 		let ark_vk = primitives::verification_keys::get_disclosure_vk();
 		primitives::PrimitiveVerifyingKey::from_ark_vk(&ark_vk)
@@ -51,7 +51,7 @@ impl DisclosureVkAdapter {
 pub struct PublicInputsAdapter;
 
 impl PublicInputsAdapter {
-	/// Convierte PublicInputs de dominio a primitivo fp-zk-verifier
+	/// Converts PublicInputs from domain to primitive fp-zk-verifier
 	pub fn to_primitive(
 		domain_inputs: &crate::domain::value_objects::PublicInputs,
 	) -> primitives::PrimitivePublicInputs {
@@ -69,7 +69,7 @@ impl PublicInputsAdapter {
 		primitives::PrimitivePublicInputs::new(inputs)
 	}
 
-	/// Convierte PublicInputs de primitivo a dominio
+	/// Converts PublicInputs from primitive to domain
 	pub fn from_primitive(
 		primitive: &primitives::PrimitivePublicInputs,
 	) -> Result<crate::domain::value_objects::PublicInputs, crate::domain::errors::DomainError> {
@@ -79,11 +79,11 @@ impl PublicInputsAdapter {
 	}
 }
 
-/// Adapter para convertir Proof del dominio a primitivo
+/// Adapter to convert Proof from domain to primitive
 pub struct ProofAdapter;
 
 impl ProofAdapter {
-	/// Convierte Proof de dominio a primitivo fp-zk-verifier
+	/// Converts Proof from domain to primitive fp-zk-verifier
 	pub fn to_primitive(
 		domain_proof: &crate::domain::entities::Proof,
 	) -> primitives::PrimitiveProof {
@@ -91,11 +91,11 @@ impl ProofAdapter {
 	}
 }
 
-/// Adapter para convertir VerificationKey del dominio a primitivo
+/// Adapter to convert VerificationKey from domain to primitive
 pub struct VerificationKeyAdapter;
 
 impl VerificationKeyAdapter {
-	/// Convierte VerificationKey de dominio a primitivo fp-zk-verifier
+	/// Converts VerificationKey from domain to primitive fp-zk-verifier
 	pub fn to_primitive(
 		domain_vk: &crate::domain::entities::VerificationKey,
 	) -> primitives::PrimitiveVerifyingKey {

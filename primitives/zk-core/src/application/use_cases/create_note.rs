@@ -133,9 +133,7 @@ mod tests {
 	use super::*;
 	use ark_bn254::Fr;
 	extern crate alloc;
-	use alloc::format;
-	use alloc::string::ToString;
-	use alloc::vec;
+	use alloc::{format, string::ToString, vec};
 
 	// ===== Use Case Construction Tests =====
 

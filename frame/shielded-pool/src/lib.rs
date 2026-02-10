@@ -79,14 +79,18 @@ mod runtime_api_impl;
 
 // Re-export domain types for external use
 pub use application::DepositInfo;
-pub use domain::entities::AssetMetadata;
-pub use domain::entities::audit::{AuditPolicy, AuditTrail, DisclosureProof, DisclosureRequest};
-pub use domain::value_objects::audit::{Auditor, DisclosureCondition};
-pub use domain::value_objects::{
-	DEFAULT_TREE_DEPTH, DefaultMerklePath, Hash, MAX_TREE_DEPTH, MerklePath,
+pub use domain::{
+	Commitment, Note, Nullifier,
+	entities::{
+		AssetMetadata,
+		audit::{AuditPolicy, AuditTrail, DisclosureProof, DisclosureRequest},
+	},
+	value_objects::{
+		AssetId, DEFAULT_TREE_DEPTH, DefaultMerklePath, Hash, MAX_MEMO_SIZE, MAX_TREE_DEPTH,
+		MerklePath, StandardEncryptedMemo,
+		audit::{Auditor, DisclosureCondition},
+	},
 };
-pub use domain::value_objects::{MAX_MEMO_SIZE, StandardEncryptedMemo};
-pub use domain::{Commitment, Note, Nullifier, value_objects::AssetId};
 // Re-export FRAME-specific EncryptedMemo for storage compatibility
 pub use infrastructure::frame_types::EncryptedMemo as FrameEncryptedMemo;
 
@@ -165,17 +169,10 @@ pub mod pallet {
 	// Storage
 	// ========================================================================
 
-	/// Current Merkle tree root (Blake2)
-	/// Note: Maintained for backward compatibility and as fallback
-	#[pallet::storage]
-	#[pallet::getter(fn merkle_root)]
-	pub type MerkleRoot<T> = StorageValue<_, Hash, ValueQuery>;
-
-	/// Current Poseidon Merkle root (when poseidon-wasm feature enabled)
-	/// This is the canonical root when feature is active
+	/// Current Poseidon Merkle root (canonical root)
 	#[pallet::storage]
 	#[pallet::getter(fn poseidon_root)]
-	pub type PoseidonRoot<T> = StorageValue<_, Hash, OptionQuery>;
+	pub type PoseidonRoot<T> = StorageValue<_, Hash, ValueQuery>;
 
 	/// Number of leaves in the Merkle tree
 	#[pallet::storage]
@@ -196,11 +193,7 @@ pub mod pallet {
 	#[pallet::getter(fn pool_balance)]
 	pub type PoolBalance<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
-	/// Historic Blake2 Merkle roots (for proving against recent states)
-	#[pallet::storage]
-	pub type HistoricRoots<T> = StorageMap<_, Blake2_128Concat, Hash, bool, ValueQuery>;
-
-	/// Historic Poseidon Merkle roots (when poseidon-wasm enabled)
+	/// Historic Poseidon Merkle roots (for proving against recent states)
 	#[pallet::storage]
 	pub type HistoricPoseidonRoots<T> = StorageMap<_, Blake2_128Concat, Hash, bool, ValueQuery>;
 

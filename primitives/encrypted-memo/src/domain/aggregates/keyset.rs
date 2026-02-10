@@ -2,8 +2,10 @@
 //!
 //! KeySet aggregate manages all keys derived from a spending key.
 
-use crate::domain::entities::types::{EdDSAKey, NullifierKey, ViewingKey};
-use crate::domain::services::key_derivation;
+use crate::domain::{
+	entities::types::{EdDSAKey, NullifierKey, ViewingKey},
+	services::key_derivation,
+};
 
 /// Full key set derived from a single spending key
 ///
