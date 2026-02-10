@@ -4,6 +4,7 @@
 //! Native runtime interface exposing Poseidon hashing with ~3x performance
 //! improvement over WASM by bypassing interpreter overhead.
 
+use alloc::vec::Vec;
 use sp_runtime_interface::{
 	pass_by::{AllocateAndReturnFatPointer, PassFatPointerAndRead},
 	runtime_interface,
@@ -26,14 +27,14 @@ pub trait PoseidonHostInterface {
 		use ark_ff::{BigInteger, PrimeField};
 
 		// Validate input sizes
-		assert_eq!(left.len(), 32, "Left input must be 32 bytes");
-		assert_eq!(right.len(), 32, "Right input must be 32 bytes");
+		assert_eq!((*left).len(), 32, "Left input must be 32 bytes");
+		assert_eq!((*right).len(), 32, "Right input must be 32 bytes");
 
 		// Convert to fixed arrays
 		let mut left_arr = [0u8; 32];
 		let mut right_arr = [0u8; 32];
-		left_arr.copy_from_slice(left);
-		right_arr.copy_from_slice(right);
+		left_arr.copy_from_slice(&*left);
+		right_arr.copy_from_slice(&*right);
 
 		// Convert bytes to field elements (little-endian mod order)
 		let left_fr = Fr::from_le_bytes_mod_order(&left_arr);
@@ -63,20 +64,20 @@ pub trait PoseidonHostInterface {
 		use ark_ff::{BigInteger, PrimeField};
 
 		// Validate sizes
-		assert_eq!(input1.len(), 32, "Input1 must be 32 bytes");
-		assert_eq!(input2.len(), 32, "Input2 must be 32 bytes");
-		assert_eq!(input3.len(), 32, "Input3 must be 32 bytes");
-		assert_eq!(input4.len(), 32, "Input4 must be 32 bytes");
+		assert_eq!((*input1).len(), 32, "Input1 must be 32 bytes");
+		assert_eq!((*input2).len(), 32, "Input2 must be 32 bytes");
+		assert_eq!((*input3).len(), 32, "Input3 must be 32 bytes");
+		assert_eq!((*input4).len(), 32, "Input4 must be 32 bytes");
 
 		// Convert to fixed arrays
 		let mut arr1 = [0u8; 32];
 		let mut arr2 = [0u8; 32];
 		let mut arr3 = [0u8; 32];
 		let mut arr4 = [0u8; 32];
-		arr1.copy_from_slice(input1);
-		arr2.copy_from_slice(input2);
-		arr3.copy_from_slice(input3);
-		arr4.copy_from_slice(input4);
+		arr1.copy_from_slice(&*input1);
+		arr2.copy_from_slice(&*input2);
+		arr3.copy_from_slice(&*input3);
+		arr4.copy_from_slice(&*input4);
 
 		// Convert all inputs to field elements
 		let frs: [Fr; 4] = [
