@@ -96,10 +96,10 @@ default = [
 	"sql",
 	"txpool",
 	"rpc-binary-search-estimate",
-	"native-poseidon",
+	"poseidon-native",
 ]
-native-poseidon = [
-	"orbinum-zk-core/native-poseidon",
+poseidon-native = [
+	"orbinum-zk-core/poseidon-native",
 ]
 rocksdb = [
 	"sc-cli/rocksdb",
