@@ -20,9 +20,10 @@ pub trait PoseidonHostInterface {
 		left: PassFatPointerAndRead<&[u8]>,
 		right: PassFatPointerAndRead<&[u8]>,
 	) -> AllocateAndReturnFatPointer<Vec<u8>> {
-		use crate::domain::ports::PoseidonHasher;
-		use crate::domain::value_objects::FieldElement;
-		use crate::infrastructure::crypto::LightPoseidonHasher;
+		use crate::{
+			domain::{ports::PoseidonHasher, value_objects::FieldElement},
+			infrastructure::crypto::LightPoseidonHasher,
+		};
 		use ark_bn254::Fr;
 		use ark_ff::{BigInteger, PrimeField};
 
@@ -33,8 +34,8 @@ pub trait PoseidonHostInterface {
 		// Convert to fixed arrays
 		let mut left_arr = [0u8; 32];
 		let mut right_arr = [0u8; 32];
-		left_arr.copy_from_slice(&*left);
-		right_arr.copy_from_slice(&*right);
+		left_arr.copy_from_slice(left);
+		right_arr.copy_from_slice(right);
 
 		// Convert bytes to field elements (little-endian mod order)
 		let left_fr = Fr::from_le_bytes_mod_order(&left_arr);
@@ -57,9 +58,10 @@ pub trait PoseidonHostInterface {
 		input3: PassFatPointerAndRead<&[u8]>,
 		input4: PassFatPointerAndRead<&[u8]>,
 	) -> AllocateAndReturnFatPointer<Vec<u8>> {
-		use crate::domain::ports::PoseidonHasher;
-		use crate::domain::value_objects::FieldElement;
-		use crate::infrastructure::crypto::LightPoseidonHasher;
+		use crate::{
+			domain::{ports::PoseidonHasher, value_objects::FieldElement},
+			infrastructure::crypto::LightPoseidonHasher,
+		};
 		use ark_bn254::Fr;
 		use ark_ff::{BigInteger, PrimeField};
 
@@ -74,10 +76,10 @@ pub trait PoseidonHostInterface {
 		let mut arr2 = [0u8; 32];
 		let mut arr3 = [0u8; 32];
 		let mut arr4 = [0u8; 32];
-		arr1.copy_from_slice(&*input1);
-		arr2.copy_from_slice(&*input2);
-		arr3.copy_from_slice(&*input3);
-		arr4.copy_from_slice(&*input4);
+		arr1.copy_from_slice(input1);
+		arr2.copy_from_slice(input2);
+		arr3.copy_from_slice(input3);
+		arr4.copy_from_slice(input4);
 
 		// Convert all inputs to field elements
 		let frs: [Fr; 4] = [
