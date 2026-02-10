@@ -23,7 +23,7 @@ use alloc::vec;
 mod benchmarks {
 	use super::*;
 	use crate::pallet::{
-		Assets, /* CommitmentMemos, DisclosureVerifyingKey, */ HistoricRoots, NextAssetId,
+		Assets, /* CommitmentMemos, DisclosureVerifyingKey, */ HistoricPoseidonRoots, NextAssetId,
 		PoolBalancePerAsset,
 	};
 	use crate::{Auditor, /* BatchDisclosureSubmission, */ DisclosureCondition};
@@ -132,7 +132,7 @@ mod benchmarks {
 		let merkle_root = [1u8; 32];
 
 		// Setup valid root in storage
-		HistoricRoots::<T>::insert(merkle_root, true);
+		HistoricPoseidonRoots::<T>::insert(merkle_root, true);
 
 		let proof: BoundedVec<u8, ConstU32<512>> = vec![0u8; 128].try_into().unwrap();
 		let nullifiers: BoundedVec<Nullifier, ConstU32<2>> =
@@ -164,7 +164,7 @@ mod benchmarks {
 		let amount: BalanceOf<T> = T::MinShieldAmount::get() * 10u32.into();
 
 		// Setup valid state: root and pool balance
-		HistoricRoots::<T>::insert(merkle_root, true);
+		HistoricPoseidonRoots::<T>::insert(merkle_root, true);
 		PoolBalancePerAsset::<T>::insert(asset_id, amount * 2u32.into());
 		// Fund pool account too for actual transfer
 		let _ = <T::Currency as Currency<T::AccountId>>::make_free_balance_be(
