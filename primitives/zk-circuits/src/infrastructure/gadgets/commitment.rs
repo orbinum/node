@@ -56,9 +56,9 @@ mod tests {
 	use super::*;
 	use ark_r1cs_std::{alloc::AllocVar, R1CSVar};
 	use ark_relations::r1cs::{ConstraintSystem, SynthesisMode};
-	use orbinum_zk_core::domain::services::{CommitmentService, NullifierService};
-	use orbinum_zk_core::domain::value_objects::{
-		Blinding, Commitment, FieldElement, OwnerPubkey, SpendingKey,
+	use orbinum_zk_core::domain::{
+		services::{CommitmentService, NullifierService},
+		value_objects::{Blinding, Commitment, FieldElement, OwnerPubkey, SpendingKey},
 	};
 	extern crate alloc;
 	use orbinum_zk_core::infrastructure::crypto::LightPoseidonHasher;
