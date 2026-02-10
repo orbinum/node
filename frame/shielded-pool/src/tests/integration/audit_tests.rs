@@ -2,10 +2,15 @@
 //!
 //! Tests for audit policies, disclosure requests, and compliance.
 
-use crate::domain::entities::audit::AuditPolicy;
-use crate::domain::value_objects::audit::{Auditor, DisclosureCondition};
-use crate::infrastructure::frame_types::{EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE};
-use crate::{Commitment, Error, Event, mock::*};
+use crate::{
+	Commitment, Error, Event,
+	domain::{
+		entities::audit::AuditPolicy,
+		value_objects::audit::{Auditor, DisclosureCondition},
+	},
+	infrastructure::frame_types::{EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE},
+	mock::*,
+};
 use frame_support::{BoundedVec, assert_noop, assert_ok};
 
 // ============================================================================
