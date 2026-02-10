@@ -1,7 +1,6 @@
 //! Tests for note
 
-use crate::domain::entities::Note;
-use crate::domain::value_objects::Hash;
+use crate::domain::{entities::Note, value_objects::Hash};
 
 fn sample_pubkey() -> Hash {
 	[42u8; 32]
