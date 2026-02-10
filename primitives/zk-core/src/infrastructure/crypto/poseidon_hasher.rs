@@ -55,8 +55,7 @@ impl PoseidonHasher for LightPoseidonHasher {
 mod tests {
 	use super::*;
 	extern crate alloc;
-	use alloc::format;
-	use alloc::vec::Vec;
+	use alloc::{format, vec::Vec};
 
 	// ===== Construction Tests =====
 
