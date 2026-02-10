@@ -22,13 +22,12 @@ use alloc::vec;
 )]
 mod benchmarks {
 	use super::*;
-	use crate::FrameEncryptedMemo;
-	use crate::domain::entities::audit::DisclosureRequest;
 	use crate::pallet::{
 		Assets, /* CommitmentMemos, DisclosureVerifyingKey, */ HistoricRoots, NextAssetId,
 		PoolBalancePerAsset,
 	};
 	use crate::{Auditor, /* BatchDisclosureSubmission, */ DisclosureCondition};
+	use crate::{FrameEncryptedMemo, domain::entities::audit::DisclosureRequest};
 	use sp_std::vec::Vec;
 
 	// NOTE: Disclosure benchmarks están deshabilitados temporalmente mientras
