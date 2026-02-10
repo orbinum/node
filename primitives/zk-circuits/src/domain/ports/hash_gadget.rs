@@ -27,8 +27,7 @@ pub trait HashGadgetPort {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use ark_r1cs_std::alloc::AllocVar;
-	use ark_r1cs_std::R1CSVar;
+	use ark_r1cs_std::{alloc::AllocVar, R1CSVar};
 	use ark_relations::r1cs::ConstraintSystem;
 	extern crate alloc;
 	use alloc::{boxed::Box, vec, vec::Vec};
