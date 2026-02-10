@@ -8,12 +8,14 @@ use chacha20poly1305::{
 	ChaCha20Poly1305, Nonce,
 };
 
-use crate::domain::entities::{
-	constants::{MAX_ENCRYPTED_MEMO_SIZE, MIN_ENCRYPTED_MEMO_SIZE},
-	error::MemoError,
-	types::MemoData,
+use crate::domain::{
+	entities::{
+		constants::{MAX_ENCRYPTED_MEMO_SIZE, MIN_ENCRYPTED_MEMO_SIZE},
+		error::MemoError,
+		types::MemoData,
+	},
+	services::key_derivation::derive_encryption_key,
 };
-use crate::domain::services::key_derivation::derive_encryption_key;
 
 /// Decrypts encrypted memo using viewing key
 ///
