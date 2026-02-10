@@ -333,7 +333,7 @@ fn unshield_tracks_balance_per_asset() {
 
 		// Mock unshield (would normally require valid proof)
 		// For test purposes, we manually update the state
-		crate::HistoricRoots::<Test>::insert(sample_merkle_root(), true);
+		crate::HistoricPoseidonRoots::<Test>::insert(sample_merkle_root(), true);
 
 		// Note: Real unshield would verify proof, but for testing balance tracking
 		// we focus on the balance update logic
