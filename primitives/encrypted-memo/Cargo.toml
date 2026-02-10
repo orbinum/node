@@ -23,7 +23,7 @@ serde = { version = "1.0", default-features = false, features = ["derive"], opti
 serde_json = { version = "1.0", default-features = false, optional = true }
 
 # Random number generation (always required for secure encryption)
-rand = { version = "0.8", default-features = false, features = ["std_rng"] }
+getrandom = { version = "0.2", default-features = false }
 
 # ZK proof dependencies (disclosure feature)
 ark-bn254 = { version = "0.5.0", default-features = false, optional = true }
@@ -42,9 +42,7 @@ once_cell = { version = "1.19", optional = true }
 wasmer = { version = "4.2", optional = true }
 
 [dev-dependencies]
-getrandom = { version = "0.2", default-features = false, features = ["js"] }
 hex = "0.4"
-rand = { version = "0.8", default-features = false, features = ["getrandom"] }
 
 [features]
 default = ["std"]
@@ -54,7 +52,7 @@ std = [
 	"sha2/std",
 	"parity-scale-codec?/std",
 	"scale-info?/std",
-	"rand/std",
+	"getrandom/std",
 	"ark-std?/std",
 ]
 
