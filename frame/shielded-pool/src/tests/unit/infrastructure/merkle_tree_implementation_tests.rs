@@ -154,8 +154,7 @@ fn generate_and_verify_proof_for_all_leaves() {
 		let verified = IncrementalMerkleTree::<4>::verify_proof(&tree.root(), leaf, &proof);
 		assert!(
 			verified,
-			"Proof verification failed for leaf at index {}",
-			i
+			"Proof verification failed for leaf at index {i}"
 		);
 	}
 }
@@ -281,8 +280,7 @@ fn zero_hashes_are_consistent() {
 		let cached = get_zero_hash_cached(level);
 		assert_eq!(
 			computed, cached,
-			"Computed and cached zero hash should match at level {}",
-			level
+			"Computed and cached zero hash should match at level {level}"
 		);
 	}
 }
