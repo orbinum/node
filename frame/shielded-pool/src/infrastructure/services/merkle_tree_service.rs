@@ -18,6 +18,12 @@ impl MerkleTreeService {
 
 		ensure!(index < max_leaves, Error::<T>::MerkleTreeFull);
 
+		// Check if commitment already exists (prevent duplicates)
+		ensure!(
+			Self::find_leaf_index::<T>(&commitment).is_none(),
+			Error::<T>::CommitmentAlreadyExists
+		);
+
 		// Store the leaf using repository
 		MerkleRepository::insert_leaf::<T>(index, commitment);
 
