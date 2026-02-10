@@ -1,7 +1,9 @@
 //! Tests for audit_policy
 
-use crate::domain::entities::audit::AuditPolicy;
-use crate::domain::value_objects::audit::{Auditor, DisclosureCondition};
+use crate::domain::{
+	entities::audit::AuditPolicy,
+	value_objects::audit::{Auditor, DisclosureCondition},
+};
 use frame_support::BoundedVec;
 
 type AccountId = u64;
