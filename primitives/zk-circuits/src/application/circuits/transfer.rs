@@ -12,8 +12,7 @@ use ark_r1cs_std::{alloc::AllocVar, boolean::Boolean, eq::EqGadget, fields::fp::
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
 
 use super::note::{note_commitment, nullifier, Note};
-use crate::infrastructure::gadgets::merkle::merkle_tree_verifier;
-use crate::Bn254Fr;
+use crate::{infrastructure::gadgets::merkle::merkle_tree_verifier, Bn254Fr};
 use orbinum_zk_core::domain::constants::MERKLE_TREE_DEPTH as DEFAULT_TREE_DEPTH;
 
 /// Number of inputs in a transfer (MVP: fixed at 2)
@@ -396,9 +395,13 @@ mod tests {
 	use super::*;
 	use crate::infrastructure::native_crypto::poseidon_hash_2;
 	use ark_relations::r1cs::ConstraintSystem;
-	use orbinum_zk_core::domain::services::MerkleService;
-	use orbinum_zk_core::domain::value_objects::{Commitment, FieldElement};
-	use orbinum_zk_core::infrastructure::crypto::LightPoseidonHasher;
+	use orbinum_zk_core::{
+		domain::{
+			services::MerkleService,
+			value_objects::{Commitment, FieldElement},
+		},
+		infrastructure::crypto::LightPoseidonHasher,
+	};
 	extern crate alloc;
 
 	/// Creates test Merkle paths for TREE_DEPTH levels
