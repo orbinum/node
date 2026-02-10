@@ -34,9 +34,9 @@ fn single_leaf_produces_deterministic_root() {
 	let leaf = [42u8; 32];
 
 	// Multiple calls should produce identical roots
-	let root1 = compute_root_from_leaves_poseidon::<20>(&vec![leaf]);
-	let root2 = compute_root_from_leaves_poseidon::<20>(&vec![leaf]);
-	let root3 = compute_root_from_leaves_poseidon::<20>(&vec![leaf]);
+	let root1 = compute_root_from_leaves_poseidon::<20>(&[leaf]);
+	let root2 = compute_root_from_leaves_poseidon::<20>(&[leaf]);
+	let root3 = compute_root_from_leaves_poseidon::<20>(&[leaf]);
 
 	assert_eq!(root1, root2);
 	assert_eq!(root2, root3);
@@ -61,8 +61,8 @@ fn two_leaves_no_padding_required() {
 
 	// Continue hashing with zeros to depth 20
 	let mut expected = parent;
-	for level in 1..20 {
-		expected = hash_pair_poseidon(&expected, &zero_hashes[level]);
+	for zh in &zero_hashes[1..20] {
+		expected = hash_pair_poseidon(&expected, zh);
 	}
 
 	assert_eq!(
@@ -96,8 +96,8 @@ fn three_leaves_requires_padding() {
 
 	// Continue to depth 20 (from level 2)
 	let mut expected = grandparent;
-	for level in 2..20 {
-		expected = hash_pair_poseidon(&expected, &zero_hashes[level]);
+	for zh in &zero_hashes[2..20] {
+		expected = hash_pair_poseidon(&expected, zh);
 	}
 
 	assert_eq!(root, expected, "Three leaves computation should match");
@@ -123,8 +123,8 @@ fn four_leaves_power_of_two() {
 
 	// Continue to depth 20
 	let mut expected = gp;
-	for level in 2..20 {
-		expected = hash_pair_poseidon(&expected, &zero_hashes[level]);
+	for zh in &zero_hashes[2..20] {
+		expected = hash_pair_poseidon(&expected, zh);
 	}
 
 	assert_eq!(root, expected, "Four leaves should form perfect subtree");
@@ -153,8 +153,8 @@ fn five_leaves_multiple_padding_levels() {
 
 	// Continue to depth 20
 	let mut expected = ggp;
-	for level in 3..20 {
-		expected = hash_pair_poseidon(&expected, &zero_hashes[level]);
+	for zh in &zero_hashes[3..20] {
+		expected = hash_pair_poseidon(&expected, zh);
 	}
 
 	assert_eq!(root, expected, "Five leaves with multi-level padding");
@@ -171,7 +171,7 @@ fn zero_hashes_are_deterministic() {
 	let zh2 = compute_zero_hashes();
 
 	for i in 0..=20 {
-		assert_eq!(zh1[i], zh2[i], "Zero hash mismatch at level {}", i);
+		assert_eq!(zh1[i], zh2[i], "Zero hash mismatch at level {i}");
 	}
 }
 
@@ -229,9 +229,9 @@ fn root_changes_with_more_leaves() {
 	let leaf1 = [2u8; 32];
 	let leaf2 = [3u8; 32];
 
-	let root1 = compute_root_from_leaves_poseidon::<20>(&vec![leaf0]);
-	let root2 = compute_root_from_leaves_poseidon::<20>(&vec![leaf0, leaf1]);
-	let root3 = compute_root_from_leaves_poseidon::<20>(&vec![leaf0, leaf1, leaf2]);
+	let root1 = compute_root_from_leaves_poseidon::<20>(&[leaf0]);
+	let root2 = compute_root_from_leaves_poseidon::<20>(&[leaf0, leaf1]);
+	let root3 = compute_root_from_leaves_poseidon::<20>(&[leaf0, leaf1, leaf2]);
 
 	// Adding leaves should change the root
 	assert_ne!(root1, root2);
@@ -262,8 +262,8 @@ fn investigate_tree_construction() {
 	let zero_hashes = compute_zero_hashes();
 	println!("🔢 Zero Hashes (for padding):");
 	println!("  zero[0]: {} (empty leaf)", hex_short(&zero_hashes[0]));
-	for i in 1..=3 {
-		println!("  zero[{}]: {}", i, hex_short(&zero_hashes[i]));
+	for (i, zh) in zero_hashes.iter().enumerate().take(4).skip(1) {
+		println!("  zero[{i}]: {}", hex_short(zh));
 	}
 	println!("  ... (continuing to level 20)");
 	println!("  zero[20]: {}", hex_short(&zero_hashes[20]));
@@ -281,7 +281,7 @@ fn investigate_tree_construction() {
 		// Pad if odd
 		if current_level.len() % 2 != 0 {
 			current_level.push(zero_hashes[level_num]);
-			println!("  ├─ Padded with zero[{}]", level_num);
+			println!("  ├─ Padded with zero[{level_num}]");
 		}
 
 		// Hash pairs
@@ -307,13 +307,12 @@ fn investigate_tree_construction() {
 		if current_level.len() == 1 && level_num < 20 {
 			println!();
 			println!(
-				"  ⚡ Reached single node at level {}, continuing to depth 20...\n",
-				level_num
+				"  ⚡ Reached single node at level {level_num}, continuing to depth 20...\n"
 			);
 
 			let mut root = current_level[0];
-			for remaining_level in level_num..20 {
-				root = hash_pair_poseidon(&root, &zero_hashes[remaining_level]);
+			for (remaining_level, zh) in zero_hashes.iter().enumerate().take(20).skip(level_num) {
+				root = hash_pair_poseidon(&root, zh);
 
 				if remaining_level < level_num + 2 || remaining_level >= 19 {
 					println!(
@@ -369,15 +368,15 @@ fn print_hash_examples() {
 	// Example 2: Zero hashes
 	println!("Example 2: First 5 zero hashes");
 	let zero_hashes = compute_zero_hashes();
-	for i in 0..5 {
-		println!("  zero[{}]: {}", i, hex_full(&zero_hashes[i]));
+	for (i, zh) in zero_hashes.iter().enumerate().take(5) {
+		println!("  zero[{i}]: {}", hex_full(zh));
 	}
 	println!();
 
 	// Example 3: Single leaf tree
 	println!("Example 3: Tree with single leaf [0x42, 0x42, ...]");
 	let leaf = [0x42; 32];
-	let root = compute_root_from_leaves_poseidon::<20>(&vec![leaf]);
+	let root = compute_root_from_leaves_poseidon::<20>(&[leaf]);
 	println!("  leaf: {}", hex_full(&leaf));
 	println!("  root: {}", hex_full(&root));
 	println!();
@@ -401,10 +400,10 @@ fn compute_zero_hashes() -> [[u8; 32]; 21] {
 
 /// Format hash as hex (first 16 chars)
 fn hex_short(hash: &[u8; 32]) -> String {
-	hash.iter().take(8).map(|b| format!("{:02x}", b)).collect()
+	hash.iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
 
 /// Format hash as full hex string
 fn hex_full(hash: &[u8; 32]) -> String {
-	hash.iter().map(|b| format!("{:02x}", b)).collect()
+	hash.iter().map(|b| format!("{b:02x}")).collect()
 }
