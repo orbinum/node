@@ -152,10 +152,7 @@ fn generate_and_verify_proof_for_all_leaves() {
 	for (i, leaf) in leaves.iter().enumerate() {
 		let proof = tree.generate_proof(i as u32, &leaves).unwrap();
 		let verified = IncrementalMerkleTree::<4>::verify_proof(&tree.root(), leaf, &proof);
-		assert!(
-			verified,
-			"Proof verification failed for leaf at index {i}"
-		);
+		assert!(verified, "Proof verification failed for leaf at index {i}");
 	}
 }
 

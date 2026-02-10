@@ -306,9 +306,7 @@ fn investigate_tree_construction() {
 		// If we reached 1 node, continue hashing with zeros to depth
 		if current_level.len() == 1 && level_num < 20 {
 			println!();
-			println!(
-				"  ⚡ Reached single node at level {level_num}, continuing to depth 20...\n"
-			);
+			println!("  ⚡ Reached single node at level {level_num}, continuing to depth 20...\n");
 
 			let mut root = current_level[0];
 			for (remaining_level, zh) in zero_hashes.iter().enumerate().take(20).skip(level_num) {
