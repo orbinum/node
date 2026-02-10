@@ -2,9 +2,9 @@
 
 use crate::{
 	domain::entities::Nullifier,
+	infrastructure::repositories::MerkleRepository,
 	pallet::{
-		Assets, Config, Error, Event, HistoricRoots, NullifierSet, Pallet, PoolBalance,
-		PoolBalancePerAsset,
+		Assets, Config, Error, Event, NullifierSet, Pallet, PoolBalance, PoolBalancePerAsset,
 	},
 };
 use frame_support::{
@@ -44,9 +44,9 @@ impl UnshieldService {
 			Error::<T>::InvalidRecipient
 		);
 
-		// 3. Verify Merkle root is known
+		// 3. Verify Merkle root is known (checks Poseidon roots)
 		ensure!(
-			HistoricRoots::<T>::get(merkle_root),
+			MerkleRepository::is_known_root::<T>(&merkle_root),
 			Error::<T>::UnknownMerkleRoot
 		);
 
