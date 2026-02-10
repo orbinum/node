@@ -3,8 +3,7 @@
 //! Data structures for circuit public inputs.
 
 use crate::Bn254Fr;
-use alloc::vec;
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 /// Public inputs for transfer circuit
 #[derive(Debug, Clone, PartialEq, Eq)]
