@@ -79,14 +79,18 @@ mod runtime_api_impl;
 
 // Re-export domain types for external use
 pub use application::DepositInfo;
-pub use domain::entities::AssetMetadata;
-pub use domain::entities::audit::{AuditPolicy, AuditTrail, DisclosureProof, DisclosureRequest};
-pub use domain::value_objects::audit::{Auditor, DisclosureCondition};
-pub use domain::value_objects::{
-	DEFAULT_TREE_DEPTH, DefaultMerklePath, Hash, MAX_TREE_DEPTH, MerklePath,
+pub use domain::{
+	Commitment, Note, Nullifier,
+	entities::{
+		AssetMetadata,
+		audit::{AuditPolicy, AuditTrail, DisclosureProof, DisclosureRequest},
+	},
+	value_objects::{
+		AssetId, DEFAULT_TREE_DEPTH, DefaultMerklePath, Hash, MAX_MEMO_SIZE, MAX_TREE_DEPTH,
+		MerklePath, StandardEncryptedMemo,
+		audit::{Auditor, DisclosureCondition},
+	},
 };
-pub use domain::value_objects::{MAX_MEMO_SIZE, StandardEncryptedMemo};
-pub use domain::{Commitment, Note, Nullifier, value_objects::AssetId};
 // Re-export FRAME-specific EncryptedMemo for storage compatibility
 pub use infrastructure::frame_types::EncryptedMemo as FrameEncryptedMemo;
 
