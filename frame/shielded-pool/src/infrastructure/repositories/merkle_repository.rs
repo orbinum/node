@@ -1,8 +1,7 @@
 //! Merkle Repository - Encapsulates Merkle tree storage access
 
 use crate::{
-	domain::Commitment,
-	domain::value_objects::Hash,
+	domain::{Commitment, value_objects::Hash},
 	pallet::{
 		Config, HistoricPoseidonRoots, HistoricRootsOrder, MerkleLeaves, MerkleTreeSize,
 		PoseidonRoot,
