@@ -82,9 +82,12 @@ cumulus-pallet-weight-reclaim = { workspace = true }
 substrate-wasm-builder = { workspace = true, optional = true }
 
 [features]
-default = ["std", "with-rocksdb-weights"]
+default = ["std", "with-rocksdb-weights", "poseidon-native-runtime"]
 with-rocksdb-weights = []
 with-paritydb-weights = []
+
+poseidon-native-runtime = ["pallet-shielded-pool/poseidon-native"]
+
 std = [
 	"ethereum/std",
 	"scale-codec/std",
@@ -138,8 +141,7 @@ std = [
 	# Orbinum Privacy
 	"pallet-zk-verifier/std",
 	"pallet-shielded-pool/std",
-	"pallet-shielded-pool/poseidon-wasm",
-	"pallet-shielded-pool/native-poseidon",
+	"pallet-shielded-pool/poseidon-native",
 	"pallet-shielded-pool-runtime-api/std",
 	# Polkadot
 	"polkadot-runtime-common/std",
