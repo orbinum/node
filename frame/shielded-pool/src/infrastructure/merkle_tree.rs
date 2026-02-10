@@ -300,58 +300,44 @@ impl<const DEPTH: usize> IncrementalMerkleTree<DEPTH> {
 /// Compute the Merkle root from a set of leaves using Poseidon
 pub fn compute_root_from_leaves_poseidon<const DEPTH: usize>(leaves: &[Hash]) -> Hash {
 	if leaves.is_empty() {
-		// Return empty tree root
-		let mut current = [0u8; 32];
-		for _ in 0..DEPTH {
-			current = hash_pair_poseidon(&current, &current);
-		}
-		return current;
+		return [0u8; 32];
+	}
+
+	// Precompute zero hashes for all levels
+	let mut zero_hashes = [[0u8; 32]; 21]; // Support up to depth 20
+	zero_hashes[0] = [0u8; 32];
+	for i in 1..=20 {
+		zero_hashes[i] = hash_pair_poseidon(&zero_hashes[i - 1], &zero_hashes[i - 1]);
 	}
 
 	let mut current_level: Vec<Hash> = leaves.to_vec();
 
-	// Compute up the tree
+	// Build tree level by level
 	for level in 0..DEPTH {
-		// Pad to even length
+		// Pad to even length with zero hash for this level
 		if current_level.len() % 2 != 0 {
-			let mut zero = [0u8; 32];
-			for _ in 0..level {
-				zero = hash_pair_poseidon(&zero, &zero);
-			}
-			current_level.push(zero);
+			current_level.push(zero_hashes[level]);
 		}
 
-		// Compute next level
+		// Hash pairs to create next level
 		let mut next_level = Vec::new();
-		for chunk in current_level.chunks(2) {
-			let left = chunk[0];
-			let right = if chunk.len() > 1 {
-				chunk[1]
-			} else {
-				let mut zero = [0u8; 32];
-				for _ in 0..level {
-					zero = hash_pair_poseidon(&zero, &zero);
-				}
-				zero
-			};
+		for i in (0..current_level.len()).step_by(2) {
+			let left = current_level[i];
+			let right = current_level[i + 1];
 			next_level.push(hash_pair_poseidon(&left, &right));
 		}
+
 		current_level = next_level;
 
-		if current_level.len() == 1 {
-			// We might have reached the root early, but we need to continue
-			// hashing with zeros to reach the correct depth
-			if level + 1 < DEPTH {
-				let mut zero = [0u8; 32];
-				for _ in 0..=level {
-					zero = hash_pair_poseidon(&zero, &zero);
-				}
-				for _ in (level + 1)..DEPTH {
-					current_level[0] = hash_pair_poseidon(&current_level[0], &zero);
-					zero = hash_pair_poseidon(&zero, &zero);
-				}
-				break;
+		// For sparse Merkle tree with fixed depth, we must continue hashing
+		// with zeros until we reach exactly the root level (DEPTH)
+		if current_level.len() == 1 && level + 1 < DEPTH {
+			// Continue hashing the single node with zeros up to DEPTH
+			let mut root = current_level[0];
+			for remaining_level in (level + 1)..DEPTH {
+				root = hash_pair_poseidon(&root, &zero_hashes[remaining_level]);
 			}
+			return root;
 		}
 	}
 
