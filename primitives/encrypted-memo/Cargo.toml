@@ -1,6 +1,6 @@
 [package]
 name = "orbinum-encrypted-memo"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Orbinum Network <dev@orbinum.net>"]
 edition = "2021"
 license = "Apache-2.0 OR GPL-3.0-or-later"
