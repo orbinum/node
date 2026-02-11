@@ -3,9 +3,9 @@
 //! MemoData, ViewingKey, NullifierKey, EdDSAKey.
 
 use super::error::MemoError;
-#[cfg(feature = "parity-scale-codec")]
+#[cfg(all(feature = "parity-scale-codec", feature = "scale-info"))]
 use parity_scale_codec::{Decode, Encode};
-#[cfg(feature = "scale-info")]
+#[cfg(all(feature = "parity-scale-codec", feature = "scale-info"))]
 use scale_info::TypeInfo;
 
 /// Plaintext memo data
