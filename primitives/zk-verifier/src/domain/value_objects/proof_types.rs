@@ -117,13 +117,7 @@ impl PublicInputs {
 
 		self.inputs
 			.iter()
-			.map(|bytes| {
-				// Convert bytes to field element
-				// Note: We store in big-endian but arkworks expects little-endian
-				let mut bytes_le = *bytes;
-				bytes_le.reverse();
-				Ok(Bn254Fr::from_le_bytes_mod_order(&bytes_le))
-			})
+			.map(|bytes| Ok(Bn254Fr::from_le_bytes_mod_order(bytes)))
 			.collect()
 	}
 
@@ -135,9 +129,9 @@ impl PublicInputs {
 			.iter()
 			.map(|elem| {
 				let mut bytes = [0u8; 32];
-				let elem_bytes = elem.into_bigint().to_bytes_be();
-				let start = 32 - elem_bytes.len();
-				bytes[start..].copy_from_slice(&elem_bytes);
+				let elem_bytes = elem.into_bigint().to_bytes_le();
+				let len = core::cmp::min(elem_bytes.len(), 32);
+				bytes[..len].copy_from_slice(&elem_bytes[..len]);
 				bytes
 			})
 			.collect();
