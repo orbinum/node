@@ -1,5 +1,5 @@
 //! Auto-generated Verification Key for unshield circuit
-//! Generated on: 2026-01-29
+//! Generated on: 2026-02-15
 //! Source: artifacts/verification_key_unshield.json
 //!
 //! DO NOT EDIT MANUALLY - Run sync-circuit-artifacts.sh to regenerate
@@ -14,10 +14,10 @@ use crate::domain::value_objects::circuit_constants::{
 	CIRCUIT_ID_UNSHIELD, UNSHIELD_PUBLIC_INPUTS,
 };
 
-/// Circuit ID for unshield (re-exported from core)
+/// Circuit ID for unshield (re-exported from domain)
 pub const CIRCUIT_ID: u8 = CIRCUIT_ID_UNSHIELD;
 
-/// Number of public inputs for this circuit (re-exported from core)
+/// Number of public inputs for this circuit (re-exported from domain)
 pub const NUM_PUBLIC_INPUTS: usize = UNSHIELD_PUBLIC_INPUTS;
 
 /// Creates the verification key for the unshield circuit
@@ -86,21 +86,21 @@ pub fn get_vk() -> VerifyingKey<Bn254> {
 	let delta_g2 = G2Affine::new_unchecked(
 		Fq2::new(
 			Fq::from_str(
-				"5164894844635586629422630419290975671508067803052824880915648552282889009006",
+				"17447850509502413500922534249490152642088360304398927533410993280334881184923",
 			)
 			.unwrap(),
 			Fq::from_str(
-				"1495179534890747141422768378733972726717346836187716706250042561072473723115",
+				"20885456245844682377728788629324843068751103404003544176149786026459068697174",
 			)
 			.unwrap(),
 		),
 		Fq2::new(
 			Fq::from_str(
-				"1780059888441966309831105400345895468639071445602419194538262190252986629776",
+				"20604444392908579961406246999960824363396616878569322333806711263912998707285",
 			)
 			.unwrap(),
 			Fq::from_str(
-				"13847327108044167853450582454494743265312552610982822441323575939225314838997",
+				"15919872506598808790062152411541187924467118965299215032467778864841275356301",
 			)
 			.unwrap(),
 		),
@@ -109,66 +109,66 @@ pub fn get_vk() -> VerifyingKey<Bn254> {
 	// IC points (gamma_abc_g1)
 	let ic_0 = G1Affine::new_unchecked(
 		Fq::from_str(
-			"3791652952762766576456772942332930874416323443583650640307031208126897023347",
+			"4759917404823790432407520088534459023356590579383652181465364916912449624695",
 		)
 		.unwrap(),
 		Fq::from_str(
-			"1444382082201784227131492965380730244659946368555890761649591396978491841190",
+			"3832863574771841234331076301811290460934931101437953774708549890327258738564",
 		)
 		.unwrap(),
 	);
 
 	let ic_1 = G1Affine::new_unchecked(
 		Fq::from_str(
-			"12745071339817817982085758703270782635430439174681091660921937409706187644814",
+			"5336337706419091211868472399687230066131810167568242892809804587865519165344",
 		)
 		.unwrap(),
 		Fq::from_str(
-			"1093329777465162135025843952875696580500091823873378759677632904044118779946",
+			"11353185051357039508206677538186633821853103335512576778299092029039610062882",
 		)
 		.unwrap(),
 	);
 
 	let ic_2 = G1Affine::new_unchecked(
 		Fq::from_str(
-			"7080080136840729418774725968685835380140451745514070938364389425686711816903",
+			"15084681146036149779834232651527344012418671089935933939397885561760086121969",
 		)
 		.unwrap(),
 		Fq::from_str(
-			"9181293857588371726342738752740711996472365629989528547839351853280295811014",
+			"10673952063622217067979641197117245279252423258914282179285754313970092562596",
 		)
 		.unwrap(),
 	);
 
 	let ic_3 = G1Affine::new_unchecked(
 		Fq::from_str(
-			"5332905788061312722800657651892374162379227801033088262000022804729983719767",
+			"21039779822942533132271658631716796333199025786313218659510617689739394153598",
 		)
 		.unwrap(),
 		Fq::from_str(
-			"17505500046504307777660874302954718007346199177830667435850863312070825393440",
+			"11163282276070815586063767846812914624591347999168289386275553753092237495248",
 		)
 		.unwrap(),
 	);
 
 	let ic_4 = G1Affine::new_unchecked(
 		Fq::from_str(
-			"2424429808854779488107734502502842386310369098340187330302986802889387616004",
+			"3095712311814508041135867864726006035419219310141511809667041762596327080341",
 		)
 		.unwrap(),
 		Fq::from_str(
-			"6123745780343856572777199153986766289975405386603185483577673996972026715922",
+			"17159247848061658623919878194408282495395946967527260450426770075448330620486",
 		)
 		.unwrap(),
 	);
 
 	let ic_5 = G1Affine::new_unchecked(
 		Fq::from_str(
-			"14845863620398137863610772620471502187309357591581718955783685552667259940486",
+			"4168950959496505617599330781731644101559373119770356275626759863667568305184",
 		)
 		.unwrap(),
 		Fq::from_str(
-			"3020757416089395124222218392421542421476465671058441197801068960374483038601",
+			"5644689731760572677103844719463014317690882565098456772580613601327065049357",
 		)
 		.unwrap(),
 	);
@@ -191,67 +191,4 @@ pub fn get_vk_bytes() -> alloc::vec::Vec<u8> {
 	vk.serialize_compressed(&mut bytes)
 		.expect("VK serialization should not fail");
 	bytes
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use ark_serialize::CanonicalDeserialize;
-
-	#[test]
-	fn test_circuit_constants() {
-		assert_eq!(CIRCUIT_ID, CIRCUIT_ID_UNSHIELD);
-		assert_eq!(NUM_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS);
-	}
-
-	#[test]
-	fn test_get_vk_does_not_panic() {
-		let vk = get_vk();
-		assert_eq!(vk.gamma_abc_g1.len(), NUM_PUBLIC_INPUTS + 1);
-	}
-
-	#[test]
-	fn test_get_vk_bytes_not_empty() {
-		let bytes = get_vk_bytes();
-		assert!(!bytes.is_empty());
-		assert!(bytes.len() > 200);
-	}
-
-	#[test]
-	fn test_vk_serialization_deserialization_roundtrip() {
-		let vk_original = get_vk();
-		let bytes = get_vk_bytes();
-
-		let vk_deserialized = VerifyingKey::<Bn254>::deserialize_compressed(&bytes[..]);
-		assert!(vk_deserialized.is_ok());
-
-		let vk_deserialized = vk_deserialized.unwrap();
-		assert_eq!(vk_deserialized.alpha_g1, vk_original.alpha_g1);
-		assert_eq!(vk_deserialized.beta_g2, vk_original.beta_g2);
-		assert_eq!(vk_deserialized.gamma_g2, vk_original.gamma_g2);
-		assert_eq!(vk_deserialized.delta_g2, vk_original.delta_g2);
-		assert_eq!(
-			vk_deserialized.gamma_abc_g1.len(),
-			vk_original.gamma_abc_g1.len()
-		);
-	}
-
-	#[test]
-	fn test_gamma_abc_g1_length() {
-		let vk = get_vk();
-		assert_eq!(vk.gamma_abc_g1.len(), NUM_PUBLIC_INPUTS + 1);
-	}
-
-	#[test]
-	fn test_vk_points_on_curve() {
-		let vk = get_vk();
-		assert!(vk.alpha_g1.is_on_curve());
-		assert!(vk.beta_g2.is_on_curve());
-		assert!(vk.gamma_g2.is_on_curve());
-		assert!(vk.delta_g2.is_on_curve());
-
-		for point in &vk.gamma_abc_g1 {
-			assert!(point.is_on_curve());
-		}
-	}
 }

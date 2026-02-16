@@ -1,5 +1,5 @@
 //! Auto-generated Verification Key for transfer circuit
-//! Generated on: 2026-01-29
+//! Generated on: 2026-02-15
 //! Source: artifacts/verification_key_transfer.json
 //!
 //! DO NOT EDIT MANUALLY - Run sync-circuit-artifacts.sh to regenerate
@@ -14,10 +14,10 @@ use crate::domain::value_objects::circuit_constants::{
 	CIRCUIT_ID_TRANSFER, TRANSFER_PUBLIC_INPUTS,
 };
 
-/// Circuit ID for transfer (re-exported from core)
+/// Circuit ID for transfer (re-exported from domain)
 pub const CIRCUIT_ID: u8 = CIRCUIT_ID_TRANSFER;
 
-/// Number of public inputs for this circuit (re-exported from core)
+/// Number of public inputs for this circuit (re-exported from domain)
 pub const NUM_PUBLIC_INPUTS: usize = TRANSFER_PUBLIC_INPUTS;
 
 /// Creates the verification key for the transfer circuit
@@ -86,21 +86,21 @@ pub fn get_vk() -> VerifyingKey<Bn254> {
 	let delta_g2 = G2Affine::new_unchecked(
 		Fq2::new(
 			Fq::from_str(
-				"4066667103933237001358769304643672656732008857298180907033093762212084286733",
+				"6128887458088249554860395918118246705861422303056882185490762080648320621170",
 			)
 			.unwrap(),
 			Fq::from_str(
-				"9246265017486699567757505080463732748534369707414722827986515422093586221143",
+				"4392716790709150487971950457548426651027717797967422679982836156265069267378",
 			)
 			.unwrap(),
 		),
 		Fq2::new(
 			Fq::from_str(
-				"12494434054136414084752676734485286069834583810521763176304870440186182078688",
+				"6862579306496809164234032958633900420354507233456088930175888498992887907124",
 			)
 			.unwrap(),
 			Fq::from_str(
-				"14834101484710336070389659744892339008941055661164130330202523250054784765457",
+				"11320937609295642066952076896464842220914857834192185407806271953305006523919",
 			)
 			.unwrap(),
 		),
@@ -109,66 +109,68 @@ pub fn get_vk() -> VerifyingKey<Bn254> {
 	// IC points (gamma_abc_g1)
 	let ic_0 = G1Affine::new_unchecked(
 		Fq::from_str(
-			"1966048745967271659690731985817152161896932148353434032417994178951456098677",
+			"12521353044701549515327655017850372472462274389676752451261564850795277210784",
 		)
 		.unwrap(),
 		Fq::from_str(
-			"18547351416994791538512210090861643093465500783924731349613797842962660465793",
+			"17537427920533725255683527309076964578961889733887641292864968986005206833227",
 		)
 		.unwrap(),
 	);
 
 	let ic_1 = G1Affine::new_unchecked(
 		Fq::from_str(
-			"3247596314751791827937113646181335469274675229295376136135173388928543707303",
+			"9054540875357326821742569992875343778082451382872166255139682380736118336965",
 		)
 		.unwrap(),
 		Fq::from_str(
-			"9986435598957867322055502477774218152900452352473976302525196696736166057918",
+			"19145371190592659949158552383366523068893276589381638814741619309597554902109",
 		)
 		.unwrap(),
 	);
 
 	let ic_2 = G1Affine::new_unchecked(
 		Fq::from_str(
-			"14712156563022212299517063318724451247264425422558612666793298953188268472754",
+			"4742393298120554619433281305566496971436669707311583698440427823952632276050",
 		)
 		.unwrap(),
 		Fq::from_str(
-			"3546603963612890248184170281415395614773716445199444996219929625208201148176",
+			"3877416000326877112020382111726729873163167304724326109191809999398145068082",
 		)
 		.unwrap(),
 	);
 
 	let ic_3 = G1Affine::new_unchecked(
 		Fq::from_str(
-			"6492549827431371331906007027147293243980604741632895415799088391004189404042",
+			"13596656322317975043597922138537730020108978263529423575433634179437267442285",
 		)
 		.unwrap(),
 		Fq::from_str(
-			"15520307967575805661187754748986353320468247949185351945267452987579134101247",
+			"9742436487435369435567344764161265311134349467077942742196530523569923539419",
 		)
 		.unwrap(),
 	);
 
 	let ic_4 = G1Affine::new_unchecked(
 		Fq::from_str(
-			"7698116388689409170797463557843402721001046498589742027966196456335697945252",
+			"10688916237036738808967339930842102783882829011167399097753073924876231581798",
 		)
 		.unwrap(),
 		Fq::from_str(
-			"19496512074146521797474722387106023817067805152321450801801714643269312114541",
+			"15541123047651505099565506020079072290645702361358638026159150320227489549290",
 		)
 		.unwrap(),
 	);
 
 	let ic_5 = G1Affine::new_unchecked(
 		Fq::from_str(
-			"18018829288594843113838468782351565978383206609085746829513443288600819371846",
+			"10594341809050651078348790198511832237136162370751007990030736876706319494726",
 		)
 		.unwrap(),
-		Fq::from_str("574513036642887995308766560787260721995633444018793147549923509872721537303")
-			.unwrap(),
+		Fq::from_str(
+			"8811599578125639162916289173502210672259754599803755307954551465982761005752",
+		)
+		.unwrap(),
 	);
 
 	let gamma_abc_g1 = vec![ic_0, ic_1, ic_2, ic_3, ic_4, ic_5];
@@ -189,67 +191,4 @@ pub fn get_vk_bytes() -> alloc::vec::Vec<u8> {
 	vk.serialize_compressed(&mut bytes)
 		.expect("VK serialization should not fail");
 	bytes
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use ark_serialize::CanonicalDeserialize;
-
-	#[test]
-	fn test_circuit_constants() {
-		assert_eq!(CIRCUIT_ID, CIRCUIT_ID_TRANSFER);
-		assert_eq!(NUM_PUBLIC_INPUTS, TRANSFER_PUBLIC_INPUTS);
-	}
-
-	#[test]
-	fn test_get_vk_does_not_panic() {
-		let vk = get_vk();
-		assert_eq!(vk.gamma_abc_g1.len(), NUM_PUBLIC_INPUTS + 1);
-	}
-
-	#[test]
-	fn test_get_vk_bytes_not_empty() {
-		let bytes = get_vk_bytes();
-		assert!(!bytes.is_empty());
-		assert!(bytes.len() > 200);
-	}
-
-	#[test]
-	fn test_vk_serialization_deserialization_roundtrip() {
-		let vk_original = get_vk();
-		let bytes = get_vk_bytes();
-
-		let vk_deserialized = VerifyingKey::<Bn254>::deserialize_compressed(&bytes[..]);
-		assert!(vk_deserialized.is_ok());
-
-		let vk_deserialized = vk_deserialized.unwrap();
-		assert_eq!(vk_deserialized.alpha_g1, vk_original.alpha_g1);
-		assert_eq!(vk_deserialized.beta_g2, vk_original.beta_g2);
-		assert_eq!(vk_deserialized.gamma_g2, vk_original.gamma_g2);
-		assert_eq!(vk_deserialized.delta_g2, vk_original.delta_g2);
-		assert_eq!(
-			vk_deserialized.gamma_abc_g1.len(),
-			vk_original.gamma_abc_g1.len()
-		);
-	}
-
-	#[test]
-	fn test_gamma_abc_g1_length() {
-		let vk = get_vk();
-		assert_eq!(vk.gamma_abc_g1.len(), NUM_PUBLIC_INPUTS + 1);
-	}
-
-	#[test]
-	fn test_vk_points_on_curve() {
-		let vk = get_vk();
-		assert!(vk.alpha_g1.is_on_curve());
-		assert!(vk.beta_g2.is_on_curve());
-		assert!(vk.gamma_g2.is_on_curve());
-		assert!(vk.delta_g2.is_on_curve());
-
-		for point in &vk.gamma_abc_g1 {
-			assert!(point.is_on_curve());
-		}
-	}
 }

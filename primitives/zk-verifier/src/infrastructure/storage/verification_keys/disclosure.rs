@@ -1,5 +1,5 @@
 //! Auto-generated Verification Key for disclosure circuit
-//! Generated on: 2026-01-29
+//! Generated on: 2026-02-15
 //! Source: artifacts/verification_key_disclosure.json
 //!
 //! DO NOT EDIT MANUALLY - Run sync-circuit-artifacts.sh to regenerate
@@ -14,10 +14,10 @@ use crate::domain::value_objects::circuit_constants::{
 	CIRCUIT_ID_DISCLOSURE, DISCLOSURE_PUBLIC_INPUTS,
 };
 
-/// Circuit ID for disclosure (re-exported from core)
+/// Circuit ID for disclosure (re-exported from domain)
 pub const CIRCUIT_ID: u8 = CIRCUIT_ID_DISCLOSURE;
 
-/// Number of public inputs for this circuit (re-exported from core)
+/// Number of public inputs for this circuit (re-exported from domain)
 pub const NUM_PUBLIC_INPUTS: usize = DISCLOSURE_PUBLIC_INPUTS;
 
 /// Creates the verification key for the disclosure circuit
@@ -86,21 +86,21 @@ pub fn get_vk() -> VerifyingKey<Bn254> {
 	let delta_g2 = G2Affine::new_unchecked(
 		Fq2::new(
 			Fq::from_str(
-				"21296971819096369563605032751117675058098323653331708756216725365432527850317",
+				"2381173057563833764233815915068000834834115452056520237556247865255806971249",
 			)
 			.unwrap(),
 			Fq::from_str(
-				"992438336802630169176931955414021662128085457825368043147628306774341563680",
+				"14925087808722726730908922825409111491604984585967959067713802713576688599264",
 			)
 			.unwrap(),
 		),
 		Fq2::new(
 			Fq::from_str(
-				"2648607868487078729519032733040595114996750498473698968488814784968188111940",
+				"3647003627059138544808423335602440346505630062835555901870537472515929888599",
 			)
 			.unwrap(),
 			Fq::from_str(
-				"8348398533081661687471518783651193519113562292215655452286555300098345022329",
+				"18046788152159239766494427734682464055750108324022225733392731051350401204337",
 			)
 			.unwrap(),
 		),
@@ -180,73 +180,4 @@ pub fn get_vk_bytes() -> alloc::vec::Vec<u8> {
 	vk.serialize_compressed(&mut bytes)
 		.expect("VK serialization should not fail");
 	bytes
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use ark_serialize::CanonicalDeserialize;
-
-	#[test]
-	fn test_circuit_constants() {
-		assert_eq!(CIRCUIT_ID, CIRCUIT_ID_DISCLOSURE);
-		assert_eq!(NUM_PUBLIC_INPUTS, DISCLOSURE_PUBLIC_INPUTS);
-	}
-
-	#[test]
-	fn test_get_vk_does_not_panic() {
-		let vk = get_vk();
-		// Should not panic during construction
-		assert_eq!(vk.gamma_abc_g1.len(), NUM_PUBLIC_INPUTS + 1);
-	}
-
-	#[test]
-	fn test_get_vk_bytes_not_empty() {
-		let bytes = get_vk_bytes();
-		assert!(!bytes.is_empty());
-		// VK should be at least 200 bytes compressed
-		assert!(bytes.len() > 200);
-	}
-
-	#[test]
-	fn test_vk_serialization_deserialization_roundtrip() {
-		let vk_original = get_vk();
-		let bytes = get_vk_bytes();
-
-		// Deserialize back
-		let vk_deserialized = VerifyingKey::<Bn254>::deserialize_compressed(&bytes[..]);
-		assert!(vk_deserialized.is_ok());
-
-		let vk_deserialized = vk_deserialized.unwrap();
-		assert_eq!(vk_deserialized.alpha_g1, vk_original.alpha_g1);
-		assert_eq!(vk_deserialized.beta_g2, vk_original.beta_g2);
-		assert_eq!(vk_deserialized.gamma_g2, vk_original.gamma_g2);
-		assert_eq!(vk_deserialized.delta_g2, vk_original.delta_g2);
-		assert_eq!(
-			vk_deserialized.gamma_abc_g1.len(),
-			vk_original.gamma_abc_g1.len()
-		);
-	}
-
-	#[test]
-	fn test_gamma_abc_g1_length() {
-		let vk = get_vk();
-		// Should have NUM_PUBLIC_INPUTS + 1 elements
-		assert_eq!(vk.gamma_abc_g1.len(), NUM_PUBLIC_INPUTS + 1);
-	}
-
-	#[test]
-	fn test_vk_points_on_curve() {
-		let vk = get_vk();
-		// Arkworks validates points are on curve during construction
-		// If get_vk() succeeds, points are valid
-		assert!(vk.alpha_g1.is_on_curve());
-		assert!(vk.beta_g2.is_on_curve());
-		assert!(vk.gamma_g2.is_on_curve());
-		assert!(vk.delta_g2.is_on_curve());
-
-		for point in &vk.gamma_abc_g1 {
-			assert!(point.is_on_curve());
-		}
-	}
 }
