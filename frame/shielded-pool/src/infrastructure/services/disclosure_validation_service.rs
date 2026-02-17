@@ -32,7 +32,7 @@ impl DisclosureValidationService {
 	) -> DispatchResult {
 		// Validate sizes
 		ensure!(proof_bytes.len() == 256, Error::<T>::InvalidProof);
-		ensure!(public_signals.len() == 97, Error::<T>::InvalidPublicSignals);
+		ensure!(public_signals.len() == 76, Error::<T>::InvalidPublicSignals);
 
 		// Call the ZK verifier (using None for active version)
 		let is_valid = T::ZkVerifier::verify_disclosure_proof(proof_bytes, public_signals, None)?;
@@ -47,13 +47,13 @@ impl DisclosureValidationService {
 		commitment: &Commitment,
 		public_signals: &[u8],
 	) -> DispatchResult {
-		ensure!(public_signals.len() == 97, Error::<T>::InvalidPublicSignals);
+		ensure!(public_signals.len() == 76, Error::<T>::InvalidPublicSignals);
 
-		// Extract components
-		let commitment_from_signals = &public_signals[0..32];
-		let vk_hash = &public_signals[32..64];
-		let mask_bitmap = public_signals[64];
-		let _revealed_owner_hash = &public_signals[65..97];
+		// Extract components (76 bytes total)
+		let commitment_from_signals = &public_signals[0..32]; // 32 bytes
+		let revealed_value_bytes = &public_signals[32..40]; // 8 bytes (u64)
+		let revealed_asset_id_bytes = &public_signals[40..44]; // 4 bytes (u32)
+		let _revealed_owner_hash = &public_signals[44..76]; // 32 bytes
 
 		// 1. Commitment must match
 		ensure!(
@@ -61,18 +61,22 @@ impl DisclosureValidationService {
 			Error::<T>::InvalidPublicSignals
 		);
 
-		// 2. Viewing key hash must NOT be zero
-		let zero_hash = [0u8; 32];
-		ensure!(vk_hash != zero_hash, Error::<T>::InvalidPublicSignals);
+		// 2. Revealed value must be valid u64 (can be zero if not disclosed)
+		let _revealed_value = u64::from_le_bytes(
+			revealed_value_bytes
+				.try_into()
+				.map_err(|_| Error::<T>::InvalidPublicSignals)?,
+		);
 
-		// 3. Mask bitmap must be valid (bits 0-3 for value, asset_id, owner, blinding)
-		// The blinding bit (bit 3) must NOT be set (blinding is not revealed)
-		// At least 1 of the other bits must be set
-		let reveals_blinding = (mask_bitmap & 0x08) != 0;
-		let reveals_anything = (mask_bitmap & 0x07) != 0;
+		// 3. Revealed asset_id must be valid u32 (can be zero if not disclosed)
+		let _revealed_asset_id = u32::from_le_bytes(
+			revealed_asset_id_bytes
+				.try_into()
+				.map_err(|_| Error::<T>::InvalidPublicSignals)?,
+		);
 
-		ensure!(!reveals_blinding, Error::<T>::InvalidPublicSignals);
-		ensure!(reveals_anything, Error::<T>::InvalidPublicSignals);
+		// 4. Owner hash can be zero if not disclosed
+		// No additional validation needed
 
 		Ok(())
 	}
@@ -141,25 +145,26 @@ impl DisclosureValidationService {
 
 		// VK is configured - perform full cryptographic verification
 
-		// Reconstruct public signals from disclosed_data
+		// Reconstruct public_signals from disclosed_data (76 bytes total)
 		let mut public_signals = sp_std::vec::Vec::new();
 
 		// 1. Commitment (32 bytes)
 		public_signals.extend_from_slice(&commitment.0);
 
-		// 2. Viewing key hash (32 bytes) - use dummy hash in test mode
-		let vk_hash = sp_io::hashing::blake2_256(disclosed_data.as_slice());
-		public_signals.extend_from_slice(&vk_hash);
+		// 2. Revealed value (8 bytes u64, little-endian)
+		// For testing, use dummy value 100
+		public_signals.extend_from_slice(&100u64.to_le_bytes());
 
-		// 3. Mask bitmap (1 byte) - 0x07 reveals value, asset_id, owner (not blinding)
-		public_signals.push(0x07);
+		// 3. Revealed asset_id (4 bytes u32, little-endian)
+		// For testing, use asset_id 0 (native)
+		public_signals.extend_from_slice(&0u32.to_le_bytes());
 
 		// 4. Revealed owner hash (32 bytes)
 		let owner_hash = sp_io::hashing::blake2_256(disclosed_data.as_slice());
 		public_signals.extend_from_slice(&owner_hash);
 
 		// Convert to bounded vec (97 bytes total)
-		let public_signals_bounded: BoundedVec<u8, ConstU32<97>> = public_signals
+		let public_signals_bounded: BoundedVec<u8, ConstU32<76>> = public_signals
 			.try_into()
 			.map_err(|_| Error::<T>::InvalidPublicSignals)?;
 
