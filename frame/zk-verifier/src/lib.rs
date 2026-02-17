@@ -318,6 +318,9 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 		use alloc::{boxed::Box, vec::Vec};
 
 		// Build public inputs: [merkle_root, nullifier1, nullifier2, commitment1, commitment2]
+		// Canonical format between shielded-pool and zk-verifier is little-endian (LE).
+		// Keep bytes as-is to avoid cross-pallet conversions.
+
 		let mut public_inputs = Vec::new();
 		public_inputs.push(merkle_root.to_vec());
 		for nullifier in nullifiers {
@@ -352,6 +355,8 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 		merkle_root: &[u8; 32],
 		nullifier: &[u8; 32],
 		amount: u128,
+		recipient: &[u8; 20],
+		asset_id: u32,
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
 		use crate::{
@@ -364,16 +369,32 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 		};
 		use alloc::boxed::Box;
 
-		// Construir public inputs: [merkle_root, nullifier, amount]
-		// amount se codifica como bytes de 32 bytes (u128 -> [u8; 32])
+		// Build public inputs: [merkle_root, nullifier, amount, recipient, asset_id]
+		// Canonical format between shielded-pool and zk-verifier is LE.
+
+		// amount is encoded as 32 bytes little-endian (u128 -> [u8; 32])
 		let mut amount_bytes = [0u8; 32];
-		amount_bytes[16..].copy_from_slice(&amount.to_le_bytes());
+		amount_bytes[..16].copy_from_slice(&amount.to_le_bytes());
+
+		// recipient is encoded as LE field bytes:
+		// - recipient arrives as canonical address bytes
+		// - for LE field encoding, reverse byte order and place in low-order bytes
+		let mut recipient_bytes = [0u8; 32];
+		for (index, byte) in recipient.iter().rev().enumerate() {
+			recipient_bytes[index] = *byte;
+		}
+
+		// asset_id is encoded as 32 bytes little-endian (u32 -> [u8; 32])
+		let mut asset_id_bytes = [0u8; 32];
+		asset_id_bytes[..4].copy_from_slice(&asset_id.to_le_bytes());
 
 		use alloc::vec;
 		let public_inputs = vec![
 			merkle_root.to_vec(),
 			nullifier.to_vec(),
 			amount_bytes.to_vec(),
+			recipient_bytes.to_vec(),
+			asset_id_bytes.to_vec(),
 		];
 
 		// Create command for the use case
@@ -419,13 +440,29 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 			));
 		}
 
-		// Separate into 4 inputs for the verifier
+		// Separate into 4 inputs, padding each to 32 bytes for verifier
+		// All public inputs must be exactly 32 bytes per domain validation
 		use alloc::vec;
+
+		// 1. commitment (32 bytes) - already correct size
+		let commitment = public_signals[0..32].to_vec();
+
+		// 2. revealed_value (8 bytes) - pad to 32 bytes little-endian
+		let mut revealed_value_bytes = [0u8; 32];
+		revealed_value_bytes[..8].copy_from_slice(&public_signals[32..40]);
+
+		// 3. revealed_asset_id (4 bytes) - pad to 32 bytes little-endian
+		let mut revealed_asset_id_bytes = [0u8; 32];
+		revealed_asset_id_bytes[..4].copy_from_slice(&public_signals[40..44]);
+
+		// 4. revealed_owner_hash (32 bytes) - already correct size
+		let revealed_owner_hash = public_signals[44..76].to_vec();
+
 		let public_inputs = vec![
-			public_signals[0..32].to_vec(),  // commitment
-			public_signals[32..40].to_vec(), // revealed_value
-			public_signals[40..44].to_vec(), // revealed_asset_id
-			public_signals[44..76].to_vec(), // revealed_owner_hash
+			commitment,
+			revealed_value_bytes.to_vec(),
+			revealed_asset_id_bytes.to_vec(),
+			revealed_owner_hash,
 		];
 
 		// Create command for the use case with circuit ID "disclosure"
@@ -515,25 +552,25 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 				));
 			}
 
-			// Parse into 4 inputs (32, 8, 4, 32 bytes)
+			// Parse into 4 inputs, each padded to 32 bytes (low-order, little-endian style)
 			let mut inputs_raw = Vec::with_capacity(4);
 
-			// commitment
+			// 1. commitment (32 bytes) - already correct size
 			let mut commitment = [0u8; 32];
 			commitment.copy_from_slice(&signals[0..32]);
 			inputs_raw.push(commitment);
 
-			// revealed_value (8 bytes, pad to 32)
+			// 2. revealed_value (8 bytes) - pad to 32 bytes little-endian
 			let mut val = [0u8; 32];
-			val[24..].copy_from_slice(&signals[32..40]);
+			val[..8].copy_from_slice(&signals[32..40]);
 			inputs_raw.push(val);
 
-			// revealed_asset_id (4 bytes, pad to 32)
+			// 3. revealed_asset_id (4 bytes) - pad to 32 bytes little-endian
 			let mut asset = [0u8; 32];
-			asset[28..].copy_from_slice(&signals[40..44]);
+			asset[..4].copy_from_slice(&signals[40..44]);
 			inputs_raw.push(asset);
 
-			// revealed_owner_hash
+			// 4. revealed_owner_hash (32 bytes) - already correct size
 			let mut owner = [0u8; 32];
 			owner.copy_from_slice(&signals[44..76]);
 			inputs_raw.push(owner);
@@ -554,6 +591,8 @@ impl<T: Config> Pallet<T> {
 	fn map_application_error_to_dispatch(
 		err: crate::application::errors::ApplicationError,
 	) -> sp_runtime::DispatchError {
+		#[cfg(feature = "std")]
+		log::error!("zk-verifier application error: {err:?}");
 		Self::map_application_error(err).into()
 	}
 }
