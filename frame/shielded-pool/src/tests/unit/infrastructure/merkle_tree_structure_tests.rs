@@ -416,8 +416,8 @@ fn test_zero_hashes_for_js_comparison() {
 
 	let zero_hashes = compute_zero_hashes();
 
-	for i in 0..=5 {
-		println!("Rust Zero Hash[{}]: 0x{}", i, hex_full(&zero_hashes[i]));
+	for (i, zero_hash) in zero_hashes[0..=5].iter().enumerate() {
+		println!("Rust Zero Hash[{}]: 0x{}", i, hex_full(zero_hash));
 	}
 
 	println!("\n📋 Compare these with JavaScript output from:");
