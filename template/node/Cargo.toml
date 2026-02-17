@@ -62,6 +62,9 @@ pallet-shielded-pool-runtime-api = { workspace = true }
 pallet-transaction-payment-rpc = { workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { workspace = true }
 substrate-frame-rpc-system = { workspace = true }
+
+# ZK dependencies for genesis VK loading
+orbinum-zk-verifier = { workspace = true }
 # These dependencies are used for runtime benchmarking
 frame-benchmarking = { workspace = true }
 frame-benchmarking-cli = { workspace = true }
