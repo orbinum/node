@@ -11,6 +11,9 @@ use sp_core::{H160, U256};
 use sp_genesis_builder::PresetId;
 use sp_std::prelude::*;
 
+use orbinum_zk_verifier::infrastructure::storage::verification_keys;
+use pallet_zk_verifier::CircuitId;
+
 /// Generate a chain spec for use with the development service.
 pub fn development() -> serde_json::Value {
 	testnet_genesis(
@@ -107,7 +110,23 @@ fn testnet_genesis(
 			key: Some(sudo_key),
 		},
 		transaction_payment: Default::default(),
-		zk_verifier: Default::default(),
+		zk_verifier: pallet_zk_verifier::GenesisConfig {
+			verification_keys: vec![
+				(
+					CircuitId::TRANSFER,
+					verification_keys::get_transfer_vk_bytes(),
+				),
+				(
+					CircuitId::UNSHIELD,
+					verification_keys::get_unshield_vk_bytes(),
+				),
+				(
+					CircuitId::DISCLOSURE,
+					verification_keys::get_disclosure_vk_bytes(),
+				),
+			],
+			..Default::default()
+		},
 		shielded_pool: Default::default(),
 	};
 

@@ -68,6 +68,7 @@ pallet-evm-precompile-sha3fips-benchmarking = { workspace = true }
 pallet-evm-precompile-simple = { workspace = true }
 
 # Orbinum Privacy
+orbinum-zk-verifier = { workspace = true, default-features = false }
 pallet-shielded-pool = { workspace = true }
 pallet-shielded-pool-runtime-api = { workspace = true }
 pallet-zk-verifier = { workspace = true }
@@ -143,6 +144,7 @@ std = [
 	"pallet-shielded-pool/std",
 	"pallet-shielded-pool/poseidon-native",
 	"pallet-shielded-pool-runtime-api/std",
+	"orbinum-zk-verifier/std",
 	# Polkadot
 	"polkadot-runtime-common/std",
 	# Cumulus primitives

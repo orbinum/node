@@ -8,6 +8,7 @@ publish = false
 authors = { workspace = true }
 edition = { workspace = true }
 repository = { workspace = true }
+default-run = "orbinum-node"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
@@ -61,6 +62,11 @@ pallet-shielded-pool-runtime-api = { workspace = true }
 pallet-transaction-payment-rpc = { workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { workspace = true }
 substrate-frame-rpc-system = { workspace = true }
+
+# ZK dependencies for genesis VK loading
+orbinum-zk-verifier = { workspace = true }
+pallet-zk-verifier = { workspace = true }
+
 # These dependencies are used for runtime benchmarking
 frame-benchmarking = { workspace = true }
 frame-benchmarking-cli = { workspace = true }

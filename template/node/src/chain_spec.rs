@@ -12,6 +12,9 @@ use sp_runtime::traits::{IdentifyAccount, Verify};
 // Frontier
 use orbinum_runtime::{AccountId, Balance, SS58Prefix, Signature, WASM_BINARY};
 
+use orbinum_zk_verifier::infrastructure::storage::verification_keys;
+use pallet_zk_verifier::CircuitId;
+
 // The URL for the telemetry server.
 // const STAGING_TELEMETRY_URL: &str = "wss://telemetry.polkadot.io/submit/";
 
@@ -173,6 +176,13 @@ fn testnet_genesis(
 		"grandpa": { "authorities": initial_authorities.iter().map(|x| (x.1.clone(), 1)).collect::<Vec<_>>() },
 		"evmChainId": { "chainId": chain_id },
 		"evm": { "accounts": evm_accounts },
-		"manualSeal": { "enable": enable_manual_seal }
+		"manualSeal": { "enable": enable_manual_seal },
+		"zkVerifier": {
+			"verificationKeys": vec![
+				(CircuitId::TRANSFER, verification_keys::get_transfer_vk_bytes()),
+				(CircuitId::UNSHIELD, verification_keys::get_unshield_vk_bytes()),
+				(CircuitId::DISCLOSURE, verification_keys::get_disclosure_vk_bytes()),
+			]
+		}
 	})
 }
