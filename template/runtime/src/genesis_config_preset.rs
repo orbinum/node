@@ -12,6 +12,7 @@ use sp_genesis_builder::PresetId;
 use sp_std::prelude::*;
 
 use orbinum_zk_verifier::infrastructure::storage::verification_keys;
+use pallet_zk_verifier::CircuitId;
 
 /// Generate a chain spec for use with the development service.
 pub fn development() -> serde_json::Value {
