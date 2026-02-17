@@ -21,18 +21,6 @@ pub mod primitives {
 
 	// Verification keys
 	pub use orbinum_zk_verifier::infrastructure::storage::verification_keys;
-
-	// orbinum-zk-core types
-	pub use orbinum_zk_core::{
-		domain::{
-			entities::Note,
-			services::{CommitmentService, NullifierService},
-			value_objects::{
-				Blinding, Commitment, FieldElement, Nullifier, OwnerPubkey, SpendingKey,
-			},
-		},
-		infrastructure::crypto::LightPoseidonHasher,
-	};
 }
 
 /// Adapter to access Disclosure VK
