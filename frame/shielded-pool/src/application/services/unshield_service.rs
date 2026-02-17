@@ -14,6 +14,7 @@ use frame_support::{
 use frame_system;
 #[cfg(not(feature = "runtime-benchmarks"))]
 use pallet_zk_verifier::ZkVerifierPort;
+#[cfg(not(feature = "runtime-benchmarks"))]
 use parity_scale_codec::Encode;
 
 pub struct UnshieldService;
