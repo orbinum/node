@@ -42,6 +42,7 @@ pub mod unit {
 // Integration tests
 pub mod integration {
 	pub mod audit_tests;
+	pub mod invalid_proof_tests;
 	pub mod multi_asset_tests;
 	pub mod private_transfer_tests;
 	pub mod shield_batch_tests;
