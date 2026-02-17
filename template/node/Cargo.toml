@@ -8,6 +8,7 @@ publish = false
 authors = { workspace = true }
 edition = { workspace = true }
 repository = { workspace = true }
+default-run = "orbinum-node"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
