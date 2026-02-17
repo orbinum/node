@@ -81,6 +81,7 @@ fc-db = { workspace = true }
 fc-mapping-sync = { workspace = true }
 fc-rpc = { workspace = true, features = ["aura"] }
 fc-rpc-core = { workspace = true }
+fc-rpc-v2 = { workspace = true }
 fc-storage = { workspace = true }
 fp-account = { workspace = true }
 fp-dynamic-fee = { workspace = true, features = ["default"] }

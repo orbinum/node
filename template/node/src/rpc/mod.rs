@@ -81,6 +81,9 @@ where
 	use sc_consensus_manual_seal::rpc::{ManualSeal, ManualSealApiServer};
 	use substrate_frame_rpc_system::{System, SystemApiServer};
 
+	// Orbinum Privacy RPC
+	use fc_rpc_v2::{PrivacyApiServer, PrivacyRpcServer, SubstrateStorageAdapter};
+
 	let mut io = RpcModule::new(());
 	let FullDeps {
 		client,
@@ -92,6 +95,11 @@ where
 	io.merge(System::new(client.clone(), pool).into_rpc())?;
 	io.merge(TransactionPayment::new(client.clone()).into_rpc())?;
 	io.merge(ShieldedPool::new(client.clone()).into_rpc())?;
+
+	// Orbinum Privacy RPC
+	let privacy_adapter = SubstrateStorageAdapter::new(client.clone());
+	let privacy_rpc = PrivacyRpcServer::new(privacy_adapter);
+	io.merge(privacy_rpc.into_rpc())?;
 
 	if let Some(command_sink) = command_sink {
 		io.merge(
