@@ -36,7 +36,7 @@ mod verification_key_tests {
 
 	#[test]
 	fn verification_key_validates_min_size() {
-		let data = vec![1u8; 511]; // Min is 512 bytes for Groth16
+		let data = vec![1u8; 255]; // Min is 256 bytes for Groth16
 		let result = VerificationKey::new(data, ProofSystem::Groth16);
 
 		assert_eq!(result, Err(DomainError::InvalidVerificationKeySize));
