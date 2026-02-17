@@ -46,3 +46,9 @@ Orbinum is dual-licensed under:
 - **GNU General Public License v3.0** ([LICENSE-GPL3](LICENSE-GPL3) or https://www.gnu.org/licenses/gpl-3.0.html)
 
 You may choose either license to govern your use of this software.
+
+## Attribution
+
+Orbinum is built upon and extends [Frontier](https://github.com/polkadot-evm/frontier), the Ethereum compatibility layer for Substrate. The EVM integration, Ethereum RPC, and related client infrastructure are derived from Frontier's work by Parity Technologies and contributors.
+
+We are grateful to the Frontier and Substrate communities for their foundational work.
