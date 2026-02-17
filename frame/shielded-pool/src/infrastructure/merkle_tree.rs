@@ -101,7 +101,7 @@ pub fn hash_pair_poseidon(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
 	// Use native hasher for ~3x performance boost (falls back to WASM if feature disabled)
 	#[cfg(feature = "poseidon-native")]
 	let hasher = orbinum_zk_core::NativePoseidonHasher;
-	
+
 	#[cfg(not(feature = "poseidon-native"))]
 	let hasher = orbinum_zk_core::LightPoseidonHasher;
 
