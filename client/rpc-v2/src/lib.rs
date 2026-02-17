@@ -17,3 +17,12 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 #![warn(unused_crate_dependencies)]
+
+// ============================================================================
+// Orbinum Privacy RPC
+// ============================================================================
+
+pub mod orbinum;
+
+// Re-exportar tipos principales para facilitar importación
+pub use orbinum::{PrivacyApiServer, PrivacyRpcServer, SubstrateStorageAdapter};
