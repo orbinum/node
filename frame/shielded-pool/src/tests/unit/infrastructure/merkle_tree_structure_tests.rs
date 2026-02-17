@@ -405,3 +405,21 @@ fn hex_short(hash: &[u8; 32]) -> String {
 fn hex_full(hash: &[u8; 32]) -> String {
 	hash.iter().map(|b| format!("{b:02x}")).collect()
 }
+
+// ============================================================================
+// SECTION 4: Zero Hashes Comparison (for JavaScript verification)
+// ============================================================================
+
+#[test]
+fn test_zero_hashes_for_js_comparison() {
+	println!("\n🔍 Rust Zero Hashes (for comparison with JavaScript):\n");
+
+	let zero_hashes = compute_zero_hashes();
+
+	for i in 0..=5 {
+		println!("Rust Zero Hash[{}]: 0x{}", i, hex_full(&zero_hashes[i]));
+	}
+
+	println!("\n📋 Compare these with JavaScript output from:");
+	println!("   npx tsx ts-test/test-zero-hashes-comparison.ts\n");
+}
