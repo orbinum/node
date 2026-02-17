@@ -404,7 +404,7 @@ fn verify_unshield_proof_works() {
 		let proof = vec![1u8; 256];
 		let merkle_root = [0x11u8; 32];
 		let nullifier = [0x22u8; 32];
-		let amount = 1000_000u128; // 1000 tokens with 3 decimals
+		let amount = 1_000_000_u128; // 1000 tokens with 3 decimals
 		let recipient = [0x33u8; 20];
 		let asset_id = 0u32; // Native asset
 
@@ -420,7 +420,7 @@ fn verify_unshield_proof_works() {
 		);
 
 		assert_ok!(result);
-		assert_eq!(result.unwrap(), true);
+		assert!(result.unwrap());
 	});
 }
 
@@ -454,7 +454,7 @@ fn verify_unshield_proof_with_empty_proof_fails() {
 		match result {
 			Ok(_) => {
 				// If it succeeds, it should be true
-				assert_eq!(result.unwrap(), true);
+				assert!(result.unwrap());
 			}
 			Err(_) => {
 				// If it fails, that's also acceptable behavior for empty proof
@@ -496,7 +496,7 @@ fn verify_unshield_proof_with_different_amounts() {
 			);
 
 			assert_ok!(result);
-			assert_eq!(result.unwrap(), true);
+			assert!(result.unwrap());
 		}
 	});
 }
@@ -534,7 +534,7 @@ fn verify_unshield_proof_with_different_recipients() {
 			);
 
 			assert_ok!(result);
-			assert_eq!(result.unwrap(), true);
+			assert!(result.unwrap());
 		}
 	});
 }
@@ -570,7 +570,7 @@ fn verify_unshield_proof_with_different_asset_ids() {
 			);
 
 			assert_ok!(result);
-			assert_eq!(result.unwrap(), true);
+			assert!(result.unwrap());
 		}
 	});
 }
@@ -610,7 +610,7 @@ fn verify_unshield_proof_with_specific_version() {
 		);
 
 		assert_ok!(result1);
-		assert_eq!(result1.unwrap(), true);
+		assert!(result1.unwrap());
 
 		// Test with specific version 2
 		let result2 = ZkVerifier::verify_unshield_proof(
@@ -624,7 +624,7 @@ fn verify_unshield_proof_with_specific_version() {
 		);
 
 		assert_ok!(result2);
-		assert_eq!(result2.unwrap(), true);
+		assert!(result2.unwrap());
 	});
 }
 

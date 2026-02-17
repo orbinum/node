@@ -31,7 +31,7 @@ fn unshield_public_inputs_encoding_test() {
 
 	// Should succeed in test mode
 	assert!(result.is_ok());
-	assert_eq!(result.unwrap(), true);
+	assert!(result.unwrap());
 }
 
 #[test]
@@ -61,8 +61,8 @@ fn unshield_amount_encoding_edge_cases() {
 			None,
 		);
 
-		assert!(result.is_ok(), "Failed for amount: {}", amount);
-		assert_eq!(result.unwrap(), true);
+		assert!(result.is_ok(), "Failed for amount: {amount}");
+		assert!(result.unwrap());
 	}
 }
 
@@ -75,12 +75,12 @@ fn unshield_recipient_address_formats() {
 	let asset_id = 0u32;
 
 	// Test different recipient address patterns
-	let recipients = vec![
+	let recipients = [
 		[0x00; 20], // All zeros
 		[0xFF; 20], // All ones
 		// Ethereum-like address pattern
 		[
-			0xd8, 0xdA, 0x6B, 0xF2, 0x69, 0x64, 0xaf, 0x9d, 0x7e, 0xEd, 0x9e, 0x03, 0xE5, 0x34,
+			0xd8, 0xda, 0x6B, 0xF2, 0x69, 0x64, 0xaf, 0x9d, 0x7e, 0xed, 0x9e, 0x03, 0xE5, 0x34,
 			0x15, 0xD3, 0x7A, 0xA9, 0x60, 0x45,
 		],
 		// Mixed pattern
@@ -101,8 +101,8 @@ fn unshield_recipient_address_formats() {
 			None,
 		);
 
-		assert!(result.is_ok(), "Failed for recipient: {:?}", recipient);
-		assert_eq!(result.unwrap(), true);
+		assert!(result.is_ok(), "Failed for recipient: {recipient:?}");
+		assert!(result.unwrap());
 	}
 }
 
@@ -135,8 +135,8 @@ fn unshield_asset_id_ranges() {
 			None,
 		);
 
-		assert!(result.is_ok(), "Failed for asset_id: {}", asset_id);
-		assert_eq!(result.unwrap(), true);
+		assert!(result.is_ok(), "Failed for asset_id: {asset_id}");
+		assert!(result.unwrap());
 	}
 }
 
@@ -149,7 +149,7 @@ fn unshield_merkle_root_patterns() {
 	let asset_id = 0u32;
 
 	// Test different merkle root patterns
-	let merkle_roots = vec![
+	let merkle_roots = [
 		[0x00; 32], // All zeros (empty tree)
 		[0xFF; 32], // All ones
 		// Realistic looking hash
@@ -177,8 +177,8 @@ fn unshield_merkle_root_patterns() {
 			None,
 		);
 
-		assert!(result.is_ok(), "Failed for merkle_root: {:?}", merkle_root);
-		assert_eq!(result.unwrap(), true);
+		assert!(result.is_ok(), "Failed for merkle_root: {merkle_root:?}");
+		assert!(result.unwrap());
 	}
 }
 
@@ -191,7 +191,7 @@ fn unshield_nullifier_patterns() {
 	let asset_id = 0u32;
 
 	// Test different nullifier patterns
-	let nullifiers = vec![
+	let nullifiers = [
 		[0x00; 32], // All zeros
 		[0xFF; 32], // All ones
 		// Realistic looking nullifier
@@ -219,8 +219,8 @@ fn unshield_nullifier_patterns() {
 			None,
 		);
 
-		assert!(result.is_ok(), "Failed for nullifier: {:?}", nullifier);
-		assert_eq!(result.unwrap(), true);
+		assert!(result.is_ok(), "Failed for nullifier: {nullifier:?}");
+		assert!(result.unwrap());
 	}
 }
 
@@ -278,6 +278,6 @@ mod validation_tests {
 		);
 
 		assert!(result.is_ok());
-		assert_eq!(result.unwrap(), true);
+		assert!(result.unwrap());
 	}
 }
