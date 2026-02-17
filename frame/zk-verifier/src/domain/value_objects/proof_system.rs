@@ -30,7 +30,7 @@ impl ProofSystem {
 	/// Get expected VK size range for this proof system
 	pub fn expected_vk_size_range(&self) -> (usize, usize) {
 		match self {
-			Self::Groth16 => (512, 10_000), // Min 512 bytes, max 10KB
+			Self::Groth16 => (256, 10_000), // Min 256 bytes, max 10KB
 			Self::Plonk => (1024, 20_000),
 			Self::Halo2 => (1024, 20_000),
 		}
