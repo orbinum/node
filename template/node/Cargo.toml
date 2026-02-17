@@ -65,6 +65,8 @@ substrate-frame-rpc-system = { workspace = true }
 
 # ZK dependencies for genesis VK loading
 orbinum-zk-verifier = { workspace = true }
+pallet-zk-verifier = { workspace = true }
+
 # These dependencies are used for runtime benchmarking
 frame-benchmarking = { workspace = true }
 frame-benchmarking-cli = { workspace = true }
