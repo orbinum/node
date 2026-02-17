@@ -13,6 +13,7 @@ use sp_runtime::traits::{IdentifyAccount, Verify};
 use orbinum_runtime::{AccountId, Balance, SS58Prefix, Signature, WASM_BINARY};
 
 use orbinum_zk_verifier::infrastructure::storage::verification_keys;
+use pallet_zk_verifier::CircuitId;
 
 // The URL for the telemetry server.
 // const STAGING_TELEMETRY_URL: &str = "wss://telemetry.polkadot.io/submit/";
