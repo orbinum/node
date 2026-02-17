@@ -3581,18 +3581,6 @@ dependencies = [
 [[package]]
 name = "fc-rpc-v2"
 version = "2.0.0-dev"
-dependencies = [
- "hex",
- "jsonrpsee",
- "log",
- "pallet-shielded-pool",
- "parity-scale-codec",
- "sc-client-api",
- "serde",
- "sp-blockchain",
- "sp-core",
- "sp-runtime",
-]
 
 [[package]]
 name = "fc-rpc-v2-api"
@@ -4854,6 +4842,12 @@ name = "hex-literal"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46"
+
+[[package]]
+name = "hex-literal"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e712f64ec3850b98572bffac52e2c6f282b29fe6c5fa6d42334b30be438d95c1"
 
 [[package]]
 name = "hickory-proto"
@@ -7523,7 +7517,6 @@ dependencies = [
  "fc-mapping-sync",
  "fc-rpc",
  "fc-rpc-core",
- "fc-rpc-v2",
  "fc-storage",
  "fp-account",
  "fp-dynamic-fee",
@@ -7534,7 +7527,7 @@ dependencies = [
  "frame-system",
  "frame-system-rpc-runtime-api",
  "futures",
- "hex-literal",
+ "hex-literal 1.1.0",
  "jsonrpsee",
  "log",
  "orbinum-runtime",
@@ -7599,7 +7592,7 @@ dependencies = [
  "frame-system",
  "frame-system-benchmarking",
  "frame-system-rpc-runtime-api",
- "hex-literal",
+ "hex-literal 1.1.0",
  "orbinum-zk-verifier",
  "pallet-aura",
  "pallet-balances",
@@ -7970,7 +7963,7 @@ dependencies = [
  "frame-system",
  "hash-db",
  "hex",
- "hex-literal",
+ "hex-literal 1.1.0",
  "impl-trait-for-tuples",
  "log",
  "pallet-balances",
@@ -9033,7 +9026,7 @@ source = "git+https://github.com/paritytech/polkadot-sdk?branch=stable2506#f61fa
 dependencies = [
  "bitvec",
  "bounded-collections",
- "hex-literal",
+ "hex-literal 0.4.1",
  "log",
  "parity-scale-codec",
  "polkadot-core-primitives",
@@ -9451,7 +9444,7 @@ dependencies = [
  "frame-support",
  "frame-system",
  "hex",
- "hex-literal",
+ "hex-literal 1.1.0",
  "impl-trait-for-tuples",
  "log",
  "num_enum",
@@ -9494,7 +9487,7 @@ dependencies = [
  "fp-evm",
  "frame-support",
  "frame-system",
- "hex-literal",
+ "hex-literal 1.1.0",
  "pallet-balances",
  "pallet-evm",
  "pallet-timestamp",
@@ -13504,7 +13497,7 @@ dependencies = [
  "derive-where",
  "environmental",
  "frame-support",
- "hex-literal",
+ "hex-literal 0.4.1",
  "impl-trait-for-tuples",
  "log",
  "parity-scale-codec",
