@@ -53,6 +53,8 @@ impl TransferService {
 		}
 
 		// 5. Convert to arrays for ZK verification
+		// Canonical format between shielded-pool and zk-verifier is LE.
+		// Pass hashes as-is (no endianness conversion here).
 		let nullifier_arrays: sp_std::vec::Vec<[u8; 32]> = nullifiers.iter().map(|n| n.0).collect();
 		let commitment_arrays: sp_std::vec::Vec<[u8; 32]> =
 			commitments.iter().map(|c| c.0).collect();

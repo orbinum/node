@@ -1,6 +1,6 @@
 [package]
 name = "orbinum-runtime"
-version = "0.0.0"
+version = "0.1.0"
 license = "Apache-2.0 OR GPL-3.0-or-later"
 description = "Orbinum Privacy Chain Runtime"
 publish = false
@@ -87,7 +87,9 @@ default = ["std", "with-rocksdb-weights", "poseidon-native-runtime"]
 with-rocksdb-weights = []
 with-paritydb-weights = []
 
-poseidon-native-runtime = ["pallet-shielded-pool/poseidon-native"]
+poseidon-native-runtime = [
+	"pallet-shielded-pool/poseidon-native",
+]
 
 std = [
 	"ethereum/std",

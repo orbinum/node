@@ -342,11 +342,12 @@ fn batch_submit_disclosure_proofs_works() {
 			let memo = vec![1u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
 			crate::CommitmentMemos::<Test>::insert(commitment, EncryptedMemo::new(memo).unwrap());
 
-			// Construct valid 97-byte public signals
-			let mut signals = vec![0u8; 97];
-			signals[0..32].copy_from_slice(&commitment.0); // 1. Commitment
-			signals[32..64].copy_from_slice(&[1u8; 32]); // 2. Dummy VK hash
-			signals[64] = 0x01; // 3. Valid mask (reveals value)
+			// Construct valid 76-byte public signals
+			let mut signals = vec![0u8; 76];
+			signals[0..32].copy_from_slice(&commitment.0); // 1. Commitment (32 bytes)
+			signals[32..40].copy_from_slice(&100u64.to_le_bytes()); // 2. revealed_value (8 bytes u64)
+			signals[40..44].copy_from_slice(&0u32.to_le_bytes()); // 3. revealed_asset_id (4 bytes u32)
+			signals[44..76].copy_from_slice(&[1u8; 32]); // 4. revealed_owner_hash (32 bytes)
 
 			submissions.push(crate::BatchDisclosureSubmission {
 				commitment,
@@ -395,11 +396,12 @@ fn batch_submit_disclosure_stress_test() {
 			let memo = vec![1u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
 			crate::CommitmentMemos::<Test>::insert(commitment, EncryptedMemo::new(memo).unwrap());
 
-			// Construct valid 97-byte public signals
-			let mut signals = vec![0u8; 97];
-			signals[0..32].copy_from_slice(&commitment.0);
-			signals[32..64].copy_from_slice(&[1u8; 32]);
-			signals[64] = 0x01;
+			// Construct valid 76-byte public signals
+			let mut signals = vec![0u8; 76];
+			signals[0..32].copy_from_slice(&commitment.0); // 1. Commitment (32 bytes)
+			signals[32..40].copy_from_slice(&100u64.to_le_bytes()); // 2. revealed_value (8 bytes u64)
+			signals[40..44].copy_from_slice(&0u32.to_le_bytes()); // 3. revealed_asset_id (4 bytes u32)
+			signals[44..76].copy_from_slice(&[1u8; 32]); // 4. revealed_owner_hash (32 bytes)
 
 			submissions.push(crate::BatchDisclosureSubmission {
 				commitment,

@@ -49,53 +49,110 @@ impl pallet_zk_verifier::Config for Test {
 }
 
 /// Mock ZK verifier for testing - always returns true
-/// In production, this would be pallet-zk-verifier
+///
+/// ⚠️ WARNING: This mock bypasses all ZK proof validation!
+/// Use only for testing business logic, not cryptographic correctness.
+///
+/// For testing proof validation errors, use `FailingZkVerifier` instead.
 pub struct MockZkVerifier;
 
 impl ZkVerifierPort for MockZkVerifier {
 	fn verify_transfer_proof(
-		_proof: &[u8],
+		proof: &[u8],
 		_merkle_root: &[u8; 32],
 		_nullifiers: &[[u8; 32]],
 		_commitments: &[[u8; 32]],
 		_version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
-		// Always return true for testing
+		// Validate basic format (proof should not be empty)
+		if proof.is_empty() {
+			return Err(sp_runtime::DispatchError::Other("Empty proof"));
+		}
+		// Always return true for testing (bypass ZK verification)
 		Ok(true)
 	}
 
 	fn verify_unshield_proof(
-		_proof: &[u8],
+		proof: &[u8],
 		_merkle_root: &[u8; 32],
 		_nullifier: &[u8; 32],
 		_amount: u128,
+		_recipient: &[u8; 20],
+		_asset_id: u32,
 		_version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
-		// Always return true for testing
+		// Validate basic format
+		if proof.is_empty() {
+			return Err(sp_runtime::DispatchError::Other("Empty proof"));
+		}
+		// Always return true for testing (bypass ZK verification)
 		Ok(true)
 	}
 
 	fn verify_disclosure_proof(
-		_proof: &[u8],
-		_public_signals: &[u8],
+		proof: &[u8],
+		public_signals: &[u8],
 		_version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
-		// Always return true for testing
+		// Validate basic format
+		if proof.is_empty() {
+			return Err(sp_runtime::DispatchError::Other("Empty proof"));
+		}
+		if public_signals.len() != 76 {
+			return Err(sp_runtime::DispatchError::Other(
+				"Invalid public signals length",
+			));
+		}
+		// Always return true for testing (bypass ZK verification)
 		Ok(true)
 	}
 
 	fn batch_verify_disclosure_proofs(
-		_proofs: &[sp_std::vec::Vec<u8>],
-		_public_signals: &[sp_std::vec::Vec<u8>],
+		proofs: &[sp_std::vec::Vec<u8>],
+		public_signals: &[sp_std::vec::Vec<u8>],
 		_version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
-		// Always return true for testing
+		// Validate basic format
+		if proofs.len() != public_signals.len() {
+			return Err(sp_runtime::DispatchError::Other("Mismatched array lengths"));
+		}
+		// Always return true for testing (bypass ZK verification)
 		Ok(true)
 	}
 }
 
 /// Mock ZK verifier that always fails - for testing error paths
-#[allow(dead_code)]
+///
+/// **IMPORTANT**: This mock is currently NOT used by any tests (dead code).
+/// It exists to demonstrate how to test invalid proof scenarios.
+///
+/// To use this mock, create a separate test configuration:
+/// ```ignore
+/// construct_runtime!(
+///     pub enum TestWithFailingVerifier {
+///         System: frame_system,
+///         Balances: pallet_balances,
+///         ShieldedPool: pallet_shielded_pool,
+///     }
+/// );
+///
+/// impl pallet_shielded_pool::Config for TestWithFailingVerifier {
+///     type ZkVerifier = FailingZkVerifier; // ← Use this instead of MockZkVerifier
+///     // ... other config
+/// }
+///
+/// #[test]
+/// fn unshield_fails_with_invalid_proof() {
+///     new_test_ext_failing().execute_with(|| {
+///         // Any proof will fail with FailingZkVerifier
+///         assert_noop!(ShieldedPool::unshield(...), Error::InvalidProof);
+///     });
+/// }
+/// ```
+///
+/// See: `frame/shielded-pool/docs/MOCK_SYSTEM_ANALYSIS.md` for detailed analysis
+/// See: `frame/shielded-pool/src/tests/integration/invalid_proof_tests.rs` for demo tests
+#[allow(dead_code)] // Intentionally unused - template for negative tests
 pub struct FailingZkVerifier;
 
 impl ZkVerifierPort for FailingZkVerifier {
@@ -115,6 +172,8 @@ impl ZkVerifierPort for FailingZkVerifier {
 		_merkle_root: &[u8; 32],
 		_nullifier: &[u8; 32],
 		_amount: u128,
+		_recipient: &[u8; 20],
+		_asset_id: u32,
 		_version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
 		// Always return false for testing invalid proofs

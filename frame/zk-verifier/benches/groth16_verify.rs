@@ -53,7 +53,9 @@ use orbinum_zk_verifier::{
 	domain::value_objects::{Proof, PublicInputs, VerifyingKey},
 	infrastructure::{
 		Groth16Verifier,
-		storage::verification_keys::{get_transfer_vk_bytes, get_unshield_vk_bytes},
+		storage::verification_keys::{
+			get_disclosure_vk_bytes, get_transfer_vk_bytes, get_unshield_vk_bytes,
+		},
 	},
 };
 
@@ -70,6 +72,45 @@ fn generate_real_test_data() -> (Vec<u8>, Vec<u8>, Vec<[u8; 32]>) {
 			.try_into()
 			.unwrap(),
 	];
+
+	(vk_bytes, proof_bytes, public_inputs)
+}
+
+/// Generate test data for disclosure circuit (4 public inputs)
+fn generate_disclosure_test_data() -> (Vec<u8>, Vec<u8>, Vec<[u8; 32]>) {
+	// Real VK from disclosure circuit (hardcoded in primitives)
+	let vk_bytes = get_disclosure_vk_bytes().to_vec();
+
+	// For proof, use mock data with valid format
+	// TODO: When we have real disclosure proofs, use those
+	let proof_bytes = config::test_data::mock_proof_bytes();
+
+	// Disclosure has 4 public inputs:
+	// 1. commitment (32 bytes)
+	// 2. revealed_value (32 bytes, u64 padded)
+	// 3. revealed_asset_id (32 bytes, u32 padded)
+	// 4. revealed_owner_hash (32 bytes)
+	let mut public_inputs = Vec::with_capacity(4);
+
+	// 1. commitment
+	let mut commitment = [0u8; 32];
+	commitment[0] = 0x01;
+	public_inputs.push(commitment);
+
+	// 2. revealed_value (u64 = 1000 in little-endian, padded to 32 bytes)
+	let mut revealed_value = [0u8; 32];
+	revealed_value[..8].copy_from_slice(&1000u64.to_le_bytes());
+	public_inputs.push(revealed_value);
+
+	// 3. revealed_asset_id (u32 = 1 in little-endian, padded to 32 bytes)
+	let mut revealed_asset_id = [0u8; 32];
+	revealed_asset_id[..4].copy_from_slice(&1u32.to_le_bytes());
+	public_inputs.push(revealed_asset_id);
+
+	// 4. revealed_owner_hash
+	let mut owner_hash = [0u8; 32];
+	owner_hash[0] = 0x0A;
+	public_inputs.push(owner_hash);
 
 	(vk_bytes, proof_bytes, public_inputs)
 }
@@ -243,7 +284,120 @@ fn bench_public_inputs_scaling(c: &mut Criterion) {
 }
 
 // ============================================================================
-// 6. End-to-End Workflow
+// 7. Disclosure Circuit Benchmarks
+// ============================================================================
+
+fn bench_disclosure_single_verification(c: &mut Criterion) {
+	let mut group = c.benchmark_group("disclosure_single_verification");
+	group.sample_size(100);
+
+	let (vk_bytes, proof_bytes, public_input_bytes) = generate_disclosure_test_data();
+
+	// Pre-parse structures (outside benchmark)
+	let vk = VerifyingKey::new(vk_bytes.clone());
+	let proof = Proof::new(proof_bytes.clone());
+	let public_inputs = PublicInputs::new(public_input_bytes.clone());
+
+	group.bench_function("disclosure_verify", |b| {
+		b.iter(|| {
+			// Only measure verification time for disclosure circuit
+			let _result = Groth16Verifier::verify(
+				black_box(&vk),
+				black_box(&public_inputs),
+				black_box(&proof),
+			);
+			// Note: May fail because they are mock data, but we measure the time
+		});
+	});
+
+	// Benchmark with parsing included
+	group.bench_function("disclosure_verify_with_parsing", |b| {
+		b.iter(|| {
+			let vk = VerifyingKey::new(black_box(vk_bytes.clone()));
+			let proof = Proof::new(black_box(proof_bytes.clone()));
+			let public_inputs = PublicInputs::new(black_box(public_input_bytes.clone()));
+			let _result = Groth16Verifier::verify(&vk, &public_inputs, &proof);
+		});
+	});
+
+	group.finish();
+}
+
+fn bench_disclosure_batch_verification(c: &mut Criterion) {
+	let mut group = c.benchmark_group("disclosure_batch_verification");
+	group.sample_size(50);
+
+	let (vk_bytes, proof_bytes, public_input_bytes) = generate_disclosure_test_data();
+	let vk = VerifyingKey::new(vk_bytes);
+
+	for &batch_size in BenchmarkSizes::BATCH_SIZES {
+		// Pre-generate all disclosure proofs
+		let proofs: Vec<_> = (0..batch_size)
+			.map(|_| {
+				let proof = Proof::new(proof_bytes.clone());
+				let public_inputs = PublicInputs::new(public_input_bytes.clone());
+				(proof, public_inputs)
+			})
+			.collect();
+
+		group.throughput(Throughput::Elements(batch_size as u64));
+		group.bench_with_input(
+			BenchmarkId::from_parameter(batch_size),
+			&batch_size,
+			|b, _| {
+				b.iter(|| {
+					for (proof, public_inputs) in &proofs {
+						let _result = Groth16Verifier::verify(
+							black_box(&vk),
+							black_box(public_inputs),
+							black_box(proof),
+						);
+					}
+				});
+			},
+		);
+	}
+
+	group.finish();
+}
+
+fn bench_disclosure_public_inputs_construction(c: &mut Criterion) {
+	let mut group = c.benchmark_group("disclosure_public_inputs");
+	group.sample_size(200);
+
+	// Benchmark constructing public inputs from raw disclosure data
+	group.bench_function("construct_from_76_bytes", |b| {
+		b.iter(|| {
+			// Simulate receiving 76 bytes: commitment(32) + value(8) + asset_id(4) + owner_hash(32)
+			let mut signals = Vec::with_capacity(76);
+			signals.extend_from_slice(&[1u8; 32]); // commitment
+			signals.extend_from_slice(&1000u64.to_le_bytes()); // revealed_value
+			signals.extend_from_slice(&1u32.to_le_bytes()); // revealed_asset_id
+			signals.extend_from_slice(&[0xAu8; 32]); // revealed_owner_hash
+
+			// Convert to 4 padded inputs (as done in verify_disclosure_proof)
+			let mut commitment = [0u8; 32];
+			commitment.copy_from_slice(&signals[0..32]);
+
+			let mut revealed_value = [0u8; 32];
+			revealed_value[..8].copy_from_slice(&signals[32..40]);
+
+			let mut revealed_asset_id = [0u8; 32];
+			revealed_asset_id[..4].copy_from_slice(&signals[40..44]);
+
+			let mut owner_hash = [0u8; 32];
+			owner_hash.copy_from_slice(&signals[44..76]);
+
+			let inputs = vec![commitment, revealed_value, revealed_asset_id, owner_hash];
+			let _public_inputs = PublicInputs::new(black_box(inputs));
+		});
+	});
+
+	group.finish();
+}
+
+// ============================================================================
+// 8. End-to-End Workflow Benchmark
 // ============================================================================
 
 fn bench_e2e_workflow(c: &mut Criterion) {
@@ -296,6 +450,9 @@ criterion_group! {
 		bench_vk_operations,
 		bench_proof_operations,
 		bench_public_inputs_scaling,
+		bench_disclosure_single_verification,
+		bench_disclosure_batch_verification,
+		bench_disclosure_public_inputs_construction,
 		bench_e2e_workflow
 }
 

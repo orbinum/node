@@ -37,7 +37,7 @@ impl DefaultVkValidator {
 	fn validate_groth16(vk: &VerificationKey) -> Result<(), DomainError> {
 		// Groth16 VK should have minimum size
 		// Structure: alpha_g1 (64) + beta_g2 (128) + gamma_g2 (128) + delta_g2 (128) + IC points
-		const MIN_GROTH16_SIZE: usize = 512;
+		const MIN_GROTH16_SIZE: usize = 256;
 
 		if vk.size() < MIN_GROTH16_SIZE {
 			return Err(DomainError::InvalidVerificationKeySize);

@@ -21,18 +21,6 @@ pub mod primitives {
 
 	// Verification keys
 	pub use orbinum_zk_verifier::infrastructure::storage::verification_keys;
-
-	// orbinum-zk-core types
-	pub use orbinum_zk_core::{
-		domain::{
-			entities::Note,
-			services::{CommitmentService, NullifierService},
-			value_objects::{
-				Blinding, Commitment, FieldElement, Nullifier, OwnerPubkey, SpendingKey,
-			},
-		},
-		infrastructure::crypto::LightPoseidonHasher,
-	};
 }
 
 /// Adapter to access Disclosure VK
@@ -47,7 +35,31 @@ impl DisclosureVkAdapter {
 	}
 }
 
-/// Adapter para convertir PublicInputs del dominio a primitivo
+/// Adapter to access Unshield VK
+pub struct UnshieldVkAdapter;
+
+impl UnshieldVkAdapter {
+	/// Retrieves the hardcoded unshield verification key
+	pub fn get_unshield_vk() -> primitives::PrimitiveVerifyingKey {
+		let ark_vk = primitives::verification_keys::get_unshield_vk();
+		primitives::PrimitiveVerifyingKey::from_ark_vk(&ark_vk)
+			.expect("Failed to wrap hardcoded unshield VK")
+	}
+}
+
+/// Adapter to access Transfer VK
+pub struct TransferVkAdapter;
+
+impl TransferVkAdapter {
+	/// Retrieves the hardcoded transfer verification key
+	pub fn get_transfer_vk() -> primitives::PrimitiveVerifyingKey {
+		let ark_vk = primitives::verification_keys::get_transfer_vk();
+		primitives::PrimitiveVerifyingKey::from_ark_vk(&ark_vk)
+			.expect("Failed to wrap hardcoded transfer VK")
+	}
+}
+
+/// Adapter to convert PublicInputs from domain to primitive
 pub struct PublicInputsAdapter;
 
 impl PublicInputsAdapter {

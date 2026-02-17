@@ -98,8 +98,12 @@ pub fn hash_pair_poseidon(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
 	let left_fr = Bn254Fr::from_le_bytes_mod_order(left);
 	let right_fr = Bn254Fr::from_le_bytes_mod_order(right);
 
-	// Usa siempre NativePoseidonHasher (~3x faster via host functions)
+	// Use native hasher for ~3x performance boost (falls back to WASM if feature disabled)
+	#[cfg(feature = "poseidon-native")]
 	let hasher = orbinum_zk_core::NativePoseidonHasher;
+
+	#[cfg(not(feature = "poseidon-native"))]
+	let hasher = orbinum_zk_core::LightPoseidonHasher;
 
 	// Hash using the domain port (Clean Architecture)
 	let hash_fr = hasher.hash_2([FieldElement::new(left_fr), FieldElement::new(right_fr)]);

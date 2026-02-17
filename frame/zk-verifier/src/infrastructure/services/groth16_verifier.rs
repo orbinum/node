@@ -55,44 +55,203 @@ impl ProofValidator for Groth16Verifier {
 
 impl ZkVerifierPort for Groth16Verifier {
 	fn verify_transfer_proof(
-		_proof: &[u8],
-		_merkle_root: &[u8; 32],
-		_nullifiers: &[[u8; 32]],
-		_commitments: &[[u8; 32]],
+		proof: &[u8],
+		merkle_root: &[u8; 32],
+		nullifiers: &[[u8; 32]],
+		commitments: &[[u8; 32]],
 		_version: Option<u32>,
 	) -> Result<bool, DispatchError> {
-		// TODO: Implementar verificación real de transfer proof
-		// Por ahora retornamos Ok(true) para desarrollo
+		// Skip real verification in benchmarks and tests
 		#[cfg(any(feature = "runtime-benchmarks", test))]
 		{
+			let _ = (proof, merkle_root, nullifiers, commitments);
 			Ok(true)
 		}
 
+		// Real verification in production
 		#[cfg(not(any(feature = "runtime-benchmarks", test)))]
 		{
-			// Implementación real pendiente
-			Ok(true)
+			use crate::infrastructure::adapters::primitives::{
+				PrimitiveGroth16Verifier as PrimitiveVerifier, PrimitiveProof,
+				PrimitivePublicInputs,
+			};
+
+			// Validate proof is not empty
+			if proof.is_empty() {
+				#[cfg(feature = "std")]
+				log::error!("Empty transfer proof provided");
+				return Err(DispatchError::Other("Empty transfer proof"));
+			}
+
+			// Validate input counts (transfer circuit expects 2 nullifiers and 2 commitments)
+			if nullifiers.len() != 2 {
+				#[cfg(feature = "std")]
+				log::error!(
+					"Invalid nullifiers count: {} (expected 2)",
+					nullifiers.len()
+				);
+				return Err(DispatchError::Other(
+					"Invalid nullifiers count for transfer",
+				));
+			}
+
+			if commitments.len() != 2 {
+				#[cfg(feature = "std")]
+				log::error!(
+					"Invalid commitments count: {} (expected 2)",
+					commitments.len()
+				);
+				return Err(DispatchError::Other(
+					"Invalid commitments count for transfer",
+				));
+			}
+
+			// Log para debugging (solo en std)
+			#[cfg(feature = "std")]
+			{
+				log::debug!(
+					"Transfer proof verification - merkle_root: {merkle_root:?}, nullifiers: {nullifiers:?}, commitments: {commitments:?}"
+				);
+			}
+
+			// Load verification key from hardcoded transfer VK
+			use crate::infrastructure::adapters::TransferVkAdapter;
+			let primitive_vk = TransferVkAdapter::get_transfer_vk();
+
+			// Create proof wrapper from bytes
+			let primitive_proof = PrimitiveProof::new(proof.to_vec());
+
+			// Create public inputs from parameters
+			// Expected inputs: [merkle_root, nullifier1, nullifier2, commitment1, commitment2]
+			let mut public_inputs_bytes = alloc::vec![];
+
+			// 1. merkle_root (already 32 bytes)
+			public_inputs_bytes.push(*merkle_root);
+
+			// 2-3. nullifiers (2x 32 bytes)
+			for nullifier in nullifiers {
+				public_inputs_bytes.push(*nullifier);
+			}
+
+			// 4-5. commitments (2x 32 bytes)
+			for commitment in commitments {
+				public_inputs_bytes.push(*commitment);
+			}
+
+			let primitive_public_inputs = PrimitivePublicInputs::new(public_inputs_bytes);
+
+			// Verify the proof using orbinum-zk-verifier
+			match PrimitiveVerifier::verify(
+				&primitive_vk,
+				&primitive_public_inputs,
+				&primitive_proof,
+			) {
+				Ok(()) => {
+					#[cfg(feature = "std")]
+					log::info!("✅ Transfer proof verification PASSED");
+					Ok(true)
+				}
+				Err(_) => {
+					#[cfg(feature = "std")]
+					log::warn!("❌ Transfer proof verification FAILED");
+					Ok(false)
+				}
+			}
 		}
 	}
 
 	fn verify_unshield_proof(
-		_proof: &[u8],
-		_merkle_root: &[u8; 32],
-		_nullifier: &[u8; 32],
-		_amount: u128,
+		proof: &[u8],
+		merkle_root: &[u8; 32],
+		nullifier: &[u8; 32],
+		amount: u128,
+		recipient: &[u8; 20],
+		asset_id: u32,
 		_version: Option<u32>,
 	) -> Result<bool, DispatchError> {
-		// TODO: Implementar verificación real de unshield proof
-		// Por ahora retornamos Ok(true) para desarrollo
+		// Skip real verification in benchmarks and tests
 		#[cfg(any(feature = "runtime-benchmarks", test))]
 		{
+			let _ = (proof, merkle_root, nullifier, amount, recipient, asset_id);
 			Ok(true)
 		}
 
+		// Real verification in production
 		#[cfg(not(any(feature = "runtime-benchmarks", test)))]
 		{
-			// Implementación real pendiente
-			Ok(true)
+			use crate::infrastructure::adapters::primitives::{
+				PrimitiveGroth16Verifier as PrimitiveVerifier, PrimitiveProof,
+				PrimitivePublicInputs,
+			};
+
+			// Validate proof is not empty
+			if proof.is_empty() {
+				#[cfg(feature = "std")]
+				log::error!("Empty unshield proof provided");
+				return Err(DispatchError::Other("Empty unshield proof"));
+			}
+
+			// Log para debugging (solo en std)
+			#[cfg(feature = "std")]
+			{
+				log::debug!(
+					"Unshield proof verification - merkle_root: {merkle_root:?}, nullifier: {nullifier:?}, amount: {amount}, recipient: {recipient:?}, asset_id: {asset_id}"
+				);
+			}
+
+			// Load verification key from hardcoded unshield VK
+			use crate::infrastructure::adapters::UnshieldVkAdapter;
+			let primitive_vk = UnshieldVkAdapter::get_unshield_vk();
+
+			// Create proof wrapper from bytes
+			let primitive_proof = PrimitiveProof::new(proof.to_vec());
+
+			// Create public inputs from parameters
+			// Expected inputs: [merkle_root, nullifier, amount, recipient, asset_id]
+			let mut public_inputs_bytes = alloc::vec![];
+
+			// 1. merkle_root (canonical 32-byte field element, LE representation)
+			public_inputs_bytes.push(*merkle_root);
+
+			// 2. nullifier (canonical 32-byte field element, LE representation)
+			public_inputs_bytes.push(*nullifier);
+
+			// 3. amount (u128 -> 32 bytes little-endian)
+			let mut amount_arr = [0u8; 32];
+			amount_arr[..16].copy_from_slice(&amount.to_le_bytes());
+			public_inputs_bytes.push(amount_arr);
+
+			// 4. recipient (20 bytes -> 32 bytes LE field encoding)
+			let mut recipient_arr = [0u8; 32];
+			for (index, byte) in recipient.iter().rev().enumerate() {
+				recipient_arr[index] = *byte;
+			}
+			public_inputs_bytes.push(recipient_arr);
+
+			// 5. asset_id (u32 -> 32 bytes little-endian)
+			let mut asset_id_arr = [0u8; 32];
+			asset_id_arr[..4].copy_from_slice(&asset_id.to_le_bytes());
+			public_inputs_bytes.push(asset_id_arr);
+
+			let primitive_public_inputs = PrimitivePublicInputs::new(public_inputs_bytes);
+
+			// Verify the proof using orbinum-zk-verifier
+			match PrimitiveVerifier::verify(
+				&primitive_vk,
+				&primitive_public_inputs,
+				&primitive_proof,
+			) {
+				Ok(()) => {
+					#[cfg(feature = "std")]
+					log::info!("✅ Unshield proof verification PASSED");
+					Ok(true)
+				}
+				Err(_) => {
+					#[cfg(feature = "std")]
+					log::warn!("❌ Unshield proof verification FAILED");
+					Ok(false)
+				}
+			}
 		}
 	}
 
@@ -163,7 +322,6 @@ impl ZkVerifierPort for Groth16Verifier {
 			}
 
 			// Load verification key from hardcoded disclosure VK
-			// TODO: Cargar VK desde el adapter correcto
 			use crate::infrastructure::adapters::DisclosureVkAdapter;
 			let primitive_vk = DisclosureVkAdapter::get_disclosure_vk();
 

@@ -14,6 +14,8 @@ use frame_support::{
 use frame_system;
 #[cfg(not(feature = "runtime-benchmarks"))]
 use pallet_zk_verifier::ZkVerifierPort;
+#[cfg(not(feature = "runtime-benchmarks"))]
+use parity_scale_codec::Encode;
 
 pub struct UnshieldService;
 
@@ -66,13 +68,31 @@ impl UnshieldService {
 		let amount_u128: u128 = amount.try_into().map_err(|_| Error::<T>::InvalidAmount)?;
 
 		// 7. Verify ZK proof (skip in benchmarking mode)
+		// Canonical format between shielded-pool and zk-verifier is LE.
+		// Pass merkle_root/nullifier as-is (no endianness conversion).
 		#[cfg(not(feature = "runtime-benchmarks"))]
 		{
+			// Convert recipient (AccountId) to bytes
+			// En el runtime de producción, AccountId es H160 (20 bytes)
+			// En tests, puede ser u64 (8 bytes)
+			let recipient_encoded = recipient.encode();
+
+			// Padding a 20 bytes (requerido por el circuito)
+			let recipient_bytes: [u8; 20] = {
+				let mut bytes = [0u8; 20];
+				let len = recipient_encoded.len().min(20);
+				// Copiar desde el final (right-aligned) para números pequeños
+				bytes[20 - len..].copy_from_slice(&recipient_encoded[..len]);
+				bytes
+			};
+
 			let valid = T::ZkVerifier::verify_unshield_proof(
 				_proof,
 				&merkle_root,
 				&nullifier.0,
 				amount_u128,
+				&recipient_bytes,
+				asset_id,
 				None, // Use active version
 			)
 			.map_err(|_| Error::<T>::ProofVerificationFailed)?;
