@@ -7486,7 +7486,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orbinum-encrypted-memo"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.5.0",
@@ -8312,7 +8312,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-shielded-pool"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.5.0",
@@ -8320,7 +8320,6 @@ dependencies = [
  "frame-support",
  "frame-system",
  "once_cell",
- "orbinum-encrypted-memo",
  "orbinum-zk-circuits",
  "orbinum-zk-core 0.4.0",
  "orbinum-zk-verifier",
