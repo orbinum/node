@@ -1,6 +1,6 @@
 [package]
 name = "orbinum-encrypted-memo"
-version = "0.2.2"
+version = "0.2.3"
 authors = ["Orbinum Network <dev@orbinum.net>"]
 edition = "2021"
 license = "Apache-2.0 OR GPL-3.0-or-later"
@@ -23,7 +23,7 @@ serde = { version = "1.0", default-features = false, features = ["derive"], opti
 serde_json = { version = "1.0", default-features = false, optional = true }
 
 # Random number generation (encrypt feature)
-rand = { version = "0.8", default-features = false, features = ["std_rng"], optional = true }
+rand = { version = "0.8", default-features = false, features = ["std_rng", "getrandom"], optional = true }
 
 # ZK proof dependencies (disclosure feature)
 ark-bn254 = { version = "0.5.0", default-features = false, optional = true }
@@ -66,6 +66,7 @@ encrypt = ["rand"]
 disclosure = [
 	"serde",
 	"serde_json",
+	"serde_json/alloc",
 	"hex",
 	"ark-bn254",
 	"ark-ff",
