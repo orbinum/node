@@ -1,6 +1,6 @@
 [package]
 name = "pallet-shielded-pool"
-version = "0.3.1"
+version = "0.4.0"
 description = "Shielded pool pallet for private transactions using ZK proofs"
 authors = ["Orbinum Team"]
 license = "GPL-3.0-or-later"
@@ -31,7 +31,6 @@ frame-support = { git = "https://github.com/paritytech/polkadot-sdk", branch = "
 frame-system = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
 
 # Local dependencies
-orbinum-encrypted-memo = { path = "../../primitives/encrypted-memo", default-features = false }
 orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
 orbinum-zk-verifier = { path = "../../primitives/zk-verifier", default-features = false }
 pallet-zk-verifier = { path = "../zk-verifier", default-features = false }
@@ -43,7 +42,6 @@ ark-ff = { version = "0.5.0", default-features = false }
 [dev-dependencies]
 ark-bn254 = { version = "0.5.0", default-features = false }
 ark-ff = { version = "0.5.0", default-features = false }
-orbinum-encrypted-memo = { path = "../../primitives/encrypted-memo", default-features = false }
 orbinum-zk-circuits = { path = "../../primitives/zk-circuits", default-features = false }
 orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
 pallet-balances = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
@@ -65,7 +63,6 @@ std = [
 	"frame-benchmarking?/std",
 	"orbinum-zk-verifier/std",
 	"orbinum-zk-core/std",
-	"orbinum-encrypted-memo/std",
 	"pallet-zk-verifier/std",
 	"ark-bn254/std",
 	"ark-ff/std",

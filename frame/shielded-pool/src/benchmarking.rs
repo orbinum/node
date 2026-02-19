@@ -94,8 +94,8 @@ mod benchmarks {
 		let (caller, asset_id) = setup_benchmark_env::<T>();
 		let amount: BalanceOf<T> = T::MinShieldAmount::get() * 10u32.into();
 		let commitment = Commitment([1u8; 32]);
-		// Memo must be exactly 256 bytes (MAX_ENCRYPTED_MEMO_SIZE)
-		let memo_bytes = vec![0u8; 256];
+		// Memo must be exactly 104 bytes (MAX_ENCRYPTED_MEMO_SIZE): nonce(12) + data(76) + MAC(16)
+		let memo_bytes = vec![0u8; 104];
 		let encrypted_memo = FrameEncryptedMemo(memo_bytes.try_into().unwrap());
 
 		#[extrinsic_call]
@@ -116,7 +116,7 @@ mod benchmarks {
 		let mut operations = Vec::new();
 		for i in 0..n {
 			let commitment = Commitment([i as u8; 32]);
-			let memo_bytes = vec![0u8; 256];
+			let memo_bytes = vec![0u8; 104];
 			let encrypted_memo = FrameEncryptedMemo(memo_bytes.try_into().unwrap());
 			operations.push((asset_id, amount, commitment, encrypted_memo));
 		}
@@ -139,7 +139,7 @@ mod benchmarks {
 			vec![Nullifier([2u8; 32])].try_into().unwrap();
 		let commitments: BoundedVec<Commitment, ConstU32<2>> =
 			vec![Commitment([3u8; 32])].try_into().unwrap();
-		let memo_bytes = vec![0u8; 256];
+		let memo_bytes = vec![0u8; 104];
 		let encrypted_memos: BoundedVec<FrameEncryptedMemo, ConstU32<2>> =
 			vec![FrameEncryptedMemo(memo_bytes.try_into().unwrap())]
 				.try_into()
