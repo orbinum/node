@@ -73,7 +73,7 @@ jobs:
         # Builds node binary AND runtime WASM (no need to rebuild separately)
 
       - name: Upload node binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: orbinum-node
           path: target/release/orbinum-node
@@ -102,7 +102,7 @@ jobs:
           fi
 
       - name: Upload runtime WASM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: orbinum-runtime-wasm
           path: target/release/wbuild/orbinum-runtime/orbinum_runtime.compact.compressed.wasm
