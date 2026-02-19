@@ -90,10 +90,11 @@ pub fn encrypt_memo_random(
 	commitment: &[u8; 32],
 	recipient_viewing_key: &[u8; 32],
 ) -> Result<Vec<u8>, MemoError> {
+	use rand::rngs::OsRng;
 	use rand::RngCore;
 
 	let mut nonce = [0u8; 12];
-	rand::thread_rng().fill_bytes(&mut nonce);
+	OsRng.fill_bytes(&mut nonce);
 
 	encrypt_memo(memo, commitment, recipient_viewing_key, &nonce)
 }
