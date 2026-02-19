@@ -1,10 +1,11 @@
 name: Build
 
 on:
-  push:
+  # Run only after Test passes on main/develop — avoids double Substrate compilation
+  workflow_run:
+    workflows: ["Test"]
+    types: [completed]
     branches: [main, develop]
-  # Only run on push to main/develop for release builds
-  # Pull requests use the Test workflow's build job
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -19,6 +20,8 @@ jobs:
   build-release:
     name: Build Release
     runs-on: ubuntu-latest
+    # Only run if the Test workflow succeeded
+    if: github.event.workflow_run.conclusion == 'success'
     steps:
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@main
@@ -33,10 +36,9 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@v4
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang libclang-dev
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -68,6 +70,7 @@ jobs:
 
       - name: Build release
         run: make build-release
+        # Builds node binary AND runtime WASM (no need to rebuild separately)
 
       - name: Upload node binary
         uses: actions/upload-artifact@v4
@@ -75,9 +78,6 @@ jobs:
           name: orbinum-node
           path: target/release/orbinum-node
           retention-days: 7
-
-      - name: Build runtime WASM
-        run: cargo build --release -p orbinum-runtime
 
       - name: Check runtime size
         run: |
