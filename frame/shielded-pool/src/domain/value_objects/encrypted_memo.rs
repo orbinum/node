@@ -9,7 +9,10 @@ use sp_runtime::RuntimeDebug;
 use sp_std::vec::Vec;
 
 /// Maximum size for an encrypted memo (in bytes)
-pub const MAX_MEMO_SIZE: u32 = 256;
+///
+/// Must match the output of ChaCha20Poly1305 encryption:
+/// `nonce(12) + note_data(76) + MAC(16) = 104`
+pub const MAX_MEMO_SIZE: u32 = 104;
 
 /// Standard encrypted memo with default max size
 pub type StandardEncryptedMemo = EncryptedMemo<ConstU32<MAX_MEMO_SIZE>>;
