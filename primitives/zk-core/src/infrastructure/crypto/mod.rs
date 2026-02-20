@@ -1,3 +1,4 @@
+pub mod poseidon_hash_1;
 pub mod poseidon_hasher;
 
 #[cfg(feature = "poseidon-native")]

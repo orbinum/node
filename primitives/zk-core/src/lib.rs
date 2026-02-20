@@ -55,6 +55,7 @@ pub use application::{
 };
 
 // Re-export infrastructure implementations
+pub use infrastructure::crypto::poseidon_hash_1::poseidon_hash_1;
 pub use infrastructure::crypto::poseidon_hasher::LightPoseidonHasher;
 
 #[cfg(feature = "poseidon-native")]
