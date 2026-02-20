@@ -423,3 +423,559 @@ fn batch_submit_disclosure_stress_test() {
 		assert_eq!(stored_count, 10);
 	});
 }
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/// Build valid 76-byte public signals where signals[0..32] matches commitment.
+fn make_signals(commitment: &Commitment) -> Vec<u8> {
+	let mut signals = vec![0u8; 76];
+	signals[0..32].copy_from_slice(&commitment.0); // commitment
+	signals[32..40].copy_from_slice(&0u64.to_le_bytes()); // revealed_value (0 = not disclosed)
+	signals[40..44].copy_from_slice(&0u32.to_le_bytes()); // revealed_asset_id (0 = not disclosed)
+	// signals[44..76] = all zeros (revealed_owner_hash not disclosed)
+	signals
+}
+
+/// Shield a commitment so it exists in CommitmentMemos.
+fn shield_commitment(who: u64, commitment: Commitment) {
+	let memo = vec![1u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
+	let encrypted_memo = EncryptedMemo::new(memo).unwrap();
+	assert_ok!(ShieldedPool::shield(
+		RuntimeOrigin::signed(who),
+		0, // native asset
+		200u128,
+		commitment,
+		encrypted_memo,
+	));
+}
+
+/// Set the disclosure VK (bypasses extrinsic; simulates governance setup).
+fn set_vk() {
+	let vk = vec![1u8; 100];
+	crate::DisclosureVerifyingKey::<Test>::put(BoundedVec::try_from(vk).unwrap());
+}
+
+// ============================================================================
+// set_disclosure_verifying_key
+// ============================================================================
+
+#[test]
+fn set_disclosure_verifying_key_works() {
+	new_test_ext().execute_with(|| {
+		let vk = vec![1u8; 200];
+		let vk_bounded = BoundedVec::try_from(vk).unwrap();
+
+		assert_ok!(ShieldedPool::set_disclosure_verifying_key(
+			RuntimeOrigin::root(),
+			vk_bounded,
+		));
+
+		// VK is stored
+		assert!(crate::DisclosureVerifyingKey::<Test>::get().is_some());
+
+		// Event emitted
+		System::assert_last_event(
+			Event::DisclosureVerifyingKeyUpdated { vk_size: 200 }.into()
+		);
+	});
+}
+
+#[test]
+fn set_disclosure_verifying_key_fails_not_root() {
+	new_test_ext().execute_with(|| {
+		let vk = vec![1u8; 200];
+		let vk_bounded = BoundedVec::try_from(vk).unwrap();
+
+		assert_noop!(
+			ShieldedPool::set_disclosure_verifying_key(
+				RuntimeOrigin::signed(1),
+				vk_bounded,
+			),
+			frame_support::error::BadOrigin
+		);
+	});
+}
+
+// ============================================================================
+// submit_disclosure – happy paths
+// ============================================================================
+
+#[test]
+fn submit_disclosure_works_no_policy_no_auditor() {
+	new_test_ext().execute_with(|| {
+		let who = 1u64;
+		let commitment = Commitment([10u8; 32]);
+
+		shield_commitment(who, commitment);
+		set_vk();
+
+		let proof = BoundedVec::try_from(vec![1u8; 256]).unwrap();
+		let signals: BoundedVec<u8, _> = BoundedVec::try_from(make_signals(&commitment)).unwrap();
+		let partial = BoundedVec::try_from(vec![0u8; 10]).unwrap();
+
+		assert_ok!(ShieldedPool::submit_disclosure(
+			RuntimeOrigin::signed(who),
+			commitment,
+			proof,
+			signals,
+			partial,
+			None, // no auditor
+		));
+
+		// Proof is stored
+		assert!(crate::DisclosureProofs::<Test>::contains_key(commitment));
+
+		// DisclosureVerified event
+		System::assert_has_event(
+			Event::DisclosureVerified {
+				who,
+				commitment,
+				verified: true,
+			}
+			.into(),
+		);
+	});
+}
+
+#[test]
+fn submit_disclosure_stores_rate_limit_timestamp() {
+	new_test_ext().execute_with(|| {
+		let who = 1u64;
+		let commitment = Commitment([20u8; 32]);
+
+		shield_commitment(who, commitment);
+		set_vk();
+
+		let proof = BoundedVec::try_from(vec![1u8; 256]).unwrap();
+		let signals: BoundedVec<u8, _> = BoundedVec::try_from(make_signals(&commitment)).unwrap();
+		let partial = BoundedVec::try_from(vec![0u8; 10]).unwrap();
+
+		assert_ok!(ShieldedPool::submit_disclosure(
+			RuntimeOrigin::signed(who),
+			commitment,
+			proof,
+			signals,
+			partial,
+			None,
+		));
+
+		// Rate-limiting timestamp stored
+		assert!(crate::LastDisclosureTimestamp::<Test>::get(who, commitment).is_some());
+	});
+}
+
+#[test]
+fn submit_disclosure_with_auditor_works() {
+	new_test_ext().execute_with(|| {
+		let owner = 1u64;
+		let auditor = 2u64;
+		let commitment = Commitment([30u8; 32]);
+
+		// Setup: shield, VK, policy, request
+		shield_commitment(owner, commitment);
+		set_vk();
+
+		let auditor_enum = Auditor::Account(auditor);
+		let conds = BoundedVec::try_from(vec![DisclosureCondition::Always]).unwrap();
+		let auds = BoundedVec::try_from(vec![auditor_enum]).unwrap();
+		assert_ok!(ShieldedPool::set_audit_policy(
+			RuntimeOrigin::signed(owner),
+			auds,
+			conds,
+			None,
+		));
+		let reason = BoundedVec::try_from(b"Tax audit".to_vec()).unwrap();
+		assert_ok!(ShieldedPool::request_disclosure(
+			RuntimeOrigin::signed(auditor),
+			owner,
+			reason,
+			None,
+		));
+
+		let proof = BoundedVec::try_from(vec![1u8; 256]).unwrap();
+		let signals: BoundedVec<u8, _> = BoundedVec::try_from(make_signals(&commitment)).unwrap();
+		let partial = BoundedVec::try_from(vec![0u8; 10]).unwrap();
+
+		assert_ok!(ShieldedPool::submit_disclosure(
+			RuntimeOrigin::signed(owner),
+			commitment,
+			proof,
+			signals,
+			partial,
+			Some(auditor),
+		));
+
+		// Proof stored and audit trail created
+		assert!(crate::DisclosureProofs::<Test>::contains_key(commitment));
+		assert_eq!(crate::NextAuditTrailId::<Test>::get(), 1);
+	});
+}
+
+// ============================================================================
+// submit_disclosure – error paths
+// ============================================================================
+
+#[test]
+fn submit_disclosure_fails_commitment_not_found() {
+	new_test_ext().execute_with(|| {
+		let who = 1u64;
+		let commitment = Commitment([99u8; 32]); // never shielded
+
+		set_vk();
+
+		let proof = BoundedVec::try_from(vec![1u8; 256]).unwrap();
+		let signals: BoundedVec<u8, _> = BoundedVec::try_from(make_signals(&commitment)).unwrap();
+		let partial = BoundedVec::try_from(vec![0u8; 10]).unwrap();
+
+		assert_noop!(
+			ShieldedPool::submit_disclosure(
+				RuntimeOrigin::signed(who),
+				commitment,
+				proof,
+				signals,
+				partial,
+				None,
+			),
+			Error::<Test>::CommitmentNotFound
+		);
+	});
+}
+
+#[test]
+fn submit_disclosure_fails_verifying_key_not_set() {
+	new_test_ext().execute_with(|| {
+		let who = 1u64;
+		let commitment = Commitment([11u8; 32]);
+
+		shield_commitment(who, commitment);
+		// intentionally skip set_vk()
+
+		let proof = BoundedVec::try_from(vec![1u8; 256]).unwrap();
+		let signals: BoundedVec<u8, _> = BoundedVec::try_from(make_signals(&commitment)).unwrap();
+		let partial = BoundedVec::try_from(vec![0u8; 10]).unwrap();
+
+		assert_noop!(
+			ShieldedPool::submit_disclosure(
+				RuntimeOrigin::signed(who),
+				commitment,
+				proof,
+				signals,
+				partial,
+				None,
+			),
+			Error::<Test>::VerifyingKeyNotSet
+		);
+	});
+}
+
+#[test]
+fn submit_disclosure_fails_invalid_proof_size() {
+	new_test_ext().execute_with(|| {
+		let who = 1u64;
+		let commitment = Commitment([12u8; 32]);
+
+		shield_commitment(who, commitment);
+		set_vk();
+
+		// Proof too short (not 256 bytes)
+		let proof = BoundedVec::try_from(vec![1u8; 100]).unwrap();
+		let signals: BoundedVec<u8, _> = BoundedVec::try_from(make_signals(&commitment)).unwrap();
+		let partial = BoundedVec::try_from(vec![0u8; 10]).unwrap();
+
+		assert_noop!(
+			ShieldedPool::submit_disclosure(
+				RuntimeOrigin::signed(who),
+				commitment,
+				proof,
+				signals,
+				partial,
+				None,
+			),
+			Error::<Test>::InvalidProof
+		);
+	});
+}
+
+#[test]
+fn submit_disclosure_fails_invalid_signals_length() {
+	new_test_ext().execute_with(|| {
+		let who = 1u64;
+		let commitment = Commitment([13u8; 32]);
+
+		shield_commitment(who, commitment);
+		set_vk();
+
+		let proof = BoundedVec::try_from(vec![1u8; 256]).unwrap();
+		// Wrong length (not 76 bytes)
+		let signals: BoundedVec<u8, _> = BoundedVec::try_from(vec![0u8; 32]).unwrap();
+		let partial = BoundedVec::try_from(vec![0u8; 10]).unwrap();
+
+		assert_noop!(
+			ShieldedPool::submit_disclosure(
+				RuntimeOrigin::signed(who),
+				commitment,
+				proof,
+				signals,
+				partial,
+				None,
+			),
+			Error::<Test>::InvalidPublicSignals
+		);
+	});
+}
+
+#[test]
+fn submit_disclosure_fails_signals_commitment_mismatch() {
+	new_test_ext().execute_with(|| {
+		let who = 1u64;
+		let commitment = Commitment([14u8; 32]);
+
+		shield_commitment(who, commitment);
+		set_vk();
+
+		let proof = BoundedVec::try_from(vec![1u8; 256]).unwrap();
+		// Signals with wrong commitment (all zeros vs [14u8; 32])
+		let mut signals_raw = vec![0u8; 76];
+		signals_raw[0..32].copy_from_slice(&[99u8; 32]); // mismatch!
+		let signals: BoundedVec<u8, _> = BoundedVec::try_from(signals_raw).unwrap();
+		let partial = BoundedVec::try_from(vec![0u8; 10]).unwrap();
+
+		assert_noop!(
+			ShieldedPool::submit_disclosure(
+				RuntimeOrigin::signed(who),
+				commitment,
+				proof,
+				signals,
+				partial,
+				None,
+			),
+			Error::<Test>::InvalidPublicSignals
+		);
+	});
+}
+
+#[test]
+fn submit_disclosure_fails_no_policy_with_auditor() {
+	new_test_ext().execute_with(|| {
+		let who = 1u64;
+		let auditor = 2u64;
+		let commitment = Commitment([15u8; 32]);
+
+		shield_commitment(who, commitment);
+		set_vk();
+		// No audit policy set for `who`
+
+		let proof = BoundedVec::try_from(vec![1u8; 256]).unwrap();
+		let signals: BoundedVec<u8, _> = BoundedVec::try_from(make_signals(&commitment)).unwrap();
+		let partial = BoundedVec::try_from(vec![0u8; 10]).unwrap();
+
+		assert_noop!(
+			ShieldedPool::submit_disclosure(
+				RuntimeOrigin::signed(who),
+				commitment,
+				proof,
+				signals,
+				partial,
+				Some(auditor), // auditor specified but no policy
+			),
+			Error::<Test>::UnauthorizedAuditor
+		);
+	});
+}
+
+#[test]
+fn submit_disclosure_fails_unauthorized_auditor_in_policy() {
+	new_test_ext().execute_with(|| {
+		let owner = 1u64;
+		let authorized_auditor = 2u64;
+		let unauthorized_auditor = 3u64;
+		let commitment = Commitment([16u8; 32]);
+
+		shield_commitment(owner, commitment);
+		set_vk();
+
+		// Policy only authorizes auditor 2
+		let auds = BoundedVec::try_from(vec![Auditor::Account(authorized_auditor)]).unwrap();
+		let conds = BoundedVec::try_from(vec![DisclosureCondition::Always]).unwrap();
+		assert_ok!(ShieldedPool::set_audit_policy(
+			RuntimeOrigin::signed(owner),
+			auds,
+			conds,
+			None,
+		));
+
+		let proof = BoundedVec::try_from(vec![1u8; 256]).unwrap();
+		let signals: BoundedVec<u8, _> = BoundedVec::try_from(make_signals(&commitment)).unwrap();
+		let partial = BoundedVec::try_from(vec![0u8; 10]).unwrap();
+
+		// Auditor 3 is not in the policy
+		assert_noop!(
+			ShieldedPool::submit_disclosure(
+				RuntimeOrigin::signed(owner),
+				commitment,
+				proof,
+				signals,
+				partial,
+				Some(unauthorized_auditor),
+			),
+			Error::<Test>::UnauthorizedAuditor
+		);
+	});
+}
+
+// ============================================================================
+// reject_disclosure – error paths
+// ============================================================================
+
+#[test]
+fn reject_disclosure_fails_request_not_found() {
+	new_test_ext().execute_with(|| {
+		let target = 1u64;
+		let auditor = 2u64;
+
+		// No request active → reject should fail
+		let reason = BoundedVec::try_from(b"No request".to_vec()).unwrap();
+		assert_noop!(
+			ShieldedPool::reject_disclosure(
+				RuntimeOrigin::signed(target),
+				auditor,
+				reason,
+			),
+			Error::<Test>::DisclosureRequestNotFound
+		);
+	});
+}
+
+// ============================================================================
+// approve_disclosure – error paths
+// ============================================================================
+
+#[test]
+fn approve_disclosure_fails_request_not_found() {
+	new_test_ext().execute_with(|| {
+		let target = 1u64;
+		let auditor = 2u64;
+		let commitment = Commitment([50u8; 32]);
+
+		// Shield so commitment exists, but never request disclosure
+		shield_commitment(target, commitment);
+		set_vk();
+
+		let zk_proof = BoundedVec::try_from(vec![1u8; 256]).unwrap();
+		let disclosed_data = BoundedVec::try_from(vec![2u8; 50]).unwrap();
+
+		assert_noop!(
+			ShieldedPool::approve_disclosure(
+				RuntimeOrigin::signed(target),
+				auditor,
+				commitment,
+				zk_proof,
+				disclosed_data,
+			),
+			Error::<Test>::DisclosureRequestNotFound
+		);
+	});
+}
+
+#[test]
+fn approve_disclosure_fails_invalid_proof_when_commitment_not_shielded() {
+	new_test_ext().execute_with(|| {
+		let target = 1u64;
+		let auditor = 2u64;
+		let commitment = Commitment([51u8; 32]); // never shielded
+
+		// Setup policy + request (without shielding)
+		let auds = BoundedVec::try_from(vec![Auditor::Account(auditor)]).unwrap();
+		let conds = BoundedVec::try_from(vec![DisclosureCondition::Always]).unwrap();
+		assert_ok!(ShieldedPool::set_audit_policy(
+			RuntimeOrigin::signed(target),
+			auds,
+			conds,
+			None,
+		));
+		let reason = BoundedVec::try_from(b"audit".to_vec()).unwrap();
+		assert_ok!(ShieldedPool::request_disclosure(
+			RuntimeOrigin::signed(auditor),
+			target,
+			reason,
+			None,
+		));
+
+		let zk_proof = BoundedVec::try_from(vec![1u8; 256]).unwrap();
+		let disclosed_data = BoundedVec::try_from(vec![2u8; 50]).unwrap();
+
+		assert_noop!(
+			ShieldedPool::approve_disclosure(
+				RuntimeOrigin::signed(target),
+				auditor,
+				commitment,
+				zk_proof,
+				disclosed_data,
+			),
+			Error::<Test>::InvalidDisclosureProof
+		);
+	});
+}
+
+// ============================================================================
+// request_disclosure – additional error paths
+// ============================================================================
+
+#[test]
+fn request_disclosure_fails_no_audit_policy() {
+	new_test_ext().execute_with(|| {
+		let target = 1u64;
+		let auditor = 2u64;
+
+		// target never called set_audit_policy
+		let reason = BoundedVec::try_from(b"Regulatory".to_vec()).unwrap();
+		assert_noop!(
+			ShieldedPool::request_disclosure(
+				RuntimeOrigin::signed(auditor),
+				target,
+				reason,
+				None,
+			),
+			Error::<Test>::AuditPolicyNotFound
+		);
+	});
+}
+
+#[test]
+fn request_disclosure_fails_duplicate_request() {
+	new_test_ext().execute_with(|| {
+		let target = 1u64;
+		let auditor = 2u64;
+
+		let auds = BoundedVec::try_from(vec![Auditor::Account(auditor)]).unwrap();
+		let conds = BoundedVec::try_from(vec![DisclosureCondition::Always]).unwrap();
+		assert_ok!(ShieldedPool::set_audit_policy(
+			RuntimeOrigin::signed(target),
+			auds,
+			conds,
+			None,
+		));
+
+		let reason = BoundedVec::try_from(b"First request".to_vec()).unwrap();
+		assert_ok!(ShieldedPool::request_disclosure(
+			RuntimeOrigin::signed(auditor),
+			target,
+			reason,
+			None,
+		));
+
+		// Second request from same auditor → duplicate
+		let reason2 = BoundedVec::try_from(b"Second request".to_vec()).unwrap();
+		assert_noop!(
+			ShieldedPool::request_disclosure(
+				RuntimeOrigin::signed(auditor),
+				target,
+				reason2,
+				None,
+			),
+			Error::<Test>::DisclosureRequestAlreadyExists
+		);
+	});
+}
