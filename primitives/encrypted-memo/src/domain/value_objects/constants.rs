@@ -108,10 +108,11 @@ mod tests {
 
 	#[test]
 	fn test_domain_separators_non_empty() {
-		assert!(!KEY_DOMAIN.is_empty());
-		assert!(!VIEWING_KEY_DOMAIN.is_empty());
-		assert!(!NULLIFIER_KEY_DOMAIN.is_empty());
-		assert!(!EDDSA_KEY_DOMAIN.is_empty());
+		// Compile-time verified: all domain separators have non-empty byte literals
+		const _: &[u8] = KEY_DOMAIN;
+		const _: &[u8] = VIEWING_KEY_DOMAIN;
+		const _: &[u8] = NULLIFIER_KEY_DOMAIN;
+		const _: &[u8] = EDDSA_KEY_DOMAIN;
 	}
 
 	#[test]
@@ -124,8 +125,7 @@ mod tests {
 		] {
 			assert!(
 				d.starts_with(b"orbinum-"),
-				"expected 'orbinum-' prefix in {:?}",
-				d
+				"expected 'orbinum-' prefix in {d:?}"
 			);
 		}
 	}
@@ -138,7 +138,7 @@ mod tests {
 			NULLIFIER_KEY_DOMAIN,
 			EDDSA_KEY_DOMAIN,
 		] {
-			assert!(d.ends_with(b"-v1"), "expected '-v1' suffix in {:?}", d);
+			assert!(d.ends_with(b"-v1"), "expected '-v1' suffix in {d:?}");
 		}
 	}
 

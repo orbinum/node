@@ -154,28 +154,22 @@ mod tests {
 
 	#[test]
 	fn test_valid_min_size() {
-		assert!(is_valid_encrypted_memo(&vec![0u8; MIN_ENCRYPTED_MEMO_SIZE]));
+		assert!(is_valid_encrypted_memo(&[0u8; MIN_ENCRYPTED_MEMO_SIZE]));
 	}
 
 	#[test]
 	fn test_valid_max_size() {
-		assert!(is_valid_encrypted_memo(&vec![0u8; MAX_ENCRYPTED_MEMO_SIZE]));
+		assert!(is_valid_encrypted_memo(&[0u8; MAX_ENCRYPTED_MEMO_SIZE]));
 	}
 
 	#[test]
 	fn test_invalid_too_short() {
-		assert!(!is_valid_encrypted_memo(&vec![
-			0u8;
-			MIN_ENCRYPTED_MEMO_SIZE - 1
-		]));
+		assert!(!is_valid_encrypted_memo(&[0u8; MIN_ENCRYPTED_MEMO_SIZE - 1]));
 	}
 
 	#[test]
 	fn test_invalid_too_long() {
-		assert!(!is_valid_encrypted_memo(&vec![
-			0u8;
-			MAX_ENCRYPTED_MEMO_SIZE + 1
-		]));
+		assert!(!is_valid_encrypted_memo(&[0u8; MAX_ENCRYPTED_MEMO_SIZE + 1]));
 	}
 
 	#[test]
@@ -185,17 +179,17 @@ mod tests {
 
 	#[test]
 	fn test_boundary_just_below_min() {
-		assert!(!is_valid_encrypted_memo(&vec![0u8; 27]));
+		assert!(!is_valid_encrypted_memo(&[0u8; 27]));
 	}
 
 	#[test]
 	fn test_boundary_just_above_max() {
-		assert!(!is_valid_encrypted_memo(&vec![0u8; 105]));
+		assert!(!is_valid_encrypted_memo(&[0u8; 105]));
 	}
 
 	#[test]
 	fn test_valid_mid_size() {
-		assert!(is_valid_encrypted_memo(&vec![0u8; 60]));
+		assert!(is_valid_encrypted_memo(&[0u8; 60]));
 	}
 
 	#[test]
