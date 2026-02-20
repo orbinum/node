@@ -164,12 +164,16 @@ mod tests {
 
 	#[test]
 	fn test_invalid_too_short() {
-		assert!(!is_valid_encrypted_memo(&[0u8; MIN_ENCRYPTED_MEMO_SIZE - 1]));
+		assert!(!is_valid_encrypted_memo(
+			&[0u8; MIN_ENCRYPTED_MEMO_SIZE - 1]
+		));
 	}
 
 	#[test]
 	fn test_invalid_too_long() {
-		assert!(!is_valid_encrypted_memo(&[0u8; MAX_ENCRYPTED_MEMO_SIZE + 1]));
+		assert!(!is_valid_encrypted_memo(
+			&[0u8; MAX_ENCRYPTED_MEMO_SIZE + 1]
+		));
 	}
 
 	#[test]
