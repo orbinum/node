@@ -1,30 +1,30 @@
-//! Key Set Management
+//! Key Set aggregate.
 //!
-//! KeySet aggregate manages all keys derived from a spending key.
+//! Manages all sub-keys derived from a single master spending key.
 
 use crate::domain::{
-	entities::types::{EdDSAKey, NullifierKey, ViewingKey},
 	services::key_derivation,
+	value_objects::{EdDSAKey, NullifierKey, ViewingKey},
 };
 
-/// Full key set derived from a single spending key
+/// Full key set derived from a single spending key.
 ///
-/// Contains spending, viewing, nullifier, and EdDSA keys.
-/// All derived from master spending_key via SHA256-based KDF.
+/// All sub-keys are deterministically derived via SHA-256 with domain separation.
+/// The `spending_key` is kept private — access it only through [`KeySet::spending_key`].
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct KeySet {
-	/// Master spending key (secret)
-	pub spending_key: [u8; 32],
-	/// Viewing key for memo decryption (shareable)
+	/// Master spending key (secret — never expose over the wire)
+	spending_key: [u8; 32],
+	/// Viewing key for memo decryption (safe to share with auditors)
 	pub viewing_key: ViewingKey,
 	/// Nullifier derivation key
 	pub nullifier_key: NullifierKey,
-	/// EdDSA signing key for circuits
+	/// EdDSA signing key for ZK circuits
 	pub eddsa_key: EdDSAKey,
 }
 
 impl KeySet {
-	/// Create new KeySet with all keys
+	/// Creates a `KeySet` from pre-derived keys.
 	pub fn new(
 		spending_key: [u8; 32],
 		viewing_key: ViewingKey,
@@ -39,7 +39,7 @@ impl KeySet {
 		}
 	}
 
-	/// Derive full key set from spending key
+	/// Derives a full key set from a master spending key.
 	pub fn from_spending_key(spending_key: [u8; 32]) -> Self {
 		Self {
 			spending_key,
@@ -49,12 +49,19 @@ impl KeySet {
 		}
 	}
 
-	/// Export viewing key for auditor (read-only)
+	/// Returns a reference to the master spending key.
+	///
+	/// Use with care — never serialize or transmit this value.
+	pub fn spending_key(&self) -> &[u8; 32] {
+		&self.spending_key
+	}
+
+	/// Exports the viewing key for an auditor (read-only access).
 	pub fn export_viewing_key(&self) -> ViewingKey {
 		self.viewing_key.clone()
 	}
 
-	/// Check if a viewing key matches this key set
+	/// Returns `true` when `vk` matches the viewing key in this key set.
 	pub fn matches_viewing_key(&self, vk: &ViewingKey) -> bool {
 		self.viewing_key == *vk
 	}
@@ -79,7 +86,7 @@ mod tests {
 
 		let keyset = KeySet::new(spending, viewing.clone(), nullifier.clone(), eddsa.clone());
 
-		assert_eq!(keyset.spending_key, spending);
+		assert_eq!(keyset.spending_key(), &spending);
 		assert_eq!(keyset.viewing_key, viewing);
 		assert_eq!(keyset.nullifier_key, nullifier);
 		assert_eq!(keyset.eddsa_key, eddsa);
@@ -94,7 +101,7 @@ mod tests {
 
 		let keyset = KeySet::new(spending, viewing.clone(), nullifier.clone(), eddsa.clone());
 
-		assert_eq!(keyset.spending_key, [0u8; 32]);
+		assert_eq!(keyset.spending_key(), &[0u8; 32]);
 		assert_eq!(keyset.viewing_key, viewing);
 	}
 
@@ -107,7 +114,7 @@ mod tests {
 
 		let keyset = KeySet::new(spending, viewing.clone(), nullifier.clone(), eddsa.clone());
 
-		assert_eq!(keyset.spending_key, [255u8; 32]);
+		assert_eq!(keyset.spending_key(), &[255u8; 32]);
 		assert_eq!(keyset.viewing_key, viewing);
 	}
 
@@ -118,7 +125,7 @@ mod tests {
 		let spending_key = [42u8; 32];
 		let keyset = KeySet::from_spending_key(spending_key);
 
-		assert_eq!(keyset.spending_key, spending_key);
+		assert_eq!(keyset.spending_key(), &spending_key);
 		// All derived keys should be non-zero (SHA256 output)
 		assert_ne!(keyset.viewing_key.as_bytes(), &[0u8; 32]);
 		assert_ne!(keyset.nullifier_key.as_bytes(), &[0u8; 32]);
@@ -155,7 +162,7 @@ mod tests {
 		let spending_key = [0u8; 32];
 		let keyset = KeySet::from_spending_key(spending_key);
 
-		assert_eq!(keyset.spending_key, [0u8; 32]);
+		assert_eq!(keyset.spending_key(), &[0u8; 32]);
 		// Even zero spending key should produce non-zero derived keys
 		assert_ne!(keyset.viewing_key.as_bytes(), &[0u8; 32]);
 	}
@@ -169,7 +176,7 @@ mod tests {
 
 		let keyset = KeySet::from_spending_key(spending_key);
 
-		assert_eq!(keyset.spending_key, spending_key);
+		assert_eq!(keyset.spending_key(), &spending_key);
 		assert_ne!(keyset.viewing_key.as_bytes(), &[0u8; 32]);
 	}
 
@@ -255,7 +262,7 @@ mod tests {
 		let keyset2 = keyset1.clone();
 
 		assert_eq!(keyset1, keyset2);
-		assert_eq!(keyset1.spending_key, keyset2.spending_key);
+		assert_eq!(keyset1.spending_key(), keyset2.spending_key());
 		assert_eq!(keyset1.viewing_key, keyset2.viewing_key);
 		assert_eq!(keyset1.nullifier_key, keyset2.nullifier_key);
 		assert_eq!(keyset1.eddsa_key, keyset2.eddsa_key);
@@ -286,7 +293,7 @@ mod tests {
 		let keyset = KeySet::from_spending_key(spending_key);
 
 		// All keys should be derived and distinct
-		assert_eq!(keyset.spending_key, spending_key);
+		assert_eq!(keyset.spending_key(), &spending_key);
 		assert_ne!(keyset.viewing_key.as_bytes(), &spending_key);
 		assert_ne!(keyset.nullifier_key.as_bytes(), &spending_key);
 		assert_ne!(keyset.eddsa_key.as_bytes(), &spending_key);
