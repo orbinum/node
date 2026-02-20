@@ -7538,7 +7538,7 @@ dependencies = [
  "jsonrpsee",
  "log",
  "orbinum-runtime",
- "orbinum-zk-core 0.4.0",
+ "orbinum-zk-core 0.5.0",
  "orbinum-zk-verifier",
  "pallet-shielded-pool-rpc",
  "pallet-shielded-pool-runtime-api",
@@ -7649,7 +7649,7 @@ dependencies = [
  "ark-bn254",
  "ark-r1cs-std",
  "ark-relations",
- "orbinum-zk-core 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "orbinum-zk-core 0.4.0",
 ]
 
 [[package]]
@@ -7666,19 +7666,6 @@ dependencies = [
 [[package]]
 name = "orbinum-zk-core"
 version = "0.4.0"
-dependencies = [
- "ark-bn254",
- "ark-ff 0.5.0",
- "ark-std 0.5.0",
- "light-poseidon-nostd",
- "serde",
- "serde_json",
- "sp-runtime-interface 30.0.0 (git+https://github.com/paritytech/polkadot-sdk?branch=stable2506)",
-]
-
-[[package]]
-name = "orbinum-zk-core"
-version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4eb2090c32b7de525e75499c48b3f3dbc24e3cde0e11ff2b1cafe1f0d0361c9"
 dependencies = [
@@ -7687,6 +7674,19 @@ dependencies = [
  "light-poseidon-nostd",
  "serde",
  "sp-runtime-interface 30.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "orbinum-zk-core"
+version = "0.5.0"
+dependencies = [
+ "ark-bn254",
+ "ark-ff 0.5.0",
+ "ark-std 0.5.0",
+ "light-poseidon-nostd",
+ "serde",
+ "serde_json",
+ "sp-runtime-interface 30.0.0 (git+https://github.com/paritytech/polkadot-sdk?branch=stable2506)",
 ]
 
 [[package]]
@@ -7703,7 +7703,7 @@ dependencies = [
  "ark-snark",
  "ark-std 0.5.0",
  "num-bigint",
- "orbinum-zk-core 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "orbinum-zk-core 0.4.0",
  "parity-scale-codec",
  "scale-info",
 ]
@@ -8321,7 +8321,7 @@ dependencies = [
  "frame-system",
  "once_cell",
  "orbinum-zk-circuits",
- "orbinum-zk-core 0.4.0",
+ "orbinum-zk-core 0.5.0",
  "orbinum-zk-verifier",
  "pallet-balances",
  "pallet-zk-verifier",
@@ -8527,7 +8527,7 @@ dependencies = [
  "frame-support",
  "frame-system",
  "log",
- "orbinum-zk-core 0.4.0",
+ "orbinum-zk-core 0.5.0",
  "orbinum-zk-verifier",
  "parity-scale-codec",
  "scale-info",
