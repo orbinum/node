@@ -97,8 +97,6 @@ pub fn is_valid_encrypted_memo(data: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	extern crate alloc;
-	use alloc::vec;
 
 	// ===== MemoData Tests =====
 
