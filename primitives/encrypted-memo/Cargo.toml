@@ -1,6 +1,6 @@
 [package]
 name = "orbinum-encrypted-memo"
-version = "0.2.3"
+version = "0.3.0"
 authors = ["Orbinum Network <dev@orbinum.net>"]
 edition = "2021"
 license = "Apache-2.0 OR GPL-3.0-or-later"
@@ -25,22 +25,6 @@ serde_json = { version = "1.0", default-features = false, optional = true }
 # Random number generation (encrypt feature)
 rand = { version = "0.8", default-features = false, features = ["std_rng", "getrandom"], optional = true }
 
-# ZK proof dependencies (disclosure feature)
-ark-bn254 = { version = "0.5.0", default-features = false, optional = true }
-ark-ff = { version = "0.5.0", default-features = false, optional = true }
-ark-groth16 = { version = "0.5.0", default-features = false, optional = true }
-ark-relations = { version = "0.5.0", default-features = false, optional = true }
-ark-serialize = { version = "0.5.0", default-features = false, optional = true }
-ark-snark = { version = "0.5.0", default-features = false, optional = true }
-ark-std = { version = "0.5.0", default-features = false, features = ["std"], optional = true }
-
-# Local dependencies
-orbinum-zk-core = { version = "0.3.0", default-features = false, optional = true }
-
-# WASM runtime (wasm-witness feature, requires std)
-once_cell = { version = "1.19", optional = true }
-wasmer = { version = "4.2", optional = true }
-
 [dev-dependencies]
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
 hex = "0.4"
@@ -55,34 +39,8 @@ std = [
 	"parity-scale-codec?/std",
 	"scale-info?/std",
 	"rand?/std",
-	"ark-std?/std",
 	"encrypt",
 ]
 
 # Encryption with random nonce generation
 encrypt = ["rand"]
-
-# Selective disclosure proof generation
-disclosure = [
-	"serde",
-	"serde_json",
-	"serde_json/alloc",
-	"hex",
-	"ark-bn254",
-	"ark-ff",
-	"ark-groth16",
-	"ark-relations",
-	"ark-serialize",
-	"ark-snark",
-	"ark-std",
-	"orbinum-zk-core",
-	"parity-scale-codec",
-	"scale-info",
-]
-
-# WASM witness calculator (requires std)
-wasm-witness = [
-	"disclosure",
-	"wasmer",
-	"once_cell",
-]

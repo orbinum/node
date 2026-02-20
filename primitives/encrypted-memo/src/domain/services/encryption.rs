@@ -9,12 +9,9 @@ use chacha20poly1305::{
 };
 
 use crate::domain::{
-	entities::{
-		constants::{MAX_ENCRYPTED_MEMO_SIZE, MIN_ENCRYPTED_MEMO_SIZE},
-		error::MemoError,
-		types::MemoData,
-	},
+	entities::{error::MemoError, memo_data::MemoData},
 	services::key_derivation::derive_encryption_key,
+	value_objects::constants::{MAX_ENCRYPTED_MEMO_SIZE, MIN_ENCRYPTED_MEMO_SIZE},
 };
 
 /// Decrypts encrypted memo using viewing key
@@ -469,5 +466,55 @@ mod tests {
 		// Wallet can only decrypt owned notes
 		assert!(try_decrypt_memo(&owned_encrypted, &commitment, &wallet_vk).is_some());
 		assert!(try_decrypt_memo(&other_encrypted, &commitment, &wallet_vk).is_none());
+	}
+
+	// ===== Boundary edge cases =====
+
+	#[test]
+	fn test_decrypt_memo_at_exact_min_size_returns_decryption_failed() {
+		// MIN_ENCRYPTED_MEMO_SIZE bytes of garbage — valid length but invalid ciphertext
+		let data = vec![0u8; MIN_ENCRYPTED_MEMO_SIZE];
+		let result = decrypt_memo(&data, &[0u8; 32], &[0u8; 32]);
+		// Must NOT be DataTooShort — size is exactly valid
+		assert!(matches!(
+			result,
+			Err(MemoError::DecryptionFailed) | Err(MemoError::InvalidNoteData)
+		));
+	}
+
+	#[test]
+	fn test_decrypt_memo_at_exact_max_size_returns_decryption_failed() {
+		// MAX_ENCRYPTED_MEMO_SIZE bytes of garbage — valid length but invalid ciphertext
+		let data = vec![0u8; MAX_ENCRYPTED_MEMO_SIZE];
+		let result = decrypt_memo(&data, &[0u8; 32], &[0u8; 32]);
+		// Must NOT be DataTooLong — size is exactly valid
+		assert!(matches!(
+			result,
+			Err(MemoError::DecryptionFailed) | Err(MemoError::InvalidNoteData)
+		));
+	}
+
+	#[test]
+	fn test_encrypt_different_commitments_produce_different_ciphertexts() {
+		let memo = MemoData::new(100, [1u8; 32], [2u8; 32], 0);
+		let vk = [4u8; 32];
+		let nonce = [5u8; 12];
+		let c1 = encrypt_memo(&memo, &[10u8; 32], &vk, &nonce).unwrap();
+		let c2 = encrypt_memo(&memo, &[20u8; 32], &vk, &nonce).unwrap();
+		// Commitment feeds into key derivation → different ciphertext
+		assert_ne!(c1, c2);
+	}
+
+	#[test]
+	fn test_decrypt_memo_output_size_exact() {
+		let memo = MemoData::new(42, [7u8; 32], [8u8; 32], 3);
+		let vk = [1u8; 32];
+		let nonce = [2u8; 12];
+		let comm = [3u8; 32];
+		let enc = encrypt_memo(&memo, &comm, &vk, &nonce).unwrap();
+		// 12 nonce + 76 plaintext + 16 MAC = 104 == MAX_ENCRYPTED_MEMO_SIZE
+		assert_eq!(enc.len(), MAX_ENCRYPTED_MEMO_SIZE);
+		let dec = decrypt_memo(&enc, &comm, &vk).unwrap();
+		assert_eq!(dec, memo);
 	}
 }

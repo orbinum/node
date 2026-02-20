@@ -4,8 +4,8 @@
 //!
 //! ## Aggregates
 //!
-//! - [`disclosure`] - Selective disclosure proof structures
-//! - [`keyset`] - Wallet key management
+//! - [`disclosure`] - Selective disclosure proof structures (mask, signals, proof, partial)
+//! - [`keyset`]     - Wallet key management (spending, viewing, nullifier, EdDSA)
 
 pub mod disclosure;
 pub mod keyset;
