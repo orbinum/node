@@ -16,7 +16,7 @@ use crate::chain_spec::get_account_id_from_seed;
 
 impl SubstrateCli for Cli {
 	fn impl_name() -> String {
-		"Frontier Node".into()
+		"Orbinum Node".into()
 	}
 
 	fn impl_version() -> String {
