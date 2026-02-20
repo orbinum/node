@@ -7644,12 +7644,12 @@ dependencies = [
 
 [[package]]
 name = "orbinum-zk-circuits"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "ark-bn254",
  "ark-r1cs-std",
  "ark-relations",
- "orbinum-zk-core 0.4.0",
+ "orbinum-zk-core 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -7661,19 +7661,6 @@ dependencies = [
  "ark-bn254",
  "ark-ff 0.5.0",
  "light-poseidon-nostd",
-]
-
-[[package]]
-name = "orbinum-zk-core"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4eb2090c32b7de525e75499c48b3f3dbc24e3cde0e11ff2b1cafe1f0d0361c9"
-dependencies = [
- "ark-bn254",
- "ark-ff 0.5.0",
- "light-poseidon-nostd",
- "serde",
- "sp-runtime-interface 30.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
