@@ -476,9 +476,7 @@ fn set_disclosure_verifying_key_works() {
 		assert!(crate::DisclosureVerifyingKey::<Test>::get().is_some());
 
 		// Event emitted
-		System::assert_last_event(
-			Event::DisclosureVerifyingKeyUpdated { vk_size: 200 }.into()
-		);
+		System::assert_last_event(Event::DisclosureVerifyingKeyUpdated { vk_size: 200 }.into());
 	});
 }
 
@@ -489,10 +487,7 @@ fn set_disclosure_verifying_key_fails_not_root() {
 		let vk_bounded = BoundedVec::try_from(vk).unwrap();
 
 		assert_noop!(
-			ShieldedPool::set_disclosure_verifying_key(
-				RuntimeOrigin::signed(1),
-				vk_bounded,
-			),
+			ShieldedPool::set_disclosure_verifying_key(RuntimeOrigin::signed(1), vk_bounded,),
 			frame_support::error::BadOrigin
 		);
 	});
@@ -838,11 +833,7 @@ fn reject_disclosure_fails_request_not_found() {
 		// No request active → reject should fail
 		let reason = BoundedVec::try_from(b"No request".to_vec()).unwrap();
 		assert_noop!(
-			ShieldedPool::reject_disclosure(
-				RuntimeOrigin::signed(target),
-				auditor,
-				reason,
-			),
+			ShieldedPool::reject_disclosure(RuntimeOrigin::signed(target), auditor, reason,),
 			Error::<Test>::DisclosureRequestNotFound
 		);
 	});
@@ -932,12 +923,7 @@ fn request_disclosure_fails_no_audit_policy() {
 		// target never called set_audit_policy
 		let reason = BoundedVec::try_from(b"Regulatory".to_vec()).unwrap();
 		assert_noop!(
-			ShieldedPool::request_disclosure(
-				RuntimeOrigin::signed(auditor),
-				target,
-				reason,
-				None,
-			),
+			ShieldedPool::request_disclosure(RuntimeOrigin::signed(auditor), target, reason, None,),
 			Error::<Test>::AuditPolicyNotFound
 		);
 	});
@@ -969,12 +955,7 @@ fn request_disclosure_fails_duplicate_request() {
 		// Second request from same auditor → duplicate
 		let reason2 = BoundedVec::try_from(b"Second request".to_vec()).unwrap();
 		assert_noop!(
-			ShieldedPool::request_disclosure(
-				RuntimeOrigin::signed(auditor),
-				target,
-				reason2,
-				None,
-			),
+			ShieldedPool::request_disclosure(RuntimeOrigin::signed(auditor), target, reason2, None,),
 			Error::<Test>::DisclosureRequestAlreadyExists
 		);
 	});
