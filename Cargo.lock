@@ -7264,7 +7264,7 @@ dependencies = [
 
 [[package]]
 name = "orbinum-node"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "clap",
@@ -7338,7 +7338,7 @@ dependencies = [
 
 [[package]]
 name = "orbinum-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cumulus-pallet-weight-reclaim",
  "ethereum",
@@ -7353,6 +7353,7 @@ dependencies = [
  "frame-system-benchmarking",
  "frame-system-rpc-runtime-api",
  "hex-literal",
+ "orbinum-signature-api",
  "orbinum-zk-verifier",
  "pallet-aura",
  "pallet-balances",
@@ -7393,6 +7394,18 @@ dependencies = [
  "sp-transaction-pool",
  "sp-version",
  "substrate-wasm-builder",
+]
+
+[[package]]
+name = "orbinum-signature-api"
+version = "0.1.0"
+dependencies = [
+ "parity-scale-codec",
+ "scale-info",
+ "sp-api",
+ "sp-core",
+ "sp-runtime",
+ "sp-std",
 ]
 
 [[package]]
