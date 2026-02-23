@@ -7,7 +7,7 @@ use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_consensus_grandpa::AuthorityId as GrandpaId;
 #[allow(unused_imports)]
 use sp_core::ecdsa;
-use sp_core::{Pair, Public, H160, U256};
+use sp_core::{hashing::blake2_256, Pair, Public, H160, U256};
 use sp_runtime::traits::{IdentifyAccount, Verify};
 // Frontier
 use orbinum_runtime::{AccountId, Balance, SS58Prefix, Signature, WASM_BINARY};
@@ -20,6 +20,13 @@ use pallet_zk_verifier::CircuitId;
 
 /// Specialized `ChainSpec`. This is a specialization of the general Substrate ChainSpec type.
 pub type ChainSpec = sc_service::GenericChainSpec;
+
+/// Map Ethereum address (20 bytes) to AccountId32 for genesis configuration
+/// Matches the HashedAddressMapping implementation in the runtime
+fn ethereum_account_id(eth_address: [u8; 20]) -> AccountId {
+	let hash_result = blake2_256(&eth_address);
+	AccountId::from(hash_result)
+}
 
 /// Generate a crypto pair from seed.
 pub fn get_from_seed<TPublic: Public>(seed: &str) -> <TPublic::Pair as Pair>::Public {
@@ -63,16 +70,29 @@ pub fn development_config(enable_manual_seal: bool) -> ChainSpec {
 		.with_chain_type(ChainType::Development)
 		.with_properties(properties())
 		.with_genesis_config_patch(testnet_genesis(
-			// Sudo account (Alith)
-			AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
-			// Pre-funded accounts
+			// Sudo account (Alice sr25519)
+			AccountId::from(hex!(
+				"d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d"
+			)),
+			// Pre-funded accounts (sr25519 test accounts + Ethereum mapped)
 			vec![
-				AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), // Alith
-				AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), // Baltathar
-				AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), // Charleth
-				AccountId::from(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")), // Dorothy
-				AccountId::from(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")), // Ethan
-				AccountId::from(hex!("C0F0f4ab324C46e55D02D0033343B4Be8A55532d")), // Faith
+				// Substrate sr25519 accounts
+				AccountId::from(hex!(
+					"d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d"
+				)), // Alice
+				AccountId::from(hex!(
+					"8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48"
+				)), // Bob
+				AccountId::from(hex!(
+					"90b5ab205c6974c9ea841be688864633dc9ca8a357843eeacf2314649965fe22"
+				)), // Charlie
+				// Ethereum mapped accounts
+				ethereum_account_id(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), // Alith
+				ethereum_account_id(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), // Baltathar
+				ethereum_account_id(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), // Charleth
+				ethereum_account_id(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")), // Dorothy
+				ethereum_account_id(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")), // Ethan
+				ethereum_account_id(hex!("C0F0f4ab324C46e55D02D0033343B4Be8A55532d")), // Faith
 			],
 			// Initial PoA authorities
 			vec![authority_keys_from_seed("Alice")],
@@ -90,16 +110,29 @@ pub fn local_testnet_config() -> ChainSpec {
 		.with_chain_type(ChainType::Local)
 		.with_properties(properties())
 		.with_genesis_config_patch(testnet_genesis(
-			// Sudo account (Alith)
-			AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
-			// Pre-funded accounts
+			// Sudo account (Alice sr25519)
+			AccountId::from(hex!(
+				"d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d"
+			)),
+			// Pre-funded accounts (sr25519 test accounts + Ethereum mapped)
 			vec![
-				AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), // Alith
-				AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), // Baltathar
-				AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), // Charleth
-				AccountId::from(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")), // Dorothy
-				AccountId::from(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")), // Ethan
-				AccountId::from(hex!("C0F0f4ab324C46e55D02D0033343B4Be8A55532d")), // Faith
+				// Substrate sr25519 accounts
+				AccountId::from(hex!(
+					"d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d"
+				)), // Alice
+				AccountId::from(hex!(
+					"8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48"
+				)), // Bob
+				AccountId::from(hex!(
+					"90b5ab205c6974c9ea841be688864633dc9ca8a357843eeacf2314649965fe22"
+				)), // Charlie
+				// Ethereum mapped accounts
+				ethereum_account_id(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), // Alith
+				ethereum_account_id(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), // Baltathar
+				ethereum_account_id(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), // Charleth
+				ethereum_account_id(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")), // Dorothy
+				ethereum_account_id(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")), // Ethan
+				ethereum_account_id(hex!("C0F0f4ab324C46e55D02D0033343B4Be8A55532d")), // Faith
 			],
 			vec![
 				authority_keys_from_seed("Alice"),

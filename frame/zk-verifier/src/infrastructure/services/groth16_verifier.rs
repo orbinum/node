@@ -165,7 +165,7 @@ impl ZkVerifierPort for Groth16Verifier {
 		merkle_root: &[u8; 32],
 		nullifier: &[u8; 32],
 		amount: u128,
-		recipient: &[u8; 20],
+		recipient: &[u8; 32],
 		asset_id: u32,
 		_version: Option<u32>,
 	) -> Result<bool, DispatchError> {
@@ -221,7 +221,7 @@ impl ZkVerifierPort for Groth16Verifier {
 			amount_arr[..16].copy_from_slice(&amount.to_le_bytes());
 			public_inputs_bytes.push(amount_arr);
 
-			// 4. recipient (20 bytes -> 32 bytes LE field encoding)
+			// 4. recipient (32-byte AccountId32, big-endian) -> LE field encoding
 			let mut recipient_arr = [0u8; 32];
 			for (index, byte) in recipient.iter().rev().enumerate() {
 				recipient_arr[index] = *byte;

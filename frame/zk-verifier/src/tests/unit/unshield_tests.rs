@@ -14,7 +14,7 @@ fn unshield_public_inputs_encoding_test() {
 	let merkle_root = [0x11u8; 32];
 	let nullifier = [0x22u8; 32];
 	let amount = 1_000_000u128; // 1M wei
-	let recipient = [0x33u8; 20];
+	let recipient = [0x33u8; 32];
 	let asset_id = 42u32;
 
 	// In test mode, this will always return Ok(true)
@@ -39,7 +39,7 @@ fn unshield_amount_encoding_edge_cases() {
 	let proof = vec![1u8; 256];
 	let merkle_root = [0u8; 32];
 	let nullifier = [1u8; 32];
-	let recipient = [2u8; 20];
+	let recipient = [2u8; 32];
 	let asset_id = 0u32;
 
 	// Test edge case amounts
@@ -74,19 +74,21 @@ fn unshield_recipient_address_formats() {
 	let amount = 1000u128;
 	let asset_id = 0u32;
 
-	// Test different recipient address patterns
-	let recipients = [
-		[0x00; 20], // All zeros
-		[0xFF; 20], // All ones
-		// Ethereum-like address pattern
+	// Test different recipient address patterns (AccountId32 = 32 bytes)
+	let recipients: [[u8; 32]; 4] = [
+		[0x00; 32], // All zeros
+		[0xFF; 32], // All ones
+		// Substrate-like 32-byte address pattern
 		[
-			0xd8, 0xda, 0x6B, 0xF2, 0x69, 0x64, 0xaf, 0x9d, 0x7e, 0xed, 0x9e, 0x03, 0xE5, 0x34,
-			0x15, 0xD3, 0x7A, 0xA9, 0x60, 0x45,
+			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xd8, 0xda,
+			0x6B, 0xF2, 0x69, 0x64, 0xaf, 0x9d, 0x7e, 0xed, 0x9e, 0x03, 0xE5, 0x34, 0x15, 0xD3,
+			0x7A, 0xA9, 0x60, 0x45,
 		],
 		// Mixed pattern
 		[
-			0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54,
-			0x32, 0x10, 0x11, 0x22, 0x33, 0x44,
+			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x23,
+			0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+			0x11, 0x22, 0x33, 0x44,
 		],
 	];
 
@@ -112,7 +114,7 @@ fn unshield_asset_id_ranges() {
 	let merkle_root = [0u8; 32];
 	let nullifier = [1u8; 32];
 	let amount = 1000u128;
-	let recipient = [0x33u8; 20];
+	let recipient = [0x33u8; 32];
 
 	// Test different asset ID ranges
 	let asset_ids = vec![
@@ -145,7 +147,7 @@ fn unshield_merkle_root_patterns() {
 	let proof = vec![1u8; 256];
 	let nullifier = [1u8; 32];
 	let amount = 1000u128;
-	let recipient = [0x33u8; 20];
+	let recipient = [0x33u8; 32];
 	let asset_id = 0u32;
 
 	// Test different merkle root patterns
@@ -187,7 +189,7 @@ fn unshield_nullifier_patterns() {
 	let proof = vec![1u8; 256];
 	let merkle_root = [0x11u8; 32];
 	let amount = 1000u128;
-	let recipient = [0x33u8; 20];
+	let recipient = [0x33u8; 32];
 	let asset_id = 0u32;
 
 	// Test different nullifier patterns
@@ -238,7 +240,7 @@ mod validation_tests {
 		let merkle_root = [0x11u8; 32];
 		let nullifier = [0x22u8; 32];
 		let amount = 1_000_000_000_000u128; // 1T wei
-		let recipient = [0x33u8; 20];
+		let recipient = [0x33u8; 32];
 		let asset_id = 42u32;
 
 		// Expected encoding (what the function should create internally):
@@ -249,9 +251,11 @@ mod validation_tests {
 		let mut expected_amount = [0u8; 32];
 		expected_amount[16..].copy_from_slice(&amount.to_be_bytes());
 
-		// 4. recipient: [u8; 20] -> [u8; 32] with left padding
+		// 4. recipient: [u8; 32] (AccountId32) -> [u8; 32] LE field encoding (invert byte order)
 		let mut expected_recipient = [0u8; 32];
-		expected_recipient[12..].copy_from_slice(&recipient);
+		for (i, b) in recipient.iter().rev().enumerate() {
+			expected_recipient[i] = *b;
+		}
 
 		// 5. asset_id: u32 -> [u8; 32] big-endian
 		let mut expected_asset_id = [0u8; 32];
@@ -261,7 +265,11 @@ mod validation_tests {
 		assert_eq!(expected_amount[16..24], amount.to_be_bytes()[0..8]);
 		assert_eq!(expected_amount[24..32], amount.to_be_bytes()[8..16]);
 
-		assert_eq!(expected_recipient[12..32], recipient);
+		// Verifica que la codificación LE invierte correctamente los bytes
+		// expected_recipient[i] == recipient[31 - i]
+		for (i, &b) in recipient.iter().rev().enumerate() {
+			assert_eq!(expected_recipient[i], b);
+		}
 
 		assert_eq!(expected_asset_id[28..32], asset_id.to_be_bytes());
 

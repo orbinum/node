@@ -77,7 +77,7 @@ impl ZkVerifierPort for MockZkVerifier {
 		_merkle_root: &[u8; 32],
 		_nullifier: &[u8; 32],
 		_amount: u128,
-		_recipient: &[u8; 20],
+		_recipient: &[u8; 32],
 		_asset_id: u32,
 		_version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
@@ -172,7 +172,7 @@ impl ZkVerifierPort for FailingZkVerifier {
 		_merkle_root: &[u8; 32],
 		_nullifier: &[u8; 32],
 		_amount: u128,
-		_recipient: &[u8; 20],
+		_recipient: &[u8; 32],
 		_asset_id: u32,
 		_version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {

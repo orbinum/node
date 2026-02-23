@@ -195,7 +195,7 @@ fn port_verify_unshield_proof_works() {
 		let merkle_root = [1u8; 32];
 		let nullifier = [2u8; 32];
 		let amount = 1_000_000u128;
-		let recipient = [3u8; 20];
+		let recipient = [3u8; 32];
 		let asset_id = 0u32;
 
 		let result = ZkVerifier::verify_unshield_proof(
@@ -222,7 +222,7 @@ fn port_verify_unshield_proof_fails_without_vk() {
 		let merkle_root = [1u8; 32];
 		let nullifier = [2u8; 32];
 		let amount = 1_000_000u128;
-		let recipient = [3u8; 20];
+		let recipient = [3u8; 32];
 		let asset_id = 0u32;
 
 		let result = ZkVerifier::verify_unshield_proof(
@@ -248,7 +248,7 @@ fn port_verify_unshield_proof_with_empty_proof() {
 		let merkle_root = [1u8; 32];
 		let nullifier = [2u8; 32];
 		let amount = 1_000_000u128;
-		let recipient = [3u8; 20];
+		let recipient = [3u8; 32];
 		let asset_id = 0u32;
 
 		let result = ZkVerifier::verify_unshield_proof(
@@ -274,7 +274,7 @@ fn port_verify_unshield_proof_with_zero_amount() {
 		let merkle_root = [1u8; 32];
 		let nullifier = [2u8; 32];
 		let amount = 0u128;
-		let recipient = [3u8; 20];
+		let recipient = [3u8; 32];
 		let asset_id = 0u32;
 
 		let result = ZkVerifier::verify_unshield_proof(
@@ -301,7 +301,7 @@ fn port_verify_unshield_proof_with_max_amount() {
 		let merkle_root = [1u8; 32];
 		let nullifier = [2u8; 32];
 		let amount = u128::MAX;
-		let recipient = [3u8; 20];
+		let recipient = [3u8; 32];
 		let asset_id = 0u32;
 
 		let result = ZkVerifier::verify_unshield_proof(
@@ -341,7 +341,7 @@ fn port_can_verify_multiple_circuit_types() {
 			&[4u8; 32],
 			&[5u8; 32],
 			100_000u128,
-			&[6u8; 20],
+			&[6u8; 32],
 			0u32,
 			None,
 		);
@@ -375,7 +375,7 @@ fn port_maintains_independent_statistics() {
 				&[4u8; 32],
 				&[5u8; 32],
 				100_000u128,
-				&[6u8; 20],
+				&[6u8; 32],
 				0u32,
 				None,
 			);
@@ -405,7 +405,7 @@ fn verify_unshield_proof_works() {
 		let merkle_root = [0x11u8; 32];
 		let nullifier = [0x22u8; 32];
 		let amount = 1_000_000_u128; // 1000 tokens with 3 decimals
-		let recipient = [0x33u8; 20];
+		let recipient = [0x33u8; 32];
 		let asset_id = 0u32; // Native asset
 
 		// Should work with valid inputs
@@ -434,7 +434,7 @@ fn verify_unshield_proof_with_empty_proof_fails() {
 		let merkle_root = [0x11u8; 32];
 		let nullifier = [0x22u8; 32];
 		let amount = 1000u128;
-		let recipient = [0x33u8; 20];
+		let recipient = [0x33u8; 32];
 		let asset_id = 0u32;
 
 		let result = ZkVerifier::verify_unshield_proof(
@@ -472,7 +472,7 @@ fn verify_unshield_proof_with_different_amounts() {
 		let proof = vec![1u8; 256];
 		let merkle_root = [0x11u8; 32];
 		let nullifier = [0x22u8; 32];
-		let recipient = [0x33u8; 20];
+		let recipient = [0x33u8; 32];
 		let asset_id = 0u32;
 
 		// Test different amount values
@@ -512,14 +512,15 @@ fn verify_unshield_proof_with_different_recipients() {
 		let amount = 1000u128;
 		let asset_id = 0u32;
 
-		// Test different recipient addresses
-		let recipients = vec![
-			[0x00u8; 20], // Zero address
-			[0xFFu8; 20], // Max address
+		// Test different recipient addresses (AccountId32 = 32 bytes)
+		let recipients: Vec<[u8; 32]> = vec![
+			[0x00u8; 32], // Zero address
+			[0xFFu8; 32], // Max address
 			[
-				0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE,
-				0xFF, 0x00, 0x11, 0x22, 0x33, 0x44,
-			], // Mixed
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x11, 0x22,
+				0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00,
+				0x11, 0x22, 0x33, 0x44,
+			], // Mixed (padded to 32 bytes)
 		];
 
 		for recipient in recipients {
@@ -548,7 +549,7 @@ fn verify_unshield_proof_with_different_asset_ids() {
 		let merkle_root = [0x11u8; 32];
 		let nullifier = [0x22u8; 32];
 		let amount = 1000u128;
-		let recipient = [0x33u8; 20];
+		let recipient = [0x33u8; 32];
 
 		// Test different asset IDs
 		let asset_ids = vec![
@@ -595,7 +596,7 @@ fn verify_unshield_proof_with_specific_version() {
 		let merkle_root = [0x11u8; 32];
 		let nullifier = [0x22u8; 32];
 		let amount = 1000u128;
-		let recipient = [0x33u8; 20];
+		let recipient = [0x33u8; 32];
 		let asset_id = 0u32;
 
 		// Test with specific version 1

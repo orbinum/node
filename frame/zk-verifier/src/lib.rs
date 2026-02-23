@@ -355,7 +355,7 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 		merkle_root: &[u8; 32],
 		nullifier: &[u8; 32],
 		amount: u128,
-		recipient: &[u8; 20],
+		recipient: &[u8; 32],
 		asset_id: u32,
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
@@ -376,9 +376,8 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 		let mut amount_bytes = [0u8; 32];
 		amount_bytes[..16].copy_from_slice(&amount.to_le_bytes());
 
-		// recipient is encoded as LE field bytes:
-		// - recipient arrives as canonical address bytes
-		// - for LE field encoding, reverse byte order and place in low-order bytes
+		// recipient is AccountId32 (32 bytes, big-endian).
+		// For BN254 field LE encoding: reverse the byte order.
 		let mut recipient_bytes = [0u8; 32];
 		for (index, byte) in recipient.iter().rev().enumerate() {
 			recipient_bytes[index] = *byte;
