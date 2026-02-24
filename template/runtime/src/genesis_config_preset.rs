@@ -14,16 +14,38 @@ use sp_std::prelude::*;
 use orbinum_zk_verifier::infrastructure::storage::verification_keys;
 use pallet_zk_verifier::CircuitId;
 
+use sp_core::hashing::blake2_256;
+
+/// Map Ethereum address (20 bytes) to AccountId32 using blake2_256 hash
+/// This matches the HashedAddressMapping implementation in lib.rs
+fn ethereum_to_account_id(eth_address: [u8; 20]) -> AccountId {
+	let hash_result = blake2_256(&eth_address);
+	AccountId::from(hash_result)
+}
+
 /// Generate a chain spec for use with the development service.
 pub fn development() -> serde_json::Value {
 	testnet_genesis(
-		// Sudo account (Alith)
-		AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
-		// Pre-funded accounts
+		// Sudo account (Alice)
+		AccountId::from(hex!(
+			"d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d"
+		)),
+		// Pre-funded accounts (sr25519 test accounts + Ethereum mapped)
 		vec![
-			AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), // Alith
-			AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), // Baltathar
-			AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), // Charleth
+			// Substrate sr25519 accounts (for test extrinsics)
+			AccountId::from(hex!(
+				"d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d"
+			)), // Alice
+			AccountId::from(hex!(
+				"8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48"
+			)), // Bob
+			AccountId::from(hex!(
+				"90b5ab205c6974c9ea841be688864633dc9ca8a357843eeacf2314649965fe22"
+			)), // Charlie
+			// Ethereum mapped accounts (for EVM compatibility)
+			ethereum_to_account_id(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), // Alith
+			ethereum_to_account_id(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), // Baltathar
+			ethereum_to_account_id(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), // Charleth
 		],
 		vec![],
 		42,    // chain id

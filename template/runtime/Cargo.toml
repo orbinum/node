@@ -1,6 +1,6 @@
 [package]
 name = "orbinum-runtime"
-version = "0.1.0"
+version = "0.2.0"
 license = "Apache-2.0 OR GPL-3.0-or-later"
 description = "Orbinum Privacy Chain Runtime"
 publish = false
@@ -50,7 +50,6 @@ pallet-transaction-payment = { workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { workspace = true }
 
 # Frontier
-fp-account = { workspace = true, features = ["serde"] }
 fp-evm = { workspace = true, features = ["serde"] }
 fp-rpc = { workspace = true }
 fp-self-contained = { workspace = true, features = ["serde"] }
@@ -68,6 +67,7 @@ pallet-evm-precompile-sha3fips-benchmarking = { workspace = true }
 pallet-evm-precompile-simple = { workspace = true }
 
 # Orbinum Privacy
+orbinum-signature-api = { workspace = true }
 orbinum-zk-verifier = { workspace = true, default-features = false }
 pallet-shielded-pool = { workspace = true }
 pallet-shielded-pool-runtime-api = { workspace = true }
@@ -125,7 +125,6 @@ std = [
 	"pallet-transaction-payment/std",
 	"pallet-transaction-payment-rpc-runtime-api/std",
 	# Frontier
-	"fp-account/std",
 	"fp-evm/std",
 	"fp-rpc/std",
 	"fp-self-contained/std",
@@ -142,6 +141,7 @@ std = [
 	"pallet-evm-precompile-curve25519/std",
 	"pallet-evm-precompile-curve25519-benchmarking/std",
 	# Orbinum Privacy
+	"orbinum-signature-api/std",
 	"pallet-zk-verifier/std",
 	"pallet-shielded-pool/std",
 	"pallet-shielded-pool/poseidon-native",

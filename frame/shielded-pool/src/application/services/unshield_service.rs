@@ -72,19 +72,9 @@ impl UnshieldService {
 		// Pass merkle_root/nullifier as-is (no endianness conversion).
 		#[cfg(not(feature = "runtime-benchmarks"))]
 		{
-			// Convert recipient (AccountId) to bytes
-			// En el runtime de producción, AccountId es H160 (20 bytes)
-			// En tests, puede ser u64 (8 bytes)
-			let recipient_encoded = recipient.encode();
-
-			// Padding a 20 bytes (requerido por el circuito)
-			let recipient_bytes: [u8; 20] = {
-				let mut bytes = [0u8; 20];
-				let len = recipient_encoded.len().min(20);
-				// Copiar desde el final (right-aligned) para números pequeños
-				bytes[20 - len..].copy_from_slice(&recipient_encoded[..len]);
-				bytes
-			};
+			// AccountId32 is encoded in SCALE as exactly 32 bytes.
+			// Convert directly without truncation.
+			let recipient_bytes: [u8; 32] = recipient.encode().try_into().unwrap_or([0u8; 32]);
 
 			let valid = T::ZkVerifier::verify_unshield_proof(
 				_proof,

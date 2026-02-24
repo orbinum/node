@@ -48,7 +48,7 @@ pub trait ZkVerifierPort {
 		merkle_root: &[u8; 32],
 		nullifier: &[u8; 32],
 		amount: u128,
-		recipient: &[u8; 20],
+		recipient: &[u8; 32],
 		asset_id: u32,
 		version: Option<u32>,
 	) -> Result<bool, DispatchError>;

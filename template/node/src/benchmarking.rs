@@ -5,14 +5,14 @@ use std::{sync::Arc, time::Duration};
 
 use scale_codec::Encode;
 // Substrate
+use orbinum_runtime::{self as runtime, AccountId, Balance, BalancesCall, SystemCall};
 use sc_cli::Result;
 use sc_client_api::BlockBackend;
 use sp_core::{ecdsa, Pair};
 use sp_inherents::{InherentData, InherentDataProvider};
-use sp_runtime::{generic::Era, OpaqueExtrinsic, SaturatedConversion};
-// Frontier
-use fp_account::AccountId20;
-use orbinum_runtime::{self as runtime, AccountId, Balance, BalancesCall, SystemCall};
+use sp_runtime::{
+	generic::Era, traits::IdentifyAccount, MultiSigner, OpaqueExtrinsic, SaturatedConversion,
+};
 
 use crate::service::Client;
 
@@ -88,7 +88,7 @@ impl frame_benchmarking_cli::ExtrinsicBuilder for TransferKeepAliveBuilder {
 			self.client.as_ref(),
 			acc,
 			BalancesCall::transfer_keep_alive {
-				dest: self.dest,
+				dest: self.dest.clone(),
 				value: self.value,
 			}
 			.into(),
@@ -153,8 +153,8 @@ pub fn create_benchmark_extrinsic(
 
 	runtime::UncheckedExtrinsic::new_signed(
 		call,
-		AccountId20::from(sender.public()),
-		runtime::Signature::new(signature),
+		MultiSigner::Ecdsa(sender.public()).into_account(),
+		runtime::Signature::Ecdsa(signature),
 		extra,
 	)
 }
