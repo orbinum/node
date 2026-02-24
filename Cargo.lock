@@ -7278,7 +7278,6 @@ dependencies = [
  "fc-rpc-core",
  "fc-rpc-v2",
  "fc-storage",
- "fp-account",
  "fp-dynamic-fee",
  "fp-evm",
  "fp-rpc",
