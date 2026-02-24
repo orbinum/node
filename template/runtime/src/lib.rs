@@ -1444,6 +1444,7 @@ mod tests {
 	/// Documenta explícitamente las dos rutas de derivación de AccountId en Orbinum:
 	///   1. Substrate ECDSA: blake2_256(33-byte-compressed-pubkey)
 	///   2. EVM mapping:     blake2_256(20-byte-eth-address)
+	///
 	/// Son independientes e incompatibles intencionalmente.
 	#[test]
 	fn ecdsa_substrate_and_evm_paths_are_independent() {
@@ -1645,8 +1646,8 @@ mod tests {
 	#[test]
 	fn nonce_type_is_u32_for_this_runtime() {
 		// T::Nonce para este Runtime es u32
-		let zero: <Runtime as frame_system::Config>::Nonce = 0u32.into();
-		let one: <Runtime as frame_system::Config>::Nonce = 1u32.into();
+		let zero: <Runtime as frame_system::Config>::Nonce = 0u32;
+		let one: <Runtime as frame_system::Config>::Nonce = 1u32;
 		assert_ne!(zero, one, "Nonce 0 y Nonce 1 deben ser distintos");
 
 		// El nonce usa u32 nativo — verificar límite superior
