@@ -1227,7 +1227,7 @@ mod tests {
 	// HashedAddressMapping tests
 	// ─────────────────────────────────────────────────────────────────────────
 
-	/// El mismo H160 siempre produce el mismo AccountId32
+	/// The same H160 always produces the same AccountId32
 	#[test]
 	fn hashed_address_mapping_is_deterministic() {
 		let eth_addr = H160::from([0x42u8; 20]);
@@ -1245,29 +1245,29 @@ mod tests {
 		let acc2 = HashedAddressMapping::<Runtime>::into_account_id(addr2);
 		assert_ne!(
 			acc1, acc2,
-			"diferentes H160 deben producir AccountId32 distintos"
+			"different H160 values must produce distinct AccountId32"
 		);
 	}
 
-	/// La dirección Ethereum de Alith mapeada en chain_spec coincide con el runtime
+	/// The Ethereum address of Alith mapped in chain_spec matches the runtime
 	#[test]
 	fn chain_spec_mapping_matches_runtime_mapping() {
-		// Dirección Ethereum de Alith (del chain_spec)
+		// Ethereum address of Alith (from chain_spec)
 		let alith_eth = H160::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac"));
 
-		// chain_spec usa: blake2_256(&eth_address)
+		// chain_spec uses: blake2_256(&eth_address)
 		let chain_spec_account = AccountId::from(blake2_256(alith_eth.as_bytes()));
 
-		// Runtime HashedAddressMapping usa: blake2_256(address.as_bytes())
+		// Runtime HashedAddressMapping uses: blake2_256(address.as_bytes())
 		let runtime_account = HashedAddressMapping::<Runtime>::into_account_id(alith_eth);
 
 		assert_eq!(
 			chain_spec_account, runtime_account,
-			"chain_spec y el runtime deben producir el mismo AccountId32 para Alith"
+			"chain_spec and the runtime must produce the same AccountId32 for Alith"
 		);
 	}
 
-	/// Todos los EVM dev accounts del chain_spec mapean a AccountId únicos
+	/// All EVM dev accounts from chain_spec map to unique AccountId values
 	#[test]
 	fn all_evm_dev_accounts_map_to_unique_accounts() {
 		let dev_addresses: [[u8; 20]; 6] = [
@@ -1284,12 +1284,12 @@ mod tests {
 			.map(|b| HashedAddressMapping::<Runtime>::into_account_id(H160::from(*b)))
 			.collect();
 
-		// Verificar que todos los AccountId son únicos
+		// Verify that all AccountId values are unique
 		for i in 0..accounts.len() {
 			for j in (i + 1)..accounts.len() {
 				assert_ne!(
 					accounts[i], accounts[j],
-					"EVM dev accounts deben mapearse a AccountId32 únicos (índices {i} y {j})"
+					"EVM dev accounts must map to unique AccountId32 values (indices {i} and {j})"
 				);
 			}
 		}
@@ -1299,7 +1299,7 @@ mod tests {
 	// MultiSignature Sr25519 tests
 	// ─────────────────────────────────────────────────────────────────────────
 
-	/// Sr25519: firma válida verifica correctamente contra el signer
+	/// Sr25519: valid signature verifies correctly against the signer
 	#[test]
 	fn sr25519_valid_signature_verifies() {
 		let pair = sr25519::Pair::from_string("//Alice", None).unwrap();
@@ -1308,16 +1308,16 @@ mod tests {
 		let sig = pair.sign(msg);
 		let multi_sig = MultiSignature::Sr25519(sig);
 
-		// AccountId32 para sr25519 desde MultiSigner
+		// AccountId32 for sr25519 from MultiSigner
 		let signer_account: AccountId = MultiSigner::from(pair.public()).into_account();
 
 		assert!(
 			multi_sig.verify(msg.as_ref(), &signer_account),
-			"Sr25519 firma válida debe verificar contra su propio AccountId"
+			"Sr25519 valid signature must verify against its own AccountId"
 		);
 	}
 
-	/// Sr25519: firma de Alice NO verifica contra la cuenta de Bob
+	/// Sr25519: Alice's signature does NOT verify against Bob's account
 	#[test]
 	fn sr25519_wrong_signer_rejected() {
 		let alice = sr25519::Pair::from_string("//Alice", None).unwrap();
@@ -1331,17 +1331,17 @@ mod tests {
 
 		assert!(
 			!multi_sig.verify(msg.as_ref(), &bob_account),
-			"Sr25519 firma de Alice NO debe verificar contra la cuenta de Bob"
+			"Sr25519 Alice's signature must NOT verify against Bob's account"
 		);
 	}
 
-	/// Sr25519: firma sobre mensaje A NO verifica mensaje B
+	/// Sr25519: signature over message A does NOT verify message B
 	#[test]
 	fn sr25519_wrong_message_rejected() {
 		let pair = sr25519::Pair::from_string("//Alice", None).unwrap();
 
-		let original_msg = b"mensaje original";
-		let different_msg = b"mensaje diferente";
+		let original_msg = b"original-message";
+		let different_msg = b"different-message";
 
 		let sig = pair.sign(original_msg);
 		let multi_sig = MultiSignature::Sr25519(sig);
@@ -1350,17 +1350,17 @@ mod tests {
 
 		assert!(
 			!multi_sig.verify(different_msg.as_ref(), &signer_account),
-			"Sr25519 firma sobre mensaje A NO debe verificar mensaje B"
+			"Sr25519 signature over message A must NOT verify message B"
 		);
 	}
 
-	/// Sr25519: firma corrupta (bytes cero) es rechazada
+	/// Sr25519: corrupted signature (zero bytes) is rejected
 	#[test]
 	fn sr25519_corrupted_signature_rejected() {
 		let pair = sr25519::Pair::from_string("//Alice", None).unwrap();
 		let msg = b"test-corrupted";
 
-		// Firma corrupta: 64 bytes en cero
+		// Corrupted signature: 64 zero bytes
 		let corrupted = sr25519::Signature::default();
 		let multi_sig = MultiSignature::Sr25519(corrupted);
 
@@ -1368,34 +1368,34 @@ mod tests {
 
 		assert!(
 			!multi_sig.verify(msg.as_ref(), &signer_account),
-			"Sr25519 firma corrupta debe ser rechazada"
+			"Sr25519 corrupted signature must be rejected"
 		);
 	}
 
-	/// Sr25519: cada cuenta verifica únicamente su propia firma
+	/// Sr25519: each account verifies only its own signature
 	#[test]
 	fn sr25519_each_account_verifies_only_own_signature() {
 		let alice = sr25519::Pair::from_string("//Alice", None).unwrap();
 		let bob = sr25519::Pair::from_string("//Bob", None).unwrap();
 
-		let msg = b"mismo-mensaje";
+		let msg = b"same-message";
 		let alice_sig = alice.sign(msg);
 		let bob_sig = bob.sign(msg);
 
-		// Las public keys son distintas
+		// Public keys are distinct
 		assert_ne!(
 			alice.public().0,
 			bob.public().0,
-			"Alice y Bob tienen keys distintas"
+			"Alice and Bob have distinct keys"
 		);
 
 		let alice_acc: AccountId = MultiSigner::from(alice.public()).into_account();
 		let bob_acc: AccountId = MultiSigner::from(bob.public()).into_account();
 
-		// Cada firma verifica solo contra su cuenta
+		// Each signature verifies only against its own account
 		assert!(MultiSignature::Sr25519(alice_sig).verify(msg.as_ref(), &alice_acc));
 		assert!(MultiSignature::Sr25519(bob_sig).verify(msg.as_ref(), &bob_acc));
-		// Y no verifica la del otro
+		// And does not verify the other's
 		assert!(!MultiSignature::Sr25519(alice.sign(msg)).verify(msg.as_ref(), &bob_acc));
 		assert!(!MultiSignature::Sr25519(bob.sign(msg)).verify(msg.as_ref(), &alice_acc));
 	}
@@ -1404,9 +1404,9 @@ mod tests {
 	// MultiSignature ECDSA tests
 	// ─────────────────────────────────────────────────────────────────────────
 
-	/// ECDSA: firma válida verifica correctamente
-	/// AccountId32 = blake2_256(33-byte compressed pubkey)  ← ruta Substrate
-	/// Distinto del mapping EVM = blake2_256(20-byte eth address) ← ruta HashedAddressMapping
+	/// ECDSA: valid signature verifies correctly
+	/// AccountId32 = blake2_256(33-byte compressed pubkey)  ← Substrate route
+	/// Distinct from EVM mapping = blake2_256(20-byte eth address) ← HashedAddressMapping route
 	#[test]
 	fn ecdsa_valid_signature_verifies() {
 		let pair = ecdsa::Pair::from_string("//Alice", None).unwrap();
@@ -1419,11 +1419,11 @@ mod tests {
 
 		assert!(
 			multi_sig.verify(msg.as_ref(), &signer_account),
-			"ECDSA firma válida debe verificar contra su AccountId"
+			"ECDSA valid signature must verify against its AccountId"
 		);
 	}
 
-	/// ECDSA: firma de Alice NO verifica contra la cuenta de Bob
+	/// ECDSA: Alice's signature does NOT verify against Bob's account
 	#[test]
 	fn ecdsa_wrong_signer_rejected() {
 		let alice = ecdsa::Pair::from_string("//Alice", None).unwrap();
@@ -1437,39 +1437,39 @@ mod tests {
 
 		assert!(
 			!multi_sig.verify(msg.as_ref(), &bob_account),
-			"ECDSA firma de Alice NO debe verificar contra la cuenta de Bob"
+			"ECDSA Alice's signature must NOT verify against Bob's account"
 		);
 	}
 
-	/// Documenta explícitamente las dos rutas de derivación de AccountId en Orbinum:
+	/// Explicitly documents the two AccountId derivation routes in Orbinum:
 	///   1. Substrate ECDSA: blake2_256(33-byte-compressed-pubkey)
 	///   2. EVM mapping:     blake2_256(20-byte-eth-address)
 	///
-	/// Son independientes e incompatibles intencionalmente.
+	/// They are independent and intentionally incompatible.
 	#[test]
 	fn ecdsa_substrate_and_evm_paths_are_independent() {
 		let alith_eth_address = H160::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac"));
 
-		// Ruta 1: EVM mapping (chain_spec + pallet_evm)
+		// Route 1: EVM mapping (chain_spec + pallet_evm)
 		let evm_account = HashedAddressMapping::<Runtime>::into_account_id(alith_eth_address);
 
-		// Ruta 2: Substrate ECDSA (MultiSigner)
+		// Route 2: Substrate ECDSA (MultiSigner)
 		let ecdsa_pair = ecdsa::Pair::from_string("//AliceEcdsa", None).unwrap();
 		let substrate_ecdsa_account: AccountId =
 			MultiSigner::from(ecdsa_pair.public()).into_account();
 
-		// Son distintas por diseño
+		// They are distinct by design
 		assert_ne!(
 			evm_account, substrate_ecdsa_account,
-			"HashedAddressMapping (EVM) y MultiSigner ECDSA son rutas independientes"
+			"HashedAddressMapping (EVM) and MultiSigner ECDSA are independent routes"
 		);
 	}
 
 	// ─────────────────────────────────────────────────────────────────────────
-	// Tamaños de firma y construcción del enum
+	// Signature sizes and enum construction
 	// ─────────────────────────────────────────────────────────────────────────
 
-	/// Verificar tamaños de firma para cada variante de MultiSignature
+	/// Verify signature sizes for each MultiSignature variant
 	#[test]
 	fn multisignature_variants_have_correct_byte_sizes() {
 		let sr25519_pair = sr25519::Pair::from_string("//Alice", None).unwrap();
@@ -1483,23 +1483,23 @@ mod tests {
 		assert_eq!(
 			sr25519_sig.0.len(),
 			64,
-			"Sr25519 signature debe ser 64 bytes"
+			"Sr25519 signature must be 64 bytes"
 		);
 
 		// ECDSA: 65 bytes (64 + recovery bit)
-		assert_eq!(ecdsa_sig.0.len(), 65, "ECDSA signature debe ser 65 bytes");
+		assert_eq!(ecdsa_sig.0.len(), 65, "ECDSA signature must be 65 bytes");
 
-		// Se pueden construir como MultiSignature sin errores
+		// Can be constructed as MultiSignature without errors
 		let _ms_sr = MultiSignature::Sr25519(sr25519_sig);
 		let _ms_ec = MultiSignature::Ecdsa(ecdsa_sig);
 	}
 
 	// ─────────────────────────────────────────────────────────────────────────
-	// SignatureApi RuntimeAPI — lógica de validación
+	// SignatureApi RuntimeAPI — validation logic
 	// ─────────────────────────────────────────────────────────────────────────
 
-	// Helpers que replican exactamente la lógica expuesta en la RuntimeAPI.
-	// validate_signature en el runtime simplemente delega a MultiSignature::verify.
+	// Helpers that exactly replicate the logic exposed by the RuntimeAPI.
+	// validate_signature in the runtime simply delegates to MultiSignature::verify.
 	fn api_validate_signature(
 		signature: MultiSignature,
 		message: &[u8],
@@ -1527,21 +1527,17 @@ mod tests {
 		(pair, account)
 	}
 
-	/// SignatureApi expone exactamente Sr25519 y Ecdsa, sin más
+	/// SignatureApi exposes exactly Sr25519 and Ecdsa, nothing more
 	#[test]
 	fn signature_api_returns_sr25519_and_ecdsa() {
 		use orbinum_signature_api::SignatureType;
 		let types = api_get_supported_types();
 		assert!(types.contains(&SignatureType::Sr25519));
 		assert!(types.contains(&SignatureType::Ecdsa));
-		assert_eq!(
-			types.len(),
-			2,
-			"Solo Sr25519 y Ecdsa deben estar registrados"
-		);
+		assert_eq!(types.len(), 2, "Only Sr25519 and Ecdsa must be registered");
 	}
 
-	/// Sr25519 es el tipo preferido: primer elemento de get_supported_signature_types
+	/// Sr25519 is the preferred type: first element of get_supported_signature_types
 	#[test]
 	fn signature_api_sr25519_is_first_preferred_type() {
 		use orbinum_signature_api::SignatureType;
@@ -1549,11 +1545,11 @@ mod tests {
 		assert_eq!(
 			types[0],
 			SignatureType::Sr25519,
-			"Sr25519 debe ser el primer tipo (preferido)"
+			"Sr25519 must be the first type (preferred)"
 		);
 	}
 
-	/// Los discriminantes SCALE del enum SignatureType no deben cambiar entre versiones
+	/// SCALE discriminants of the SignatureType enum must not change between versions
 	#[test]
 	fn signature_type_scale_discriminants_are_stable() {
 		use orbinum_signature_api::SignatureType;
@@ -1563,7 +1559,7 @@ mod tests {
 		assert_eq!(SignatureType::Ecdsa.encode(), vec![2u8]);
 	}
 
-	/// validate_signature acepta firma Sr25519 válida
+	/// validate_signature accepts a valid Sr25519 signature
 	#[test]
 	fn signature_api_validate_sr25519_valid_signature() {
 		let (pair, account) = sr25519_account("//Alice");
@@ -1572,7 +1568,7 @@ mod tests {
 		assert!(api_validate_signature(multi_sig, msg, &account));
 	}
 
-	/// validate_signature acepta firma ECDSA válida
+	/// validate_signature accepts a valid ECDSA signature
 	#[test]
 	fn signature_api_validate_ecdsa_valid_signature() {
 		let (pair, account) = ecdsa_account("//Alice");
@@ -1581,7 +1577,7 @@ mod tests {
 		assert!(api_validate_signature(multi_sig, msg, &account));
 	}
 
-	/// validate_signature rechaza firma Sr25519 con firmante incorrecto
+	/// validate_signature rejects Sr25519 signature with wrong signer
 	#[test]
 	fn signature_api_validate_wrong_signer_rejected() {
 		let (alice, _) = sr25519_account("//Alice");
@@ -1591,7 +1587,7 @@ mod tests {
 		assert!(!api_validate_signature(multi_sig, msg, &bob_account));
 	}
 
-	/// validate_signature rechaza cuando el mensaje fue alterado
+	/// validate_signature rejects when the message was altered
 	#[test]
 	fn signature_api_validate_wrong_message_rejected() {
 		let (pair, account) = sr25519_account("//Alice");
@@ -1601,7 +1597,7 @@ mod tests {
 		assert!(!api_validate_signature(multi_sig, wrong_msg, &account));
 	}
 
-	/// validate_signature rechaza firma Sr25519 con bytes corrompidos
+	/// validate_signature rejects Sr25519 signature with corrupted bytes
 	#[test]
 	fn signature_api_validate_corrupted_signature_rejected() {
 		let (pair, account) = sr25519_account("//Alice");
@@ -1613,7 +1609,7 @@ mod tests {
 		assert!(!api_validate_signature(multi_sig, msg, &account));
 	}
 
-	/// validate_signature rechaza bytes de Sr25519 empaquetados como variante ECDSA
+	/// validate_signature rejects Sr25519 bytes packed as ECDSA variant
 	#[test]
 	fn signature_api_validate_wrong_signature_type_rejected() {
 		let (sr_pair, sr_account) = sr25519_account("//Alice");
@@ -1629,38 +1625,38 @@ mod tests {
 	// Nonce Validation — estructura e invariantes
 	// ─────────────────────────────────────────────────────────────────────────
 
-	/// frame_system::CheckNonce<Runtime> puede instanciarse — compile-time check de
-	/// que la extensión de nonce está disponible para el runtime configurado.
+	/// frame_system::CheckNonce<Runtime> can be instantiated — compile-time check that
+	/// the nonce extension is available for the configured runtime.
 	///
-	/// Si este test compila, CheckNonce está accesible y el Runtime implementa
-	/// frame_system::Config correctamente.
+	/// If this test compiles, CheckNonce is accessible and the Runtime correctly implements
+	/// frame_system::Config.
 	#[test]
 	fn check_nonce_signed_extension_is_constructable() {
-		// CheckNonce wraps T::Nonce (= u32 en este runtime).
-		// Si este test compila, el tipo está disponible para el runtime.
+		// CheckNonce wraps T::Nonce (= u32 in this runtime).
+		// If this test compiles, the type is available for the runtime.
 		let _: frame_system::CheckNonce<Runtime>;
 	}
 
-	/// El tipo Nonce del runtime es u32, lo que significa que puede representar
-	/// hasta 4.294.967.295 transacciones por cuenta sin overflow.
+	/// The runtime Nonce type is u32, meaning it can represent
+	/// up to 4,294,967,295 transactions per account without overflow.
 	#[test]
 	fn nonce_type_is_u32_for_this_runtime() {
-		// T::Nonce para este Runtime es u32
+		// T::Nonce for this Runtime is u32
 		let zero: <Runtime as frame_system::Config>::Nonce = 0u32;
 		let one: <Runtime as frame_system::Config>::Nonce = 1u32;
-		assert_ne!(zero, one, "Nonce 0 y Nonce 1 deben ser distintos");
+		assert_ne!(zero, one, "Nonce 0 and Nonce 1 must be distinct");
 
-		// El nonce usa u32 nativo — verificar límite superior
+		// Nonce uses native u32 — verify upper bound
 		let max_nonce: u32 = u32::MAX;
 		assert_eq!(
 			max_nonce, 4_294_967_295u32,
-			"Nonce máximo es u32::MAX = 4.294.967.295"
+			"Maximum nonce is u32::MAX = 4,294,967,295"
 		);
 	}
 
-	/// Sr25519 //Alice y ECDSA //Alice producen AccountId32 DISTINTOS, lo que
-	/// significa que tienen nonces separados en el runtime. Los wallets deben
-	/// gestionarlos de forma independiente.
+	/// Sr25519 //Alice and ECDSA //Alice produce DIFFERENT AccountId32 values,
+	/// meaning they have separate nonces in the runtime. Wallets must
+	/// manage them independently.
 	#[test]
 	fn sr25519_and_ecdsa_same_derivation_produce_different_accounts() {
 		let (_, sr25519_alice_account) = sr25519_account("//Alice");
@@ -1668,36 +1664,32 @@ mod tests {
 
 		assert_ne!(
 			sr25519_alice_account, ecdsa_alice_account,
-			"Sr25519 //Alice y ECDSA //Alice deben tener AccountId32 distintos — nonces independientes"
+			"Sr25519 //Alice and ECDSA //Alice must have distinct AccountId32 — independent nonces"
 		);
 	}
 
-	/// Una cuenta tiene UN solo nonce sin importar el tipo de firma usada.
-	/// Dos firmas distintas (Sr25519 y ECDSA) para el mismo AccountId apuntan
-	/// al mismo contador de nonce en frame_system::Account.
+	/// An account has ONE single nonce regardless of the signature type used.
+	/// Two different signatures (Sr25519 and ECDSA) for the same AccountId point
+	/// to the same nonce counter in frame_system::Account.
 	///
-	/// Este test verifica que el AccountId32 siempre tiene 32 bytes y que la firma
-	/// referencia a la cuenta correcta en storage. Frame_system garantiza que
-	/// existe UN único AccountInfo por AccountId32, con UN único nonce.
+	/// This test verifies that AccountId32 always has 32 bytes and that the signature
+	/// references the correct account in storage. frame_system guarantees that
+	/// there is ONE unique AccountInfo per AccountId32, with ONE unique nonce.
 	#[test]
 	fn same_account_single_nonce_regardless_of_signature_type() {
 		let (alice_sr, alice_sr_account) = sr25519_account("//AliceNonce");
 		let msg = b"nonce-invariant-test";
 
-		// Firma Sr25519 verifica contra su AccountId32
+		// Sr25519 signature verifies against its AccountId32
 		let sig_sr = MultiSignature::Sr25519(alice_sr.sign(msg));
 		assert!(
 			api_validate_signature(sig_sr, msg, &alice_sr_account),
-			"La firma Sr25519 del AccountId correcto siempre verifica"
+			"Sr25519 signature for the correct AccountId always verifies"
 		);
 
-		// AccountId32 tiene exactamente 32 bytes — este es el key en frame_system::Account
-		// que almacena UN AccountInfo con UN nonce.
+		// AccountId32 has exactly 32 bytes — this is the key in frame_system::Account
+		// that stores ONE AccountInfo with ONE nonce.
 		let account_bytes: &[u8; 32] = alice_sr_account.as_ref();
-		assert_eq!(
-			account_bytes.len(),
-			32,
-			"AccountId32 siempre tiene 32 bytes"
-		);
+		assert_eq!(account_bytes.len(), 32, "AccountId32 always has 32 bytes");
 	}
 }
