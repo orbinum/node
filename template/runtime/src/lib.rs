@@ -447,22 +447,22 @@ impl pallet_dynamic_fee::Config for Runtime {
 }
 
 parameter_types! {
-    // ORB uses 12 decimals (1 ORB = 1e12 planck), unlike ETH’s 18 decimals.
-    // If we reused Ethereum-like base fees (e.g., 1 gwei = 1e9 wei/gas),
-    // the effective cost would be 1e9 planck/gas = 1e-3 ORB/gas.
-    // A typical contract deployment (~100k–300k gas) would then cost
-    // ~100–300 ORB, which is economically unreasonable on this network.
-    //
-    // Setting the base fee to 1_000_000 planck/gas (= 1e6) yields:
-    //   1e6 / 1e12 = 1e-6 ORB per gas
-    //   → ~0.1 ORB for 100k gas
-    //   → ~0.3 ORB for 300k gas
-    //
-    // This keeps EVM execution costs in a practical range while preserving
-    // sufficient granularity for fee market adjustment under EIP-1559.
-    pub DefaultBaseFeePerGas: U256 = U256::from(1_000_000);
+	// ORB uses 12 decimals (1 ORB = 1e12 planck), unlike ETH’s 18 decimals.
+	// If we reused Ethereum-like base fees (e.g., 1 gwei = 1e9 wei/gas),
+	// the effective cost would be 1e9 planck/gas = 1e-3 ORB/gas.
+	// A typical contract deployment (~100k–300k gas) would then cost
+	// ~100–300 ORB, which is economically unreasonable on this network.
+	//
+	// Setting the base fee to 1_000_000 planck/gas (= 1e6) yields:
+	//   1e6 / 1e12 = 1e-6 ORB per gas
+	//   → ~0.1 ORB for 100k gas
+	//   → ~0.3 ORB for 300k gas
+	//
+	// This keeps EVM execution costs in a practical range while preserving
+	// sufficient granularity for fee market adjustment under EIP-1559.
+	pub DefaultBaseFeePerGas: U256 = U256::from(1_000_000);
 
-    pub DefaultElasticity: Permill = Permill::from_parts(125_000);
+	pub DefaultElasticity: Permill = Permill::from_parts(125_000);
 }
 pub struct BaseFeeThreshold;
 impl pallet_base_fee::BaseFeeThreshold for BaseFeeThreshold {
@@ -1754,8 +1754,16 @@ mod tests {
 		let substrate_bytes: &[u8; 32] = substrate_account.as_ref();
 
 		// 1. Verify mapping: 12 zero bytes + 20 bytes from H160
-		assert_eq!(&substrate_bytes[..12], &[0u8; 12], "First 12 bytes must be zero");
-		assert_eq!(&substrate_bytes[12..], alith_h160.as_bytes(), "Last 20 bytes must match H160");
+		assert_eq!(
+			&substrate_bytes[..12],
+			&[0u8; 12],
+			"First 12 bytes must be zero"
+		);
+		assert_eq!(
+			&substrate_bytes[12..],
+			alith_h160.as_bytes(),
+			"Last 20 bytes must match H160"
+		);
 
 		// 2. Verify that pallet_evm shares the same Currency
 		// If type Currency = Balances is configured correctly in impl pallet_evm::Config,
@@ -1766,8 +1774,7 @@ mod tests {
 		// but the configuration check below validates the setup)
 
 		// 3. Sanity check: the mapping is deterministic
-		let substrate_account_2 =
-			TruncatedAddressMapping::<Runtime>::into_account_id(alith_h160);
+		let substrate_account_2 = TruncatedAddressMapping::<Runtime>::into_account_id(alith_h160);
 		assert_eq!(
 			substrate_account, substrate_account_2,
 			"Mapping must be deterministic — same H160 always produces same AccountId32"

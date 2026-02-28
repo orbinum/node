@@ -10,7 +10,9 @@ use ark_groth16::VerifyingKey;
 use ark_serialize::CanonicalSerialize;
 use ark_std::str::FromStr;
 
-use crate::domain::value_objects::circuit_constants::{CIRCUIT_ID_UNSHIELD, UNSHIELD_PUBLIC_INPUTS};
+use crate::domain::value_objects::circuit_constants::{
+	CIRCUIT_ID_UNSHIELD, UNSHIELD_PUBLIC_INPUTS,
+};
 
 /// Circuit ID for unshield (re-exported from domain)
 pub const CIRCUIT_ID: u8 = CIRCUIT_ID_UNSHIELD;

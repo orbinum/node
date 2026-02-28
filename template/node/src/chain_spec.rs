@@ -66,7 +66,7 @@ fn properties() -> Properties {
 /// 1 ORB = 1_000_000_000_000 planck (12 decimals)
 const PLANCK: Balance = 1_000_000_000_000;
 const TOTAL_SUPPLY: Balance = 1_000_000_000 * PLANCK; // 1 billion ORB
-const DEV_BALANCE: Balance = 10_000 * PLANCK;         // 10,000 ORB per dev account
+const DEV_BALANCE: Balance = 10_000 * PLANCK; // 10,000 ORB per dev account
 
 const UNITS: Balance = 1_000_000_000_000_000_000;
 const EVM_CHAIN_ID: u64 = 1984;
@@ -85,19 +85,55 @@ pub fn development_config(enable_manual_seal: bool) -> ChainSpec {
 			// (account, balance) — Alith holds total supply; others get 10,000 ORB
 			vec![
 				// Primary account (MetaMask / Alith) — total project supply
-				(ethereum_account_id(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), TOTAL_SUPPLY),
+				(
+					ethereum_account_id(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
+					TOTAL_SUPPLY,
+				),
 				// Substrate sr25519 dev accounts
-				(AccountId::from(hex!("d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d")), DEV_BALANCE), // Alice
-				(AccountId::from(hex!("8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48")), DEV_BALANCE), // Bob
-				(AccountId::from(hex!("90b5ab205c6974c9ea841be688864633dc9ca8a357843eeacf2314649965fe22")), DEV_BALANCE), // Charlie
+				(
+					AccountId::from(hex!(
+						"d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d"
+					)),
+					DEV_BALANCE,
+				), // Alice
+				(
+					AccountId::from(hex!(
+						"8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48"
+					)),
+					DEV_BALANCE,
+				), // Bob
+				(
+					AccountId::from(hex!(
+						"90b5ab205c6974c9ea841be688864633dc9ca8a357843eeacf2314649965fe22"
+					)),
+					DEV_BALANCE,
+				), // Charlie
 				// Ethereum dev accounts
-				(ethereum_account_id(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), DEV_BALANCE), // Baltathar
-				(ethereum_account_id(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), DEV_BALANCE), // Charleth
-				(ethereum_account_id(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")), DEV_BALANCE), // Dorothy
-				(ethereum_account_id(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")), DEV_BALANCE), // Ethan
-				(ethereum_account_id(hex!("C0F0f4ab324C46e55D02D0033343B4Be8A55532d")), DEV_BALANCE), // Faith
+				(
+					ethereum_account_id(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")),
+					DEV_BALANCE,
+				), // Baltathar
+				(
+					ethereum_account_id(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")),
+					DEV_BALANCE,
+				), // Charleth
+				(
+					ethereum_account_id(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")),
+					DEV_BALANCE,
+				), // Dorothy
+				(
+					ethereum_account_id(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")),
+					DEV_BALANCE,
+				), // Ethan
+				(
+					ethereum_account_id(hex!("C0F0f4ab324C46e55D02D0033343B4Be8A55532d")),
+					DEV_BALANCE,
+				), // Faith
 				// CI test runner
-				(ethereum_account_id(hex!("6be02d1d3665660d22ff9624b7be0551ee1ac91b")), DEV_BALANCE),
+				(
+					ethereum_account_id(hex!("6be02d1d3665660d22ff9624b7be0551ee1ac91b")),
+					DEV_BALANCE,
+				),
 			],
 			// Initial PoA authorities
 			vec![authority_keys_from_seed("Alice")],
@@ -118,16 +154,52 @@ pub fn local_testnet_config() -> ChainSpec {
 				"d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d"
 			)),
 			vec![
-				(ethereum_account_id(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), TOTAL_SUPPLY),
-				(AccountId::from(hex!("d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d")), DEV_BALANCE),
-				(AccountId::from(hex!("8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48")), DEV_BALANCE),
-				(AccountId::from(hex!("90b5ab205c6974c9ea841be688864633dc9ca8a357843eeacf2314649965fe22")), DEV_BALANCE),
-				(ethereum_account_id(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), DEV_BALANCE),
-				(ethereum_account_id(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), DEV_BALANCE),
-				(ethereum_account_id(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")), DEV_BALANCE),
-				(ethereum_account_id(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")), DEV_BALANCE),
-				(ethereum_account_id(hex!("C0F0f4ab324C46e55D02D0033343B4Be8A55532d")), DEV_BALANCE),
-				(ethereum_account_id(hex!("6be02d1d3665660d22ff9624b7be0551ee1ac91b")), DEV_BALANCE),
+				(
+					ethereum_account_id(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
+					TOTAL_SUPPLY,
+				),
+				(
+					AccountId::from(hex!(
+						"d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d"
+					)),
+					DEV_BALANCE,
+				),
+				(
+					AccountId::from(hex!(
+						"8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48"
+					)),
+					DEV_BALANCE,
+				),
+				(
+					AccountId::from(hex!(
+						"90b5ab205c6974c9ea841be688864633dc9ca8a357843eeacf2314649965fe22"
+					)),
+					DEV_BALANCE,
+				),
+				(
+					ethereum_account_id(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")),
+					DEV_BALANCE,
+				),
+				(
+					ethereum_account_id(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")),
+					DEV_BALANCE,
+				),
+				(
+					ethereum_account_id(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")),
+					DEV_BALANCE,
+				),
+				(
+					ethereum_account_id(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")),
+					DEV_BALANCE,
+				),
+				(
+					ethereum_account_id(hex!("C0F0f4ab324C46e55D02D0033343B4Be8A55532d")),
+					DEV_BALANCE,
+				),
+				(
+					ethereum_account_id(hex!("6be02d1d3665660d22ff9624b7be0551ee1ac91b")),
+					DEV_BALANCE,
+				),
 			],
 			vec![
 				authority_keys_from_seed("Alice"),
