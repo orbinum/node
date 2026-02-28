@@ -1,5 +1,5 @@
 //! Auto-generated Verification Key for transfer circuit
-//! Generated on: 2026-02-15
+//! Generated on: 2026-02-26
 //! Source: artifacts/verification_key_transfer.json
 //!
 //! DO NOT EDIT MANUALLY - Run sync-circuit-artifacts.sh to regenerate
@@ -10,9 +10,7 @@ use ark_groth16::VerifyingKey;
 use ark_serialize::CanonicalSerialize;
 use ark_std::str::FromStr;
 
-use crate::domain::value_objects::circuit_constants::{
-	CIRCUIT_ID_TRANSFER, TRANSFER_PUBLIC_INPUTS,
-};
+use crate::domain::value_objects::circuit_constants::{CIRCUIT_ID_TRANSFER, TRANSFER_PUBLIC_INPUTS};
 
 /// Circuit ID for transfer (re-exported from domain)
 pub const CIRCUIT_ID: u8 = CIRCUIT_ID_TRANSFER;
@@ -86,21 +84,21 @@ pub fn get_vk() -> VerifyingKey<Bn254> {
 	let delta_g2 = G2Affine::new_unchecked(
 		Fq2::new(
 			Fq::from_str(
-				"6128887458088249554860395918118246705861422303056882185490762080648320621170",
+				"21210017356800028189765169609355689560412776515696421144943120512582080855106",
 			)
 			.unwrap(),
 			Fq::from_str(
-				"4392716790709150487971950457548426651027717797967422679982836156265069267378",
+				"14511943665331686029396001817982261398195446606415397852397236303982916813000",
 			)
 			.unwrap(),
 		),
 		Fq2::new(
 			Fq::from_str(
-				"6862579306496809164234032958633900420354507233456088930175888498992887907124",
+				"9018692140492805721382512526754426365152853537642091428184184689391575640688",
 			)
 			.unwrap(),
 			Fq::from_str(
-				"11320937609295642066952076896464842220914857834192185407806271953305006523919",
+				"15724275910543667917169717966708117257043505811261438854408519153096654146410",
 			)
 			.unwrap(),
 		),

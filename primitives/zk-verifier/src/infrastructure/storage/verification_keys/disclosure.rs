@@ -1,5 +1,5 @@
 //! Auto-generated Verification Key for disclosure circuit
-//! Generated on: 2026-02-15
+//! Generated on: 2026-02-26
 //! Source: artifacts/verification_key_disclosure.json
 //!
 //! DO NOT EDIT MANUALLY - Run sync-circuit-artifacts.sh to regenerate
@@ -10,9 +10,7 @@ use ark_groth16::VerifyingKey;
 use ark_serialize::CanonicalSerialize;
 use ark_std::str::FromStr;
 
-use crate::domain::value_objects::circuit_constants::{
-	CIRCUIT_ID_DISCLOSURE, DISCLOSURE_PUBLIC_INPUTS,
-};
+use crate::domain::value_objects::circuit_constants::{CIRCUIT_ID_DISCLOSURE, DISCLOSURE_PUBLIC_INPUTS};
 
 /// Circuit ID for disclosure (re-exported from domain)
 pub const CIRCUIT_ID: u8 = CIRCUIT_ID_DISCLOSURE;
@@ -86,21 +84,21 @@ pub fn get_vk() -> VerifyingKey<Bn254> {
 	let delta_g2 = G2Affine::new_unchecked(
 		Fq2::new(
 			Fq::from_str(
-				"2381173057563833764233815915068000834834115452056520237556247865255806971249",
+				"11410200193157305974453613388772288662598667106108903028016998289217504881244",
 			)
 			.unwrap(),
 			Fq::from_str(
-				"14925087808722726730908922825409111491604984585967959067713802713576688599264",
+				"8457902477861265958299931852423672553703826453341748884045644730281445864613",
 			)
 			.unwrap(),
 		),
 		Fq2::new(
 			Fq::from_str(
-				"3647003627059138544808423335602440346505630062835555901870537472515929888599",
+				"18303526969778007680576758467758233649115419094194688503886541946498342249723",
 			)
 			.unwrap(),
 			Fq::from_str(
-				"18046788152159239766494427734682464055750108324022225733392731051350401204337",
+				"7289018135730287798780112168328833214836450354264770164434840130314874193463",
 			)
 			.unwrap(),
 		),
