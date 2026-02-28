@@ -68,7 +68,6 @@ const PLANCK: Balance = 1_000_000_000_000;
 const TOTAL_SUPPLY: Balance = 1_000_000_000 * PLANCK; // 1 billion ORB
 const DEV_BALANCE: Balance = 10_000 * PLANCK; // 10,000 ORB per dev account
 
-const UNITS: Balance = 1_000_000_000_000_000_000;
 const EVM_CHAIN_ID: u64 = 1984;
 
 pub fn development_config(enable_manual_seal: bool) -> ChainSpec {
