@@ -80,6 +80,18 @@ benchmark-pallet:
 audit:
 	@cargo deny check advisories
 
+.PHONY: sync-circuits sync-circuits-version
+# Sync ZK verification keys from latest circuits release
+sync-circuits:
+	bash ./scripts/sync-circuits/sync-circuit-artifacts.sh
+# Sync ZK verification keys from a specific circuits release (usage: make sync-circuits-version VERSION=v0.3.1)
+sync-circuits-version:
+	@if [ -z "$(VERSION)" ]; then \
+		echo "Error: VERSION variable is required. Usage: make sync-circuits-version VERSION=v0.3.1"; \
+		exit 1; \
+	fi
+	bash ./scripts/sync-circuits/sync-circuit-artifacts.sh $(VERSION)
+
 .PHONY: help
 # Show help
 help:

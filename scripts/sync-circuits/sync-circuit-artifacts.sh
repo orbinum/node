@@ -6,8 +6,8 @@
 # and regenerates Rust files in primitives/zk-verifier.
 #
 # Usage:
-#   ./scripts/sync-circuit-artifacts.sh           # latest version (automatic)
-#   ./scripts/sync-circuit-artifacts.sh v0.3.1    # specific version
+#   ./scripts/sync-circuits/sync-circuit-artifacts.sh           # latest version (automatic)
+#   ./scripts/sync-circuits/sync-circuit-artifacts.sh v0.3.1    # specific version
 #
 set -e
 # ============================================================================
@@ -16,9 +16,10 @@ set -e
 CIRCUITS_REPO="orbinum/circuits"
 CIRCUITS_API="https://api.github.com/repos/${CIRCUITS_REPO}/releases/latest"
 # Directories
-WORKSPACE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WORKSPACE_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 VK_DIR="${WORKSPACE_ROOT}/primitives/zk-verifier/src/infrastructure/storage/verification_keys"
-TEMP_DIR="${WORKSPACE_ROOT}/tmp/circuit-vkeys"
+TEMP_DIR="${SCRIPT_DIR}/tmp"
 # Expected circuits
 CIRCUITS=("disclosure" "transfer" "unshield")
 # Colors
@@ -29,6 +30,12 @@ NC='\033[0m'
 log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+cleanup() {
+    rm -rf "$TEMP_DIR"
+}
+
+trap cleanup EXIT
 # ============================================================================
 # Step 1: Resolve version
 # ============================================================================
@@ -40,7 +47,7 @@ if [ -n "$1" ]; then
     log_info "Specified version: ${VERSION}"
 else
     log_info "Fetching latest version from GitHub API..."
-    VERSION="$(curl -fsSL "$CIRCUITS_API" | python3 -c "import json,sys; print(json.load(sys.stdin)['tag_name'])")"
+    VERSION="$(curl -fsSL "$CIRCUITS_API" | jq -r '.tag_name')"
     if [ -z "$VERSION" ]; then
         log_error "Failed to fetch latest version from ${CIRCUITS_API}"
         exit 1
@@ -55,6 +62,7 @@ TARBALL_URL="https://github.com/${CIRCUITS_REPO}/releases/download/${VERSION}/${
 log_info ""
 log_info "Downloading verification keys..."
 log_info "  URL: ${TARBALL_URL}"
+rm -rf "$TEMP_DIR"
 mkdir -p "$TEMP_DIR"
 TARBALL_PATH="${TEMP_DIR}/${TARBALL_NAME}"
 if ! curl -fsSL -o "$TARBALL_PATH" "$TARBALL_URL"; then
@@ -88,17 +96,13 @@ for circuit in "${CIRCUITS[@]}"; do
     fi
     log_info "  verification_key_${circuit}.json ($(du -h "$VK_JSON" | cut -f1))"
     VK_RUST="${VK_DIR}/${circuit}.rs"
-    if python3 "${WORKSPACE_ROOT}/scripts/generate-vk-rust.py" "$circuit" "$VK_JSON" "$VK_RUST"; then
+    if bash "${WORKSPACE_ROOT}/scripts/sync-circuits/generate-vk-rust.sh" "$circuit" "$VK_JSON" "$VK_RUST"; then
         log_info "  ✓ Generated ${circuit}.rs"
     else
         log_error "  ✗ Failed to generate ${circuit}.rs"
         MISSING+=("${circuit}.rs")
     fi
 done
-# ============================================================================
-# Cleanup
-# ============================================================================
-rm -rf "$TEMP_DIR"
 # ============================================================================
 # Summary
 # ============================================================================

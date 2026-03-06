@@ -100,8 +100,9 @@ impl<T: Config> Pallet<T> {
 | Circuit ID | Name | Public Inputs | Description |
 |------------|------|---------------|-------------|
 | 1 | Transfer | 5 | Private transfer (2→2) |
-| 2 | Unshield | 4 | Withdrawal to public |
-| 3 | Disclosure | 3 | Selective disclosure |
+| 2 | Unshield | 5 | Withdrawal to public |
+| 4 | Disclosure | 4 | Selective disclosure |
+| 5 | Private Link | 2 | Private link dispatch verification |
 
 ## Features Flags
 
