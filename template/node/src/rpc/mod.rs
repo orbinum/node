@@ -77,8 +77,8 @@ where
 	CIDP: CreateInherentDataProviders<B, ()> + Send + 'static,
 	CT: fp_rpc::ConvertTransaction<<B as BlockT>::Extrinsic> + Send + Sync + 'static,
 {
-	use pallet_shielded_pool_rpc::{ShieldedPool, ShieldedPoolApiServer};
 	use pallet_account_mapping_rpc::{AccountMapping, AccountMappingApiServer};
+	use pallet_shielded_pool_rpc::{ShieldedPool, ShieldedPoolApiServer};
 	use pallet_transaction_payment_rpc::{TransactionPayment, TransactionPaymentApiServer};
 	use sc_consensus_manual_seal::rpc::{ManualSeal, ManualSealApiServer};
 	use substrate_frame_rpc_system::{System, SystemApiServer};

@@ -4,11 +4,11 @@ use pallet_evm::{
 };
 use sp_core::H160;
 
+use pallet_evm_precompile_account_mapping::AccountMappingPrecompile;
 use pallet_evm_precompile_curve25519 as curve25519_precompile;
 use pallet_evm_precompile_modexp::Modexp;
 use pallet_evm_precompile_sha3fips::Sha3FIPS256;
 use pallet_evm_precompile_simple::{ECRecover, ECRecoverPublicKey, Identity, Ripemd160, Sha256};
-use pallet_evm_precompile_account_mapping::AccountMappingPrecompile;
 
 pub struct FrontierPrecompiles<R>(PhantomData<R>);
 
@@ -40,8 +40,10 @@ where
 	<R as frame_system::Config>::RuntimeCall: sp_runtime::traits::Dispatchable<PostInfo = frame_support::dispatch::PostDispatchInfo>
 		+ frame_support::dispatch::GetDispatchInfo
 		+ From<pallet_account_mapping::Call<R>>,
-	<<R as frame_system::Config>::RuntimeCall as sp_runtime::traits::Dispatchable>::RuntimeOrigin: From<Option<<R as frame_system::Config>::AccountId>>,
-	<<R as frame_system::Config>::RuntimeCall as sp_runtime::traits::Dispatchable>::PostInfo: core::fmt::Debug,
+	<<R as frame_system::Config>::RuntimeCall as sp_runtime::traits::Dispatchable>::RuntimeOrigin:
+		From<Option<<R as frame_system::Config>::AccountId>>,
+	<<R as frame_system::Config>::RuntimeCall as sp_runtime::traits::Dispatchable>::PostInfo:
+		core::fmt::Debug,
 	pallet_evm::AccountIdOf<R>: Into<<R as frame_system::Config>::AccountId>,
 {
 	fn execute(&self, handle: &mut impl PrecompileHandle) -> Option<PrecompileResult> {

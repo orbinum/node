@@ -17,7 +17,6 @@ use orbinum_runtime::{
 use orbinum_zk_verifier::infrastructure::storage::verification_keys;
 use pallet_zk_verifier::CircuitId;
 
-
 pub type ChainSpec = sc_service::GenericChainSpec;
 
 fn ethereum_account_id(eth_address: [u8; 20]) -> AccountId {

@@ -329,7 +329,8 @@ mod tests {
 
 	#[test]
 	fn test_account_id32_to_account_id20_reversible_for_eth_derived() {
-		let eth = H160::from_slice(&hex::decode("f24ff3a9cf04c71dbc94d0b566f7a27b94566cac").unwrap());
+		let eth =
+			H160::from_slice(&hex::decode("f24ff3a9cf04c71dbc94d0b566f7a27b94566cac").unwrap());
 		let mut account32 = [0u8; 32];
 		account32[..20].copy_from_slice(eth.as_bytes());
 		account32[20..].copy_from_slice(&[0x00u8; 12]);

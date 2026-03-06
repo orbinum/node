@@ -1,7 +1,4 @@
-use crate::{
-	account_mapping_runtime::EeSuffixAddressMapping,
-	AccountId, Runtime, WeightPerGas,
-};
+use crate::{account_mapping_runtime::EeSuffixAddressMapping, AccountId, Runtime, WeightPerGas};
 use hex_literal::hex;
 use pallet_evm::AddressMapping;
 use sp_core::{ecdsa, sr25519, Pair, H160};
@@ -63,7 +60,6 @@ fn ee_suffix_mapping_layout_is_correct() {
 		assert_eq!(&bytes[20..], &[0x00u8; 12], "last 12 bytes must be 0x00");
 	});
 }
-
 
 #[test]
 fn chain_spec_mapping_matches_runtime_fallback_mapping() {

@@ -8,8 +8,8 @@
 
 extern crate alloc;
 
-mod genesis_config_preset;
 mod account_mapping_runtime;
+mod genesis_config_preset;
 mod precompiles;
 mod weights;
 
@@ -35,8 +35,7 @@ use sp_runtime::MultiSignature;
 use sp_runtime::{
 	generic, impl_opaque_keys,
 	traits::{
-		BlakeTwo256, Block as BlockT, DispatchInfoOf, Dispatchable, Get, IdentityLookup,
-		NumberFor,
+		BlakeTwo256, Block as BlockT, DispatchInfoOf, Dispatchable, Get, IdentityLookup, NumberFor,
 		PostDispatchInfoOf, UniqueSaturatedInto,
 	},
 	transaction_validity::{TransactionSource, TransactionValidity, TransactionValidityError},
@@ -70,14 +69,14 @@ pub use frame_system::Call as SystemCall;
 pub use pallet_balances::Call as BalancesCall;
 pub use pallet_timestamp::Call as TimestampCall;
 
-use precompiles::FrontierPrecompiles;
+pub use account_mapping_runtime::{
+	evm_bytes_to_account_id_bytes, evm_h160_to_account_id, evm_h160_to_account_id_bytes,
+};
 use account_mapping_runtime::{
 	try_evm_h160_from_account_id, AccountIdToEvmAddress, EeSuffixAddressMapping,
 	EnsureAddressMatches,
 };
-pub use account_mapping_runtime::{
-	evm_bytes_to_account_id_bytes, evm_h160_to_account_id, evm_h160_to_account_id_bytes,
-};
+use precompiles::FrontierPrecompiles;
 
 /// Type of block number.
 pub type BlockNumber = u32;
@@ -1202,7 +1201,6 @@ impl_runtime_apis! {
 
 		fn get_full_identity(alias: alloc::vec::Vec<u8>) -> Option<pallet_account_mapping_runtime_api::FullIdentityInfo<AccountId>> {
 			let record = pallet_account_mapping::Pallet::<Runtime>::runtime_api_resolve_alias(&alias)?;
-			let record = pallet_account_mapping::Pallet::<Runtime>::runtime_api_resolve_alias(&alias)?;
 			let metadata = pallet_account_mapping::AccountMetadatas::<Runtime>::get(&record.owner);
 
 			Some(pallet_account_mapping_runtime_api::FullIdentityInfo {
@@ -1325,4 +1323,3 @@ impl_runtime_apis! {
 		}
 	}
 }
-

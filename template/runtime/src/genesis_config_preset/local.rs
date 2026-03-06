@@ -1,4 +1,6 @@
-use crate::genesis_config_preset::{build_genesis, ethereum_to_account_id, DEV_BALANCE, TOTAL_SUPPLY};
+use crate::genesis_config_preset::{
+	build_genesis, ethereum_to_account_id, DEV_BALANCE, TOTAL_SUPPLY,
+};
 use crate::AccountId;
 use hex_literal::hex;
 use sp_std::vec;

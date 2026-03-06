@@ -7292,6 +7292,8 @@ dependencies = [
  "orbinum-runtime",
  "orbinum-zk-core 0.5.0",
  "orbinum-zk-verifier",
+ "pallet-account-mapping-rpc",
+ "pallet-account-mapping-runtime-api",
  "pallet-shielded-pool-rpc",
  "pallet-shielded-pool-runtime-api",
  "pallet-transaction-payment",
@@ -7353,6 +7355,8 @@ dependencies = [
  "hex-literal",
  "orbinum-signature-api",
  "orbinum-zk-verifier",
+ "pallet-account-mapping",
+ "pallet-account-mapping-runtime-api",
  "pallet-aura",
  "pallet-balances",
  "pallet-base-fee",
@@ -7360,6 +7364,7 @@ dependencies = [
  "pallet-ethereum",
  "pallet-evm",
  "pallet-evm-chain-id",
+ "pallet-evm-precompile-account-mapping",
  "pallet-evm-precompile-curve25519",
  "pallet-evm-precompile-curve25519-benchmarking",
  "pallet-evm-precompile-modexp",
@@ -7385,6 +7390,7 @@ dependencies = [
  "sp-core",
  "sp-genesis-builder",
  "sp-inherents",
+ "sp-io",
  "sp-offchain",
  "sp-runtime",
  "sp-session",
@@ -7492,6 +7498,50 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "pallet-account-mapping"
+version = "0.1.0"
+dependencies = [
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "orbinum-zk-core 0.5.0",
+ "pallet-balances",
+ "parity-scale-codec",
+ "scale-info",
+ "serde",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+]
+
+[[package]]
+name = "pallet-account-mapping-rpc"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "jsonrpsee",
+ "pallet-account-mapping-runtime-api",
+ "serde",
+ "sp-api",
+ "sp-blockchain",
+ "sp-core",
+ "sp-runtime",
+]
+
+[[package]]
+name = "pallet-account-mapping-runtime-api"
+version = "0.2.0"
+dependencies = [
+ "pallet-account-mapping",
+ "parity-scale-codec",
+ "scale-info",
+ "serde",
+ "sp-api",
+ "sp-core",
+ "sp-runtime",
 ]
 
 [[package]]
@@ -7782,6 +7832,21 @@ dependencies = [
  "parity-scale-codec",
  "polkavm-derive 0.30.0",
  "scale-info",
+]
+
+[[package]]
+name = "pallet-evm-precompile-account-mapping"
+version = "0.1.0"
+dependencies = [
+ "fp-evm",
+ "frame-support",
+ "frame-system",
+ "pallet-account-mapping",
+ "pallet-evm",
+ "precompile-utils",
+ "sp-core",
+ "sp-runtime",
+ "sp-std",
 ]
 
 [[package]]
@@ -8273,7 +8338,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-zk-verifier"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "frame-benchmarking",

@@ -10,7 +10,9 @@ use ark_groth16::VerifyingKey;
 use ark_serialize::CanonicalSerialize;
 use ark_std::str::FromStr;
 
-use crate::domain::value_objects::circuit_constants::{CIRCUIT_ID_PRIVATE_LINK, PRIVATE_LINK_PUBLIC_INPUTS};
+use crate::domain::value_objects::circuit_constants::{
+	CIRCUIT_ID_PRIVATE_LINK, PRIVATE_LINK_PUBLIC_INPUTS,
+};
 
 /// Circuit ID for private_link (re-exported from domain)
 pub const CIRCUIT_ID: u8 = CIRCUIT_ID_PRIVATE_LINK;
@@ -219,7 +221,10 @@ mod tests {
 	#[test]
 	fn get_vk_bytes_is_non_empty() {
 		let bytes = get_vk_bytes();
-		assert!(!bytes.is_empty(), "get_vk_bytes() no debe devolver bytes vacíos");
+		assert!(
+			!bytes.is_empty(),
+			"get_vk_bytes() no debe devolver bytes vacíos"
+		);
 	}
 
 	/// Round-trip: serializar → deserializar → volver a serializar produce
@@ -229,10 +234,8 @@ mod tests {
 	fn vk_bytes_round_trip() {
 		let original_bytes = get_vk_bytes();
 
-		let vk_restored = VerifyingKey::<Bn254>::deserialize_compressed(
-			original_bytes.as_slice(),
-		)
-		.expect("La deserialización de VK no debe fallar");
+		let vk_restored = VerifyingKey::<Bn254>::deserialize_compressed(original_bytes.as_slice())
+			.expect("La deserialización de VK no debe fallar");
 
 		let mut restored_bytes = alloc::vec::Vec::new();
 		vk_restored
