@@ -466,13 +466,20 @@ mod benchmarks {
 		let addr_hash = sp_io::hashing::keccak_256(&full_pubkey[..]);
 		let addr_bytes = addr_hash[12..].to_vec();
 
-		// Compute commitment: keccak_256(chain_id_le ++ address ++ blinding).
+		// Compute commitment: Poseidon2(Poseidon2(chain_id_fe, addr_fe), blinding_fe)
+		// This must match the on-chain verification in reveal_private_link.
 		let blinding = [0x11u8; 32];
-		let mut preimage = alloc::vec::Vec::new();
-		preimage.extend_from_slice(&1u32.to_le_bytes());
-		preimage.extend_from_slice(&addr_bytes);
-		preimage.extend_from_slice(&blinding);
-		let commitment = sp_io::hashing::keccak_256(&preimage);
+		let mut chain_id_fe = [0u8; 32];
+		chain_id_fe[..4].copy_from_slice(&1u32.to_le_bytes());
+		let mut addr_fe = [0u8; 32];
+		let copy_len = addr_bytes.len().min(32);
+		addr_fe[..copy_len].copy_from_slice(&addr_bytes[..copy_len]);
+		let inner = orbinum_zk_core::infrastructure::host_interface::poseidon_host_interface
+			::poseidon_hash_2(&chain_id_fe, &addr_fe);
+		let commitment: [u8; 32] = orbinum_zk_core::infrastructure::host_interface
+			::poseidon_host_interface::poseidon_hash_2(&inner, &blinding)
+			.try_into()
+			.expect("Poseidon output is 32 bytes");
 
 		// Insert the private link into storage.
 		let link = crate::PrivateChainLink {
