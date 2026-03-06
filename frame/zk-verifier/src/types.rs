@@ -40,6 +40,8 @@ impl CircuitId {
 	pub const SHIELD: Self = Self(3);
 	/// Disclosure circuit ID
 	pub const DISCLOSURE: Self = Self(4);
+	/// Private link dispatch circuit ID
+	pub const PRIVATE_LINK: Self = Self(5);
 }
 
 /// Supported proof systems

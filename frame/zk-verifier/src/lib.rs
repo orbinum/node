@@ -583,6 +583,43 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 
 		Ok(valid)
 	}
+
+	/// Verify a private link dispatch proof
+	fn verify_private_link_proof(
+		proof: &[u8],
+		commitment: &[u8; 32],
+		call_hash_fe: &[u8; 32],
+		version: Option<u32>,
+	) -> Result<bool, sp_runtime::DispatchError> {
+		use crate::{
+			application::{commands::VerifyProofCommand, use_cases::VerifyProofUseCase},
+			domain::value_objects::CircuitId as DomainCircuitId,
+			infrastructure::{
+				repositories::{FrameStatisticsRepository, FrameVkRepository},
+				services::Groth16Verifier,
+			},
+		};
+		use alloc::{boxed::Box, vec};
+
+		// Public inputs: [commitment(32B LE), call_hash_fe(32B LE)]
+		let public_inputs = vec![commitment.to_vec(), call_hash_fe.to_vec()];
+
+		let command = VerifyProofCommand {
+			circuit_id: DomainCircuitId::new(CircuitId::PRIVATE_LINK.0),
+			version,
+			proof: proof.to_vec(),
+			public_inputs,
+		};
+
+		let vk_repository = FrameVkRepository::<T>::new();
+		let statistics = FrameStatisticsRepository::<T>::new();
+		let validator = Box::new(Groth16Verifier);
+
+		let use_case = VerifyProofUseCase::new(vk_repository, statistics, validator);
+		use_case
+			.execute(command)
+			.map_err(Self::map_application_error_to_dispatch)
+	}
 }
 
 impl<T: Config> Pallet<T> {

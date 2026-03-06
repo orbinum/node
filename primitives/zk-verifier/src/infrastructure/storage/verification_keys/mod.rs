@@ -18,12 +18,14 @@
 //! ```
 
 pub mod disclosure;
+pub mod private_link;
 pub mod registry;
 pub mod transfer;
 pub mod unshield;
 
 // Re-export commonly used functions
 pub use disclosure::{get_vk as get_disclosure_vk, get_vk_bytes as get_disclosure_vk_bytes};
+pub use private_link::{get_vk as get_private_link_vk, get_vk_bytes as get_private_link_vk_bytes};
 pub use transfer::{get_vk as get_transfer_vk, get_vk_bytes as get_transfer_vk_bytes};
 pub use unshield::{get_vk as get_unshield_vk, get_vk_bytes as get_unshield_vk_bytes};
 

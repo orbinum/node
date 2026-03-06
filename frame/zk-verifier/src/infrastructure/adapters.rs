@@ -59,6 +59,18 @@ impl TransferVkAdapter {
 	}
 }
 
+/// Adapter to access PrivateLink VK
+pub struct PrivateLinkVkAdapter;
+
+impl PrivateLinkVkAdapter {
+	/// Retrieves the hardcoded private_link verification key
+	pub fn get_private_link_vk() -> primitives::PrimitiveVerifyingKey {
+		let ark_vk = primitives::verification_keys::get_private_link_vk();
+		primitives::PrimitiveVerifyingKey::from_ark_vk(&ark_vk)
+			.expect("Failed to wrap hardcoded private_link VK")
+	}
+}
+
 /// Adapter to convert PublicInputs from domain to primitive
 pub struct PublicInputsAdapter;
 
