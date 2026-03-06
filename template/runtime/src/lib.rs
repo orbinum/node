@@ -8,6 +8,9 @@
 
 extern crate alloc;
 
+// Required for WASM side effects; suppress unused_crate_dependencies warning.
+use sp_io as _;
+
 mod account_mapping_runtime;
 mod genesis_config_preset;
 mod precompiles;
