@@ -119,6 +119,20 @@ impl ZkVerifierPort for MockZkVerifier {
 		// Always return true for testing (bypass ZK verification)
 		Ok(true)
 	}
+
+	fn verify_private_link_proof(
+		proof: &[u8],
+		_commitment: &[u8; 32],
+		_call_hash_fe: &[u8; 32],
+		_version: Option<u32>,
+	) -> Result<bool, sp_runtime::DispatchError> {
+		// Validate basic format
+		if proof.is_empty() {
+			return Err(sp_runtime::DispatchError::Other("Empty proof"));
+		}
+		// Always return true for testing (bypass ZK verification)
+		Ok(true)
+	}
 }
 
 /// Mock ZK verifier that always fails - for testing error paths
@@ -192,6 +206,16 @@ impl ZkVerifierPort for FailingZkVerifier {
 	fn batch_verify_disclosure_proofs(
 		_proofs: &[sp_std::vec::Vec<u8>],
 		_public_signals: &[sp_std::vec::Vec<u8>],
+		_version: Option<u32>,
+	) -> Result<bool, sp_runtime::DispatchError> {
+		// Always return false for testing invalid proofs
+		Ok(false)
+	}
+
+	fn verify_private_link_proof(
+		_proof: &[u8],
+		_commitment: &[u8; 32],
+		_call_hash_fe: &[u8; 32],
 		_version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
 		// Always return false for testing invalid proofs

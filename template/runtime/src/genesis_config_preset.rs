@@ -1,3 +1,8 @@
+mod development;
+mod local;
+mod mainnet;
+mod testnet;
+
 use crate::{
 	AccountId, BalancesConfig, EVMChainIdConfig, EVMConfig, EthereumConfig, ManualSealConfig,
 	RuntimeGenesisConfig, SudoConfig,
@@ -14,95 +19,31 @@ use sp_std::prelude::*;
 use orbinum_zk_verifier::infrastructure::storage::verification_keys;
 use pallet_zk_verifier::CircuitId;
 
-/// Map an Ethereum H160 address to its Substrate AccountId32 using the
-/// Frontier Unified Account scheme: `[0x00; 12] ++ H160_bytes`.
+/// Map an Ethereum H160 address to its Substrate AccountId32 using
+/// the runtime helper (H160_bytes ++ [0xEE; 12]).
 ///
-/// This matches `TruncatedAddressMapping` in lib.rs so that
+/// This matches `EeSuffixAddressMapping` in lib.rs so that
 /// `eth_getBalance` and `system.account` read from the same pallet-balances entry.
-fn ethereum_to_account_id(eth_address: [u8; 20]) -> AccountId {
-	let mut bytes = [0u8; 32];
-	bytes[12..].copy_from_slice(&eth_address);
-	AccountId::from(bytes)
+pub(super) fn ethereum_to_account_id(eth_address: [u8; 20]) -> crate::AccountId {
+	crate::evm_bytes_to_account_id_bytes(eth_address).into()
 }
 
 // ── Token supply constants ────────────────────────────────────────────────────
-/// 1 ORB = 1_000_000_000_000 planck (12 decimals)
-const PLANCK: u128 = 1_000_000_000_000;
+/// 1 ORB = 1_000_000_000_000_000_000 wei (18 decimals, Ethereum-compatible)
+pub(super) const PLANCK: u128 = 1_000_000_000_000_000_000;
 /// Total project supply: 1,000,000,000 ORB
-const TOTAL_SUPPLY: u128 = 1_000_000_000 * PLANCK;
+pub(super) const TOTAL_SUPPLY: u128 = 1_000_000_000 * PLANCK;
 /// Development/test account allocation: 10,000 ORB
-const DEV_BALANCE: u128 = 10_000 * PLANCK;
+pub(super) const DEV_BALANCE: u128 = 10_000 * PLANCK;
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Generate a chain spec for use with the development service.
-pub fn development() -> serde_json::Value {
-	testnet_genesis(
-		// Sudo account (Alice)
-		AccountId::from(hex!(
-			"d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d"
-		)),
-		// (account, balance) pairs
-		// Alith holds the full project supply; dev accounts get 10,000 ORB each.
-		vec![
-			// ── Primary account (MetaMask / Alith) — total project supply ──────
-			(
-				ethereum_to_account_id(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
-				TOTAL_SUPPLY,
-			), // Alith
-			// ── Substrate sr25519 dev accounts ──────────────────────────────────
-			(
-				AccountId::from(hex!(
-					"d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d"
-				)),
-				DEV_BALANCE,
-			), // Alice
-			(
-				AccountId::from(hex!(
-					"8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48"
-				)),
-				DEV_BALANCE,
-			), // Bob
-			(
-				AccountId::from(hex!(
-					"90b5ab205c6974c9ea841be688864633dc9ca8a357843eeacf2314649965fe22"
-				)),
-				DEV_BALANCE,
-			), // Charlie
-			// ── Ethereum dev accounts (Frontier unified mapping) ─────────────────
-			(
-				ethereum_to_account_id(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")),
-				DEV_BALANCE,
-			), // Baltathar
-			(
-				ethereum_to_account_id(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")),
-				DEV_BALANCE,
-			), // Charleth
-			(
-				ethereum_to_account_id(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")),
-				DEV_BALANCE,
-			), // Dorothy
-			(
-				ethereum_to_account_id(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")),
-				DEV_BALANCE,
-			), // Ethan
-			(
-				ethereum_to_account_id(hex!("C0F0f4ab324C46e55D02D0033343B4Be8A55532d")),
-				DEV_BALANCE,
-			), // Faith
-			// CI test runner
-			(
-				ethereum_to_account_id(hex!("6be02d1d3665660d22ff9624b7be0551ee1ac91b")),
-				DEV_BALANCE,
-			),
-		],
-		vec![],
-		42,    // chain id
-		false, // disable manual seal
-	)
-}
+pub(super) const DEV_PRESET_ID: &str = sp_genesis_builder::DEV_RUNTIME_PRESET;
+pub(super) const LOCAL_PRESET_ID: &str = "orbinum_local_testnet_runtime_preset";
+pub(super) const TESTNET_PRESET_ID: &str = "orbinum_testnet_runtime_preset";
+pub(super) const MAINNET_PRESET_ID: &str = "orbinum_mainnet_runtime_preset";
 
 /// Configure initial storage state for FRAME modules.
-fn testnet_genesis(
+pub(super) fn build_genesis(
 	sudo_key: AccountId,
 	endowed_accounts: Vec<(AccountId, u128)>,
 	_initial_authorities: Vec<(AuraId, GrandpaId)>,
@@ -178,7 +119,10 @@ fn testnet_genesis(
 /// Provides the JSON representation of predefined genesis config for given `id`.
 pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 	let patch = match id.as_str() {
-		sp_genesis_builder::DEV_RUNTIME_PRESET => development(),
+		DEV_PRESET_ID => development::development(),
+		LOCAL_PRESET_ID => local::local_testnet(),
+		TESTNET_PRESET_ID => testnet::testnet(),
+		MAINNET_PRESET_ID => mainnet::mainnet(),
 		_ => return None,
 	};
 	Some(

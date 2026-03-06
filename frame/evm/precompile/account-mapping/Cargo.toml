@@ -1,0 +1,38 @@
+[package]
+name = "pallet-evm-precompile-account-mapping"
+version = "0.1.0"
+authors = { workspace = true }
+edition = "2021"
+description = "EVM Precompile for Orbinum Account Mapping Pallet."
+
+[dependencies]
+# Substrate CORE
+sp-core = { workspace = true }
+sp-runtime = { workspace = true }
+sp-std = { workspace = true }
+
+# Substrate FRAME
+frame-support = { workspace = true }
+frame-system = { workspace = true }
+
+# Frontier EVM
+fp-evm = { workspace = true }
+pallet-evm = { workspace = true }
+precompile-utils = { workspace = true }
+
+# Orbinum Pallets
+pallet-account-mapping = { workspace = true }
+
+[features]
+default = ["std"]
+std = [
+	"sp-core/std",
+	"sp-std/std",
+	"sp-runtime/std",
+	"frame-support/std",
+	"frame-system/std",
+	"fp-evm/std",
+	"pallet-evm/std",
+	"precompile-utils/std",
+	"pallet-account-mapping/std",
+]
