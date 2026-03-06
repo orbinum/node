@@ -8,7 +8,7 @@ setup:
 clean:
 	cargo clean
 
-.PHONY: fmt-check fmt
+.PHONY: fmt-check fmt format
 # Check the code format
 fmt-check:
 	taplo fmt --check
@@ -17,6 +17,8 @@ fmt-check:
 fmt:
 	taplo fmt
 	cargo fmt --all
+# Alias for fmt
+format: fmt
 
 .PHONY: clippy clippy-release
 # Run rust clippy with debug profile

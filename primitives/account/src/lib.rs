@@ -162,7 +162,18 @@ impl From<ecdsa::Public> for AccountId20 {
 impl From<[u8; 32]> for AccountId20 {
 	fn from(bytes: [u8; 32]) -> Self {
 		let mut buffer = [0u8; 20];
-		buffer.copy_from_slice(&bytes[..20]);
+
+		// Official-style reversible mapping for Ethereum-derived accounts:
+		// AccountId32 = H160 || 0x00*12
+		if bytes[20..] == [0x00u8; 12] {
+			buffer.copy_from_slice(&bytes[..20]);
+			return Self(buffer);
+		}
+
+		// Fallback for native AccountId32 values (lossy but deterministic):
+		// H160 = last 20 bytes of keccak_256(AccountId32)
+		let hash = keccak_256(&bytes);
+		buffer.copy_from_slice(&hash[12..32]);
 		Self(buffer)
 	}
 }
@@ -314,5 +325,31 @@ mod tests {
 		let account: AccountId20 = signer.into_account();
 		let account_fmt = format!("{account}");
 		assert_eq!(account_fmt, "0xE04CC55ebEE1cBCE552f250e85c57B70B2E2625b");
+	}
+
+	#[test]
+	fn test_account_id32_to_account_id20_reversible_for_eth_derived() {
+		let eth =
+			H160::from_slice(&hex::decode("f24ff3a9cf04c71dbc94d0b566f7a27b94566cac").unwrap());
+		let mut account32 = [0u8; 32];
+		account32[..20].copy_from_slice(eth.as_bytes());
+		account32[20..].copy_from_slice(&[0x00u8; 12]);
+
+		let converted = AccountId20::from(account32);
+		assert_eq!(H160::from(converted), eth);
+	}
+
+	#[test]
+	fn test_account_id32_to_account_id20_fallback_keccak_for_native() {
+		let native = H256::from_slice(
+			&hex::decode("d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d")
+				.unwrap(),
+		);
+		let native_bytes: [u8; 32] = native.into();
+		let converted = AccountId20::from(native_bytes);
+
+		let hash = keccak_256(&native_bytes);
+		let expected = H160::from_slice(&hash[12..32]);
+		assert_eq!(H160::from(converted), expected);
 	}
 }

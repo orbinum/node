@@ -24,6 +24,15 @@ pub const CIRCUIT_ID_DISCLOSURE: u8 = 4;
 /// Public inputs: [commitment, revealed_value, revealed_asset_id, revealed_owner_hash]
 pub const DISCLOSURE_PUBLIC_INPUTS: usize = 4;
 
+/// Circuit identifier for private link dispatch operations
+/// Used to lookup the correct verification key at runtime
+/// Public inputs: [commitment, call_hash_fe]
+pub const CIRCUIT_ID_PRIVATE_LINK: u8 = 5;
+
+/// Number of public inputs for the private link circuit
+/// Public inputs: [commitment(32B LE field element), call_hash_fe(32B LE field element)]
+pub const PRIVATE_LINK_PUBLIC_INPUTS: usize = 2;
+
 /// Base cost for Groth16 verification (pairing operations)
 /// This is a reasonable default that can be overridden in runtime configuration
 pub const BASE_VERIFICATION_COST: u64 = 100_000;

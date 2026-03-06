@@ -438,4 +438,67 @@ impl ZkVerifierPort for Groth16Verifier {
 			}
 		}
 	}
+
+	fn verify_private_link_proof(
+		proof: &[u8],
+		commitment: &[u8; 32],
+		call_hash_fe: &[u8; 32],
+		_version: Option<u32>,
+	) -> Result<bool, DispatchError> {
+		// In benchmarks and tests always return true
+		#[cfg(any(feature = "runtime-benchmarks", test))]
+		{
+			let _ = (proof, commitment, call_hash_fe);
+			Ok(true)
+		}
+
+		// Real verification using the embedded private_link VK
+		#[cfg(not(any(feature = "runtime-benchmarks", test)))]
+		{
+			use crate::infrastructure::adapters::{
+				PrivateLinkVkAdapter,
+				primitives::{
+					PrimitiveGroth16Verifier as PrimitiveVerifier, PrimitiveProof,
+					PrimitivePublicInputs,
+				},
+			};
+
+			if proof.is_empty() {
+				#[cfg(feature = "std")]
+				log::error!("Empty private_link proof provided");
+				return Err(DispatchError::Other("Empty private_link proof"));
+			}
+
+			#[cfg(feature = "std")]
+			{
+				log::debug!(
+					"PrivateLink proof verification - commitment: {commitment:?}, call_hash_fe: {call_hash_fe:?}"
+				);
+			}
+
+			let primitive_vk = PrivateLinkVkAdapter::get_private_link_vk();
+			let primitive_proof = PrimitiveProof::new(proof.to_vec());
+
+			// Public inputs: [commitment, call_hash_fe] (2 field elements)
+			let public_inputs_bytes = alloc::vec![*commitment, *call_hash_fe];
+			let primitive_public_inputs = PrimitivePublicInputs::new(public_inputs_bytes);
+
+			match PrimitiveVerifier::verify(
+				&primitive_vk,
+				&primitive_public_inputs,
+				&primitive_proof,
+			) {
+				Ok(()) => {
+					#[cfg(feature = "std")]
+					log::info!("✅ PrivateLink proof verification PASSED");
+					Ok(true)
+				}
+				Err(_) => {
+					#[cfg(feature = "std")]
+					log::warn!("❌ PrivateLink proof verification FAILED");
+					Ok(false)
+				}
+			}
+		}
+	}
 }

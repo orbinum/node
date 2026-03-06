@@ -82,4 +82,23 @@ pub trait ZkVerifierPort {
 		public_signals: &[sp_std::vec::Vec<u8>],
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError>;
+
+	/// Verify a private link dispatch proof
+	///
+	/// # Arguments
+	/// * `proof` - Serialized Groth16 proof bytes
+	/// * `commitment` - Poseidon2(Poseidon2(chain_id_fe, address_fe), blinding_fe) as 32-byte LE
+	/// * `call_hash_fe` - blake2_256(encoded_call) as 32-byte LE BN254 field element
+	/// * `version` - Circuit version (None for active version)
+	///
+	/// # Returns
+	/// * `Ok(true)` if the proof is valid
+	/// * `Ok(false)` if the proof is invalid
+	/// * `Err` if an error occurs during verification
+	fn verify_private_link_proof(
+		proof: &[u8],
+		commitment: &[u8; 32],
+		call_hash_fe: &[u8; 32],
+		version: Option<u32>,
+	) -> Result<bool, sp_runtime::DispatchError>;
 }

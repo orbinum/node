@@ -1,0 +1,57 @@
+[package]
+name = "pallet-account-mapping"
+version = "0.1.0"
+license = "Apache-2.0"
+description = "Stateful mapping between Substrate AccountId32 and EVM H160 addresses, with alias registration and multichain identity support."
+authors = { workspace = true }
+edition = { workspace = true }
+repository = { workspace = true }
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+scale-codec = { workspace = true }
+scale-info = { workspace = true }
+
+frame-benchmarking = { workspace = true, optional = true }
+frame-support = { workspace = true }
+frame-system = { workspace = true }
+
+orbinum-zk-core = { workspace = true, features = ["poseidon-native"] }
+pallet-balances = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+sp-core = { workspace = true }
+sp-io = { workspace = true }
+sp-runtime = { workspace = true }
+
+[dev-dependencies]
+pallet-balances = { workspace = true, features = ["default"] }
+sp-io = { workspace = true, features = ["default"] }
+sp-keystore = { workspace = true, features = ["std"] }
+
+[features]
+default = ["std"]
+std = [
+	"orbinum-zk-core/std",
+	"scale-codec/std",
+	"scale-info/std",
+	"frame-benchmarking?/std",
+	"frame-support/std",
+	"frame-system/std",
+	"sp-core/std",
+	"sp-io/std",
+	"sp-runtime/std",
+	"pallet-balances/std",
+	"serde/std",
+]
+try-runtime = [
+	"frame-support/try-runtime",
+	"frame-system/try-runtime",
+]
+runtime-benchmarks = [
+	"frame-benchmarking/runtime-benchmarks",
+	"frame-support/runtime-benchmarks",
+	"frame-system/runtime-benchmarks",
+	"pallet-balances/runtime-benchmarks",
+]

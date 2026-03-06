@@ -46,6 +46,8 @@ impl SubstrateCli for Cli {
 				Box::new(chain_spec::development_config(enable_manual_seal))
 			}
 			"" | "local" => Box::new(chain_spec::local_testnet_config()),
+			"testnet" | "orbinum_testnet" => Box::new(chain_spec::orbinum_testnet_config()),
+			"mainnet" | "orbinum_mainnet" => Box::new(chain_spec::orbinum_mainnet_config()),
 			path => Box::new(chain_spec::ChainSpec::from_json_file(
 				std::path::PathBuf::from(path),
 			)?),

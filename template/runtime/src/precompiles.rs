@@ -4,6 +4,7 @@ use pallet_evm::{
 };
 use sp_core::H160;
 
+use pallet_evm_precompile_account_mapping::AccountMappingPrecompile;
 use pallet_evm_precompile_curve25519 as curve25519_precompile;
 use pallet_evm_precompile_modexp::Modexp;
 use pallet_evm_precompile_sha3fips::Sha3FIPS256;
@@ -18,7 +19,7 @@ where
 	pub fn new() -> Self {
 		Self(Default::default())
 	}
-	pub fn used_addresses() -> [H160; 9] {
+	pub fn used_addresses() -> [H160; 10] {
 		[
 			hash(1),
 			hash(2),
@@ -29,12 +30,21 @@ where
 			hash(1025),
 			hash(1026),
 			hash(1027),
+			hash(2048),
 		]
 	}
 }
 impl<R> PrecompileSet for FrontierPrecompiles<R>
 where
-	R: pallet_evm::Config + frame_system::Config,
+	R: pallet_evm::Config + frame_system::Config + pallet_account_mapping::Config,
+	<R as frame_system::Config>::RuntimeCall: sp_runtime::traits::Dispatchable<PostInfo = frame_support::dispatch::PostDispatchInfo>
+		+ frame_support::dispatch::GetDispatchInfo
+		+ From<pallet_account_mapping::Call<R>>,
+	<<R as frame_system::Config>::RuntimeCall as sp_runtime::traits::Dispatchable>::RuntimeOrigin:
+		From<Option<<R as frame_system::Config>::AccountId>>,
+	<<R as frame_system::Config>::RuntimeCall as sp_runtime::traits::Dispatchable>::PostInfo:
+		core::fmt::Debug,
+	pallet_evm::AccountIdOf<R>: Into<<R as frame_system::Config>::AccountId>,
 {
 	fn execute(&self, handle: &mut impl PrecompileHandle) -> Option<PrecompileResult> {
 		match handle.code_address() {
@@ -59,6 +69,8 @@ where
 				R,
 				crate::weights::pallet_evm_precompile_curve25519::WeightInfo<R>,
 			>::execute(handle)),
+			// Orbinum precompiles
+			a if a == hash(2048) => Some(AccountMappingPrecompile::<R>::execute(handle)),
 			_ => None,
 		}
 	}

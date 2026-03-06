@@ -68,6 +68,7 @@ where
 	C::Api: pallet_transaction_payment_rpc::TransactionPaymentRuntimeApi<B, Balance>,
 	C::Api: fp_rpc::ConvertTransactionRuntimeApi<B>,
 	C::Api: fp_rpc::EthereumRuntimeRPCApi<B>,
+	C::Api: pallet_account_mapping_runtime_api::AccountMappingRuntimeApi<B, AccountId, u128>,
 	C::Api: pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi<B>,
 	C: HeaderBackend<B> + HeaderMetadata<B, Error = BlockChainError> + 'static,
 	C: BlockchainEvents<B> + AuxStore + UsageProvider<B> + StorageProvider<B, BE>,
@@ -76,6 +77,7 @@ where
 	CIDP: CreateInherentDataProviders<B, ()> + Send + 'static,
 	CT: fp_rpc::ConvertTransaction<<B as BlockT>::Extrinsic> + Send + Sync + 'static,
 {
+	use pallet_account_mapping_rpc::{AccountMapping, AccountMappingApiServer};
 	use pallet_shielded_pool_rpc::{ShieldedPool, ShieldedPoolApiServer};
 	use pallet_transaction_payment_rpc::{TransactionPayment, TransactionPaymentApiServer};
 	use sc_consensus_manual_seal::rpc::{ManualSeal, ManualSealApiServer};
@@ -94,6 +96,7 @@ where
 
 	io.merge(System::new(client.clone(), pool).into_rpc())?;
 	io.merge(TransactionPayment::new(client.clone()).into_rpc())?;
+	io.merge(AccountMapping::new(client.clone()).into_rpc())?;
 	io.merge(ShieldedPool::new(client.clone()).into_rpc())?;
 
 	// Orbinum Privacy RPC

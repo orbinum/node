@@ -304,6 +304,8 @@ where
 	RA: ConstructRuntimeApi<B, FullClient<B, RA, HF>>,
 	RA: Send + Sync + 'static,
 	RA::RuntimeApi: RuntimeApiCollection<B, AuraId, AccountId, Nonce, Balance>,
+	RA::RuntimeApi:
+		pallet_account_mapping_runtime_api::AccountMappingRuntimeApi<B, AccountId, u128>,
 	HF: HostFunctionsT + 'static,
 	NB: sc_network::NetworkBackend<B, <B as BlockT>::Hash>,
 {
