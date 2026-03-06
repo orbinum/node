@@ -1,6 +1,7 @@
 use crate::{self as pallet_account_mapping, PrivateLinkVerifierPort};
 use frame_support::{derive_impl, parameter_types};
 use sp_core::H160;
+use sp_keystore::{testing::MemoryKeystore, KeystoreExt};
 use sp_runtime::{
 	traits::{BlakeTwo256, Convert, IdentityLookup},
 	BuildStorage,
@@ -91,6 +92,7 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 	.assimilate_storage(&mut t)
 	.unwrap();
 	let mut ext = sp_io::TestExternalities::new(t);
+	ext.register_extension(KeystoreExt::new(MemoryKeystore::new()));
 	ext.execute_with(|| System::set_block_number(1));
 	ext
 }

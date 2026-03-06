@@ -7514,6 +7514,7 @@ dependencies = [
  "serde",
  "sp-core",
  "sp-io",
+ "sp-keystore",
  "sp-runtime",
 ]
 
