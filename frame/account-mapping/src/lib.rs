@@ -1180,7 +1180,8 @@ pub mod pallet {
 
 			// 3. Compute call_hash = blake2_256(encoded call) — this is the
 			//    signed message verified inside the ZK circuit.
-			let call_hash = sp_io::hashing::blake2_256(&call.encode());
+			let call_encoded = call.encode();
+			let call_hash = sp_io::hashing::blake2_256(&call_encoded);
 
 			// 4. Verify the ZK proof via the configured verifier port.
 			ensure!(

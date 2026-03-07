@@ -107,6 +107,10 @@ pub(super) fn build_genesis(
 					CircuitId::DISCLOSURE,
 					verification_keys::get_disclosure_vk_bytes(),
 				),
+				(
+					CircuitId::PRIVATE_LINK,
+					verification_keys::get_private_link_vk_bytes(),
+				),
 			],
 			..Default::default()
 		},

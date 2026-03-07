@@ -525,4 +525,62 @@ mod tests {
 		assert!(batch_result.is_ok());
 		assert!(!batch_result.unwrap());
 	}
+
+	/// Test de regresión para el circuito private_link.
+	/// Verifica que la VK hardcodeada en `private_link.rs` sea compatible con el
+	/// proving key del CDN (circuits.orbinum.io/v1).
+	///
+	/// Datos capturados de una ejecución real de test:24 (2026-03-07) con el
+	/// proving key actual del CDN. Si este test falla, significa que el VK en
+	/// `primitives/zk-verifier/src/infrastructure/storage/verification_keys/private_link.rs`
+	/// está desincronizado respecto al CDN — ejecuta `scripts/sync-circuits/sync-circuit-artifacts.sh`
+	/// y regenera el archivo Rust con `scripts/sync-circuits/generate-vk-rust.sh private_link`.
+	#[test]
+	fn test_real_private_link_proof_against_hardcoded_vk() {
+		use ark_groth16::Proof as ArkProof;
+		use ark_serialize::CanonicalDeserialize;
+
+		// VK hardcodeada de la crate
+		let ark_vk = verification_keys::get_private_link_vk();
+		let pvk = PreparedVerifyingKey::from(ark_vk);
+
+		// Proof comprimido (128 bytes) generado por compress_snarkjs_proof_wasm
+		// Capturado de npm run test:24 en 2026-03-07
+		let proof_hex = "a6d78479b00b00ba96405d7bde4ebc75b351db85108caba6b2d278c7e1ad5a0a25b56fbae893764cf38d01e84dbb6a458802f414a2ababcd346f33e0018a4e303fd9f74b8e5cbbb4730e8e01e8ecd6e7e04769154b427916b684e75a54e78b28981f861372008124ce74cd44c281b6d24dc7e04d070ce6246f5ce17cb8d09426";
+		let proof_bytes: alloc::vec::Vec<u8> = (0..proof_hex.len())
+			.step_by(2)
+			.map(|i| u8::from_str_radix(&proof_hex[i..i + 2], 16).unwrap())
+			.collect();
+		assert_eq!(proof_bytes.len(), 128, "Proof debe ser 128 bytes");
+
+		// Public inputs en formato LE de 32 bytes
+		// publicSignals[0] = commitment (LE hex)
+		let input0_hex = "7a103a55f6a19a42c486303590f2836ecb306eb0c704c64136e1ebcab7842a16";
+		// publicSignals[1] = call_hash_fe (LE hex)
+		let input1_hex = "4344ebdae7f9670c9f148635ff6b7add38d30e679360b508bb44800dfdf38522";
+
+		let mut input0 = [0u8; 32];
+		let mut input1 = [0u8; 32];
+		for i in 0..32 {
+			input0[i] = u8::from_str_radix(&input0_hex[i * 2..i * 2 + 2], 16).unwrap();
+			input1[i] = u8::from_str_radix(&input1_hex[i * 2..i * 2 + 2], 16).unwrap();
+		}
+
+		let public_inputs = PublicInputs::new(alloc::vec![input0, input1]);
+		let inputs_fr = public_inputs
+			.to_field_elements()
+			.expect("Conversión Fr debe funcionar");
+
+		// Deserializar el proof
+		let ark_proof = ArkProof::<Bn254>::deserialize_compressed(&proof_bytes[..])
+			.expect("Deserialización del proof debe funcionar");
+
+		// Verificar
+		let valid = Groth16::<Bn254>::verify_proof(&pvk, &ark_proof, &inputs_fr)
+			.expect("verify_proof no debe retornar error de pairing");
+
+		// Si falla aquí, el VK no coincide con el proving key del CDN
+		// Si pasa, el bug es otro (e.g. problem en el path de runtime)
+		assert!(valid, "El proof de private_link debe verificar contra la VK hardcodeada. Si falla, el VK en Rust NO coincide con el proving key del CDN.");
+	}
 }
