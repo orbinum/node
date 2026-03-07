@@ -36,6 +36,7 @@ pub fn get_vk_by_circuit_id(circuit_id: u8) -> Result<VerifyingKey<Bn254>, Verif
 		CIRCUIT_ID_TRANSFER => Ok(super::transfer::get_vk()),
 		CIRCUIT_ID_UNSHIELD => Ok(super::unshield::get_vk()),
 		CIRCUIT_ID_DISCLOSURE => Ok(super::disclosure::get_vk()),
+		CIRCUIT_ID_PRIVATE_LINK => Ok(super::private_link::get_vk()),
 		_ => Err(VerifierError::InvalidCircuitId(circuit_id)),
 	}
 }
