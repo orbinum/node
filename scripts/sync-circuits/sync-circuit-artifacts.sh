@@ -21,7 +21,7 @@ WORKSPACE_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 VK_DIR="${WORKSPACE_ROOT}/primitives/zk-verifier/src/infrastructure/storage/verification_keys"
 TEMP_DIR="${SCRIPT_DIR}/tmp"
 # Expected circuits
-CIRCUITS=("disclosure" "transfer" "unshield")
+CIRCUITS=("disclosure" "transfer" "unshield" "private_link")
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
