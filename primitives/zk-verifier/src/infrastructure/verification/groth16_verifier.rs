@@ -546,7 +546,7 @@ mod tests {
 
 		// Proof comprimido (128 bytes) generado por compress_snarkjs_proof_wasm
 		// Capturado de npm run test:24 en 2026-03-07
-		let proof_hex = "a6d78479b00b00ba96405d7bde4ebc75b351db85108caba6b2d278c7e1ad5a0a25b56fbae893764cf38d01e84dbb6a458802f414a2ababcd346f33e0018a4e303fd9f74b8e5cbbb4730e8e01e8ecd6e7e04769154b427916b684e75a54e78b28981f861372008124ce74cd44c281b6d24dc7e04d070ce6246f5ce17cb8d09426";
+		let proof_hex = "94c177a4516a446219f11d948f431db57e540252a5dbac43081199cc72ffbd04f99df60b2fdd2cb1af7e4a919e10d00defbef63562047b6898f55949b19e5f0f7a83adb71ccdeed329353e190d28d0b5be46905e47574127d2959559bb8423a946dc13483ecaa0ff4c311f14848502660960f8ef5d842485f6a618e712a39982";
 		let proof_bytes: alloc::vec::Vec<u8> = (0..proof_hex.len())
 			.step_by(2)
 			.map(|i| u8::from_str_radix(&proof_hex[i..i + 2], 16).unwrap())
