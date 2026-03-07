@@ -26,7 +26,6 @@ members = [
 	"frame/account-mapping/runtime-api",
 	"frame/account-mapping/rpc",
 	"frame/evm/precompile/account-mapping",
-	"frame/signature-api",
 	"client/api",
 	"client/consensus",
 	"client/rpc-core",
@@ -227,7 +226,6 @@ orbinum-zk-core = { path = "primitives/zk-core", default-features = false }
 orbinum-zk-verifier = { path = "primitives/zk-verifier", default-features = false }
 
 # Frontier FRAME
-orbinum-signature-api = { path = "frame/signature-api", default-features = false }
 pallet-account-mapping = { path = "frame/account-mapping", default-features = false }
 pallet-account-mapping-rpc = { path = "frame/account-mapping/rpc" }
 pallet-account-mapping-runtime-api = { path = "frame/account-mapping/runtime-api", default-features = false }

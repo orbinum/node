@@ -1257,27 +1257,6 @@ impl_runtime_apis! {
 		}
 	}
 
-	// SignatureApi RuntimeAPI implementation
-	impl orbinum_signature_api::SignatureApi<Block> for Runtime {
-		fn get_supported_signature_types() -> alloc::vec::Vec<orbinum_signature_api::SignatureType> {
-			// Sr25519 primero: tipo preferido para cuentas Substrate-nativas.
-			// Ecdsa segundo: para cuentas derivadas de claves Ethereum.
-			alloc::vec![
-				orbinum_signature_api::SignatureType::Sr25519,
-				orbinum_signature_api::SignatureType::Ecdsa,
-			]
-		}
-
-		fn validate_signature(
-			signature: sp_runtime::MultiSignature,
-			message: alloc::vec::Vec<u8>,
-			signer: sp_core::crypto::AccountId32,
-		) -> bool {
-			use sp_runtime::traits::Verify;
-			signature.verify(message.as_slice(), &signer)
-		}
-	}
-
 	#[cfg(feature = "runtime-benchmarks")]
 	impl frame_benchmarking::Benchmark<Block> for Runtime {
 		fn benchmark_metadata(extra: bool) -> (

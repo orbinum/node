@@ -274,14 +274,8 @@ fn multisignature_variants_have_correct_byte_sizes() {
 }
 
 fn api_validate_signature(signature: MultiSignature, message: &[u8], signer: &AccountId) -> bool {
+	use sp_runtime::traits::Verify;
 	signature.verify(message, signer)
-}
-
-fn api_get_supported_types() -> alloc::vec::Vec<orbinum_signature_api::SignatureType> {
-	alloc::vec![
-		orbinum_signature_api::SignatureType::Sr25519,
-		orbinum_signature_api::SignatureType::Ecdsa,
-	]
 }
 
 fn sr25519_account(derivation: &str) -> (sr25519::Pair, AccountId) {
@@ -294,91 +288,6 @@ fn ecdsa_account(derivation: &str) -> (ecdsa::Pair, AccountId) {
 	let pair = ecdsa::Pair::from_string(derivation, None).unwrap();
 	let account: AccountId = MultiSigner::from(pair.public()).into_account();
 	(pair, account)
-}
-
-#[test]
-fn signature_api_returns_sr25519_and_ecdsa() {
-	use orbinum_signature_api::SignatureType;
-	let types = api_get_supported_types();
-	assert!(types.contains(&SignatureType::Sr25519));
-	assert!(types.contains(&SignatureType::Ecdsa));
-	assert_eq!(types.len(), 2, "Only Sr25519 and Ecdsa must be registered");
-}
-
-#[test]
-fn signature_api_sr25519_is_first_preferred_type() {
-	use orbinum_signature_api::SignatureType;
-	let types = api_get_supported_types();
-	assert_eq!(
-		types[0],
-		SignatureType::Sr25519,
-		"Sr25519 must be the first type (preferred)"
-	);
-}
-
-#[test]
-fn signature_type_scale_discriminants_are_stable() {
-	use orbinum_signature_api::SignatureType;
-	use scale_codec::Encode;
-	assert_eq!(SignatureType::Sr25519.encode(), vec![0u8]);
-	assert_eq!(SignatureType::Ed25519.encode(), vec![1u8]);
-	assert_eq!(SignatureType::Ecdsa.encode(), vec![2u8]);
-}
-
-#[test]
-fn signature_api_validate_sr25519_valid_signature() {
-	let (pair, account) = sr25519_account("//Alice");
-	let msg = b"orbinum-signature-api-test";
-	let multi_sig = MultiSignature::Sr25519(pair.sign(msg));
-	assert!(api_validate_signature(multi_sig, msg, &account));
-}
-
-#[test]
-fn signature_api_validate_ecdsa_valid_signature() {
-	let (pair, account) = ecdsa_account("//Alice");
-	let msg = b"orbinum-signature-api-test";
-	let multi_sig = MultiSignature::Ecdsa(pair.sign(msg));
-	assert!(api_validate_signature(multi_sig, msg, &account));
-}
-
-#[test]
-fn signature_api_validate_wrong_signer_rejected() {
-	let (alice, _) = sr25519_account("//Alice");
-	let (_, bob_account) = sr25519_account("//Bob");
-	let msg = b"test-message";
-	let multi_sig = MultiSignature::Sr25519(alice.sign(msg));
-	assert!(!api_validate_signature(multi_sig, msg, &bob_account));
-}
-
-#[test]
-fn signature_api_validate_wrong_message_rejected() {
-	let (pair, account) = sr25519_account("//Alice");
-	let signed_msg = b"original-message";
-	let wrong_msg = b"modified-message";
-	let multi_sig = MultiSignature::Sr25519(pair.sign(signed_msg));
-	assert!(!api_validate_signature(multi_sig, wrong_msg, &account));
-}
-
-#[test]
-fn signature_api_validate_corrupted_signature_rejected() {
-	let (pair, account) = sr25519_account("//Alice");
-	let msg = b"test-message";
-	let mut raw_sig = pair.sign(msg);
-	raw_sig.0[0] ^= 0xFF;
-	raw_sig.0[1] ^= 0xFF;
-	let multi_sig = MultiSignature::Sr25519(raw_sig);
-	assert!(!api_validate_signature(multi_sig, msg, &account));
-}
-
-#[test]
-fn signature_api_validate_wrong_signature_type_rejected() {
-	let (sr_pair, sr_account) = sr25519_account("//Alice");
-	let msg = b"cross-type-test";
-	let sr_raw = sr_pair.sign(msg);
-	let mut ecdsa_bytes = [0u8; 65];
-	ecdsa_bytes[..64].copy_from_slice(&sr_raw.0[..64]);
-	let multi_sig = MultiSignature::Ecdsa(ecdsa::Signature::from_raw(ecdsa_bytes));
-	assert!(!api_validate_signature(multi_sig, msg, &sr_account));
 }
 
 #[test]
