@@ -7353,7 +7353,6 @@ dependencies = [
  "frame-system-benchmarking",
  "frame-system-rpc-runtime-api",
  "hex-literal",
- "orbinum-signature-api",
  "orbinum-zk-verifier",
  "pallet-account-mapping",
  "pallet-account-mapping-runtime-api",
@@ -7398,18 +7397,6 @@ dependencies = [
  "sp-transaction-pool",
  "sp-version",
  "substrate-wasm-builder",
-]
-
-[[package]]
-name = "orbinum-signature-api"
-version = "0.1.0"
-dependencies = [
- "parity-scale-codec",
- "scale-info",
- "sp-api",
- "sp-core",
- "sp-runtime",
- "sp-std",
 ]
 
 [[package]]

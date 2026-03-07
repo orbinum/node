@@ -71,7 +71,6 @@ pallet-evm-precompile-sha3fips-benchmarking = { workspace = true }
 pallet-evm-precompile-simple = { workspace = true }
 
 # Orbinum Privacy
-orbinum-signature-api = { workspace = true }
 orbinum-zk-verifier = { workspace = true, default-features = false }
 pallet-shielded-pool = { workspace = true }
 pallet-shielded-pool-runtime-api = { workspace = true }
@@ -149,7 +148,6 @@ std = [
 	"pallet-evm-precompile-curve25519-benchmarking/std",
 	"pallet-evm-precompile-account-mapping/std",
 	# Orbinum Privacy
-	"orbinum-signature-api/std",
 	"pallet-zk-verifier/std",
 	"pallet-shielded-pool/std",
 	"pallet-shielded-pool/poseidon-native",
