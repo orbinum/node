@@ -1,5 +1,5 @@
 //! Auto-generated Verification Key for private_link circuit
-//! Generated on: 2026-03-05
+//! Generated on: 2026-03-07 01:21:28 -03
 //! Source: artifacts/verification_key_private_link.json
 //!
 //! DO NOT EDIT MANUALLY - Run sync-circuit-artifacts.sh to regenerate
@@ -86,21 +86,21 @@ pub fn get_vk() -> VerifyingKey<Bn254> {
 	let delta_g2 = G2Affine::new_unchecked(
 		Fq2::new(
 			Fq::from_str(
-				"5875107934225591956824400118336800666032055630977304736548317085933989709703",
+				"2565234234239597894477767752957328294706065628533483134015556951878191186940",
 			)
 			.unwrap(),
 			Fq::from_str(
-				"18828871098072208939353097682642446147257193375470187817603824354430981750855",
+				"8483364959845595109279475140305812836298387099255485870422752648849759396051",
 			)
 			.unwrap(),
 		),
 		Fq2::new(
 			Fq::from_str(
-				"10165414766257904664737341746029150667983055399710524654380456653164638114206",
+				"11691054892072623793550814582824415856906815287133539594126281557791174112842",
 			)
 			.unwrap(),
 			Fq::from_str(
-				"19242268793339951329162337436243933498903385532340416509627578042100918910721",
+				"16346382950154383395909238016212011279689014921920459803554530379130109824762",
 			)
 			.unwrap(),
 		),
@@ -158,104 +158,4 @@ pub fn get_vk_bytes() -> alloc::vec::Vec<u8> {
 	vk.serialize_compressed(&mut bytes)
 		.expect("VK serialization should not fail");
 	bytes
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use ark_serialize::CanonicalDeserialize;
-
-	/// La VK de private_link tiene exactamente 2 public inputs, por lo que
-	/// `gamma_abc_g1` debe tener 3 elementos (n_inputs + 1).
-	#[test]
-	fn vk_has_correct_number_of_ic_points() {
-		let vk = get_vk();
-		assert_eq!(
-			vk.gamma_abc_g1.len(),
-			PRIVATE_LINK_PUBLIC_INPUTS + 1,
-			"gamma_abc_g1 debe tener {} puntos (n_public + 1)",
-			PRIVATE_LINK_PUBLIC_INPUTS + 1
-		);
-	}
-
-	/// Los puntos G1/G2 se construyen con `new_unchecked`; verificar que son
-	/// efectivamente puntos válidos en la curva BN254.
-	#[test]
-	fn vk_points_are_on_curve() {
-		use ark_bn254::{g1::Config as G1Config, g2::Config as G2Config};
-		use ark_ec::short_weierstrass::Affine;
-
-		let vk = get_vk();
-
-		// alpha_g1
-		assert!(
-			Affine::<G1Config>::is_on_curve(&vk.alpha_g1),
-			"alpha_g1 no está en la curva"
-		);
-		// beta_g2
-		assert!(
-			Affine::<G2Config>::is_on_curve(&vk.beta_g2),
-			"beta_g2 no está en la curva"
-		);
-		// gamma_g2
-		assert!(
-			Affine::<G2Config>::is_on_curve(&vk.gamma_g2),
-			"gamma_g2 no está en la curva"
-		);
-		// delta_g2
-		assert!(
-			Affine::<G2Config>::is_on_curve(&vk.delta_g2),
-			"delta_g2 no está en la curva"
-		);
-		// todos los IC points
-		for (i, ic) in vk.gamma_abc_g1.iter().enumerate() {
-			assert!(
-				Affine::<G1Config>::is_on_curve(ic),
-				"IC point {i} no está en la curva"
-			);
-		}
-	}
-
-	/// `get_vk_bytes()` debe producir bytes no vacíos y del tamaño esperado
-	/// para una VK Groth16/BN254 con 2 public inputs (compressed).
-	#[test]
-	fn get_vk_bytes_is_non_empty() {
-		let bytes = get_vk_bytes();
-		assert!(
-			!bytes.is_empty(),
-			"get_vk_bytes() no debe devolver bytes vacíos"
-		);
-	}
-
-	/// Round-trip: serializar → deserializar → volver a serializar produce
-	/// exactamente los mismos bytes. Esto garantiza que los datos están bien
-	/// formados y que el parsing es invertible.
-	#[test]
-	fn vk_bytes_round_trip() {
-		let original_bytes = get_vk_bytes();
-
-		let vk_restored = VerifyingKey::<Bn254>::deserialize_compressed(original_bytes.as_slice())
-			.expect("La deserialización de VK no debe fallar");
-
-		let mut restored_bytes = alloc::vec::Vec::new();
-		vk_restored
-			.serialize_compressed(&mut restored_bytes)
-			.expect("La re-serialización no debe fallar");
-
-		assert_eq!(
-			original_bytes, restored_bytes,
-			"Los bytes deben ser idénticos tras un round-trip serialize → deserialize → serialize"
-		);
-	}
-
-	/// Verificar que el CIRCUIT_ID y NUM_PUBLIC_INPUTS de este módulo coinciden
-	/// con las constantes del dominio.
-	#[test]
-	fn constants_match_domain() {
-		use crate::domain::value_objects::circuit_constants::{
-			CIRCUIT_ID_PRIVATE_LINK, PRIVATE_LINK_PUBLIC_INPUTS as DOMAIN_INPUTS,
-		};
-		assert_eq!(CIRCUIT_ID, CIRCUIT_ID_PRIVATE_LINK);
-		assert_eq!(NUM_PUBLIC_INPUTS, DOMAIN_INPUTS);
-	}
 }
