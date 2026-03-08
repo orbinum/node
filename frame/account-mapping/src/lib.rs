@@ -367,6 +367,9 @@ pub mod pallet {
 		CommitmentMismatch,
 		/// The ZK proof for a private link dispatch is invalid.
 		InvalidProof,
+		/// Attempted to register a Substrate-native signature scheme as a chain link scheme.
+		/// Chain links are exclusively for external, non-Substrate ecosystems.
+		SubstrateNativeSchemeNotAllowed,
 	}
 
 	// ──────────────────────────────────────────────
@@ -386,6 +389,14 @@ pub mod pallet {
 			scheme: SignatureScheme,
 		) -> DispatchResult {
 			ensure_root(origin)?;
+			// Chain links are exclusively for external, non-Substrate-native ecosystems.
+			// Substrate accounts are already self-proving via their AccountId32; linking
+			// them with a chain link is meaningless and would create a confusing identity
+			// model. See SignatureScheme::is_for_external_chain() for the invariant.
+			ensure!(
+				scheme.is_for_external_chain(),
+				Error::<T>::SubstrateNativeSchemeNotAllowed
+			);
 			SupportedChains::<T>::insert(chain_id, scheme.clone());
 			Self::deposit_event(Event::SupportedChainAdded { chain_id, scheme });
 			Ok(())
