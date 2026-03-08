@@ -1,6 +1,6 @@
 [package]
 name = "pallet-account-mapping"
-version = "0.1.0"
+version = "0.2.0"
 license = "Apache-2.0"
 description = "Stateful mapping between Substrate AccountId32 and EVM H160 addresses, with alias registration and multichain identity support."
 authors = { workspace = true }
