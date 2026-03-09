@@ -54,3 +54,64 @@ impl fmt::Display for VerifierError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for VerifierError {}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_error_equality_and_clone() {
+		let a = VerifierError::InvalidProof;
+		let b = a.clone();
+		assert_eq!(a, b);
+
+		let c = VerifierError::InvalidPublicInputCount {
+			expected: 5,
+			got: 3,
+		};
+		let d = c.clone();
+		assert_eq!(c, d);
+	}
+
+	#[test]
+	fn test_display_messages() {
+		assert_eq!(VerifierError::InvalidProof.to_string(), "Invalid proof");
+		assert_eq!(
+			VerifierError::InvalidVerifyingKey.to_string(),
+			"Invalid verifying key"
+		);
+		assert_eq!(
+			VerifierError::InvalidPublicInput.to_string(),
+			"Invalid public input"
+		);
+		assert_eq!(
+			VerifierError::VerificationFailed.to_string(),
+			"Verification failed"
+		);
+		assert_eq!(
+			VerifierError::SerializationError.to_string(),
+			"Serialization error"
+		);
+		assert_eq!(
+			VerifierError::InvalidProofSize.to_string(),
+			"Invalid proof size"
+		);
+		assert_eq!(
+			VerifierError::InvalidVKSize.to_string(),
+			"Invalid verifying key size"
+		);
+	}
+
+	#[test]
+	fn test_display_dynamic_messages() {
+		let msg = VerifierError::InvalidPublicInputCount {
+			expected: 5,
+			got: 2,
+		}
+		.to_string();
+		assert_eq!(msg, "Invalid public input count: expected 5, got 2");
+
+		let msg = VerifierError::InvalidCircuitId(9).to_string();
+		assert_eq!(msg, "Invalid circuit ID: 9");
+	}
+}

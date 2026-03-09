@@ -1,6 +1,6 @@
 //! Utility functions for ZK proof handling
 
-use crate::{domain::value_objects::errors::VerifierError, Bn254Fr};
+use crate::Bn254Fr;
 use ark_ff::{BigInteger, PrimeField};
 
 /// Convert a field element to bytes (big-endian)
@@ -13,15 +13,8 @@ pub fn field_to_bytes(field: &Bn254Fr) -> [u8; 32] {
 }
 
 /// Convert bytes (big-endian) to a field element
-pub fn bytes_to_field(bytes: &[u8; 32]) -> Result<Bn254Fr, VerifierError> {
-	Ok(Bn254Fr::from_be_bytes_mod_order(bytes))
-}
-
-/// Hash two field elements together (simple addition for now)
-///
-/// In production, this should use Poseidon or another ZK-friendly hash
-pub fn hash_two_fields(left: &Bn254Fr, right: &Bn254Fr) -> Bn254Fr {
-	*left + *right
+pub fn bytes_to_field(bytes: &[u8; 32]) -> Bn254Fr {
+	Bn254Fr::from_be_bytes_mod_order(bytes)
 }
 
 /// Convert a u64 to a field element
@@ -87,7 +80,7 @@ mod tests {
 		let field = Bn254Fr::from(123456789u64);
 		let bytes = field_to_bytes(&field);
 		// Should be able to convert back
-		let recovered = bytes_to_field(&bytes).unwrap();
+		let recovered = bytes_to_field(&bytes);
 		assert_eq!(field, recovered);
 	}
 
@@ -95,7 +88,7 @@ mod tests {
 	#[test]
 	fn test_bytes_to_field_zero() {
 		let bytes = [0u8; 32];
-		let field = bytes_to_field(&bytes).unwrap();
+		let field = bytes_to_field(&bytes);
 		assert_eq!(field, Bn254Fr::from(0u64));
 	}
 
@@ -103,7 +96,7 @@ mod tests {
 	fn test_bytes_to_field_one() {
 		let mut bytes = [0u8; 32];
 		bytes[31] = 1;
-		let field = bytes_to_field(&bytes).unwrap();
+		let field = bytes_to_field(&bytes);
 		assert_eq!(field, Bn254Fr::from(1u64));
 	}
 
@@ -111,7 +104,7 @@ mod tests {
 	fn test_bytes_to_field_max_u64() {
 		let mut bytes = [0u8; 32];
 		bytes[24..].copy_from_slice(&[0xFF; 8]);
-		let field = bytes_to_field(&bytes).unwrap();
+		let field = bytes_to_field(&bytes);
 		assert_eq!(field, Bn254Fr::from(u64::MAX));
 	}
 
@@ -119,45 +112,8 @@ mod tests {
 	fn test_bytes_to_field_roundtrip() {
 		let original = Bn254Fr::from(987654321u64);
 		let bytes = field_to_bytes(&original);
-		let recovered = bytes_to_field(&bytes).unwrap();
+		let recovered = bytes_to_field(&bytes);
 		assert_eq!(original, recovered);
-	}
-
-	// hash_two_fields tests
-	#[test]
-	fn test_hash_two_fields_zeros() {
-		let left = Bn254Fr::from(0u64);
-		let right = Bn254Fr::from(0u64);
-		let result = hash_two_fields(&left, &right);
-		assert_eq!(result, Bn254Fr::from(0u64));
-	}
-
-	#[test]
-	fn test_hash_two_fields_commutative() {
-		let left = Bn254Fr::from(42u64);
-		let right = Bn254Fr::from(100u64);
-		let result1 = hash_two_fields(&left, &right);
-		let result2 = hash_two_fields(&right, &left);
-		// Addition is commutative
-		assert_eq!(result1, result2);
-	}
-
-	#[test]
-	fn test_hash_two_fields_simple_addition() {
-		let left = Bn254Fr::from(10u64);
-		let right = Bn254Fr::from(20u64);
-		let result = hash_two_fields(&left, &right);
-		assert_eq!(result, Bn254Fr::from(30u64));
-	}
-
-	#[test]
-	fn test_hash_two_fields_large_values() {
-		let left = Bn254Fr::from(u64::MAX);
-		let right = Bn254Fr::from(1u64);
-		let result = hash_two_fields(&left, &right);
-		// Should not panic, modular arithmetic handles overflow
-		assert_ne!(result, left);
-		assert_ne!(result, right);
 	}
 
 	// u64_to_field tests
@@ -251,7 +207,7 @@ mod tests {
 		for value in values {
 			let field = Bn254Fr::from(value);
 			let bytes = field_to_bytes(&field);
-			let recovered = bytes_to_field(&bytes).unwrap();
+			let recovered = bytes_to_field(&bytes);
 			assert_eq!(field, recovered, "Failed for value {value}");
 		}
 	}

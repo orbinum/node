@@ -47,8 +47,8 @@ pub fn parse_proof_from_snarkjs(points: SnarkjsProofPoints) -> Result<Proof, Ver
 	let a = G1Affine::new(parse_fq(points.a_x), parse_fq(points.a_y));
 
 	// Parse point B (G2)
-	// Note: snarkjs uses (x0, x1) order but arkworks might use (c1, c0)
-	// We need to check the convention
+	// snarkjs exports coordinates in [c0, c1] order and this adapter maps
+	// them directly to arkworks Fq2::new(c0, c1).
 	let b = G2Affine::new(
 		Fq2::new(parse_fq(points.b_x0), parse_fq(points.b_x1)),
 		Fq2::new(parse_fq(points.b_y0), parse_fq(points.b_y1)),

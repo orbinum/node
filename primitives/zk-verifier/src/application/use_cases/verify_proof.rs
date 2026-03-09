@@ -41,7 +41,7 @@ impl<V: VerifierPort> VerifyProofUseCase<V> {
 	/// Execute proof verification with prepared VK (optimized)
 	pub fn execute_prepared(
 		&self,
-		prepared_vk: &ark_groth16::PreparedVerifyingKey<crate::Bn254>,
+		prepared_vk: &V::PreparedKey,
 		public_inputs: &PublicInputs,
 		proof: &Proof,
 		expected_input_count: usize,
@@ -60,10 +60,10 @@ impl<V: VerifierPort> VerifyProofUseCase<V> {
 mod tests {
 	use super::*;
 	use alloc::rc::Rc;
-	use ark_bn254::{Fr as Bn254Fr, G1Affine, G2Affine};
+	use ark_bn254::{Bn254, Fr as Bn254Fr, G1Affine, G2Affine};
 	use ark_ec::AffineRepr;
 	use ark_ff::{BigInteger, PrimeField};
-	use ark_groth16::PreparedVerifyingKey;
+	use ark_groth16::{PreparedVerifyingKey, VerifyingKey as ArkVerifyingKey};
 	use ark_serialize::CanonicalSerialize;
 	use core::cell::RefCell;
 
@@ -94,6 +94,8 @@ mod tests {
 	}
 
 	impl VerifierPort for MockVerifier {
+		type PreparedKey = PreparedVerifyingKey<crate::Bn254>;
+
 		fn verify(
 			&self,
 			_vk: &VerifyingKey,
@@ -110,7 +112,7 @@ mod tests {
 
 		fn verify_prepared(
 			&self,
-			_prepared_vk: &PreparedVerifyingKey<crate::Bn254>,
+			_prepared_vk: &Self::PreparedKey,
 			_public_inputs: &PublicInputs,
 			_proof: &Proof,
 		) -> Result<(), VerifierError> {
@@ -152,17 +154,27 @@ mod tests {
 		PublicInputs::new(inputs)
 	}
 
+	fn create_mock_ark_vk(expected_inputs: usize) -> ArkVerifyingKey<Bn254> {
+		ArkVerifyingKey {
+			alpha_g1: G1Affine::generator(),
+			beta_g2: G2Affine::generator(),
+			gamma_g2: G2Affine::generator(),
+			delta_g2: G2Affine::generator(),
+			gamma_abc_g1: (0..=expected_inputs)
+				.map(|_| G1Affine::generator())
+				.collect(),
+		}
+	}
+
 	// Helper: Create mock VK
 	fn create_mock_vk() -> VerifyingKey {
-		use crate::infrastructure::storage::verification_keys;
-		let vk = verification_keys::transfer::get_vk();
+		let vk = create_mock_ark_vk(5);
 		VerifyingKey::from_ark_vk(&vk).unwrap()
 	}
 
 	// Helper: Create mock prepared VK
 	fn create_mock_prepared_vk() -> PreparedVerifyingKey<crate::Bn254> {
-		use crate::infrastructure::storage::verification_keys;
-		let vk = verification_keys::transfer::get_vk();
+		let vk = create_mock_ark_vk(5);
 		PreparedVerifyingKey::from(vk)
 	}
 

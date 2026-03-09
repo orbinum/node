@@ -1,59 +1,24 @@
 # orbinum-zk-verifier
 
-[![crates.io](https://img.shields.io/crates/v/orbinum-zk-verifier.svg)](https://crates.io/crates/orbinum-zk-verifier)
-[![Documentation](https://docs.rs/orbinum-zk-verifier/badge.svg)](https://docs.rs/orbinum-zk-verifier)
+Groth16 (BN254) verification primitive for Orbinum.
 
-On-chain Zero-Knowledge proof verification for Orbinum Network using Groth16 over BN254.
+This crate implements a 3-layer clean architecture (`domain`, `application`, `infrastructure`) and does not manage on-chain verification key storage. VK resolution and versioning are handled by the `frame/zk-verifier` pallet.
 
-## Features
+## Architecture
 
-- **Fast verification**: ~8ms on-chain for private transfers
-- **Small proofs**: ~200 bytes
-- **no_std compatible**: Suitable for Substrate runtimes
-- **Embedded verification keys**: No external storage needed
-- **SnarkJS compatible**: Works with circom circuits
+- `domain/`
+  - ports (`VerifierPort`), services (`ProofValidator`), and value objects (`Proof`, `VerifyingKey`, `PublicInputs`, `VerifierError`).
+- `application/`
+  - use cases (`VerifyProofUseCase`) and output DTOs.
+- `infrastructure/`
+  - concrete implementation (`Groth16Verifier`) and adapters (`snarkjs_adapter`, `std` feature only).
 
-## Usage
-
-Add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-orbinum-zk-verifier = { version = "0.2", default-features = false }
-```
-
-### Basic Verification
-
-```rust
-use orbinum_zk_verifier::{
-    infrastructure::verification::Groth16Verifier,
-    domain::value_objects::{Proof, PublicInputs, VerifyingKey},
-};
-
-// Load verification key (embedded or from storage)
-let vk = get_transfer_vk();
-
-// Prepare inputs
-let public_inputs = PublicInputs::new(vec![
-    merkle_root,
-    nullifier1,
-    nullifier2,
-    commitment1,
-    commitment2,
-]);
-
-// Verify proof
-let verifier = Groth16Verifier::new();
-let result = verifier.verify(&vk, &public_inputs, &proof);
-
-assert!(result.is_ok());
-```
-
-### With Use Case Pattern
+## Basic Usage
 
 ```rust
 use orbinum_zk_verifier::{
     application::use_cases::VerifyProofUseCase,
+    domain::value_objects::{Proof, PublicInputs, VerifyingKey},
     infrastructure::verification::Groth16Verifier,
 };
 
@@ -66,57 +31,37 @@ let result = use_case.execute(
     &proof,
     expected_input_count,
 );
+
+assert!(result.is_ok());
 ```
 
-### Substrate Runtime Integration
+## Substrate Integration
 
 ```toml
 [dependencies]
-orbinum-zk-verifier = { version = "0.2", default-features = false, features = ["substrate"] }
-```
-
-```rust
-// In your pallet
-use orbinum_zk_verifier::infrastructure::storage::verification_keys::get_vk_by_circuit_id;
-
-#[pallet::call]
-impl<T: Config> Pallet<T> {
-    pub fn verify_proof(
-        origin: OriginFor<T>,
-        circuit_id: u8,
-        proof: Proof,
-        public_inputs: PublicInputs,
-    ) -> DispatchResult {
-        let vk = get_vk_by_circuit_id(circuit_id)?;
-        let verifier = Groth16Verifier::new();
-        verifier.verify(&vk, &public_inputs, &proof)?;
-        Ok(())
-    }
-}
+orbinum-zk-verifier = { version = "0.6.2", default-features = false, features = ["substrate"] }
 ```
 
 ## Supported Circuits
 
-| Circuit ID | Name | Public Inputs | Description |
-|------------|------|---------------|-------------|
-| 1 | Transfer | 5 | Private transfer (2→2) |
-| 2 | Unshield | 5 | Withdrawal to public |
-| 4 | Disclosure | 4 | Selective disclosure |
-| 5 | Private Link | 2 | Private link dispatch verification |
+| Circuit ID | Name | Public Inputs |
+|---|---|---|
+| 1 | transfer | 5 |
+| 2 | unshield | 5 |
+| 4 | disclosure | 4 |
+| 5 | private_link | 2 |
 
-## Features Flags
+## Features
 
-- `std` (default): Standard library support
-- `substrate`: Substrate runtime integration (SCALE codec, TypeInfo)
+- `std` (default): enables standard-library utilities and `snarkjs` adapters.
+- `substrate`: enables SCALE codec integration (`parity-scale-codec`, `scale-info`) for runtime use.
 
-## Performance
+## Design Notes
 
-| Operation | Time | Notes |
-|-----------|------|-------|
-| Verify Transfer | ~8ms | 5 public inputs |
-| Verify Unshield | ~6ms | 4 public inputs |
-| Prepare VK | ~2ms | Cacheable |
+- `Groth16Verifier` implements `VerifierPort` to decouple use cases from the concrete cryptographic library.
+- Structural validation (input count and minimum proof/VK size) is executed in the domain layer before cryptographic verification.
+- `batch_verify` is available at the infrastructure layer for optimization scenarios.
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE2) or [GPL v3](LICENSE-GPL3) at your option.
+Dual: Apache-2.0 OR GPL-3.0-or-later.

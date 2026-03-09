@@ -7,6 +7,11 @@ use crate::domain::value_objects::{Proof, PublicInputs, VerifierError, Verifying
 /// This trait abstracts over different verification implementations,
 /// allowing the domain layer to remain independent of specific cryptographic libraries.
 pub trait VerifierPort {
+	/// Opaque handle for a prepared verification key.
+	///
+	/// Each infrastructure implementation defines its own prepared-key type.
+	type PreparedKey;
+
 	/// Verify a zero-knowledge proof
 	///
 	/// # Arguments
@@ -29,7 +34,7 @@ pub trait VerifierPort {
 	/// Prepared keys cache pairing computations for faster verification.
 	fn verify_prepared(
 		&self,
-		prepared_vk: &ark_groth16::PreparedVerifyingKey<crate::Bn254>,
+		prepared_vk: &Self::PreparedKey,
 		public_inputs: &PublicInputs,
 		proof: &Proof,
 	) -> Result<(), VerifierError>;
