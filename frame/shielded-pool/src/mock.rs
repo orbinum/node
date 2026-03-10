@@ -139,7 +139,6 @@ impl pallet_shielded_pool::Config for Test {
 	type MaxHistoricRoots = MaxHistoricRoots;
 	type MinShieldAmount = MinShieldAmount;
 	type WeightInfo = ();
-	type RequestExpiration = RequestExpiration;
 }
 
 /// Build genesis storage for testing
