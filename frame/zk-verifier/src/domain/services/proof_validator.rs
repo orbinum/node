@@ -17,6 +17,6 @@ pub trait ProofValidator {
 	) -> Result<bool, DomainError>;
 }
 
-// Note: The actual implementation will be in infrastructure layer
-// using fp-zk-verifier crate, as it requires cryptographic operations
-// This trait defines the domain contract
+// Note: The concrete implementation lives in the infrastructure layer
+// (e.g. Groth16 verifier + adapters to runtime/primitives cryptography).
+// This trait is the stable domain contract.

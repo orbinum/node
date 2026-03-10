@@ -7291,7 +7291,6 @@ dependencies = [
  "log",
  "orbinum-runtime",
  "orbinum-zk-core 0.5.0",
- "orbinum-zk-verifier",
  "pallet-account-mapping-rpc",
  "pallet-account-mapping-runtime-api",
  "pallet-shielded-pool-rpc",
@@ -7299,7 +7298,8 @@ dependencies = [
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc",
  "pallet-transaction-payment-rpc-runtime-api",
- "pallet-zk-verifier",
+ "pallet-zk-verifier-rpc",
+ "pallet-zk-verifier-runtime-api",
  "parity-scale-codec",
  "sc-basic-authorship",
  "sc-chain-spec",
@@ -7353,7 +7353,6 @@ dependencies = [
  "frame-system-benchmarking",
  "frame-system-rpc-runtime-api",
  "hex-literal",
- "orbinum-zk-verifier",
  "pallet-account-mapping",
  "pallet-account-mapping-runtime-api",
  "pallet-aura",
@@ -7378,6 +7377,7 @@ dependencies = [
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
  "pallet-zk-verifier",
+ "pallet-zk-verifier-runtime-api",
  "parity-scale-codec",
  "polkadot-runtime-common",
  "scale-info",
@@ -7437,7 +7437,7 @@ dependencies = [
 
 [[package]]
 name = "orbinum-zk-verifier"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "ark-bn254",
  "ark-ec 0.5.0",
@@ -7452,6 +7452,7 @@ dependencies = [
  "orbinum-zk-core 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
  "scale-info",
+ "sha2 0.10.9",
 ]
 
 [[package]]
@@ -7489,7 +7490,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-account-mapping"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -8326,9 +8327,8 @@ dependencies = [
 
 [[package]]
 name = "pallet-zk-verifier"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
- "criterion",
  "frame-benchmarking",
  "frame-support",
  "frame-system",
@@ -8340,6 +8340,31 @@ dependencies = [
  "serde",
  "sp-io",
  "sp-runtime",
+ "sp-std",
+]
+
+[[package]]
+name = "pallet-zk-verifier-rpc"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "jsonrpsee",
+ "pallet-zk-verifier-runtime-api",
+ "serde",
+ "sp-api",
+ "sp-blockchain",
+ "sp-runtime",
+]
+
+[[package]]
+name = "pallet-zk-verifier-runtime-api"
+version = "0.1.0"
+dependencies = [
+ "pallet-zk-verifier",
+ "parity-scale-codec",
+ "scale-info",
+ "serde",
+ "sp-api",
  "sp-std",
 ]
 

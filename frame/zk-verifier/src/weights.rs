@@ -35,78 +35,32 @@ use core::marker::PhantomData;
 /// Weight functions needed for pallet_zk_verifier.
 pub trait WeightInfo {
 	fn register_verification_key() -> Weight;
-	fn remove_verification_key() -> Weight;
 	fn set_active_version() -> Weight;
+	fn remove_verification_key() -> Weight;
 	fn verify_proof() -> Weight;
 }
 
 /// Weight functions for `pallet_zk_verifier`.
 pub struct SubstrateWeight<T>(PhantomData<T>);
 impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
-	/// Storage: `ZkVerifier::VerificationKeys` (r:1 w:1)
-	/// Proof: `ZkVerifier::VerificationKeys` (`max_values`: None, `max_size`: Some(8239), added: 10714, mode: `MaxEncodedLen`)
-	/// Storage: `System::Number` (r:1 w:0)
-	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `ZkVerifier::ActiveCircuitVersion` (r:1 w:1)
-	/// Proof: `ZkVerifier::ActiveCircuitVersion` (`max_values`: None, `max_size`: Some(24), added: 2499, mode: `MaxEncodedLen`)
-	/// Storage: `System::ExecutionPhase` (r:1 w:0)
-	/// Proof: `System::ExecutionPhase` (`max_values`: Some(1), `max_size`: Some(5), added: 500, mode: `MaxEncodedLen`)
-	/// Storage: `System::EventCount` (r:1 w:1)
-	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::Events` (r:1 w:1)
-	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
 	fn register_verification_key() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `31`
-		//  Estimated: `11704`
-		// Minimum execution time: 26_000_000 picoseconds.
-		Weight::from_parts(27_000_000, 0)
-			.saturating_add(Weight::from_parts(0, 11704))
-			.saturating_add(T::DbWeight::get().reads(6))
-			.saturating_add(T::DbWeight::get().writes(4))
+		Weight::from_parts(10_000_000, 0)
+			.saturating_add(T::DbWeight::get().reads(1))
+			.saturating_add(T::DbWeight::get().writes(2))
 	}
-	/// Storage: `ZkVerifier::VerificationKeys` (r:1 w:1)
-	/// Proof: `ZkVerifier::VerificationKeys` (`max_values`: None, `max_size`: Some(8239), added: 10714, mode: `MaxEncodedLen`)
-	/// Storage: `System::Number` (r:1 w:0)
-	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::ExecutionPhase` (r:1 w:0)
-	/// Proof: `System::ExecutionPhase` (`max_values`: Some(1), `max_size`: Some(5), added: 500, mode: `MaxEncodedLen`)
-	/// Storage: `System::EventCount` (r:1 w:1)
-	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::Events` (r:1 w:1)
-	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	fn remove_verification_key() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `127`
-		//  Estimated: `11704`
-		// Minimum execution time: 19_000_000 picoseconds.
-		Weight::from_parts(20_000_000, 0)
-			.saturating_add(Weight::from_parts(0, 11704))
-			.saturating_add(T::DbWeight::get().reads(5))
-			.saturating_add(T::DbWeight::get().writes(3))
-	}
-	/// Storage: `ZkVerifier::VerificationKeys` (r:1 w:0)
-	/// Proof: `ZkVerifier::VerificationKeys` (`max_values`: None, `max_size`: Some(8239), added: 10714, mode: `MaxEncodedLen`)
-	/// Storage: `System::Number` (r:1 w:0)
-	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::ExecutionPhase` (r:1 w:0)
-	/// Proof: `System::ExecutionPhase` (`max_values`: Some(1), `max_size`: Some(5), added: 500, mode: `MaxEncodedLen`)
-	/// Storage: `System::EventCount` (r:1 w:1)
-	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::Events` (r:1 w:1)
-	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	/// Storage: `ZkVerifier::ActiveCircuitVersion` (r:0 w:1)
-	/// Proof: `ZkVerifier::ActiveCircuitVersion` (`max_values`: None, `max_size`: Some(24), added: 2499, mode: `MaxEncodedLen`)
+
 	fn set_active_version() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `127`
-		//  Estimated: `11704`
-		// Minimum execution time: 21_000_000 picoseconds.
-		Weight::from_parts(22_000_000, 0)
-			.saturating_add(Weight::from_parts(0, 11704))
-			.saturating_add(T::DbWeight::get().reads(5))
-			.saturating_add(T::DbWeight::get().writes(3))
+		Weight::from_parts(8_000_000, 0)
+			.saturating_add(T::DbWeight::get().reads(1))
+			.saturating_add(T::DbWeight::get().writes(1))
 	}
+
+	fn remove_verification_key() -> Weight {
+		Weight::from_parts(9_000_000, 0)
+			.saturating_add(T::DbWeight::get().reads(2))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
+
 	/// Storage: `ZkVerifier::ActiveCircuitVersion` (r:1 w:0)
 	/// Proof: `ZkVerifier::ActiveCircuitVersion` (`max_values`: None, `max_size`: Some(24), added: 2499, mode: `MaxEncodedLen`)
 	/// Storage: `ZkVerifier::VerificationKeys` (r:1 w:0)

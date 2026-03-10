@@ -18,6 +18,9 @@ impl CircuitId {
 	/// Disclosure circuit ID (selective disclosure)
 	pub const DISCLOSURE: Self = Self(4);
 
+	/// Private link dispatch circuit ID
+	pub const PRIVATE_LINK: Self = Self(5);
+
 	/// Create a new circuit ID
 	pub fn new(value: u32) -> Self {
 		Self(value)
@@ -35,6 +38,7 @@ impl CircuitId {
 			Self::UNSHIELD => Some("Unshield"),
 			Self::SHIELD => Some("Shield"),
 			Self::DISCLOSURE => Some("Disclosure"),
+			Self::PRIVATE_LINK => Some("PrivateLink"),
 			_ => None,
 		}
 	}

@@ -1,6 +1,6 @@
 [package]
 name = "pallet-zk-verifier"
-version = "0.3.0"
+version = "0.4.0"
 description = "Zero-Knowledge proof verification pallet for Orbinum"
 authors = ["Orbinum Team"]
 license = "GPL-3.0-or-later"
@@ -38,13 +38,8 @@ orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false 
 orbinum-zk-verifier = { path = "../../primitives/zk-verifier", default-features = false }
 
 [dev-dependencies]
-criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
 orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
 orbinum-zk-verifier = { path = "../../primitives/zk-verifier", default-features = false }
-
-[[bench]]
-name = "groth16_verify"
-harness = false
 
 [features]
 default = ["std"]

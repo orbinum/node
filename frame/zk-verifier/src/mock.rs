@@ -2,6 +2,7 @@
 
 use crate as pallet_zk_verifier;
 use frame_support::{derive_impl, parameter_types};
+#[cfg(feature = "runtime-benchmarks")]
 use sp_runtime::BuildStorage;
 
 type Block = frame_system::mocking::MockBlock<Test>;
@@ -20,33 +21,20 @@ impl frame_system::Config for Test {
 }
 
 parameter_types! {
-	pub const MaxVerificationKeySize: u32 = 8192;
 	pub const MaxProofSize: u32 = 256;
 	pub const MaxPublicInputs: u32 = 16;
 }
 
 impl pallet_zk_verifier::Config for Test {
-	type AdminOrigin = frame_system::EnsureRoot<u64>;
-	type MaxVerificationKeySize = MaxVerificationKeySize;
 	type MaxProofSize = MaxProofSize;
 	type MaxPublicInputs = MaxPublicInputs;
 	type WeightInfo = crate::weights::SubstrateWeight<Test>;
 }
 
-/// Build genesis storage for testing
+#[cfg(feature = "runtime-benchmarks")]
 pub fn new_test_ext() -> sp_io::TestExternalities {
-	let t = frame_system::GenesisConfig::<Test>::default()
+	let storage = frame_system::GenesisConfig::<Test>::default()
 		.build_storage()
-		.unwrap();
-	let mut ext = sp_io::TestExternalities::new(t);
-	ext.execute_with(|| System::set_block_number(1));
-	ext
-}
-
-/// Advance to specified block number
-#[allow(dead_code)]
-pub fn run_to_block(n: u64) {
-	while System::block_number() < n {
-		System::set_block_number(System::block_number() + 1);
-	}
+		.expect("mock storage should build");
+	sp_io::TestExternalities::new(storage)
 }

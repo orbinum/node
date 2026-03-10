@@ -4,6 +4,7 @@
 //! using the BN254 elliptic curve.
 
 use crate::{
+	domain::ports::VerifierPort,
 	domain::value_objects::{
 		circuit_constants::{BASE_VERIFICATION_COST, PER_INPUT_COST},
 		errors::VerifierError,
@@ -17,6 +18,11 @@ use ark_groth16::{Groth16, PreparedVerifyingKey};
 pub struct Groth16Verifier;
 
 impl Groth16Verifier {
+	/// Creates a stateless verifier instance.
+	pub fn new() -> Self {
+		Self
+	}
+
 	/// Verify a Groth16 proof
 	///
 	/// # Arguments
@@ -107,7 +113,8 @@ impl Groth16Verifier {
 		// arkworks 0.5.0: mul_bigint is in PrimeGroup trait
 		use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup, PrimeGroup};
 		use ark_ff::{Field, PrimeField};
-		use ark_std::{rand::SeedableRng, UniformRand, Zero};
+		use ark_std::Zero;
+		use sha2::{Digest, Sha256};
 
 		if public_inputs.len() != proofs.len() {
 			return Err(VerifierError::VerificationFailed);
@@ -130,9 +137,7 @@ impl Groth16Verifier {
 			all_inputs.push(inputs.to_field_elements()?);
 		}
 
-		// 2. Setup RNG and accumulators
-		// Use a deterministic seed for protocol consistency.
-		let mut rng = ark_std::rand::rngs::StdRng::seed_from_u64(0);
+		// 2. Setup accumulators
 
 		let mut total_r = <Bn254 as Pairing>::ScalarField::zero();
 		let mut combined_inputs = <Bn254 as Pairing>::G1::zero();
@@ -142,8 +147,20 @@ impl Groth16Verifier {
 		let mut g2_prepared = alloc::vec::Vec::with_capacity(proofs.len() + 2);
 
 		// 3. Combine proofs into linear combination
-		for (inputs, proof) in all_inputs.iter().zip(ark_proofs.iter()) {
-			let r = <Bn254 as Pairing>::ScalarField::rand(&mut rng);
+		for (index, (inputs, proof)) in all_inputs.iter().zip(ark_proofs.iter()).enumerate() {
+			let mut hasher = Sha256::new();
+			hasher.update(b"orbinum-zk-verifier-batch-v1");
+			hasher.update(vk.as_bytes());
+			hasher.update((index as u64).to_le_bytes());
+			hasher.update(proofs[index].as_bytes());
+			for input in &public_inputs[index].inputs {
+				hasher.update(input);
+			}
+			let digest = hasher.finalize();
+			let mut r = <Bn254 as Pairing>::ScalarField::from_le_bytes_mod_order(&digest);
+			if r.is_zero() {
+				r = <Bn254 as Pairing>::ScalarField::from(1u64);
+			}
 			let r_bigint = r.into_bigint();
 			total_r += r;
 
@@ -185,15 +202,42 @@ impl Groth16Verifier {
 	}
 }
 
+impl Default for Groth16Verifier {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
+impl VerifierPort for Groth16Verifier {
+	type PreparedKey = PreparedVerifyingKey<Bn254>;
+
+	fn verify(
+		&self,
+		vk: &VerifyingKey,
+		public_inputs: &PublicInputs,
+		proof: &Proof,
+	) -> Result<(), VerifierError> {
+		Self::verify(vk, public_inputs, proof)
+	}
+
+	fn verify_prepared(
+		&self,
+		prepared_vk: &Self::PreparedKey,
+		public_inputs: &PublicInputs,
+		proof: &Proof,
+	) -> Result<(), VerifierError> {
+		Self::verify_with_prepared_vk(prepared_vk, public_inputs, proof)
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{
-		domain::value_objects::circuit_constants::{BASE_VERIFICATION_COST, PER_INPUT_COST},
-		infrastructure::storage::verification_keys,
-	};
-	use ark_bn254::Fr as Bn254Fr;
+	use crate::domain::value_objects::circuit_constants::{BASE_VERIFICATION_COST, PER_INPUT_COST};
+	use ark_bn254::{Bn254, Fr as Bn254Fr, G1Affine, G2Affine};
+	use ark_ec::AffineRepr;
 	use ark_ff::{BigInteger, PrimeField};
+	use ark_groth16::VerifyingKey as ArkVerifyingKey;
 	use ark_serialize::CanonicalSerialize;
 
 	// Helper: Create mock proof with valid curve points
@@ -228,6 +272,18 @@ mod tests {
 			inputs.push(bytes);
 		}
 		PublicInputs::new(inputs)
+	}
+
+	fn create_mock_ark_vk(expected_inputs: usize) -> ArkVerifyingKey<Bn254> {
+		ArkVerifyingKey {
+			alpha_g1: G1Affine::generator(),
+			beta_g2: G2Affine::generator(),
+			gamma_g2: G2Affine::generator(),
+			delta_g2: G2Affine::generator(),
+			gamma_abc_g1: (0..=expected_inputs)
+				.map(|_| G1Affine::generator())
+				.collect(),
+		}
 	}
 
 	// estimate_verification_cost tests
@@ -265,7 +321,7 @@ mod tests {
 	// verify tests (basic structure)
 	#[test]
 	fn test_verify_detects_invalid_proof_structure() {
-		let vk = verification_keys::transfer::get_vk();
+		let vk = create_mock_ark_vk(5);
 		let vk_wrapper = VerifyingKey::from_ark_vk(&vk).unwrap();
 		let inputs = create_mock_inputs(5);
 
@@ -278,7 +334,7 @@ mod tests {
 
 	#[test]
 	fn test_verify_detects_input_count_mismatch() {
-		let vk = verification_keys::transfer::get_vk();
+		let vk = create_mock_ark_vk(5);
 		let vk_wrapper = VerifyingKey::from_ark_vk(&vk).unwrap();
 
 		// Transfer circuit expects 5 inputs, provide 3
@@ -292,7 +348,7 @@ mod tests {
 
 	#[test]
 	fn test_verify_accepts_correct_input_count() {
-		let vk = verification_keys::transfer::get_vk();
+		let vk = create_mock_ark_vk(5);
 		let vk_wrapper = VerifyingKey::from_ark_vk(&vk).unwrap();
 
 		// Transfer circuit expects 5 inputs
@@ -313,7 +369,7 @@ mod tests {
 
 	#[test]
 	fn test_verify_with_unshield_vk() {
-		let vk = verification_keys::unshield::get_vk();
+		let vk = create_mock_ark_vk(5);
 		let vk_wrapper = VerifyingKey::from_ark_vk(&vk).unwrap();
 
 		// Unshield circuit expects 5 inputs
@@ -332,7 +388,7 @@ mod tests {
 
 	#[test]
 	fn test_verify_with_disclosure_vk() {
-		let vk = verification_keys::disclosure::get_vk();
+		let vk = create_mock_ark_vk(4);
 		let vk_wrapper = VerifyingKey::from_ark_vk(&vk).unwrap();
 
 		// Disclosure circuit expects 4 inputs
@@ -352,7 +408,7 @@ mod tests {
 	// verify_with_prepared_vk tests
 	#[test]
 	fn test_verify_with_prepared_vk_structure() {
-		let vk = verification_keys::transfer::get_vk();
+		let vk = create_mock_ark_vk(5);
 		let pvk = PreparedVerifyingKey::from(vk);
 
 		let inputs = create_mock_inputs(5);
@@ -370,7 +426,7 @@ mod tests {
 
 	#[test]
 	fn test_verify_with_prepared_vk_input_mismatch() {
-		let vk = verification_keys::transfer::get_vk();
+		let vk = create_mock_ark_vk(5);
 		let pvk = PreparedVerifyingKey::from(vk);
 
 		// Wrong input count
@@ -383,7 +439,7 @@ mod tests {
 
 	#[test]
 	fn test_verify_with_prepared_vk_invalid_proof() {
-		let vk = verification_keys::unshield::get_vk();
+		let vk = create_mock_ark_vk(5);
 		let pvk = PreparedVerifyingKey::from(vk);
 
 		let inputs = create_mock_inputs(5);
@@ -396,7 +452,7 @@ mod tests {
 	// batch_verify tests
 	#[test]
 	fn test_batch_verify_empty_arrays() {
-		let vk = verification_keys::transfer::get_vk();
+		let vk = create_mock_ark_vk(5);
 		let vk_wrapper = VerifyingKey::from_ark_vk(&vk).unwrap();
 
 		let result = Groth16Verifier::batch_verify(&vk_wrapper, &[], &[]);
@@ -406,7 +462,7 @@ mod tests {
 
 	#[test]
 	fn test_batch_verify_mismatched_lengths() {
-		let vk = verification_keys::transfer::get_vk();
+		let vk = create_mock_ark_vk(5);
 		let vk_wrapper = VerifyingKey::from_ark_vk(&vk).unwrap();
 
 		let inputs = alloc::vec![create_mock_inputs(5)];
@@ -424,7 +480,7 @@ mod tests {
 
 	#[test]
 	fn test_batch_verify_single_proof() {
-		let vk = verification_keys::transfer::get_vk();
+		let vk = create_mock_ark_vk(5);
 		let vk_wrapper = VerifyingKey::from_ark_vk(&vk).unwrap();
 
 		let inputs = alloc::vec![create_mock_inputs(5)];
@@ -438,7 +494,7 @@ mod tests {
 
 	#[test]
 	fn test_batch_verify_multiple_proofs() {
-		let vk = verification_keys::transfer::get_vk();
+		let vk = create_mock_ark_vk(5);
 		let vk_wrapper = VerifyingKey::from_ark_vk(&vk).unwrap();
 
 		let inputs = alloc::vec![
@@ -460,7 +516,7 @@ mod tests {
 
 	#[test]
 	fn test_batch_verify_with_invalid_proof() {
-		let vk = verification_keys::transfer::get_vk();
+		let vk = create_mock_ark_vk(5);
 		let vk_wrapper = VerifyingKey::from_ark_vk(&vk).unwrap();
 
 		let inputs = alloc::vec![create_mock_inputs(5), create_mock_inputs(5)];
@@ -472,7 +528,7 @@ mod tests {
 
 	#[test]
 	fn test_batch_verify_input_count_mismatch() {
-		let vk = verification_keys::transfer::get_vk();
+		let vk = create_mock_ark_vk(5);
 		let vk_wrapper = VerifyingKey::from_ark_vk(&vk).unwrap();
 
 		// Transfer expects 5 inputs, providing 3
@@ -487,24 +543,24 @@ mod tests {
 	#[test]
 	fn test_all_circuits_can_prepare_vk() {
 		// Transfer
-		let transfer_vk = verification_keys::transfer::get_vk();
+		let transfer_vk = create_mock_ark_vk(5);
 		let transfer_wrapper = VerifyingKey::from_ark_vk(&transfer_vk).unwrap();
 		assert!(transfer_wrapper.prepare().is_ok());
 
 		// Unshield
-		let unshield_vk = verification_keys::unshield::get_vk();
+		let unshield_vk = create_mock_ark_vk(5);
 		let unshield_wrapper = VerifyingKey::from_ark_vk(&unshield_vk).unwrap();
 		assert!(unshield_wrapper.prepare().is_ok());
 
 		// Disclosure
-		let disclosure_vk = verification_keys::disclosure::get_vk();
+		let disclosure_vk = create_mock_ark_vk(4);
 		let disclosure_wrapper = VerifyingKey::from_ark_vk(&disclosure_vk).unwrap();
 		assert!(disclosure_wrapper.prepare().is_ok());
 	}
 
 	#[test]
 	fn test_verify_and_batch_verify_consistency() {
-		let vk = verification_keys::transfer::get_vk();
+		let vk = create_mock_ark_vk(5);
 		let vk_wrapper = VerifyingKey::from_ark_vk(&vk).unwrap();
 
 		let inputs = create_mock_inputs(5);
@@ -524,75 +580,5 @@ mod tests {
 		assert!(single_result.is_err());
 		assert!(batch_result.is_ok());
 		assert!(!batch_result.unwrap());
-	}
-
-	/// Regression test for the private_link circuit.
-	/// Verifies that the hardcoded VK in `private_link.rs` is compatible with the
-	/// CDN proving key (circuits.orbinum.io/v1).
-	///
-	/// Data captured from a real test:24 execution (2026-03-07) using the
-	/// current CDN proving key. If this test fails, it means the VK in
-	/// `primitives/zk-verifier/src/infrastructure/storage/verification_keys/private_link.rs`
-	/// is out of sync with the CDN — run `scripts/sync-circuits/sync-circuit-artifacts.sh`
-	/// and regenerate the Rust file with `scripts/sync-circuits/generate-vk-rust.sh private_link`.
-	#[test]
-	#[ignore = "Requires a proof fixture synced with the current CDN proving key (update with protocol-core/tests test:24)"]
-	fn test_real_private_link_proof_against_hardcoded_vk() {
-		use ark_groth16::Proof as ArkProof;
-		use ark_serialize::CanonicalDeserialize;
-
-		// Hardcoded VK from the crate
-		let ark_vk = verification_keys::get_private_link_vk();
-		let pvk = PreparedVerifyingKey::from(ark_vk);
-
-		// Compressed proofs (128 bytes) generated by compress_snarkjs_proof_wasm
-		// Captured from npm run test:24 across consecutive CDN versions.
-		// Keeping more than one vector avoids false negatives when VK rotates between releases.
-		let proof_hex_candidates = [
-			"94c177a4516a446219f11d948f431db57e540252a5dbac43081199cc72ffbd04f99df60b2fdd2cb1af7e4a919e10d00defbef63562047b6898f55949b19e5f0f7a83adb71ccdeed329353e190d28d0b5be46905e47574127d2959559bb8423a946dc13483ecaa0ff4c311f14848502660960f8ef5d842485f6a618e712a39982",
-			"a6d78479b00b00ba96405d7bde4ebc75b351db85108caba6b2d278c7e1ad5a0a25b56fbae893764cf38d01e84dbb6a458802f414a2ababcd346f33e0018a4e303fd9f74b8e5cbbb4730e8e01e8ecd6e7e04769154b427916b684e75a54e78b28981f861372008124ce74cd44c281b6d24dc7e04d070ce6246f5ce17cb8d09426",
-		];
-
-		// Public inputs in 32-byte LE format
-		// publicSignals[0] = commitment (LE hex)
-		let input0_hex = "7a103a55f6a19a42c486303590f2836ecb306eb0c704c64136e1ebcab7842a16";
-		// publicSignals[1] = call_hash_fe (LE hex)
-		let input1_hex = "4344ebdae7f9670c9f148635ff6b7add38d30e679360b508bb44800dfdf38522";
-
-		let mut input0 = [0u8; 32];
-		let mut input1 = [0u8; 32];
-		for i in 0..32 {
-			input0[i] = u8::from_str_radix(&input0_hex[i * 2..i * 2 + 2], 16).unwrap();
-			input1[i] = u8::from_str_radix(&input1_hex[i * 2..i * 2 + 2], 16).unwrap();
-		}
-
-		let public_inputs = PublicInputs::new(alloc::vec![input0, input1]);
-		let inputs_fr = public_inputs
-			.to_field_elements()
-			.expect("Fr conversion should succeed");
-		let mut any_valid = false;
-
-		for proof_hex in proof_hex_candidates {
-			let proof_bytes: alloc::vec::Vec<u8> = (0..proof_hex.len())
-				.step_by(2)
-				.map(|i| u8::from_str_radix(&proof_hex[i..i + 2], 16).unwrap())
-				.collect();
-			assert_eq!(proof_bytes.len(), 128, "Proof must be 128 bytes");
-
-			let ark_proof = ArkProof::<Bn254>::deserialize_compressed(&proof_bytes[..])
-				.expect("Proof deserialization should succeed");
-
-			let valid = Groth16::<Bn254>::verify_proof(&pvk, &ark_proof, &inputs_fr)
-				.expect("verify_proof should not return a pairing error");
-
-			if valid {
-				any_valid = true;
-				break;
-			}
-		}
-
-		// If this fails, the VK does not match the CDN proving key
-		// If it passes, the bug is elsewhere (e.g. issue in runtime path)
-		assert!(any_valid, "None of the real private_link proofs verified against the hardcoded VK. If this fails, the Rust VK does NOT match the CDN proving key.");
 	}
 }

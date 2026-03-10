@@ -507,10 +507,6 @@ pub mod pallet_manual_seal {
 impl pallet_manual_seal::Config for Runtime {}
 
 impl pallet_zk_verifier::Config for Runtime {
-	/// Only root can register/update verification keys
-	type AdminOrigin = frame_system::EnsureRoot<AccountId>;
-	/// Max VK size: 10MB (transfer_pk.ark: 8.3MB is the largest)
-	type MaxVerificationKeySize = ConstU32<10485760>;
 	/// Max proof size: 1KB (Groth16 proofs ~256-512 bytes)
 	type MaxProofSize = ConstU32<1024>;
 	/// Max public inputs: 32 field elements per circuit
@@ -1146,6 +1142,46 @@ impl_runtime_apis! {
 			commitment: pallet_shielded_pool::Hash,
 		) -> Option<(u32, pallet_shielded_pool::DefaultMerklePath)> {
 			ShieldedPool::get_merkle_proof_for_commitment(commitment)
+		}
+	}
+
+	impl pallet_zk_verifier_runtime_api::ZkVerifierRuntimeApi<Block> for Runtime {
+		fn get_circuit_version_info(
+			circuit_id: u32,
+		) -> Option<pallet_zk_verifier_runtime_api::CircuitVersionInfo> {
+			pallet_zk_verifier::Pallet::<Runtime>::runtime_api_get_circuit_version_info(circuit_id)
+				.map(|info| pallet_zk_verifier_runtime_api::CircuitVersionInfo {
+					circuit_id: info.circuit_id,
+					active_version: info.active_version,
+					supported_versions: info.supported_versions,
+					vk_hashes: info
+						.vk_hashes
+						.into_iter()
+						.map(|item| pallet_zk_verifier_runtime_api::VkVersionHash {
+							version: item.version,
+							vk_hash: item.vk_hash,
+						})
+						.collect(),
+				})
+		}
+
+		fn get_all_circuit_versions() -> alloc::vec::Vec<pallet_zk_verifier_runtime_api::CircuitVersionInfo> {
+			pallet_zk_verifier::Pallet::<Runtime>::runtime_api_get_all_circuit_versions()
+				.into_iter()
+				.map(|info| pallet_zk_verifier_runtime_api::CircuitVersionInfo {
+					circuit_id: info.circuit_id,
+					active_version: info.active_version,
+					supported_versions: info.supported_versions,
+					vk_hashes: info
+						.vk_hashes
+						.into_iter()
+						.map(|item| pallet_zk_verifier_runtime_api::VkVersionHash {
+							version: item.version,
+							vk_hash: item.vk_hash,
+						})
+						.collect(),
+				})
+				.collect()
 		}
 	}
 

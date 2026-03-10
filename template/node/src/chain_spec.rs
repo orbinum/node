@@ -14,9 +14,6 @@ use orbinum_runtime::{
 	evm_bytes_to_account_id_bytes, AccountId, Balance, SS58Prefix, Signature, WASM_BINARY,
 };
 
-use orbinum_zk_verifier::infrastructure::storage::verification_keys;
-use pallet_zk_verifier::CircuitId;
-
 pub type ChainSpec = sc_service::GenericChainSpec;
 
 fn ethereum_account_id(eth_address: [u8; 20]) -> AccountId {
@@ -182,14 +179,6 @@ fn testnet_genesis(
 		"grandpa": { "authorities": initial_authorities.iter().map(|x| (x.1.clone(), 1)).collect::<Vec<_>>() },
 		"evmChainId": { "chainId": chain_id },
 		"evm": { "accounts": evm_accounts },
-		"manualSeal": { "enable": enable_manual_seal },
-		"zkVerifier": {
-			"verificationKeys": vec![
-				(CircuitId::TRANSFER, verification_keys::get_transfer_vk_bytes()),
-				(CircuitId::UNSHIELD, verification_keys::get_unshield_vk_bytes()),
-				(CircuitId::DISCLOSURE, verification_keys::get_disclosure_vk_bytes()),
-				(CircuitId::PRIVATE_LINK, verification_keys::get_private_link_vk_bytes()),
-			]
-		}
+		"manualSeal": { "enable": enable_manual_seal }
 	})
 }

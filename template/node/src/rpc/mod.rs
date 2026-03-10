@@ -70,6 +70,7 @@ where
 	C::Api: fp_rpc::EthereumRuntimeRPCApi<B>,
 	C::Api: pallet_account_mapping_runtime_api::AccountMappingRuntimeApi<B, AccountId, u128>,
 	C::Api: pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi<B>,
+	C::Api: pallet_zk_verifier_runtime_api::ZkVerifierRuntimeApi<B>,
 	C: HeaderBackend<B> + HeaderMetadata<B, Error = BlockChainError> + 'static,
 	C: BlockchainEvents<B> + AuxStore + UsageProvider<B> + StorageProvider<B, BE>,
 	BE: Backend<B> + 'static,
@@ -80,6 +81,7 @@ where
 	use pallet_account_mapping_rpc::{AccountMapping, AccountMappingApiServer};
 	use pallet_shielded_pool_rpc::{ShieldedPool, ShieldedPoolApiServer};
 	use pallet_transaction_payment_rpc::{TransactionPayment, TransactionPaymentApiServer};
+	use pallet_zk_verifier_rpc::{ZkVerifier, ZkVerifierApiServer};
 	use sc_consensus_manual_seal::rpc::{ManualSeal, ManualSealApiServer};
 	use substrate_frame_rpc_system::{System, SystemApiServer};
 
@@ -98,6 +100,7 @@ where
 	io.merge(TransactionPayment::new(client.clone()).into_rpc())?;
 	io.merge(AccountMapping::new(client.clone()).into_rpc())?;
 	io.merge(ShieldedPool::new(client.clone()).into_rpc())?;
+	io.merge(ZkVerifier::new(client.clone()).into_rpc())?;
 
 	// Orbinum Privacy RPC
 	let privacy_adapter = SubstrateStorageAdapter::new(client.clone());

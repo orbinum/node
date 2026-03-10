@@ -25,6 +25,8 @@ members = [
 	"frame/account-mapping",
 	"frame/account-mapping/runtime-api",
 	"frame/account-mapping/rpc",
+	"frame/zk-verifier/runtime-api",
+	"frame/zk-verifier/rpc",
 	"frame/evm/precompile/account-mapping",
 	"client/api",
 	"client/consensus",
@@ -250,6 +252,8 @@ pallet-shielded-pool = { path = "frame/shielded-pool", default-features = false 
 pallet-shielded-pool-rpc = { path = "frame/shielded-pool/rpc" }
 pallet-shielded-pool-runtime-api = { path = "frame/shielded-pool/runtime-api", default-features = false }
 pallet-zk-verifier = { path = "frame/zk-verifier", default-features = false }
+pallet-zk-verifier-rpc = { path = "frame/zk-verifier/rpc" }
+pallet-zk-verifier-runtime-api = { path = "frame/zk-verifier/runtime-api", default-features = false }
 
 # Frontier Utility
 precompile-utils = { path = "precompiles", default-features = false }

@@ -37,14 +37,12 @@ parameter_types! {
 	pub const MinShieldAmount: u128 = 100;
 	pub const MaxProofSize: u32 = 256;
 	pub const MaxPublicInputs: u32 = 10;
-	pub const MaxVerificationKeySize: u32 = 2048;
+	pub const RequestExpiration: u64 = 1000;
 }
 
 impl pallet_zk_verifier::Config for Test {
-	type AdminOrigin = frame_system::EnsureRoot<Self::AccountId>;
 	type MaxProofSize = MaxProofSize;
 	type MaxPublicInputs = MaxPublicInputs;
-	type MaxVerificationKeySize = MaxVerificationKeySize;
 	type WeightInfo = pallet_zk_verifier::weights::SubstrateWeight<Test>;
 }
 
@@ -52,8 +50,6 @@ impl pallet_zk_verifier::Config for Test {
 ///
 /// ⚠️ WARNING: This mock bypasses all ZK proof validation!
 /// Use only for testing business logic, not cryptographic correctness.
-///
-/// For testing proof validation errors, use `FailingZkVerifier` instead.
 pub struct MockZkVerifier;
 
 impl ZkVerifierPort for MockZkVerifier {
@@ -135,94 +131,6 @@ impl ZkVerifierPort for MockZkVerifier {
 	}
 }
 
-/// Mock ZK verifier that always fails - for testing error paths
-///
-/// **IMPORTANT**: This mock is currently NOT used by any tests (dead code).
-/// It exists to demonstrate how to test invalid proof scenarios.
-///
-/// To use this mock, create a separate test configuration:
-/// ```ignore
-/// construct_runtime!(
-///     pub enum TestWithFailingVerifier {
-///         System: frame_system,
-///         Balances: pallet_balances,
-///         ShieldedPool: pallet_shielded_pool,
-///     }
-/// );
-///
-/// impl pallet_shielded_pool::Config for TestWithFailingVerifier {
-///     type ZkVerifier = FailingZkVerifier; // ← Use this instead of MockZkVerifier
-///     // ... other config
-/// }
-///
-/// #[test]
-/// fn unshield_fails_with_invalid_proof() {
-///     new_test_ext_failing().execute_with(|| {
-///         // Any proof will fail with FailingZkVerifier
-///         assert_noop!(ShieldedPool::unshield(...), Error::InvalidProof);
-///     });
-/// }
-/// ```
-///
-/// See: `frame/shielded-pool/docs/MOCK_SYSTEM_ANALYSIS.md` for detailed analysis
-/// See: `frame/shielded-pool/src/tests/integration/invalid_proof_tests.rs` for demo tests
-#[allow(dead_code)] // Intentionally unused - template for negative tests
-pub struct FailingZkVerifier;
-
-impl ZkVerifierPort for FailingZkVerifier {
-	fn verify_transfer_proof(
-		_proof: &[u8],
-		_merkle_root: &[u8; 32],
-		_nullifiers: &[[u8; 32]],
-		_commitments: &[[u8; 32]],
-		_version: Option<u32>,
-	) -> Result<bool, sp_runtime::DispatchError> {
-		// Always return false for testing invalid proofs
-		Ok(false)
-	}
-
-	fn verify_unshield_proof(
-		_proof: &[u8],
-		_merkle_root: &[u8; 32],
-		_nullifier: &[u8; 32],
-		_amount: u128,
-		_recipient: &[u8; 32],
-		_asset_id: u32,
-		_version: Option<u32>,
-	) -> Result<bool, sp_runtime::DispatchError> {
-		// Always return false for testing invalid proofs
-		Ok(false)
-	}
-
-	fn verify_disclosure_proof(
-		_proof: &[u8],
-		_public_signals: &[u8],
-		_version: Option<u32>,
-	) -> Result<bool, sp_runtime::DispatchError> {
-		// Always return false for testing invalid proofs
-		Ok(false)
-	}
-
-	fn batch_verify_disclosure_proofs(
-		_proofs: &[sp_std::vec::Vec<u8>],
-		_public_signals: &[sp_std::vec::Vec<u8>],
-		_version: Option<u32>,
-	) -> Result<bool, sp_runtime::DispatchError> {
-		// Always return false for testing invalid proofs
-		Ok(false)
-	}
-
-	fn verify_private_link_proof(
-		_proof: &[u8],
-		_commitment: &[u8; 32],
-		_call_hash_fe: &[u8; 32],
-		_version: Option<u32>,
-	) -> Result<bool, sp_runtime::DispatchError> {
-		// Always return false for testing invalid proofs
-		Ok(false)
-	}
-}
-
 impl pallet_shielded_pool::Config for Test {
 	type Currency = Balances;
 	type ZkVerifier = MockZkVerifier;
@@ -257,12 +165,4 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 	let mut ext = sp_io::TestExternalities::new(t);
 	ext.execute_with(|| System::set_block_number(1));
 	ext
-}
-
-/// Advance to specified block number
-#[allow(dead_code)]
-pub fn run_to_block(n: u64) {
-	while System::block_number() < n {
-		System::set_block_number(System::block_number() + 1);
-	}
 }

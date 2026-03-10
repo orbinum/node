@@ -42,3 +42,49 @@ pub const PER_INPUT_COST: u64 = 10_000;
 
 /// Maximum number of public inputs supported
 pub const MAX_PUBLIC_INPUTS: usize = 32;
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use core::hint::black_box;
+
+	#[test]
+	fn test_circuit_ids_are_stable() {
+		assert_eq!(CIRCUIT_ID_TRANSFER, 1);
+		assert_eq!(CIRCUIT_ID_UNSHIELD, 2);
+		assert_eq!(CIRCUIT_ID_DISCLOSURE, 4);
+		assert_eq!(CIRCUIT_ID_PRIVATE_LINK, 5);
+	}
+
+	#[test]
+	fn test_public_input_counts_are_expected() {
+		assert_eq!(TRANSFER_PUBLIC_INPUTS, 5);
+		assert_eq!(UNSHIELD_PUBLIC_INPUTS, 5);
+		assert_eq!(DISCLOSURE_PUBLIC_INPUTS, 4);
+		assert_eq!(PRIVATE_LINK_PUBLIC_INPUTS, 2);
+	}
+
+	#[test]
+	fn test_cost_constants_are_consistent() {
+		let base_verification_cost = black_box(BASE_VERIFICATION_COST);
+		let per_input_cost = black_box(PER_INPUT_COST);
+		let max_public_inputs = black_box(MAX_PUBLIC_INPUTS);
+
+		assert!(base_verification_cost > 0);
+		assert!(per_input_cost > 0);
+		assert!(max_public_inputs >= TRANSFER_PUBLIC_INPUTS);
+		assert!(max_public_inputs >= UNSHIELD_PUBLIC_INPUTS);
+		assert!(max_public_inputs >= DISCLOSURE_PUBLIC_INPUTS);
+		assert!(max_public_inputs >= PRIVATE_LINK_PUBLIC_INPUTS);
+	}
+
+	#[test]
+	fn test_estimated_cost_growth_is_linear() {
+		let cost_0 = BASE_VERIFICATION_COST;
+		let cost_1 = BASE_VERIFICATION_COST + PER_INPUT_COST;
+		let cost_5 = BASE_VERIFICATION_COST + (5 * PER_INPUT_COST);
+
+		assert_eq!(cost_1 - cost_0, PER_INPUT_COST);
+		assert_eq!(cost_5 - cost_1, 4 * PER_INPUT_COST);
+	}
+}
