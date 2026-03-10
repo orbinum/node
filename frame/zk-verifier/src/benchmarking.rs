@@ -153,7 +153,10 @@ mod benchmarks {
 		#[extrinsic_call]
 		_(RawOrigin::Root, circuit_id, new_version);
 
-		assert_eq!(ActiveCircuitVersion::<T>::get(circuit_id), Some(new_version));
+		assert_eq!(
+			ActiveCircuitVersion::<T>::get(circuit_id),
+			Some(new_version)
+		);
 	}
 
 	#[benchmark]
@@ -181,8 +184,14 @@ mod benchmarks {
 		#[extrinsic_call]
 		_(RawOrigin::Root, circuit_id, remove_version);
 
-		assert!(!VerificationKeys::<T>::contains_key(circuit_id, remove_version));
-		assert!(VerificationKeys::<T>::contains_key(circuit_id, active_version));
+		assert!(!VerificationKeys::<T>::contains_key(
+			circuit_id,
+			remove_version
+		));
+		assert!(VerificationKeys::<T>::contains_key(
+			circuit_id,
+			active_version
+		));
 	}
 
 	impl_benchmark_test_suite!(Pallet, crate::mock::new_test_ext(), crate::mock::Test);
