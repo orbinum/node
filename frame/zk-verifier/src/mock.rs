@@ -2,6 +2,7 @@
 
 use crate as pallet_zk_verifier;
 use frame_support::{derive_impl, parameter_types};
+use sp_runtime::BuildStorage;
 
 type Block = frame_system::mocking::MockBlock<Test>;
 
