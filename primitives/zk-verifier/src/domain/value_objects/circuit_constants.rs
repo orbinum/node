@@ -46,6 +46,7 @@ pub const MAX_PUBLIC_INPUTS: usize = 32;
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use core::hint::black_box;
 
 	#[test]
 	fn test_circuit_ids_are_stable() {
@@ -65,12 +66,16 @@ mod tests {
 
 	#[test]
 	fn test_cost_constants_are_consistent() {
-		assert!(BASE_VERIFICATION_COST > 0);
-		assert!(PER_INPUT_COST > 0);
-		assert!(MAX_PUBLIC_INPUTS >= TRANSFER_PUBLIC_INPUTS);
-		assert!(MAX_PUBLIC_INPUTS >= UNSHIELD_PUBLIC_INPUTS);
-		assert!(MAX_PUBLIC_INPUTS >= DISCLOSURE_PUBLIC_INPUTS);
-		assert!(MAX_PUBLIC_INPUTS >= PRIVATE_LINK_PUBLIC_INPUTS);
+		let base_verification_cost = black_box(BASE_VERIFICATION_COST);
+		let per_input_cost = black_box(PER_INPUT_COST);
+		let max_public_inputs = black_box(MAX_PUBLIC_INPUTS);
+
+		assert!(base_verification_cost > 0);
+		assert!(per_input_cost > 0);
+		assert!(max_public_inputs >= TRANSFER_PUBLIC_INPUTS);
+		assert!(max_public_inputs >= UNSHIELD_PUBLIC_INPUTS);
+		assert!(max_public_inputs >= DISCLOSURE_PUBLIC_INPUTS);
+		assert!(max_public_inputs >= PRIVATE_LINK_PUBLIC_INPUTS);
 	}
 
 	#[test]
