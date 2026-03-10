@@ -39,8 +39,10 @@ fn to_response(info: CircuitVersionInfo) -> CircuitVersionInfoResponse {
 #[rpc(client, server)]
 pub trait ZkVerifierApi<BlockHash> {
 	#[method(name = "zkVerifier_getCircuitVersionInfo")]
-	fn get_circuit_version_info(&self, circuit_id: u32)
-		-> RpcResult<Option<CircuitVersionInfoResponse>>;
+	fn get_circuit_version_info(
+		&self,
+		circuit_id: u32,
+	) -> RpcResult<Option<CircuitVersionInfoResponse>>;
 
 	#[method(name = "zkVerifier_getAllCircuitVersions")]
 	fn get_all_circuit_versions(&self) -> RpcResult<Vec<CircuitVersionInfoResponse>>;
