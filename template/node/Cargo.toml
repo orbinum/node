@@ -61,10 +61,10 @@ pallet-account-mapping-rpc = { workspace = true }
 pallet-account-mapping-runtime-api = { workspace = true }
 pallet-shielded-pool-rpc = { workspace = true }
 pallet-shielded-pool-runtime-api = { workspace = true }
-pallet-zk-verifier-rpc = { workspace = true }
-pallet-zk-verifier-runtime-api = { workspace = true }
 pallet-transaction-payment-rpc = { workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { workspace = true }
+pallet-zk-verifier-rpc = { workspace = true }
+pallet-zk-verifier-runtime-api = { workspace = true }
 substrate-frame-rpc-system = { workspace = true }
 
 # These dependencies are used for runtime benchmarking
