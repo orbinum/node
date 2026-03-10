@@ -3,11 +3,13 @@
 //! These tests verify the genesis configuration and initialization
 
 use crate::{
-	VerificationKeys,
+	ActiveCircuitVersion, VerificationKeys,
+	mock::{RuntimeOrigin, ZkVerifier},
 	pallet::GenesisConfig,
 	types::{CircuitId, ProofSystem},
 };
 use frame_support::traits::BuildGenesisConfig;
+use frame_support::{assert_noop, assert_ok};
 use sp_io::TestExternalities;
 use sp_runtime::BuildStorage;
 
@@ -65,7 +67,7 @@ fn empty_genesis_works() {
 	ext.execute_with(|| {
 		genesis_config.build();
 
-		// Verify no keys are registered
+		// Empty config does not seed VKs automatically
 		assert!(!VerificationKeys::<crate::mock::Test>::contains_key(
 			CircuitId::TRANSFER,
 			1
@@ -74,6 +76,169 @@ fn empty_genesis_works() {
 			CircuitId::UNSHIELD,
 			1
 		));
+	});
+}
+
+#[test]
+fn root_can_register_and_set_active_version() {
+	let storage = frame_system::GenesisConfig::<crate::mock::Test>::default()
+		.build_storage()
+		.unwrap();
+
+	let mut ext = TestExternalities::new(storage);
+	ext.execute_with(|| {
+		let vk_bytes = vec![9u8; 512];
+		let bounded_vk: frame_support::BoundedVec<u8, frame_support::traits::ConstU32<8192>> =
+			vk_bytes.try_into().unwrap();
+
+		assert_ok!(ZkVerifier::register_verification_key(
+			RuntimeOrigin::root(),
+			CircuitId::TRANSFER,
+			2,
+			bounded_vk
+		));
+		assert!(VerificationKeys::<crate::mock::Test>::contains_key(
+			CircuitId::TRANSFER,
+			2
+		));
+
+		assert_ok!(ZkVerifier::set_active_version(
+			RuntimeOrigin::root(),
+			CircuitId::TRANSFER,
+			2
+		));
+		assert_eq!(
+			ActiveCircuitVersion::<crate::mock::Test>::get(CircuitId::TRANSFER),
+			Some(2)
+		);
+	});
+}
+
+#[test]
+fn non_root_cannot_register_verification_key() {
+	let storage = frame_system::GenesisConfig::<crate::mock::Test>::default()
+		.build_storage()
+		.unwrap();
+
+	let mut ext = TestExternalities::new(storage);
+	ext.execute_with(|| {
+		let bounded_vk: frame_support::BoundedVec<u8, frame_support::traits::ConstU32<8192>> =
+			vec![7u8; 512].try_into().unwrap();
+		assert_noop!(
+			ZkVerifier::register_verification_key(
+				RuntimeOrigin::signed(1),
+				CircuitId::TRANSFER,
+				3,
+				bounded_vk
+			),
+			sp_runtime::DispatchError::BadOrigin
+		);
+	});
+}
+
+#[test]
+fn non_root_cannot_set_active_version() {
+	let storage = frame_system::GenesisConfig::<crate::mock::Test>::default()
+		.build_storage()
+		.unwrap();
+
+	let mut ext = TestExternalities::new(storage);
+	ext.execute_with(|| {
+		assert_noop!(
+			ZkVerifier::set_active_version(RuntimeOrigin::signed(1), CircuitId::TRANSFER, 1),
+			sp_runtime::DispatchError::BadOrigin
+		);
+	});
+}
+
+#[test]
+fn non_root_cannot_remove_verification_key() {
+	let storage = frame_system::GenesisConfig::<crate::mock::Test>::default()
+		.build_storage()
+		.unwrap();
+
+	let mut ext = TestExternalities::new(storage);
+	ext.execute_with(|| {
+		assert_noop!(
+			ZkVerifier::remove_verification_key(RuntimeOrigin::signed(1), CircuitId::TRANSFER, 1),
+			sp_runtime::DispatchError::BadOrigin
+		);
+	});
+}
+
+#[test]
+fn set_active_version_requires_existing_vk() {
+	let storage = frame_system::GenesisConfig::<crate::mock::Test>::default()
+		.build_storage()
+		.unwrap();
+
+	let mut ext = TestExternalities::new(storage);
+	ext.execute_with(|| {
+		assert_noop!(
+			ZkVerifier::set_active_version(RuntimeOrigin::root(), CircuitId::TRANSFER, 99),
+			crate::Error::<crate::mock::Test>::VerificationKeyNotFound
+		);
+	});
+}
+
+#[test]
+fn remove_nonexistent_vk_fails() {
+	let storage = frame_system::GenesisConfig::<crate::mock::Test>::default()
+		.build_storage()
+		.unwrap();
+
+	let mut ext = TestExternalities::new(storage);
+	ext.execute_with(|| {
+		assert_noop!(
+			ZkVerifier::remove_verification_key(RuntimeOrigin::root(), CircuitId::TRANSFER, 99),
+			crate::Error::<crate::mock::Test>::VerificationKeyNotFound
+		);
+	});
+}
+
+#[test]
+fn register_rejects_empty_vk() {
+	let storage = frame_system::GenesisConfig::<crate::mock::Test>::default()
+		.build_storage()
+		.unwrap();
+
+	let mut ext = TestExternalities::new(storage);
+	ext.execute_with(|| {
+		let empty_vk: frame_support::BoundedVec<u8, frame_support::traits::ConstU32<8192>> =
+			vec![].try_into().unwrap();
+
+		assert_noop!(
+			ZkVerifier::register_verification_key(
+				RuntimeOrigin::root(),
+				CircuitId::TRANSFER,
+				1,
+				empty_vk
+			),
+			crate::Error::<crate::mock::Test>::EmptyVerificationKey
+		);
+	});
+}
+
+#[test]
+fn cannot_remove_active_version() {
+	let storage = frame_system::GenesisConfig::<crate::mock::Test>::default()
+		.build_storage()
+		.unwrap();
+
+	let mut ext = TestExternalities::new(storage);
+	ext.execute_with(|| {
+		let bounded_vk: frame_support::BoundedVec<u8, frame_support::traits::ConstU32<8192>> =
+			vec![5u8; 512].try_into().unwrap();
+		assert_ok!(ZkVerifier::register_verification_key(
+			RuntimeOrigin::root(),
+			CircuitId::TRANSFER,
+			1,
+			bounded_vk
+		));
+		assert_noop!(
+			ZkVerifier::remove_verification_key(RuntimeOrigin::root(), CircuitId::TRANSFER, 1),
+			crate::Error::<crate::mock::Test>::CannotRemoveActiveVersion
+		);
 	});
 }
 
@@ -310,7 +475,8 @@ fn genesis_accepts_valid_vk_sizes() {
 }
 
 #[test]
-fn genesis_handles_empty_vk() {
+#[should_panic(expected = "Invalid zk_verifier genesis VK")]
+fn genesis_rejects_empty_vk() {
 	let genesis_config: GenesisConfig<crate::mock::Test> = GenesisConfig {
 		verification_keys: vec![(CircuitId::TRANSFER, vec![])],
 		_phantom: Default::default(),
@@ -323,13 +489,40 @@ fn genesis_handles_empty_vk() {
 	let mut ext = TestExternalities::new(storage);
 
 	ext.execute_with(|| {
-		// Genesis build doesn't fail, but creates an empty entry
+		// Empty VK must fail fast in genesis
 		genesis_config.build();
+	});
+}
 
-		// Entry exists but with empty data
-		if let Some(stored) = VerificationKeys::<crate::mock::Test>::get(CircuitId::TRANSFER, 1) {
-			assert!(stored.key_data.is_empty());
-		}
+#[test]
+fn runtime_api_lists_dynamic_circuit_ids_from_storage() {
+	let storage = frame_system::GenesisConfig::<crate::mock::Test>::default()
+		.build_storage()
+		.unwrap();
+
+	let mut ext = TestExternalities::new(storage);
+	ext.execute_with(|| {
+		let vk_a: frame_support::BoundedVec<u8, frame_support::traits::ConstU32<8192>> =
+			vec![1u8; 512].try_into().unwrap();
+		let vk_b: frame_support::BoundedVec<u8, frame_support::traits::ConstU32<8192>> =
+			vec![2u8; 512].try_into().unwrap();
+
+		assert_ok!(ZkVerifier::register_verification_key(
+			RuntimeOrigin::root(),
+			CircuitId(77),
+			1,
+			vk_a
+		));
+		assert_ok!(ZkVerifier::register_verification_key(
+			RuntimeOrigin::root(),
+			CircuitId(88),
+			1,
+			vk_b
+		));
+
+		let all = crate::Pallet::<crate::mock::Test>::runtime_api_get_all_circuit_versions();
+		assert!(all.iter().any(|info| info.circuit_id == 77));
+		assert!(all.iter().any(|info| info.circuit_id == 88));
 	});
 }
 

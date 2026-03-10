@@ -33,6 +33,19 @@ impl MockVkRepository {
 		repo.active_versions.borrow_mut().push((circuit_id, 1));
 		repo
 	}
+
+	pub fn insert_vk(&self, circuit_id: CircuitId, version: u32, vk: VerificationKey) {
+		self.storage.borrow_mut().push((circuit_id, version, vk));
+	}
+
+	pub fn set_active_version(&self, circuit_id: CircuitId, version: u32) {
+		let mut active_versions = self.active_versions.borrow_mut();
+		if let Some((_, active)) = active_versions.iter_mut().find(|(id, _)| *id == circuit_id) {
+			*active = version;
+			return;
+		}
+		active_versions.push((circuit_id, version));
+	}
 }
 
 impl VerificationKeyRepository for MockVkRepository {
@@ -86,21 +99,6 @@ impl VerificationKeyRepository for MockVkRepository {
 			.find(|(c_id, _)| *c_id == id)
 			.map(|(_, v)| *v)
 			.ok_or(ApplicationError::CircuitNotFound)
-	}
-
-	fn set_active_version(&self, id: CircuitId, version: u32) -> Result<(), Self::Error> {
-		// Verify it exists first
-		if !self.exists(id, version) {
-			return Err(ApplicationError::CircuitNotFound);
-		}
-
-		let mut versions = self.active_versions.borrow_mut();
-		if let Some(entry) = versions.iter_mut().find(|(c_id, _)| *c_id == id) {
-			entry.1 = version;
-		} else {
-			versions.push((id, version));
-		}
-		Ok(())
 	}
 }
 

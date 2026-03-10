@@ -1,0 +1,25 @@
+[package]
+name = "pallet-zk-verifier-runtime-api"
+version = "0.1.0"
+authors = { workspace = true }
+edition = { workspace = true }
+license = "Apache-2.0"
+
+[dependencies]
+pallet-zk-verifier = { path = "..", default-features = false }
+scale-codec = { workspace = true, default-features = false, features = ["derive"] }
+scale-info = { workspace = true, default-features = false, features = ["derive"] }
+serde = { workspace = true, default-features = false, features = ["derive", "alloc"], optional = true }
+sp-api = { workspace = true, default-features = false }
+sp-std = { workspace = true, default-features = false }
+
+[features]
+default = ["std"]
+std = [
+	"scale-codec/std",
+	"scale-info/std",
+	"serde/std",
+	"pallet-zk-verifier/std",
+	"sp-api/std",
+	"sp-std/std",
+]

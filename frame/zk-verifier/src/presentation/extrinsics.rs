@@ -4,25 +4,16 @@
 //! They convert FRAME types to domain types, execute use cases, and handle results.
 
 use crate::{
-	application::{
-		commands::{
-			RegisterVkCommand, RemoveVkCommand, SetActiveVersionCommand, VerifyProofCommand,
-		},
-		use_cases::{
-			RegisterVerificationKeyUseCase, RemoveVerificationKeyUseCase, SetActiveVersionUseCase,
-			VerifyProofUseCase,
-		},
-	},
+	application::{commands::VerifyProofCommand, use_cases::VerifyProofUseCase},
 	domain::{
-		repositories::VerificationKeyRepository, services::DefaultVkValidator,
-		value_objects::CircuitId as DomainCircuitId,
+		repositories::VerificationKeyRepository, value_objects::CircuitId as DomainCircuitId,
 	},
 	infrastructure::{
 		repositories::{FrameStatisticsRepository, FrameVkRepository},
 		services::Groth16Verifier,
 	},
 	pallet::{self as pallet, Config, Error, Event, Pallet},
-	types::{CircuitId, ProofSystem},
+	types::CircuitId,
 };
 use alloc::boxed::Box;
 use frame_support::pallet_prelude::*;
@@ -30,118 +21,6 @@ use frame_system::pallet_prelude::*;
 use sp_std::vec::Vec;
 
 impl<T: Config> Pallet<T> {
-	/// Register a verification key for a circuit
-	pub fn execute_register_verification_key(
-		origin: OriginFor<T>,
-		circuit_id_raw: u32,
-		version: u32,
-		vk_bytes: Vec<u8>,
-		system: ProofSystem,
-	) -> DispatchResult {
-		T::AdminOrigin::ensure_origin(origin)?;
-
-		// Convert storage types to domain types
-		let circuit_id = DomainCircuitId::new(circuit_id_raw);
-		let domain_system = Self::map_proof_system(system.clone());
-
-		// Create command
-		let command = RegisterVkCommand {
-			circuit_id,
-			version,
-			data: vk_bytes,
-			system: domain_system,
-		};
-
-		// Create dependencies
-		let repository = FrameVkRepository::<T>::new();
-		let validator = Box::new(DefaultVkValidator);
-
-		// Execute use case
-		let use_case = RegisterVerificationKeyUseCase::new(repository, validator);
-		use_case
-			.execute(command)
-			.map_err(Self::map_application_error)?;
-
-		// Emit event
-		Self::deposit_event(Event::VerificationKeyRegistered {
-			circuit_id: CircuitId(circuit_id_raw),
-			version,
-			system,
-		});
-
-		Ok(())
-	}
-
-	/// Remove a verification key version
-	pub fn execute_remove_verification_key(
-		origin: OriginFor<T>,
-		circuit_id_raw: u32,
-		version: u32,
-	) -> DispatchResult {
-		T::AdminOrigin::ensure_origin(origin)?;
-
-		// Convert to domain type
-		let circuit_id = DomainCircuitId::new(circuit_id_raw);
-
-		// Create command
-		let command = RemoveVkCommand {
-			circuit_id,
-			version: Some(version),
-		};
-
-		// Create dependencies
-		let repository = FrameVkRepository::<T>::new();
-
-		// Execute use case
-		let use_case = RemoveVerificationKeyUseCase::new(repository);
-		use_case
-			.execute(command)
-			.map_err(Self::map_application_error)?;
-
-		// Emit event
-		Self::deposit_event(Event::VerificationKeyRemoved {
-			circuit_id: CircuitId(circuit_id_raw),
-			version,
-		});
-
-		Ok(())
-	}
-
-	/// Set the active version for a circuit
-	pub fn execute_set_active_version(
-		origin: OriginFor<T>,
-		circuit_id_raw: u32,
-		version: u32,
-	) -> DispatchResult {
-		T::AdminOrigin::ensure_origin(origin)?;
-
-		// Convert to domain type
-		let circuit_id = DomainCircuitId::new(circuit_id_raw);
-
-		// Create command
-		let command = SetActiveVersionCommand {
-			circuit_id,
-			version,
-		};
-
-		// Create dependencies
-		let repository = FrameVkRepository::<T>::new();
-
-		// Execute use case
-		let use_case = SetActiveVersionUseCase::new(repository);
-		use_case
-			.execute(command)
-			.map_err(Self::map_application_error)?;
-
-		// Emit event
-		Self::deposit_event(Event::ActiveVersionChanged {
-			circuit_id: CircuitId(circuit_id_raw),
-			version,
-		});
-
-		Ok(())
-	}
-
 	/// Verify a zero-knowledge proof
 	pub fn execute_verify_proof(
 		origin: OriginFor<T>,
@@ -182,11 +61,9 @@ impl<T: Config> Pallet<T> {
 
 		// Get the actual version used for the event
 		let actual_version = version.unwrap_or_else(|| {
-			// This is a bit redundant but ensures the event has the correct version
-			// In a real system, the use case should return the version used.
 			FrameVkRepository::<T>::new()
 				.get_active_version(circuit_id)
-				.unwrap_or(1)
+				.unwrap_or_default()
 		});
 
 		// Emit event
@@ -207,14 +84,6 @@ impl<T: Config> Pallet<T> {
 	}
 
 	// Helper functions
-
-	fn map_proof_system(system: ProofSystem) -> crate::domain::value_objects::ProofSystem {
-		match system {
-			ProofSystem::Groth16 => crate::domain::value_objects::ProofSystem::Groth16,
-			ProofSystem::Plonk => crate::domain::value_objects::ProofSystem::Plonk,
-			ProofSystem::Halo2 => crate::domain::value_objects::ProofSystem::Halo2,
-		}
-	}
 
 	pub(crate) fn map_application_error(
 		err: crate::application::errors::ApplicationError,

@@ -10,6 +10,5 @@
 //! This layer depends on domain and application layers.
 
 pub mod adapters;
-pub mod mappers;
 pub mod repositories;
 pub mod services;

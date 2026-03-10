@@ -17,9 +17,6 @@ pub trait VerificationKeyRepository {
 	/// Get the active version for a circuit
 	fn get_active_version(&self, id: CircuitId) -> Result<u32, Self::Error>;
 
-	/// Set the active version for a circuit
-	fn set_active_version(&self, id: CircuitId, version: u32) -> Result<(), Self::Error>;
-
 	/// Check if a verification key version exists
 	fn exists(&self, id: CircuitId, version: u32) -> bool;
 

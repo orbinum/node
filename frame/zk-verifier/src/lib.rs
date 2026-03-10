@@ -13,22 +13,14 @@
 //!
 //! ## Features
 //!
-//! - Groth16 proof verification with sub-10ms performance
-//! - Circuit-specific verification key management
+//! - Groth16 proof verification
+//! - Verification keys managed in on-chain storage (including genesis seeding)
 //! - Statistics tracking per circuit
-//! - Support for multiple proof systems (Groth16, PLONK, Halo2)
+//! - Forward-compatible proof system model (runtime path currently Groth16)
 //!
 //! ## Usage
 //!
 //! ```ignore
-//! // Register a verification key
-//! ZkVerifier::register_verification_key(
-//!     origin,
-//!     circuit_id,
-//!     vk_bytes,
-//!     ProofSystem::Groth16
-//! )?;
-//!
 //! // Verify a proof
 //! ZkVerifier::verify_proof(
 //!     origin,
@@ -65,10 +57,38 @@ mod benchmarking;
 /// Domain port for ZK verification (the ONLY public contract)
 pub use domain::services::ZkVerifierPort;
 
-pub use types::{
-	CircuitId, CircuitMetadata, ProofSystem, VerificationKeyInfo, VerificationStatistics,
-};
+pub use types::{CircuitId, ProofSystem, VerificationKeyInfo, VerificationStatistics};
 pub use weights::WeightInfo;
+
+#[derive(
+	Clone,
+	PartialEq,
+	Eq,
+	parity_scale_codec::Encode,
+	parity_scale_codec::Decode,
+	scale_info::TypeInfo,
+	Debug
+)]
+pub struct RuntimeVkVersionHash {
+	pub version: u32,
+	pub vk_hash: [u8; 32],
+}
+
+#[derive(
+	Clone,
+	PartialEq,
+	Eq,
+	parity_scale_codec::Encode,
+	parity_scale_codec::Decode,
+	scale_info::TypeInfo,
+	Debug
+)]
+pub struct RuntimeCircuitVersionInfo {
+	pub circuit_id: u32,
+	pub active_version: u32,
+	pub supported_versions: alloc::vec::Vec<u32>,
+	pub vk_hashes: alloc::vec::Vec<RuntimeVkVersionHash>,
+}
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -83,13 +103,6 @@ pub mod pallet {
 	/// Configuration trait for the pallet
 	#[pallet::config]
 	pub trait Config: frame_system::Config<RuntimeEvent: From<Event<Self>>> {
-		/// Origin that can register verification keys (admin/governance)
-		type AdminOrigin: EnsureOrigin<Self::RuntimeOrigin>;
-
-		/// Maximum size of a verification key in bytes
-		#[pallet::constant]
-		type MaxVerificationKeySize: Get<u32>;
-
 		/// Maximum size of a proof in bytes
 		#[pallet::constant]
 		type MaxProofSize: Get<u32>;
@@ -125,11 +138,6 @@ pub mod pallet {
 	pub type ActiveCircuitVersion<T: Config> =
 		StorageMap<_, Blake2_128Concat, CircuitId, u32, OptionQuery>;
 
-	/// Circuit metadata
-	#[pallet::storage]
-	pub type CircuitInfo<T: Config> =
-		StorageMap<_, Blake2_128Concat, CircuitId, CircuitMetadata, OptionQuery>;
-
 	/// Verification statistics per circuit and version
 	#[pallet::storage]
 	pub type VerificationStats<T: Config> = StorageDoubleMap<
@@ -159,8 +167,18 @@ pub mod pallet {
 	impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
 		fn build(&self) {
 			for (circuit_id, vk_bytes) in &self.verification_keys {
+				let domain_vk = crate::domain::entities::VerificationKey::new(
+					vk_bytes.clone(),
+					crate::domain::value_objects::ProofSystem::Groth16,
+				)
+				.expect("Invalid zk_verifier genesis VK");
+
 				let vk_info = VerificationKeyInfo {
-					key_data: vk_bytes.clone().try_into().unwrap_or_default(),
+					key_data: domain_vk
+						.data()
+						.to_vec()
+						.try_into()
+						.expect("Genesis VK exceeds maximum size"),
 					system: ProofSystem::Groth16,
 					registered_at: BlockNumberFor::<T>::default(),
 				};
@@ -178,18 +196,12 @@ pub mod pallet {
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
-		/// Verification key registered
-		VerificationKeyRegistered {
-			circuit_id: CircuitId,
-			version: u32,
-			system: ProofSystem,
-		},
-		/// Verification key updated
-		VerificationKeyUpdated { circuit_id: CircuitId, version: u32 },
-		/// Verification key removed
+		/// Verification key registered on-chain
+		VerificationKeyRegistered { circuit_id: CircuitId, version: u32 },
+		/// Active version changed for a circuit
+		ActiveVersionSet { circuit_id: CircuitId, version: u32 },
+		/// Verification key removed from on-chain registry
 		VerificationKeyRemoved { circuit_id: CircuitId, version: u32 },
-		/// Active version for a circuit changed
-		ActiveVersionChanged { circuit_id: CircuitId, version: u32 },
 		/// Proof verified successfully
 		ProofVerified { circuit_id: CircuitId, version: u32 },
 		/// Proof verification failed
@@ -225,6 +237,8 @@ pub mod pallet {
 		// Application errors
 		CircuitNotFound,
 		CircuitAlreadyExists,
+		ActiveVersionNotSet,
+		CannotRemoveActiveVersion,
 
 		// Infrastructure errors
 		RepositoryError,
@@ -245,39 +259,111 @@ pub mod pallet {
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		/// Register a verification key for a circuit
+		/// Register a verification key version for a circuit.
+		///
+		/// Origin must be Root (sudo/governance).
 		#[pallet::call_index(0)]
 		#[pallet::weight(T::WeightInfo::register_verification_key())]
 		pub fn register_verification_key(
 			origin: OriginFor<T>,
 			circuit_id: CircuitId,
 			version: u32,
-			vk_bytes: Vec<u8>,
-			system: ProofSystem,
+			verification_key: BoundedVec<u8, ConstU32<8192>>,
 		) -> DispatchResult {
-			Self::execute_register_verification_key(origin, circuit_id.0, version, vk_bytes, system)
+			ensure_root(origin)?;
+
+			let domain_vk = crate::domain::entities::VerificationKey::new(
+				verification_key.to_vec(),
+				crate::domain::value_objects::ProofSystem::Groth16,
+			)
+			.map_err(|err| {
+				Self::map_application_error(crate::application::errors::ApplicationError::Domain(
+					err,
+				))
+			})?;
+
+			let vk_info = VerificationKeyInfo {
+				key_data: domain_vk
+					.data()
+					.to_vec()
+					.try_into()
+					.map_err(|_| Error::<T>::VerificationKeyTooLarge)?,
+				system: ProofSystem::Groth16,
+				registered_at: frame_system::Pallet::<T>::block_number(),
+			};
+
+			VerificationKeys::<T>::insert(circuit_id, version, vk_info);
+
+			if ActiveCircuitVersion::<T>::get(circuit_id).is_none() {
+				ActiveCircuitVersion::<T>::insert(circuit_id, version);
+				Self::deposit_event(Event::ActiveVersionSet {
+					circuit_id,
+					version,
+				});
+			}
+
+			Self::deposit_event(Event::VerificationKeyRegistered {
+				circuit_id,
+				version,
+			});
+			Ok(())
 		}
 
-		/// Remove a verification key version
+		/// Set active verification key version for a circuit.
+		///
+		/// Origin must be Root (sudo/governance).
 		#[pallet::call_index(1)]
+		#[pallet::weight(T::WeightInfo::set_active_version())]
+		pub fn set_active_version(
+			origin: OriginFor<T>,
+			circuit_id: CircuitId,
+			version: u32,
+		) -> DispatchResult {
+			ensure_root(origin)?;
+
+			ensure!(
+				VerificationKeys::<T>::contains_key(circuit_id, version),
+				Error::<T>::VerificationKeyNotFound
+			);
+
+			ActiveCircuitVersion::<T>::insert(circuit_id, version);
+			Self::deposit_event(Event::ActiveVersionSet {
+				circuit_id,
+				version,
+			});
+			Ok(())
+		}
+
+		/// Remove verification key version from a circuit.
+		///
+		/// Origin must be Root (sudo/governance).
+		#[pallet::call_index(2)]
 		#[pallet::weight(T::WeightInfo::remove_verification_key())]
 		pub fn remove_verification_key(
 			origin: OriginFor<T>,
 			circuit_id: CircuitId,
 			version: u32,
 		) -> DispatchResult {
-			Self::execute_remove_verification_key(origin, circuit_id.0, version)
-		}
+			ensure_root(origin)?;
 
-		/// Set the active version for a circuit
-		#[pallet::call_index(2)]
-		#[pallet::weight(T::WeightInfo::register_verification_key())] // Reuse weight for now
-		pub fn set_active_version(
-			origin: OriginFor<T>,
-			circuit_id: CircuitId,
-			version: u32,
-		) -> DispatchResult {
-			Self::execute_set_active_version(origin, circuit_id.0, version)
+			ensure!(
+				VerificationKeys::<T>::contains_key(circuit_id, version),
+				Error::<T>::VerificationKeyNotFound
+			);
+
+			let active_version = ActiveCircuitVersion::<T>::get(circuit_id)
+				.ok_or(Error::<T>::ActiveVersionNotSet)?;
+			ensure!(
+				active_version != version,
+				Error::<T>::CannotRemoveActiveVersion
+			);
+
+			VerificationKeys::<T>::remove(circuit_id, version);
+			Self::deposit_event(Event::VerificationKeyRemoved {
+				circuit_id,
+				version,
+			});
+			Ok(())
 		}
 
 		/// Verify a zero-knowledge proof
@@ -472,7 +558,7 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 			public_inputs,
 		};
 
-		// Ejecutar use case
+		// Execute use case
 		let vk_repository = FrameVkRepository::<T>::new();
 		let statistics = FrameStatisticsRepository::<T>::new();
 		let validator = Box::new(Groth16Verifier);
@@ -577,7 +663,7 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 			all_public_inputs.push(PublicInputs::new(inputs_raw));
 		}
 
-		// 7. Batch verify using fp-zk-verifier
+		// 7. Batch verify using orbinum-zk-verifier primitives
 		let valid = Groth16Verifier::batch_verify(&vk, &all_public_inputs, &groth16_proofs)
 			.map_err(|_| Error::<T>::BatchVerificationFailed)?;
 
@@ -619,6 +705,52 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 		use_case
 			.execute(command)
 			.map_err(Self::map_application_error_to_dispatch)
+	}
+}
+
+impl<T: Config> Pallet<T> {
+	pub fn runtime_api_get_circuit_version_info(
+		circuit_id: u32,
+	) -> Option<RuntimeCircuitVersionInfo> {
+		use crate::infrastructure::repositories::{
+			runtime_active_version, runtime_supported_versions, runtime_vk_hash,
+		};
+
+		let supported_versions = runtime_supported_versions::<T>(circuit_id);
+		if supported_versions.is_empty() {
+			return None;
+		}
+
+		let active_version = runtime_active_version::<T>(circuit_id)?;
+		let vk_hashes = supported_versions
+			.iter()
+			.filter_map(|version| {
+				runtime_vk_hash::<T>(circuit_id, *version).map(|vk_hash| RuntimeVkVersionHash {
+					version: *version,
+					vk_hash,
+				})
+			})
+			.collect();
+
+		Some(RuntimeCircuitVersionInfo {
+			circuit_id,
+			active_version,
+			supported_versions,
+			vk_hashes,
+		})
+	}
+
+	pub fn runtime_api_get_all_circuit_versions() -> alloc::vec::Vec<RuntimeCircuitVersionInfo> {
+		use alloc::collections::BTreeSet;
+
+		let circuit_ids: BTreeSet<u32> = VerificationKeys::<T>::iter_keys()
+			.map(|(circuit_id, _version)| circuit_id.0)
+			.collect();
+
+		circuit_ids
+			.into_iter()
+			.filter_map(Self::runtime_api_get_circuit_version_info)
+			.collect()
 	}
 }
 

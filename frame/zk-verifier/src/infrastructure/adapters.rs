@@ -18,64 +18,13 @@ pub mod primitives {
 		},
 		infrastructure::Groth16Verifier as PrimitiveGroth16Verifier,
 	};
-
-	// Verification keys
-	pub use orbinum_zk_verifier::infrastructure::storage::verification_keys;
-}
-
-/// Adapter to access Disclosure VK
-pub struct DisclosureVkAdapter;
-
-impl DisclosureVkAdapter {
-	/// Retrieves the hardcoded disclosure verification key
-	pub fn get_disclosure_vk() -> primitives::PrimitiveVerifyingKey {
-		let ark_vk = primitives::verification_keys::get_disclosure_vk();
-		primitives::PrimitiveVerifyingKey::from_ark_vk(&ark_vk)
-			.expect("Failed to wrap hardcoded disclosure VK")
-	}
-}
-
-/// Adapter to access Unshield VK
-pub struct UnshieldVkAdapter;
-
-impl UnshieldVkAdapter {
-	/// Retrieves the hardcoded unshield verification key
-	pub fn get_unshield_vk() -> primitives::PrimitiveVerifyingKey {
-		let ark_vk = primitives::verification_keys::get_unshield_vk();
-		primitives::PrimitiveVerifyingKey::from_ark_vk(&ark_vk)
-			.expect("Failed to wrap hardcoded unshield VK")
-	}
-}
-
-/// Adapter to access Transfer VK
-pub struct TransferVkAdapter;
-
-impl TransferVkAdapter {
-	/// Retrieves the hardcoded transfer verification key
-	pub fn get_transfer_vk() -> primitives::PrimitiveVerifyingKey {
-		let ark_vk = primitives::verification_keys::get_transfer_vk();
-		primitives::PrimitiveVerifyingKey::from_ark_vk(&ark_vk)
-			.expect("Failed to wrap hardcoded transfer VK")
-	}
-}
-
-/// Adapter to access PrivateLink VK
-pub struct PrivateLinkVkAdapter;
-
-impl PrivateLinkVkAdapter {
-	/// Retrieves the hardcoded private_link verification key
-	pub fn get_private_link_vk() -> primitives::PrimitiveVerifyingKey {
-		let ark_vk = primitives::verification_keys::get_private_link_vk();
-		primitives::PrimitiveVerifyingKey::from_ark_vk(&ark_vk)
-			.expect("Failed to wrap hardcoded private_link VK")
-	}
 }
 
 /// Adapter to convert PublicInputs from domain to primitive
 pub struct PublicInputsAdapter;
 
 impl PublicInputsAdapter {
-	/// Converts PublicInputs from domain to primitive fp-zk-verifier
+	/// Converts domain PublicInputs into primitive `orbinum-zk-verifier` inputs.
 	pub fn to_primitive(
 		domain_inputs: &crate::domain::value_objects::PublicInputs,
 	) -> primitives::PrimitivePublicInputs {
@@ -92,22 +41,13 @@ impl PublicInputsAdapter {
 
 		primitives::PrimitivePublicInputs::new(inputs)
 	}
-
-	/// Converts PublicInputs from primitive to domain
-	pub fn from_primitive(
-		primitive: &primitives::PrimitivePublicInputs,
-	) -> Result<crate::domain::value_objects::PublicInputs, crate::domain::errors::DomainError> {
-		let inputs: Vec<Vec<u8>> = primitive.inputs.iter().map(|arr| arr.to_vec()).collect();
-
-		crate::domain::value_objects::PublicInputs::new(inputs)
-	}
 }
 
 /// Adapter to convert Proof from domain to primitive
 pub struct ProofAdapter;
 
 impl ProofAdapter {
-	/// Converts Proof from domain to primitive fp-zk-verifier
+	/// Converts domain Proof into primitive `orbinum-zk-verifier` proof.
 	pub fn to_primitive(
 		domain_proof: &crate::domain::entities::Proof,
 	) -> primitives::PrimitiveProof {
@@ -119,7 +59,7 @@ impl ProofAdapter {
 pub struct VerificationKeyAdapter;
 
 impl VerificationKeyAdapter {
-	/// Converts VerificationKey from domain to primitive fp-zk-verifier
+	/// Converts domain VerificationKey into primitive `orbinum-zk-verifier` key.
 	pub fn to_primitive(
 		domain_vk: &crate::domain::entities::VerificationKey,
 	) -> primitives::PrimitiveVerifyingKey {

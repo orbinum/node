@@ -90,29 +90,6 @@ impl<BlockNumber: Default> Default for VerificationKeyInfo<BlockNumber> {
 	}
 }
 
-/// Metadata about a circuit
-#[derive(
-	Clone,
-	PartialEq,
-	Eq,
-	Encode,
-	Decode,
-	MaxEncodedLen,
-	TypeInfo,
-	Debug,
-	Default
-)]
-pub struct CircuitMetadata {
-	/// Number of public inputs expected
-	pub num_public_inputs: u32,
-	/// Number of constraints in the circuit
-	pub num_constraints: u64,
-	/// Circuit version
-	pub version: u32,
-	/// Whether the circuit is active
-	pub is_active: bool,
-}
-
 /// Statistics for proof verification
 #[derive(
 	Clone,

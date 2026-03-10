@@ -7,8 +7,9 @@
 //! - Repository Traits: Interfaces for data access
 //! - Domain Errors: Business rule violations
 //!
-//! The domain layer is completely independent of FRAME and infrastructure.
-//! It contains pure Rust code with no_std compatibility.
+//! Most of this layer is infrastructure-agnostic and no_std compatible.
+//! The runtime-facing verification port intentionally uses dispatch errors
+//! because it is consumed directly by other pallets.
 
 pub mod entities;
 pub mod errors;
@@ -16,7 +17,7 @@ pub mod repositories;
 pub mod services;
 pub mod value_objects;
 
-// Re-export commonly used domain types (para uso interno del pallet)
+// Re-export commonly used domain types for internal pallet usage.
 pub use entities::{Circuit, Proof, VerificationKey};
 pub use errors::DomainError;
 pub use repositories::{Statistics, StatisticsRepository, VerificationKeyRepository};
