@@ -53,7 +53,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang libclang-dev
+          sudo apt-get install -y build-essential clang libclang-dev protobuf-compiler
 
       - name: Cache cargo registry & git sources
         uses: actions/cache@v5
@@ -71,11 +71,6 @@ jobs:
 
       - name: Install Rust toolchain
         run: make setup
-
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check workspace
         run: cargo check --release --workspace
@@ -103,7 +98,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang libclang-dev
+          sudo apt-get install -y build-essential clang libclang-dev protobuf-compiler
 
       - name: Cache cargo registry & git sources
         uses: actions/cache@v5
@@ -121,11 +116,6 @@ jobs:
 
       - name: Install Rust toolchain
         run: make setup
-
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build workspace
         run: |
@@ -153,7 +143,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang libclang-dev
+          sudo apt-get install -y build-essential clang libclang-dev protobuf-compiler
 
       - name: Cache cargo registry & git sources
         uses: actions/cache@v5
@@ -182,11 +172,6 @@ jobs:
 
       - name: Install Rust toolchain
         run: make setup
-
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run unit tests
         run: make test-release
@@ -206,7 +191,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang libclang-dev
+          sudo apt-get install -y build-essential clang libclang-dev protobuf-compiler
 
       - name: Cache cargo registry & git sources
         uses: actions/cache@v5
@@ -235,11 +220,6 @@ jobs:
 
       - name: Install Rust toolchain
         run: make setup
-
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run clippy
         run: make clippy-release
