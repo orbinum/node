@@ -1,6 +1,6 @@
 //! PoolStatistics entity - Shielded pool statistics
 
-use crate::orbinum::domain::{ports::PoolBalance, Commitment, TreeDepth, TreeSize};
+use crate::orbinum::domain::{ports::PoolBalance, AssetId, Commitment, TreeDepth, TreeSize};
 
 /// Aggregated shielded pool statistics.
 ///
@@ -20,6 +20,8 @@ pub struct PoolStatistics {
 	commitment_count: TreeSize,
 	/// Total pool balance.
 	total_balance: PoolBalance,
+	/// Non-zero balances by asset.
+	asset_balances: Vec<(AssetId, PoolBalance)>,
 	/// Tree depth.
 	tree_depth: TreeDepth,
 }
@@ -36,12 +38,14 @@ impl PoolStatistics {
 		merkle_root: Commitment,
 		commitment_count: TreeSize,
 		total_balance: PoolBalance,
+		asset_balances: Vec<(AssetId, PoolBalance)>,
 		tree_depth: TreeDepth,
 	) -> Self {
 		Self {
 			merkle_root,
 			commitment_count,
 			total_balance,
+			asset_balances,
 			tree_depth,
 		}
 	}
@@ -59,6 +63,11 @@ impl PoolStatistics {
 	/// Returns the total balance.
 	pub fn total_balance(&self) -> PoolBalance {
 		self.total_balance
+	}
+
+	/// Returns the balances by asset.
+	pub fn asset_balances(&self) -> &[(AssetId, PoolBalance)] {
+		&self.asset_balances
 	}
 
 	/// Returns the tree depth.
@@ -84,11 +93,21 @@ mod tests {
 	#[test]
 	fn should_create_and_read_pool_statistics() {
 		let root = Commitment::new([4u8; 32]);
-		let stats = PoolStatistics::new(root, TreeSize::new(10), 2_500, TreeDepth::new(4));
+		let stats = PoolStatistics::new(
+			root,
+			TreeSize::new(10),
+			2_500,
+			vec![(AssetId::new(0), 2_000), (AssetId::new(1), 500)],
+			TreeDepth::new(4),
+		);
 
 		assert_eq!(stats.merkle_root(), root);
 		assert_eq!(stats.commitment_count().value(), 10);
 		assert_eq!(stats.total_balance(), 2_500);
+		assert_eq!(
+			stats.asset_balances(),
+			&[(AssetId::new(0), 2_000), (AssetId::new(1), 500)]
+		);
 		assert_eq!(stats.tree_depth().value(), 4);
 	}
 
@@ -98,12 +117,14 @@ mod tests {
 			Commitment::new([1u8; 32]),
 			TreeSize::new(1),
 			100,
+			vec![(AssetId::new(0), 100)],
 			TreeDepth::new(1),
 		);
 		let empty = PoolStatistics::new(
 			Commitment::new([2u8; 32]),
 			TreeSize::new(0),
 			0,
+			Vec::new(),
 			TreeDepth::new(0),
 		);
 

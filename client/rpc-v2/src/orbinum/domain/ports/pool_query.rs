@@ -31,6 +31,12 @@ pub trait PoolQuery: Send + Sync {
 		block_hash: BlockHash,
 		asset_id: AssetId,
 	) -> DomainResult<PoolBalance>;
+
+	/// Returns non-zero balances for all known assets in the pool.
+	fn get_all_asset_balances(
+		&self,
+		block_hash: BlockHash,
+	) -> DomainResult<Vec<(AssetId, PoolBalance)>>;
 }
 
 #[cfg(test)]
@@ -51,6 +57,13 @@ mod tests {
 			asset_id: AssetId,
 		) -> DomainResult<PoolBalance> {
 			Ok((asset_id.inner() as u128) * 100)
+		}
+
+		fn get_all_asset_balances(
+			&self,
+			_block_hash: BlockHash,
+		) -> DomainResult<Vec<(AssetId, PoolBalance)>> {
+			Ok(vec![(AssetId::new(0), 1_000), (AssetId::new(7), 700)])
 		}
 	}
 
@@ -76,5 +89,20 @@ mod tests {
 			.expect("asset balance query should succeed");
 
 		assert_eq!(balance, 700);
+	}
+
+	#[test]
+	fn should_query_all_asset_balances() {
+		let query = MockPoolQuery;
+		let block_hash = BlockHash::new([6u8; 32]);
+
+		let balances = query
+			.get_all_asset_balances(block_hash)
+			.expect("all asset balances query should succeed");
+
+		assert_eq!(
+			balances,
+			vec![(AssetId::new(0), 1_000), (AssetId::new(7), 700)]
+		);
 	}
 }

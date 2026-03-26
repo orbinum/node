@@ -11,4 +11,4 @@ mod pool_stats_response;
 
 pub use merkle_proof_response::MerkleProofResponse;
 pub use nullifier_status_response::NullifierStatusResponse;
-pub use pool_stats_response::PoolStatsResponse;
+pub use pool_stats_response::{AssetBalanceResponse, PoolStatsResponse};

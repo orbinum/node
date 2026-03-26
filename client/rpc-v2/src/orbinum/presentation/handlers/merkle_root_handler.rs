@@ -100,6 +100,13 @@ mod tests {
 		) -> DomainResult<u128> {
 			Ok(0)
 		}
+
+		fn get_all_asset_balances(
+			&self,
+			_block_hash: BlockHash,
+		) -> DomainResult<Vec<(AssetId, u128)>> {
+			Ok(Vec::new())
+		}
 	}
 
 	#[test]

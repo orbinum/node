@@ -7,6 +7,7 @@ use crate::orbinum::{
 		TreeDepth, TreeSize,
 	},
 };
+use pallet_shielded_pool::DEFAULT_TREE_DEPTH;
 
 /// Service for querying shielded pool statistics.
 ///
@@ -49,15 +50,17 @@ where
 
 		// 5. Query total balance
 		let total_balance = self.query.get_total_balance(block_hash)?;
+		let asset_balances = self.query.get_all_asset_balances(block_hash)?;
 
-		// 6. Compute tree depth
-		let tree_depth = TreeDepth::from_tree_size(tree_size.value());
+		// 6. Use the pallet's fixed Merkle depth for circuit compatibility.
+		let tree_depth = TreeDepth::new(DEFAULT_TREE_DEPTH as u32);
 
 		// 7. Build PoolStatistics
 		Ok(PoolStatistics::new(
 			merkle_root,
 			tree_size,
 			total_balance,
+			asset_balances,
 			tree_depth,
 		))
 	}
@@ -103,6 +106,13 @@ where
 		let block_hash = self.query.best_hash()?;
 		let balance = self.query.get_asset_balance(block_hash, asset_id)?;
 		Ok(balance)
+	}
+
+	/// Returns non-zero balances for all known assets.
+	pub fn get_all_asset_balances(&self) -> ApplicationResult<Vec<(AssetId, u128)>> {
+		let block_hash = self.query.best_hash()?;
+		let balances = self.query.get_all_asset_balances(block_hash)?;
+		Ok(balances)
 	}
 }
 
@@ -158,6 +168,13 @@ mod tests {
 		) -> DomainResult<u128> {
 			Ok((asset_id.inner() as u128) * 10)
 		}
+
+		fn get_all_asset_balances(
+			&self,
+			_block_hash: BlockHash,
+		) -> DomainResult<Vec<(AssetId, u128)>> {
+			Ok(vec![(AssetId::new(0), self.total_balance)])
+		}
 	}
 
 	#[test]
@@ -189,10 +206,8 @@ mod tests {
 		assert_eq!(stats.merkle_root(), root);
 		assert_eq!(stats.commitment_count().value(), 5);
 		assert_eq!(stats.total_balance(), 1_500);
-		assert_eq!(
-			stats.tree_depth().value(),
-			TreeDepth::from_tree_size(5).value()
-		);
+		assert_eq!(stats.asset_balances(), &[(AssetId::new(0), 1_500)]);
+		assert_eq!(stats.tree_depth().value(), DEFAULT_TREE_DEPTH as u32);
 	}
 
 	#[test]
@@ -226,6 +241,12 @@ mod tests {
 				.get_asset_balance(AssetId::new(7))
 				.expect("asset balance query must succeed"),
 			70
+		);
+		assert_eq!(
+			service
+				.get_all_asset_balances()
+				.expect("all asset balances query must succeed"),
+			vec![(AssetId::new(0), 999)]
 		);
 	}
 }

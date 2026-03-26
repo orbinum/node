@@ -68,7 +68,8 @@ pub trait PrivacyApi {
 	///   "result": {
 	///     "path": ["0x1234...", "0x5678..."],
 	///     "leaf_index": 5,
-	///     "tree_depth": 10
+	///     "tree_depth": 20
+	///       "asset_balances": [{ "asset_id": 0, "balance": "1000000000000000000" }],
 	///   },
 	///   "id": 1
 	/// }
@@ -131,7 +132,7 @@ pub trait PrivacyApi {
 	///     "merkle_root": "0x1234...abcd",
 	///     "commitment_count": 100,
 	///     "total_balance": "1000000000000000000",
-	///     "tree_depth": 10
+	///     "tree_depth": 20
 	///   },
 	///   "id": 1
 	/// }
