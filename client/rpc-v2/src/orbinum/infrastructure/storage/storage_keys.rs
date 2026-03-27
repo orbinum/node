@@ -64,17 +64,17 @@ pub fn merkle_leaf(index: u32) -> Vec<u8> {
 	key
 }
 
-/// Builds the storage key for `PoolBalance` (`StorageValue<Balance>`).
+/// Builds the storage key for `NextAssetId` (`StorageValue<u32>`).
 ///
 /// # Storage Item
-/// `pallet_shielded_pool::PoolBalance::<T>`
+/// `pallet_shielded_pool::NextAssetId::<T>`
 ///
 /// # Returns
-/// `twox_128("ShieldedPool") + twox_128("PoolBalance")`
-pub fn pool_balance() -> Vec<u8> {
+/// `twox_128("ShieldedPool") + twox_128("NextAssetId")`
+pub fn next_asset_id() -> Vec<u8> {
 	twox_128(PALLET_SHIELDED_POOL)
 		.iter()
-		.chain(twox_128(b"PoolBalance").iter())
+		.chain(twox_128(b"NextAssetId").iter())
 		.copied()
 		.collect()
 }
@@ -173,7 +173,7 @@ mod tests {
 
 	#[test]
 	fn should_build_pool_balance_keys_with_expected_lengths() {
-		let total = pool_balance();
+		let total = next_asset_id();
 		let per_asset = pool_balance_per_asset(7);
 
 		assert_eq!(total.len(), 32);

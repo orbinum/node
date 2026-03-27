@@ -40,6 +40,7 @@ Method names use the `privacy_` prefix.
   - `merkle_root`: `string`
   - `commitment_count`: `u32`
   - `total_balance`: `u128` (minimum units)
+  - `asset_balances`: `Array<{ asset_id: u32, balance: u128 }>` (solo balances no-cero)
   - `tree_depth`: `u32`
 
 ## Usage Notes

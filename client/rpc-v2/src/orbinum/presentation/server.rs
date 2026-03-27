@@ -188,6 +188,13 @@ mod tests {
 		) -> DomainResult<u128> {
 			Ok(0)
 		}
+
+		fn get_all_asset_balances(
+			&self,
+			_block_hash: BlockHash,
+		) -> DomainResult<Vec<(AssetId, u128)>> {
+			Ok(vec![(AssetId::new(0), self.total_balance)])
+		}
 	}
 
 	#[test]
@@ -218,6 +225,9 @@ mod tests {
 		assert_eq!(proof.tree_depth, 20);
 		assert!(nullifier.is_spent);
 		assert_eq!(stats.total_balance, 777);
+		assert_eq!(stats.asset_balances.len(), 1);
+		assert_eq!(stats.asset_balances[0].asset_id, 0);
+		assert_eq!(stats.asset_balances[0].balance, 777);
 	}
 
 	#[test]

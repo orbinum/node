@@ -12,7 +12,9 @@ pub mod services;
 pub use services::{MerkleProofService, NullifierService, PoolQueryService};
 
 // DTO re-exports
-pub use dto::{MerkleProofResponse, NullifierStatusResponse, PoolStatsResponse};
+pub use dto::{
+	AssetBalanceResponse, MerkleProofResponse, NullifierStatusResponse, PoolStatsResponse,
+};
 
 /// Application layer error type.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -6,7 +6,7 @@ use crate::orbinum::{
 };
 
 // Import zero-hash function from the pallet
-use pallet_shielded_pool::infrastructure::merkle_tree::get_zero_hash_cached;
+use pallet_shielded_pool::{infrastructure::merkle_tree::get_zero_hash_cached, DEFAULT_TREE_DEPTH};
 
 // Logging
 extern crate log;
@@ -162,7 +162,7 @@ where
 		let block_hash = self.query.best_hash()?;
 		let root = self.query.get_merkle_root(block_hash)?;
 		let size = self.query.get_tree_size(block_hash)?;
-		let depth = TreeDepth::from_tree_size(size.value());
+		let depth = TreeDepth::new(DEFAULT_TREE_DEPTH as u32);
 
 		Ok((root, size, depth))
 	}
@@ -282,6 +282,6 @@ mod tests {
 
 		assert_eq!(root, Commitment::new([3u8; 32]));
 		assert_eq!(size.value(), 5);
-		assert_eq!(depth.value(), TreeDepth::from_tree_size(5).value());
+		assert_eq!(depth.value(), DEFAULT_TREE_DEPTH as u32);
 	}
 }

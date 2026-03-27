@@ -5,7 +5,7 @@ use std::sync::Arc;
 use jsonrpsee::core::RpcResult;
 
 use crate::orbinum::{
-	application::{PoolQueryService, PoolStatsResponse},
+	application::{AssetBalanceResponse, PoolQueryService, PoolStatsResponse},
 	infrastructure::mappers::CommitmentMapper,
 	presentation::validation::RpcError,
 };
@@ -47,6 +47,11 @@ where
 			merkle_root_hex,
 			stats.commitment_count().value(),
 			stats.total_balance(),
+			stats
+				.asset_balances()
+				.iter()
+				.map(|(asset_id, balance)| AssetBalanceResponse::new(asset_id.inner(), *balance))
+				.collect(),
 			stats.tree_depth().value(),
 		);
 
@@ -109,6 +114,13 @@ mod tests {
 		) -> DomainResult<u128> {
 			Ok(0)
 		}
+
+		fn get_all_asset_balances(
+			&self,
+			_block_hash: BlockHash,
+		) -> DomainResult<Vec<(AssetId, u128)>> {
+			Ok(vec![(AssetId::new(0), self.total_balance)])
+		}
 	}
 
 	#[test]
@@ -127,8 +139,12 @@ mod tests {
 		assert_eq!(response.commitment_count, 8);
 		assert_eq!(response.total_balance, 1_234);
 		assert_eq!(
+			response.asset_balances,
+			vec![AssetBalanceResponse::new(0, 1_234)]
+		);
+		assert_eq!(
 			response.tree_depth,
-			crate::orbinum::domain::TreeDepth::from_tree_size(8).value()
+			pallet_shielded_pool::DEFAULT_TREE_DEPTH as u32
 		);
 	}
 

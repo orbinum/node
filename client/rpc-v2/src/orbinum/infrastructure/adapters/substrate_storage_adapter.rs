@@ -179,17 +179,16 @@ where
 	BE: sc_client_api::Backend<B> + Send + Sync,
 {
 	fn get_total_balance(&self, block_hash: BlockHash) -> DomainResult<u128> {
-		let storage_key = storage_keys::pool_balance();
-		let data = self
-			.storage_at(block_hash, &storage_key)?
-			.ok_or(DomainError::PoolNotInitialized)?;
+		let mut total_balance = 0u128;
+		for (_, asset_balance) in self.get_all_asset_balances(block_hash)? {
+			total_balance = total_balance.checked_add(asset_balance).ok_or_else(|| {
+				DomainError::CalculationError(
+					"Pool balance overflow while aggregating per-asset balances".to_string(),
+				)
+			})?;
+		}
 
-		// Decode balance (`u128`)
-		let balance = u128::decode(&mut &data[..]).map_err(|e| {
-			DomainError::StorageDecodeError(format!("Failed to decode pool balance: {e}"))
-		})?;
-
-		Ok(balance)
+		Ok(total_balance)
 	}
 
 	fn get_asset_balance(&self, block_hash: BlockHash, asset_id: AssetId) -> DomainResult<u128> {
@@ -206,6 +205,27 @@ where
 		};
 
 		Ok(balance)
+	}
+
+	fn get_all_asset_balances(&self, block_hash: BlockHash) -> DomainResult<Vec<(AssetId, u128)>> {
+		let next_asset_id_key = storage_keys::next_asset_id();
+		let next_asset_id_data = self
+			.storage_at(block_hash, &next_asset_id_key)?
+			.ok_or(DomainError::PoolNotInitialized)?;
+
+		let next_asset_id = u32::decode(&mut &next_asset_id_data[..]).map_err(|e| {
+			DomainError::StorageDecodeError(format!("Failed to decode next asset id: {e}"))
+		})?;
+
+		let mut balances = Vec::new();
+		for asset_id in 0..next_asset_id {
+			let balance = self.get_asset_balance(block_hash, AssetId::new(asset_id))?;
+			if balance > 0 {
+				balances.push((AssetId::new(asset_id), balance));
+			}
+		}
+
+		Ok(balances)
 	}
 }
 
