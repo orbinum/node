@@ -75,6 +75,11 @@ benchmark-pallet:
 	cargo build --release --features=runtime-benchmarks
 	./target/release/orbinum-node benchmark pallet --chain=dev --pallet=$(PALLET) --extrinsic='*' --steps=50 --repeat=20 --output=./frame/$(PALLET)/src/weights.rs --template=./scripts/frame-weight-template.hbs
 
+.PHONY: run-dev
+# Run node in development mode with temporary storage
+run-dev:
+	./target/release/orbinum-node --dev --tmp
+
 .PHONY: audit
 # Run security audit (ignoring known Polkadot SDK transitive dependencies via deny.toml)
 audit:
