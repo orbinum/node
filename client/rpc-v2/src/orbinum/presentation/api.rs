@@ -77,6 +77,26 @@ pub trait PrivacyApi {
 	#[method(name = "privacy_getMerkleProof")]
 	fn get_merkle_proof(&self, leaf_index: u32) -> RpcResult<MerkleProofResponse>;
 
+	/// Returns a Merkle proof for a leaf identified by its commitment hash.
+	///
+	/// # Parameters
+	/// - `commitment`: Commitment hash as 0x-prefixed hex string (64 hex chars)
+	///
+	/// # Returns
+	/// - `MerkleProofResponse`: Proof with path, leaf index, and tree depth
+	///
+	/// # Example
+	/// ```json
+	/// {
+	///   "jsonrpc": "2.0",
+	///   "method": "privacy_getMerkleProofByCommitment",
+	///   "params": ["0xabcd...1234"],
+	///   "id": 1
+	/// }
+	/// ```
+	#[method(name = "privacy_getMerkleProofByCommitment")]
+	fn get_merkle_proof_by_commitment(&self, commitment: String) -> RpcResult<MerkleProofResponse>;
+
 	/// Checks whether a nullifier has been spent.
 	///
 	/// # Parameters

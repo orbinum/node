@@ -105,6 +105,10 @@ where
 		self.merkle_proof_handler.handle(leaf_index)
 	}
 
+	fn get_merkle_proof_by_commitment(&self, commitment: String) -> RpcResult<MerkleProofResponse> {
+		self.merkle_proof_handler.handle_by_commitment(commitment)
+	}
+
 	fn get_nullifier_status(&self, nullifier: String) -> RpcResult<NullifierStatusResponse> {
 		self.nullifier_handler.handle(nullifier)
 	}

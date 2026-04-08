@@ -166,6 +166,110 @@ where
 
 		Ok((root, size, depth))
 	}
+
+	/// Generates a Merkle proof by leaf index and returns the Merkle root, both
+	/// read under the **same `best_block`** (atomic — no risk of root/path mismatch).
+	///
+	/// # Errors
+	/// - `InvalidLeafIndex`: If `leaf_index >= tree_size`
+	/// - `TreeNotInitialized`: If the tree is empty
+	pub fn generate_proof_with_root(
+		&self,
+		leaf_index: u32,
+	) -> ApplicationResult<(MerkleProofPath, Commitment)> {
+		let block_hash = self.query.best_hash()?;
+		let tree_size = self.query.get_tree_size(block_hash)?;
+
+		if tree_size.value() == 0 {
+			return Err(ApplicationError::TreeNotInitialized);
+		}
+		if leaf_index >= tree_size.value() {
+			return Err(ApplicationError::InvalidLeafIndex {
+				index: leaf_index,
+				tree_size: tree_size.value(),
+			});
+		}
+
+		let root = self.query.get_merkle_root(block_hash)?;
+		let path = self.collect_sibling_path(block_hash, leaf_index)?;
+		let tree_depth = TreeDepth::new(20);
+
+		Ok((MerkleProofPath::new(path, leaf_index, tree_depth), root))
+	}
+
+	/// Generates a Merkle proof by commitment and returns the Merkle root, both
+	/// read under the **same `best_block`** (atomic — no risk of root/path mismatch).
+	///
+	/// # Errors
+	/// - `CalculationError`: If the commitment is not found in the tree
+	/// - `TreeNotInitialized`: If the tree is empty
+	pub fn generate_proof_by_commitment_with_root(
+		&self,
+		target: Commitment,
+	) -> ApplicationResult<(MerkleProofPath, Commitment)> {
+		let block_hash = self.query.best_hash()?;
+		let tree_size = self.query.get_tree_size(block_hash)?;
+
+		if tree_size.value() == 0 {
+			return Err(ApplicationError::TreeNotInitialized);
+		}
+
+		let mut found_index: Option<u32> = None;
+		for i in 0..tree_size.value() {
+			if self.query.get_leaf(block_hash, i)? == target {
+				found_index = Some(i);
+				break;
+			}
+		}
+
+		let leaf_index = found_index.ok_or_else(|| {
+			ApplicationError::CalculationError("Commitment not found in Merkle tree".to_string())
+		})?;
+
+		let root = self.query.get_merkle_root(block_hash)?;
+		let path = self.collect_sibling_path(block_hash, leaf_index)?;
+		let tree_depth = TreeDepth::new(20);
+
+		Ok((MerkleProofPath::new(path, leaf_index, tree_depth), root))
+	}
+
+	/// Generates a Merkle proof by scanning for a matching commitment in the tree leaves.
+	///
+	/// # Parameters
+	/// - `target`: Commitment to search for
+	///
+	/// # Returns
+	/// - `MerkleProofPath`: Sibling path with leaf index
+	///
+	/// # Errors
+	/// - `InvalidLeafIndex`: If the commitment is not found in the tree
+	/// - `TreeNotInitialized`: If the tree is empty
+	/// - `Domain`: Storage query errors
+	pub fn generate_proof_by_commitment(
+		&self,
+		target: Commitment,
+	) -> ApplicationResult<MerkleProofPath> {
+		let block_hash = self.query.best_hash()?;
+		let tree_size = self.query.get_tree_size(block_hash)?;
+
+		if tree_size.value() == 0 {
+			return Err(ApplicationError::TreeNotInitialized);
+		}
+
+		let mut found_index: Option<u32> = None;
+		for i in 0..tree_size.value() {
+			if self.query.get_leaf(block_hash, i)? == target {
+				found_index = Some(i);
+				break;
+			}
+		}
+
+		let leaf_index = found_index.ok_or_else(|| {
+			ApplicationError::CalculationError("Commitment not found in Merkle tree".to_string())
+		})?;
+
+		self.generate_proof(leaf_index)
+	}
 }
 
 #[cfg(test)]

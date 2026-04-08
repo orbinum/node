@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 /// It maps from `domain::MerkleProofPath`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MerkleProofResponse {
+	/// Current Merkle root (0x-prefixed hex), read from the same block as the proof.
+	pub root: String,
 	/// Sibling hash path (hex strings).
 	pub path: Vec<String>,
 	/// Leaf index.
@@ -18,8 +20,9 @@ pub struct MerkleProofResponse {
 
 impl MerkleProofResponse {
 	/// Creates a new `MerkleProofResponse`.
-	pub fn new(path: Vec<String>, leaf_index: u32, tree_depth: u32) -> Self {
+	pub fn new(root: String, path: Vec<String>, leaf_index: u32, tree_depth: u32) -> Self {
 		Self {
+			root,
 			path,
 			leaf_index,
 			tree_depth,
@@ -33,9 +36,14 @@ mod tests {
 
 	#[test]
 	fn should_create_merkle_proof_response() {
-		let response =
-			MerkleProofResponse::new(vec!["0xaaaa".to_string(), "0xbbbb".to_string()], 7, 20);
+		let response = MerkleProofResponse::new(
+			"0x0000".to_string(),
+			vec!["0xaaaa".to_string(), "0xbbbb".to_string()],
+			7,
+			20,
+		);
 
+		assert_eq!(response.root, "0x0000");
 		assert_eq!(response.path, vec!["0xaaaa", "0xbbbb"]);
 		assert_eq!(response.leaf_index, 7);
 		assert_eq!(response.tree_depth, 20);
