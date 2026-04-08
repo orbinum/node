@@ -10,7 +10,7 @@ use crate::orbinum::{
 	presentation::validation::{RequestValidator, RpcError},
 };
 
-/// Handler for `privacy_getMerkleProof`.
+/// Handler for `privacy_getMerkleProof` and `privacy_getMerkleProofByCommitment`.
 pub struct MerkleProofHandler<Q> {
 	merkle_service: Arc<MerkleProofService<Q>>,
 }
@@ -24,7 +24,7 @@ where
 		Self { merkle_service }
 	}
 
-	/// Handles request to generate a Merkle proof.
+	/// Handles request to generate a Merkle proof by leaf index.
 	///
 	/// # Parameters
 	/// - `leaf_index`: Leaf index (0-indexed)
@@ -39,22 +39,62 @@ where
 		// 1. Validate input
 		RequestValidator::validate_leaf_index(leaf_index)?;
 
-		// 2. Generate proof from service
-		let proof_path = self
+		// 2. Generate proof + root atomically from the same best_block
+		let (proof_path, root) = self
 			.merkle_service
-			.generate_proof(leaf_index)
+			.generate_proof_with_root(leaf_index)
 			.map_err(RpcError::from_application_error)?;
 
-		// 3. Map domain entity to DTO
+		// 3. Map domain entities to DTO
 		let (path, leaf_idx, tree_depth) = proof_path.into_parts();
 		let path_hex: Vec<String> = path
 			.into_iter()
 			.map(CommitmentMapper::to_hex_string)
 			.collect();
+		let root_hex = CommitmentMapper::to_hex_string(root);
 
-		let response = MerkleProofResponse::new(path_hex, leaf_idx, tree_depth.value());
+		let response = MerkleProofResponse::new(root_hex, path_hex, leaf_idx, tree_depth.value());
 
 		Ok(response)
+	}
+
+	/// Handles request to generate a Merkle proof by commitment hex.
+	///
+	/// # Parameters
+	/// - `commitment_hex`: Commitment as 0x-prefixed hex string
+	///
+	/// # Returns
+	/// - `MerkleProofResponse`: DTO with path, leaf index, and tree depth
+	///
+	/// # Errors
+	/// - `InvalidCommitment`: If the hex string is malformed
+	/// - `CalculationError`: If the commitment is not found in the tree
+	/// - `MerkleTreeNotInitialized`: If tree is not initialized
+	pub fn handle_by_commitment(&self, commitment_hex: String) -> RpcResult<MerkleProofResponse> {
+		// 1. Parse commitment hex
+		let commitment = CommitmentMapper::from_hex_string(&commitment_hex)
+			.map_err(RpcError::invalid_commitment)?;
+
+		// 2. Generate proof + root atomically from the same best_block
+		let (proof_path, root) = self
+			.merkle_service
+			.generate_proof_by_commitment_with_root(commitment)
+			.map_err(RpcError::from_application_error)?;
+
+		// 3. Map domain entities to DTO
+		let (path, leaf_idx, tree_depth) = proof_path.into_parts();
+		let path_hex: Vec<String> = path
+			.into_iter()
+			.map(CommitmentMapper::to_hex_string)
+			.collect();
+		let root_hex = CommitmentMapper::to_hex_string(root);
+
+		Ok(MerkleProofResponse::new(
+			root_hex,
+			path_hex,
+			leaf_idx,
+			tree_depth.value(),
+		))
 	}
 }
 
