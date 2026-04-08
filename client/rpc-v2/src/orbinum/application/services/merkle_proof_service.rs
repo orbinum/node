@@ -319,6 +319,49 @@ mod tests {
 		}
 	}
 
+	/// Mock that returns known commitments for all leaf indices (needed for by-commitment tests).
+	#[derive(Clone, Copy)]
+	struct MockQueryWithLeaves {
+		root: Commitment,
+		leaf_0: Commitment,
+		leaf_1: Commitment,
+	}
+
+	impl BlockchainQuery for MockQueryWithLeaves {
+		fn best_hash(&self) -> DomainResult<BlockHash> {
+			Ok(BlockHash::new([9u8; 32]))
+		}
+
+		fn storage_at(
+			&self,
+			_block_hash: BlockHash,
+			_storage_key: &[u8],
+		) -> DomainResult<Option<Vec<u8>>> {
+			Ok(None)
+		}
+	}
+
+	impl MerkleTreeQuery for MockQueryWithLeaves {
+		fn get_merkle_root(&self, _block_hash: BlockHash) -> DomainResult<Commitment> {
+			Ok(self.root)
+		}
+
+		fn get_tree_size(&self, _block_hash: BlockHash) -> DomainResult<TreeSize> {
+			Ok(TreeSize::new(2))
+		}
+
+		fn get_leaf(&self, _block_hash: BlockHash, leaf_index: u32) -> DomainResult<Commitment> {
+			match leaf_index {
+				0 => Ok(self.leaf_0),
+				1 => Ok(self.leaf_1),
+				_ => Err(DomainError::LeafIndexOutOfBounds {
+					index: leaf_index,
+					tree_size: 2,
+				}),
+			}
+		}
+	}
+
 	#[test]
 	fn should_return_tree_not_initialized_when_tree_is_empty() {
 		let query = MockQuery {
@@ -387,5 +430,115 @@ mod tests {
 		assert_eq!(root, Commitment::new([3u8; 32]));
 		assert_eq!(size.value(), 5);
 		assert_eq!(depth.value(), DEFAULT_TREE_DEPTH as u32);
+	}
+
+	// --- generate_proof_with_root ---
+
+	#[test]
+	fn should_generate_proof_with_root() {
+		let expected_root = Commitment::new([5u8; 32]);
+		let sibling = Commitment::new([7u8; 32]);
+		let query = MockQuery {
+			root: expected_root,
+			tree_size: 2,
+			sibling,
+		};
+		let service = MerkleProofService::new(query);
+
+		let (proof, root) = service
+			.generate_proof_with_root(0)
+			.expect("generate_proof_with_root must succeed");
+
+		assert_eq!(root, expected_root);
+		assert_eq!(proof.leaf_index(), 0);
+		assert_eq!(proof.tree_depth().value(), 20);
+		assert_eq!(proof.path().len(), 20);
+		assert_eq!(proof.path()[0], sibling);
+	}
+
+	#[test]
+	fn should_return_tree_not_initialized_for_generate_proof_with_root() {
+		let query = MockQuery {
+			root: Commitment::new([1u8; 32]),
+			tree_size: 0,
+			sibling: Commitment::new([2u8; 32]),
+		};
+		let service = MerkleProofService::new(query);
+
+		let result = service.generate_proof_with_root(0);
+
+		assert!(matches!(result, Err(ApplicationError::TreeNotInitialized)));
+	}
+
+	#[test]
+	fn should_return_invalid_leaf_index_for_generate_proof_with_root() {
+		let query = MockQuery {
+			root: Commitment::new([1u8; 32]),
+			tree_size: 1,
+			sibling: Commitment::new([2u8; 32]),
+		};
+		let service = MerkleProofService::new(query);
+
+		let result = service.generate_proof_with_root(1);
+
+		assert!(matches!(
+			result,
+			Err(ApplicationError::InvalidLeafIndex {
+				index: 1,
+				tree_size: 1
+			})
+		));
+	}
+
+	// --- generate_proof_by_commitment_with_root ---
+
+	#[test]
+	fn should_generate_proof_by_commitment_with_root() {
+		let target = Commitment::new([0xAAu8; 32]);
+		let expected_root = Commitment::new([5u8; 32]);
+		let query = MockQueryWithLeaves {
+			root: expected_root,
+			leaf_0: Commitment::new([0x11u8; 32]),
+			leaf_1: target,
+		};
+		let service = MerkleProofService::new(query);
+
+		let (proof, root) = service
+			.generate_proof_by_commitment_with_root(target)
+			.expect("generate_proof_by_commitment_with_root must succeed");
+
+		assert_eq!(root, expected_root);
+		assert_eq!(proof.leaf_index(), 1);
+		assert_eq!(proof.tree_depth().value(), 20);
+		assert_eq!(proof.path().len(), 20);
+	}
+
+	#[test]
+	fn should_return_tree_not_initialized_for_generate_proof_by_commitment_with_root() {
+		let query = MockQuery {
+			root: Commitment::new([1u8; 32]),
+			tree_size: 0,
+			sibling: Commitment::new([2u8; 32]),
+		};
+		let service = MerkleProofService::new(query);
+
+		let result = service.generate_proof_by_commitment_with_root(Commitment::new([0xAAu8; 32]));
+
+		assert!(matches!(result, Err(ApplicationError::TreeNotInitialized)));
+	}
+
+	#[test]
+	fn should_return_calculation_error_when_commitment_not_found() {
+		let absent = Commitment::new([0xFFu8; 32]);
+		let query = MockQueryWithLeaves {
+			root: Commitment::new([1u8; 32]),
+			leaf_0: Commitment::new([0x11u8; 32]),
+			leaf_1: Commitment::new([0x22u8; 32]),
+		};
+		let service = MerkleProofService::new(query);
+
+		let result = service.generate_proof_by_commitment_with_root(absent);
+
+		assert!(matches!(result, Err(ApplicationError::CalculationError(_))));
 	}
 }

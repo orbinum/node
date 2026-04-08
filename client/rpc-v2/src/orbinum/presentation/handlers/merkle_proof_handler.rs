@@ -147,6 +147,48 @@ mod tests {
 		}
 	}
 
+	/// Mock that returns known commitments for all leaf indices (needed for by-commitment tests).
+	#[derive(Clone, Copy)]
+	struct MockQueryAll {
+		leaf_0: Commitment,
+		leaf_1: Commitment,
+	}
+
+	impl BlockchainQuery for MockQueryAll {
+		fn best_hash(&self) -> DomainResult<BlockHash> {
+			Ok(BlockHash::new([2u8; 32]))
+		}
+
+		fn storage_at(
+			&self,
+			_block_hash: BlockHash,
+			_storage_key: &[u8],
+		) -> DomainResult<Option<Vec<u8>>> {
+			Ok(None)
+		}
+	}
+
+	impl MerkleTreeQuery for MockQueryAll {
+		fn get_merkle_root(&self, _block_hash: BlockHash) -> DomainResult<Commitment> {
+			Ok(Commitment::new([3u8; 32]))
+		}
+
+		fn get_tree_size(&self, _block_hash: BlockHash) -> DomainResult<TreeSize> {
+			Ok(TreeSize::new(2))
+		}
+
+		fn get_leaf(&self, _block_hash: BlockHash, leaf_index: u32) -> DomainResult<Commitment> {
+			match leaf_index {
+				0 => Ok(self.leaf_0),
+				1 => Ok(self.leaf_1),
+				_ => Err(DomainError::LeafIndexOutOfBounds {
+					index: leaf_index,
+					tree_size: 2,
+				}),
+			}
+		}
+	}
+
 	#[test]
 	fn should_return_merkle_proof_response() {
 		let query = MockQuery {
@@ -176,5 +218,40 @@ mod tests {
 		let result = handler.handle(1);
 
 		assert!(result.is_err());
+	}
+
+	#[test]
+	fn should_include_root_in_handle_response() {
+		let query = MockQuery {
+			tree_size: 2,
+			sibling: Commitment::new([0xBBu8; 32]),
+		};
+		let service = Arc::new(MerkleProofService::new(query));
+		let handler = MerkleProofHandler::new(service);
+
+		let response = handler.handle(0).expect("handler should succeed");
+
+		let expected_root = format!("0x{}", "03".repeat(32));
+		assert_eq!(response.root, expected_root);
+	}
+
+	#[test]
+	fn should_include_root_in_handle_by_commitment_response() {
+		let target = Commitment::new([0xCCu8; 32]);
+		let query = MockQueryAll {
+			leaf_0: Commitment::new([0x11u8; 32]),
+			leaf_1: target,
+		};
+		let service = Arc::new(MerkleProofService::new(query));
+		let handler = MerkleProofHandler::new(service);
+
+		let commitment_hex = format!("0x{}", "cc".repeat(32));
+		let response = handler
+			.handle_by_commitment(commitment_hex)
+			.expect("handler should succeed");
+
+		let expected_root = format!("0x{}", "03".repeat(32));
+		assert_eq!(response.root, expected_root);
+		assert_eq!(response.leaf_index, 1);
 	}
 }
