@@ -38,6 +38,7 @@ pub trait WeightInfo {
 	fn set_active_version() -> Weight;
 	fn remove_verification_key() -> Weight;
 	fn verify_proof() -> Weight;
+	fn batch_register_verification_keys(n: u32) -> Weight;
 }
 
 /// Weight functions for `pallet_zk_verifier`.
@@ -84,5 +85,34 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(Weight::from_parts(0, 11704))
 			.saturating_add(T::DbWeight::get().reads(7))
 			.saturating_add(T::DbWeight::get().writes(3))
+	}
+
+	/// Storage: `System::Number` (r:1 w:0)
+	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `ZkVerifier::ActiveCircuitVersion` (r:10 w:10)
+	/// Proof: `ZkVerifier::ActiveCircuitVersion` (`max_values`: None, `max_size`: Some(24), added: 2499, mode: `MaxEncodedLen`)
+	/// Storage: `System::ExecutionPhase` (r:1 w:0)
+	/// Proof: `System::ExecutionPhase` (`max_values`: Some(1), `max_size`: Some(5), added: 500, mode: `MaxEncodedLen`)
+	/// Storage: `System::EventCount` (r:1 w:1)
+	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `System::Events` (r:1 w:1)
+	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
+	/// Storage: `ZkVerifier::VerificationKeys` (r:0 w:10)
+	/// Proof: `ZkVerifier::VerificationKeys` (`max_values`: None, `max_size`: Some(8239), added: 10714, mode: `MaxEncodedLen`)
+	/// The range of component `n` is `[1, 10]`.
+	fn batch_register_verification_keys(n: u32) -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `61`
+		//  Estimated: `1546 + n * (2499 ±0)`
+		// Minimum execution time: 14_000_000 picoseconds.
+		Weight::from_parts(6_790_664, 0)
+			.saturating_add(Weight::from_parts(0, 1546))
+			// Standard Error: 8_132
+			.saturating_add(Weight::from_parts(7_990_704, 0).saturating_mul(n.into()))
+			.saturating_add(T::DbWeight::get().reads(4))
+			.saturating_add(T::DbWeight::get().reads((1_u64).saturating_mul(n.into())))
+			.saturating_add(T::DbWeight::get().writes(2))
+			.saturating_add(T::DbWeight::get().writes((2_u64).saturating_mul(n.into())))
+			.saturating_add(Weight::from_parts(0, 2499).saturating_mul(n.into()))
 	}
 }

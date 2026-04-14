@@ -57,7 +57,7 @@ mod benchmarking;
 /// Domain port for ZK verification (the ONLY public contract)
 pub use domain::services::ZkVerifierPort;
 
-pub use types::{CircuitId, ProofSystem, VerificationKeyInfo, VerificationStatistics};
+pub use types::{CircuitId, ProofSystem, VerificationKeyInfo, VerificationStatistics, VkEntry};
 pub use weights::WeightInfo;
 
 #[derive(
@@ -206,6 +206,8 @@ pub mod pallet {
 		ProofVerified { circuit_id: CircuitId, version: u32 },
 		/// Proof verification failed
 		ProofVerificationFailed { circuit_id: CircuitId, version: u32 },
+		/// All VKs in a batch were registered (and optionally activated) atomically
+		BatchVerificationKeysRegistered { count: u32 },
 	}
 
 	// ========================================================================
@@ -376,6 +378,69 @@ pub mod pallet {
 			public_inputs: BoundedVec<BoundedVec<u8, ConstU32<32>>, T::MaxPublicInputs>,
 		) -> DispatchResult {
 			Self::execute_verify_proof(origin, circuit_id.0, None, proof, public_inputs)
+		}
+
+		/// Atomically register (and optionally activate) up to 10 verification keys.
+		///
+		/// All entries are validated and written in the same block. If any entry is
+		/// invalid the whole call reverts — no partial state is committed.
+		///
+		/// `set_active: true` in an entry forces that version to become the active one
+		/// for its circuit. If no active version exists yet the entry is activated
+		/// regardless of the flag.
+		///
+		/// Origin must be Root (sudo/governance).
+		#[pallet::call_index(4)]
+		#[pallet::weight(T::WeightInfo::batch_register_verification_keys(entries.len() as u32))]
+		pub fn batch_register_verification_keys(
+			origin: OriginFor<T>,
+			entries: BoundedVec<VkEntry, ConstU32<10>>,
+		) -> DispatchResult {
+			ensure_root(origin)?;
+			ensure!(!entries.is_empty(), Error::<T>::InvalidBatchSize);
+
+			for entry in entries.iter() {
+				let domain_vk = crate::domain::entities::VerificationKey::new(
+					entry.verification_key.to_vec(),
+					crate::domain::value_objects::ProofSystem::Groth16,
+				)
+				.map_err(|err| {
+					Self::map_application_error(
+						crate::application::errors::ApplicationError::Domain(err),
+					)
+				})?;
+
+				let vk_info = VerificationKeyInfo {
+					key_data: domain_vk
+						.data()
+						.to_vec()
+						.try_into()
+						.map_err(|_| Error::<T>::VerificationKeyTooLarge)?,
+					system: ProofSystem::Groth16,
+					registered_at: frame_system::Pallet::<T>::block_number(),
+				};
+
+				VerificationKeys::<T>::insert(entry.circuit_id, entry.version, vk_info);
+
+				let auto_activate = ActiveCircuitVersion::<T>::get(entry.circuit_id).is_none();
+				if entry.set_active || auto_activate {
+					ActiveCircuitVersion::<T>::insert(entry.circuit_id, entry.version);
+					Self::deposit_event(Event::ActiveVersionSet {
+						circuit_id: entry.circuit_id,
+						version: entry.version,
+					});
+				}
+
+				Self::deposit_event(Event::VerificationKeyRegistered {
+					circuit_id: entry.circuit_id,
+					version: entry.version,
+				});
+			}
+
+			Self::deposit_event(Event::BatchVerificationKeysRegistered {
+				count: entries.len() as u32,
+			});
+			Ok(())
 		}
 	}
 }

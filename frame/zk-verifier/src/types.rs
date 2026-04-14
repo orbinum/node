@@ -110,3 +110,30 @@ pub struct VerificationStatistics {
 	/// Failed verifications
 	pub failed_verifications: u64,
 }
+
+/// A single entry for batch verification key registration.
+///
+/// Used by `batch_register_verification_keys` to atomically register
+/// and optionally activate multiple circuits in one extrinsic.
+#[derive(
+	Clone,
+	PartialEq,
+	Eq,
+	Encode,
+	Decode,
+	DecodeWithMemTracking,
+	MaxEncodedLen,
+	TypeInfo,
+	Debug
+)]
+pub struct VkEntry {
+	/// Circuit to register the key for.
+	pub circuit_id: CircuitId,
+	/// Version number for this key.
+	pub version: u32,
+	/// Serialized verification key data (max 8 KB).
+	pub verification_key: BoundedVec<u8, ConstU32<8192>>,
+	/// Set this version as active after registration.
+	/// If no active version exists for the circuit, it is activated regardless.
+	pub set_active: bool,
+}
