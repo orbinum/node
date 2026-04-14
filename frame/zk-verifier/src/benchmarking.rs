@@ -194,5 +194,44 @@ mod benchmarks {
 		));
 	}
 
+	#[benchmark]
+	fn batch_register_verification_keys(n: Linear<1, 10>) {
+		let vk_bytes = sample_verification_key();
+
+		let entries: Vec<crate::types::VkEntry> = (0..n)
+			.map(|i| crate::types::VkEntry {
+				circuit_id: CircuitId(100 + i),
+				version: 1,
+				verification_key: vk_bytes
+					.clone()
+					.try_into()
+					.expect("benchmark vk bytes must fit BoundedVec"),
+				set_active: true,
+			})
+			.collect();
+
+		let bounded_entries: frame_support::BoundedVec<
+			crate::types::VkEntry,
+			frame_support::traits::ConstU32<10>,
+		> = entries
+			.try_into()
+			.expect("n <= 10, bounded vec debe admitir la entrada");
+
+		#[extrinsic_call]
+		_(RawOrigin::Root, bounded_entries);
+
+		for i in 0..n {
+			assert!(
+				VerificationKeys::<T>::contains_key(CircuitId(100 + i), 1u32),
+				"entrada {i} debe estar en VerificationKeys"
+			);
+			assert_eq!(
+				crate::pallet::ActiveCircuitVersion::<T>::get(CircuitId(100 + i)),
+				Some(1u32),
+				"entrada {i} debe tener versión activa = 1"
+			);
+		}
+	}
+
 	impl_benchmark_test_suite!(Pallet, crate::mock::new_test_ext(), crate::mock::Test);
 }
