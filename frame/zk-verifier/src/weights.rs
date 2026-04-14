@@ -38,6 +38,7 @@ pub trait WeightInfo {
 	fn set_active_version() -> Weight;
 	fn remove_verification_key() -> Weight;
 	fn verify_proof() -> Weight;
+	fn batch_register_verification_keys(n: u32) -> Weight;
 }
 
 /// Weight functions for `pallet_zk_verifier`.
