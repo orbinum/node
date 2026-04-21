@@ -572,7 +572,7 @@ impl pallet_shielded_pool::Config for Runtime {
 	/// Groth16 proof verifier for unshield/transfer operations
 	type ZkVerifier = ZkVerifier;
 	/// Relay config, fee accumulation and block-author — delegated to pallet-relayer.
-	type Relayer = pallet_relayer::Pallet<Runtime>;
+	// type Relayer = pallet_relayer::Pallet<Runtime>;
 	/// PalletId for the pool account
 	type PalletId = ShieldedPoolPalletId;
 	/// Merkle tree depth: 2^20 = 1M notes max (see MERKLE_TREE_SCALABILITY.md)
@@ -582,6 +582,8 @@ impl pallet_shielded_pool::Config for Runtime {
 	/// Minimum shield amount: prevents spam, 1 ORB = 1e18 wei
 	type MinShieldAmount = ConstU128<1_000_000_000_000_000_000>;
 	type WeightInfo = pallet_shielded_pool::weights::SubstrateWeight<Runtime>;
+	/// Disclosure requests expire after 14400 blocks (~1 day at 6s/block)
+	type RequestExpiration = ConstU32<14400>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
@@ -1200,27 +1202,27 @@ impl_runtime_apis! {
 			ShieldedPool::get_merkle_proof_for_commitment(commitment)
 		}
 
-		fn relay_config() -> pallet_shielded_pool_runtime_api::RelayConfig {
-			use pallet_relayer::RelayerInterface;
-			let min_fee_planck = pallet_relayer::Pallet::<Runtime>::min_relay_fee();
-			// Fallback selectors for day-0 operation: when the chain launches the
-			// AllowedSelectors storage is empty, so we return the canonical defaults
-			// (unshield + privateTransfer) derived from keccak256(sig)[0..4].
-			// Once governance calls `set_allowed_selectors`, the stored list takes
-			// precedence and these hardcoded values are never reached again.
-			let allowed_selectors = {
-				let stored = pallet_relayer::Pallet::<Runtime>::allowed_selectors();
-				if stored.is_empty() {
-					sp_std::vec![
-						[0x47, 0xfc, 0x44, 0xa2], // unshield
-						[0x8c, 0x0f, 0x5d, 0x24], // privateTransfer
-					]
-				} else {
-					stored
-				}
-			};
-			pallet_shielded_pool_runtime_api::RelayConfig { min_fee_planck, allowed_selectors }
-		}
+		// fn relay_config() -> pallet_shielded_pool_runtime_api::RelayConfig {
+		// 	use pallet_relayer::RelayerInterface;
+		// 	let min_fee_planck = pallet_relayer::Pallet::<Runtime>::min_relay_fee();
+		// 	// Fallback selectors for day-0 operation: when the chain launches the
+		// 	// AllowedSelectors storage is empty, so we return the canonical defaults
+		// 	// (unshield + privateTransfer) derived from keccak256(sig)[0..4].
+		// 	// Once governance calls `set_allowed_selectors`, the stored list takes
+		// 	// precedence and these hardcoded values are never reached again.
+		// 	let allowed_selectors = {
+		// 		let stored = pallet_relayer::Pallet::<Runtime>::allowed_selectors();
+		// 		if stored.is_empty() {
+		// 			sp_std::vec![
+		// 				[0x47, 0xfc, 0x44, 0xa2], // unshield
+		// 				[0x8c, 0x0f, 0x5d, 0x24], // privateTransfer
+		// 			]
+		// 		} else {
+		// 			stored
+		// 		}
+		// 	};
+		// 	pallet_shielded_pool_runtime_api::RelayConfig { min_fee_planck, allowed_selectors }
+		// }
 	}
 
 	impl pallet_zk_verifier_runtime_api::ZkVerifierRuntimeApi<Block> for Runtime {
