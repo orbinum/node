@@ -274,6 +274,30 @@ impl pallet_aura::Config for Runtime {
 	type SlotDuration = pallet_aura::MinimumPeriodTimesTwo<Runtime>;
 }
 
+impl pallet_authorship::Config for Runtime {
+	type FindAuthor = FindAuthorAccountId;
+	type EventHandler = ();
+}
+
+/// Maps an Aura authority index to its `AccountId32`.
+///
+/// `pallet_aura::AuraAuthorId` implements `FindAuthor<u32>` (authority index).
+/// This wrapper looks up the AuraId at that index and converts its 32-byte
+/// sr25519 public key into an `AccountId32`.
+pub struct FindAuthorAccountId;
+impl FindAuthor<AccountId> for FindAuthorAccountId {
+	fn find_author<'a, I>(digests: I) -> Option<AccountId>
+	where
+		I: 'a + IntoIterator<Item = (ConsensusEngineId, &'a [u8])>,
+	{
+		if let Some(aura_id) = pallet_aura::AuraAuthorId::<Runtime>::find_author(digests) {
+			let raw: [u8; 32] = aura_id.to_raw_vec().try_into().unwrap_or([0u8; 32]);
+			return Some(AccountId::from(raw));
+		}
+		None
+	}
+}
+
 impl pallet_grandpa::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = ();
@@ -448,14 +472,12 @@ impl pallet_dynamic_fee::Config for Runtime {
 
 parameter_types! {
 	// ORB uses 18 decimals (1 ORB = 1e18 wei), aligned with Ethereum tooling.
-	// Keeping DefaultBaseFeePerGas at 1_000_000 wei/gas yields low dev/test costs:
-	//   1e6 / 1e18 = 1e-12 ORB per gas
-	//   → ~1e-7 ORB for 100k gas
-	//   → ~3e-7 ORB for 300k gas
-	//
-	// This keeps EVM execution costs in a practical range while preserving
-	// sufficient granularity for fee market adjustment under EIP-1559.
-	pub DefaultBaseFeePerGas: U256 = U256::from(1_000_000);
+	// DefaultBaseFeePerGas is used as the runtime-level fallback (e.g. storage migration).
+	// Actual genesis values are set per-chain-spec in genesis_config_preset/:
+	//   all networks → 1_000_000_000 wei/gas (1 gwei → ~0.00001 ORB / transfer)
+	// The floor (empty blocks) = DefaultBaseFeePerGas / 2 = 0.5 gwei.
+	// EIP-1559 adjusts the fee upward automatically as the network gains traffic.
+	pub DefaultBaseFeePerGas: U256 = U256::from(1_000_000_000u64); // 1 gwei
 
 	pub DefaultElasticity: Permill = Permill::from_parts(125_000);
 }
@@ -514,6 +536,31 @@ impl pallet_zk_verifier::Config for Runtime {
 	type WeightInfo = pallet_zk_verifier::weights::SubstrateWeight<Runtime>;
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// pallet-relayer
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Provides the current block's author (Aura validator) for relay fee attribution.
+pub struct RelayerBlockAuthor;
+impl frame_support::traits::Get<Option<AccountId>> for RelayerBlockAuthor {
+	fn get() -> Option<AccountId> {
+		pallet_authorship::Pallet::<Runtime>::author()
+	}
+}
+
+impl pallet_relayer::Config for Runtime {
+	/// Block author for relay fee attribution.
+	type BlockAuthor = RelayerBlockAuthor;
+	/// Default minimum relay fee: 0.001 ORB = 1e15 planck (anti-spam).
+	/// Overridable at runtime via `set_min_relay_fee` (governance/sudo).
+	type DefaultMinRelayFee = ConstU128<1_000_000_000_000_000>;
+	/// Only sudo/governance can update relay configuration.
+	type ManageOrigin = frame_system::EnsureRoot<AccountId>;
+	/// Allow up to 16 ABI selectors in the whitelist.
+	type MaxAllowedSelectors = ConstU32<16>;
+	type WeightInfo = ();
+}
+
 parameter_types! {
 	/// Pool account that holds all shielded tokens
 	pub const ShieldedPoolPalletId: PalletId = PalletId(*b"shld/pol");
@@ -524,6 +571,8 @@ impl pallet_shielded_pool::Config for Runtime {
 	type Currency = Balances;
 	/// Groth16 proof verifier for unshield/transfer operations
 	type ZkVerifier = ZkVerifier;
+	/// Relay config, fee accumulation and block-author — delegated to pallet-relayer.
+	type Relayer = pallet_relayer::Pallet<Runtime>;
 	/// PalletId for the pool account
 	type PalletId = ShieldedPoolPalletId;
 	/// Merkle tree depth: 2^20 = 1M notes max (see MERKLE_TREE_SCALABILITY.md)
@@ -596,6 +645,12 @@ mod runtime {
 
 	#[runtime::pallet_index(14)]
 	pub type AccountMapping = pallet_account_mapping;
+
+	#[runtime::pallet_index(15)]
+	pub type Authorship = pallet_authorship;
+
+	#[runtime::pallet_index(16)]
+	pub type Relayer = pallet_relayer;
 }
 
 #[derive(Clone)]
@@ -693,6 +748,7 @@ mod benches {
 		[pallet_zk_verifier, ZkVerifier]
 		[pallet_shielded_pool, ShieldedPool]
 		[pallet_account_mapping, AccountMapping]
+		[pallet_relayer, Relayer]
 	);
 }
 
@@ -1143,6 +1199,28 @@ impl_runtime_apis! {
 		) -> Option<(u32, pallet_shielded_pool::DefaultMerklePath)> {
 			ShieldedPool::get_merkle_proof_for_commitment(commitment)
 		}
+
+		fn relay_config() -> pallet_shielded_pool_runtime_api::RelayConfig {
+			use pallet_relayer::RelayerInterface;
+			let min_fee_planck = pallet_relayer::Pallet::<Runtime>::min_relay_fee();
+			// Fallback selectors for day-0 operation: when the chain launches the
+			// AllowedSelectors storage is empty, so we return the canonical defaults
+			// (unshield + privateTransfer) derived from keccak256(sig)[0..4].
+			// Once governance calls `set_allowed_selectors`, the stored list takes
+			// precedence and these hardcoded values are never reached again.
+			let allowed_selectors = {
+				let stored = pallet_relayer::Pallet::<Runtime>::allowed_selectors();
+				if stored.is_empty() {
+					sp_std::vec![
+						[0x47, 0xfc, 0x44, 0xa2], // unshield
+						[0x8c, 0x0f, 0x5d, 0x24], // privateTransfer
+					]
+				} else {
+					stored
+				}
+			};
+			pallet_shielded_pool_runtime_api::RelayConfig { min_fee_planck, allowed_selectors }
+		}
 	}
 
 	impl pallet_zk_verifier_runtime_api::ZkVerifierRuntimeApi<Block> for Runtime {
@@ -1290,6 +1368,21 @@ impl_runtime_apis! {
 
 		fn has_private_link(alias: alloc::vec::Vec<u8>, commitment: [u8; 32]) -> bool {
 			pallet_account_mapping::Pallet::<Runtime>::runtime_api_has_private_link(alias, commitment)
+		}
+	}
+
+	// Relayer Runtime API implementation
+	impl pallet_relayer_runtime_api::RelayerRuntimeApi<Block> for Runtime {
+		fn is_relayer(account: sp_runtime::AccountId32) -> bool {
+			pallet_relayer::RelayerByAccount::<Runtime>::contains_key(&account)
+		}
+
+		fn pending_fees(account: sp_runtime::AccountId32, asset_id: u32) -> u128 {
+			pallet_relayer::PendingRelayerFees::<Runtime>::get(&account, asset_id)
+		}
+
+		fn registered_evm_address(account: sp_runtime::AccountId32) -> Option<[u8; 20]> {
+			pallet_relayer::RelayerByAccount::<Runtime>::get(&account).map(|h| h.0)
 		}
 	}
 

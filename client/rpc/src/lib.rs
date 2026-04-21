@@ -31,6 +31,7 @@ mod debug;
 mod eth;
 mod eth_pubsub;
 mod net;
+pub mod relay;
 mod signer;
 #[cfg(feature = "txpool")]
 mod txpool;
@@ -44,7 +45,8 @@ pub use self::{
 	eth::{format, pending, EstimateGasAdapter, Eth, EthConfig, EthFilter},
 	eth_pubsub::{EthPubSub, EthereumSubIdProvider},
 	net::Net,
-	signer::{EthDevSigner, EthSigner},
+	relay::{OrbinumRelay, OrbinumRelayApiServer, RelayerStatus},
+	signer::{EthDevSigner, EthSigner, EthValidatorSigner},
 	web3::Web3,
 };
 pub use ethereum::TransactionV3 as EthereumTransaction;

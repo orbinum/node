@@ -24,7 +24,7 @@ rand = "0.9"
 rlp = { workspace = true }
 scale-codec = { workspace = true }
 schnellru = "0.2.4"
-serde = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 
@@ -84,5 +84,5 @@ rocksdb = [
 	"fc-db/rocksdb",
 	"fc-mapping-sync/rocksdb",
 ]
-txpool = ["fc-rpc-core/txpool", "serde"]
+txpool = ["fc-rpc-core/txpool"]
 rpc-binary-search-estimate = []

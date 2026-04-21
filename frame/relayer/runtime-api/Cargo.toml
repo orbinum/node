@@ -1,0 +1,30 @@
+[package]
+name = "pallet-relayer-runtime-api"
+version = "0.1.0"
+description = "Runtime API for pallet-relayer: query relayer status and pending fees."
+authors = { workspace = true }
+license = "GPL-3.0-or-later"
+edition = "2021"
+repository = { workspace = true }
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+scale-codec = { workspace = true }
+scale-info = { workspace = true }
+sp-api = { workspace = true }
+sp-core = { workspace = true }
+sp-runtime = { workspace = true }
+sp-std = { workspace = true }
+
+[features]
+default = ["std"]
+std = [
+	"scale-codec/std",
+	"scale-info/std",
+	"sp-api/std",
+	"sp-core/std",
+	"sp-runtime/std",
+	"sp-std/std",
+]

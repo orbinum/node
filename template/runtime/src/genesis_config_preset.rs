@@ -4,8 +4,8 @@ mod mainnet;
 mod testnet;
 
 use crate::{
-	AccountId, BalancesConfig, EVMChainIdConfig, EVMConfig, EthereumConfig, ManualSealConfig,
-	RuntimeGenesisConfig, SudoConfig,
+	AccountId, BalancesConfig, BaseFeeConfig, EVMChainIdConfig, EVMConfig, EthereumConfig,
+	ManualSealConfig, RuntimeGenesisConfig, SudoConfig,
 };
 use hex_literal::hex;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
@@ -46,6 +46,7 @@ pub(super) fn build_genesis(
 	_initial_authorities: Vec<(AuraId, GrandpaId)>,
 	chain_id: u64,
 	enable_manual_seal: bool,
+	base_fee_per_gas: u64,
 ) -> serde_json::Value {
 	let evm_accounts = {
 		let mut map = sp_std::collections::btree_map::BTreeMap::new();
@@ -65,7 +66,10 @@ pub(super) fn build_genesis(
 	let config = RuntimeGenesisConfig {
 		system: Default::default(),
 		aura: Default::default(),
-		base_fee: Default::default(),
+		base_fee: BaseFeeConfig {
+			base_fee_per_gas: U256::from(base_fee_per_gas),
+			..Default::default()
+		},
 		grandpa: Default::default(),
 		balances: BalancesConfig {
 			balances: endowed_accounts.clone(),

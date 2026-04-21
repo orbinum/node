@@ -25,6 +25,8 @@ members = [
 	"frame/account-mapping",
 	"frame/account-mapping/runtime-api",
 	"frame/account-mapping/rpc",
+	"frame/relayer/runtime-api",
+	"frame/relayer/rpc",
 	"frame/zk-verifier/runtime-api",
 	"frame/zk-verifier/rpc",
 	"frame/evm/precompile/account-mapping",
@@ -162,6 +164,7 @@ frame-system = { git = "https://github.com/paritytech/polkadot-sdk", branch = "s
 frame-system-benchmarking = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
 frame-system-rpc-runtime-api = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
 pallet-aura = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+pallet-authorship = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
 pallet-balances = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
 pallet-grandpa = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
 pallet-sudo = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
@@ -248,6 +251,9 @@ pallet-evm-precompile-sha3fips-benchmarking = { path = "frame/evm/precompile/sha
 pallet-evm-precompile-simple = { path = "frame/evm/precompile/simple", default-features = false }
 pallet-evm-test-vector-support = { path = "frame/evm/test-vector-support" }
 pallet-hotfix-sufficients = { path = "frame/hotfix-sufficients", default-features = false }
+pallet-relayer = { path = "frame/relayer", default-features = false }
+pallet-relayer-rpc = { path = "frame/relayer/rpc" }
+pallet-relayer-runtime-api = { path = "frame/relayer/runtime-api", default-features = false }
 pallet-shielded-pool = { path = "frame/shielded-pool", default-features = false }
 pallet-shielded-pool-rpc = { path = "frame/shielded-pool/rpc" }
 pallet-shielded-pool-runtime-api = { path = "frame/shielded-pool/runtime-api", default-features = false }

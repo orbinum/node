@@ -307,6 +307,7 @@ where
 	RA::RuntimeApi:
 		pallet_account_mapping_runtime_api::AccountMappingRuntimeApi<B, AccountId, u128>,
 	RA::RuntimeApi: pallet_zk_verifier_runtime_api::ZkVerifierRuntimeApi<B>,
+	RA::RuntimeApi: pallet_relayer_runtime_api::RelayerRuntimeApi<B>,
 	HF: HostFunctionsT + 'static,
 	NB: sc_network::NetworkBackend<B, <B as BlockT>::Hash>,
 {
@@ -437,6 +438,7 @@ where
 
 		let is_authority = role.is_authority();
 		let enable_dev_signer = eth_config.enable_dev_signer;
+		let evm_relayer_key = eth_config.evm_relayer_key.clone();
 		let max_past_logs = eth_config.max_past_logs;
 		let execute_gas_limit_multiplier = eth_config.execute_gas_limit_multiplier;
 		let filter_pool = filter_pool.clone();
@@ -473,6 +475,7 @@ where
 				converter: Some(TransactionConverter::<B>::default()),
 				is_authority,
 				enable_dev_signer,
+				evm_relayer_key: evm_relayer_key.clone(),
 				network: network.clone(),
 				sync: sync_service.clone(),
 				frontier_backend: match &*frontier_backend {
@@ -536,6 +539,33 @@ where
 		pubsub_notification_sinks,
 	)
 	.await;
+
+	// If an EVM relay key is configured, auto-register it with pallet-relayer using
+	// the node's first Aura (sr25519) key as the Substrate identity.
+	if let Some(key_hex) = eth_config.evm_relayer_key.as_deref() {
+		match fc_rpc::EthValidatorSigner::from_hex(key_hex) {
+			Ok(signer) => {
+				let evm_address = signer.address();
+				let client_r = client.clone();
+				let pool_r = transaction_pool.clone();
+				let keystore_r = keystore_container.keystore();
+				task_manager.spawn_handle().spawn(
+					"relayer-auto-register",
+					Some("relayer"),
+					crate::relayer_register::auto_register(
+						client_r,
+						pool_r,
+						keystore_r,
+						evm_address,
+					)
+					.boxed(),
+				);
+			}
+			Err(e) => {
+				log::error!(target: "orbinum-relay", "auto-register: invalid --evm-relayer-key: {e}");
+			}
+		}
+	}
 
 	if role.is_authority() {
 		// manual-seal authorship
