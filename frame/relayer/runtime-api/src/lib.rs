@@ -41,16 +41,14 @@ mod tests {
 	#[test]
 	fn account_id32_all_zeros_roundtrip() {
 		let account = AccountId32::from([0u8; 32]);
-		let decoded =
-			AccountId32::decode(&mut &account.encode()[..]).expect("decode must succeed");
+		let decoded = AccountId32::decode(&mut &account.encode()[..]).expect("decode must succeed");
 		assert_eq!(account, decoded);
 	}
 
 	#[test]
 	fn account_id32_all_ff_roundtrip() {
 		let account = AccountId32::from([0xffu8; 32]);
-		let decoded =
-			AccountId32::decode(&mut &account.encode()[..]).expect("decode must succeed");
+		let decoded = AccountId32::decode(&mut &account.encode()[..]).expect("decode must succeed");
 		assert_eq!(account, decoded);
 	}
 

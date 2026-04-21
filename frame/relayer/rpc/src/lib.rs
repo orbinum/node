@@ -3,7 +3,7 @@ use pallet_relayer_runtime_api::RelayerRuntimeApi;
 use sp_api::ProvideRuntimeApi;
 use sp_blockchain::HeaderBackend;
 use sp_core::crypto::Ss58Codec;
-use sp_runtime::{traits::Block as BlockT, AccountId32};
+use sp_runtime::{AccountId32, traits::Block as BlockT};
 use std::sync::Arc;
 
 #[rpc(client, server)]
