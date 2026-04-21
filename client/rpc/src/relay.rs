@@ -296,10 +296,10 @@ where
 				U256::from(RELAY_GAS_LIMIT),
 				Some(U256::from(MAX_FEE_PER_GAS_WEI)),
 				Some(U256::from(1_000_000_000u64)),
-				None, // nonce — not needed for simulation
+				None,  // nonce — not needed for simulation
 				false, // estimate = false: real execution semantics
-				None, // access_list
-				None, // authorization_list
+				None,  // access_list
+				None,  // authorization_list
 			);
 			match dry_result {
 				Err(e) => {
@@ -406,10 +406,7 @@ where
 			.map(|cfg| cfg.min_fee_planck)
 			.unwrap_or(MIN_RELAY_FEE_FALLBACK);
 
-		let base_fee_wei: u128 = api
-			.gas_price(best_hash)
-			.map(|p| p.as_u128())
-			.unwrap_or(0);
+		let base_fee_wei: u128 = api.gas_price(best_hash).map(|p| p.as_u128()).unwrap_or(0);
 		let min_fee = compute_effective_min_fee(min_fee_planck, base_fee_wei);
 
 		let balance = {
@@ -631,7 +628,10 @@ mod tests {
 	/// At zero base_fee the governance floor must win.
 	#[test]
 	fn effective_min_fee_zero_base_fee_returns_governance_floor() {
-		assert_eq!(compute_effective_min_fee(MIN_RELAY_FEE_FALLBACK, 0), MIN_RELAY_FEE_FALLBACK);
+		assert_eq!(
+			compute_effective_min_fee(MIN_RELAY_FEE_FALLBACK, 0),
+			MIN_RELAY_FEE_FALLBACK
+		);
 	}
 
 	/// At 10 gwei the 2× gas floor (40_000_000_000_000_000) must beat governance (0.001 ORB).
@@ -639,8 +639,14 @@ mod tests {
 	fn effective_min_fee_gas_floor_dominates_at_10_gwei() {
 		let base_fee = 10_000_000_000u128; // 10 gwei
 		let expected = (RELAY_GAS_LIMIT as u128) * 2 * base_fee;
-		assert!(expected > MIN_RELAY_FEE_FALLBACK, "test precondition: gas floor must exceed governance");
-		assert_eq!(compute_effective_min_fee(MIN_RELAY_FEE_FALLBACK, base_fee), expected);
+		assert!(
+			expected > MIN_RELAY_FEE_FALLBACK,
+			"test precondition: gas floor must exceed governance"
+		);
+		assert_eq!(
+			compute_effective_min_fee(MIN_RELAY_FEE_FALLBACK, base_fee),
+			expected
+		);
 	}
 
 	/// At 1 wei base_fee the gas floor (4_000_000) is far below governance (0.001 ORB).
@@ -648,8 +654,14 @@ mod tests {
 	fn effective_min_fee_governance_floor_dominates_at_negligible_base_fee() {
 		let base_fee = 1u128;
 		let gas_floor = (RELAY_GAS_LIMIT as u128) * 2 * base_fee;
-		assert!(MIN_RELAY_FEE_FALLBACK > gas_floor, "test precondition: governance must exceed gas floor");
-		assert_eq!(compute_effective_min_fee(MIN_RELAY_FEE_FALLBACK, base_fee), MIN_RELAY_FEE_FALLBACK);
+		assert!(
+			MIN_RELAY_FEE_FALLBACK > gas_floor,
+			"test precondition: governance must exceed gas floor"
+		);
+		assert_eq!(
+			compute_effective_min_fee(MIN_RELAY_FEE_FALLBACK, base_fee),
+			MIN_RELAY_FEE_FALLBACK
+		);
 	}
 
 	/// The crossover point is at base_fee = governance / (gas_limit × 2) = 250_000_000 (0.25 gwei).
@@ -672,7 +684,10 @@ mod tests {
 		let governance = 100_000_000_000_000_000u128; // 0.1 ORB
 		let base_fee = 1_000_000_000u128; // 1 gwei
 		let gas_floor = (RELAY_GAS_LIMIT as u128) * 2 * base_fee;
-		assert!(governance > gas_floor, "test precondition: governance must exceed gas floor");
+		assert!(
+			governance > gas_floor,
+			"test precondition: governance must exceed gas floor"
+		);
 		assert_eq!(compute_effective_min_fee(governance, base_fee), governance);
 	}
 
