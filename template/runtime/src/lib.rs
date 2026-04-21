@@ -583,7 +583,7 @@ impl pallet_shielded_pool::Config for Runtime {
 	type MinShieldAmount = ConstU128<1_000_000_000_000_000_000>;
 	type WeightInfo = pallet_shielded_pool::weights::SubstrateWeight<Runtime>;
 	/// Disclosure requests expire after 14400 blocks (~1 day at 6s/block)
-	type RequestExpiration = ConstU32<14400>;
+	// type RequestExpiration = ConstU32<14400>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
