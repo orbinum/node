@@ -572,7 +572,7 @@ impl pallet_shielded_pool::Config for Runtime {
 	/// Groth16 proof verifier for unshield/transfer operations
 	type ZkVerifier = ZkVerifier;
 	/// Relay config, fee accumulation and block-author — delegated to pallet-relayer.
-	type Relayer = pallet_relayer::Pallet<Runtime>;
+	// type Relayer = pallet_relayer::Pallet<Runtime>;
 	/// PalletId for the pool account
 	type PalletId = ShieldedPoolPalletId;
 	/// Merkle tree depth: 2^20 = 1M notes max (see MERKLE_TREE_SCALABILITY.md)
