@@ -23,6 +23,7 @@ pub use fc_rpc::{EthBlockDataCacheTask, EthConfig};
 pub use fc_rpc_core::types::{FeeHistoryCache, FeeHistoryCacheLimit, FilterPool};
 use fc_storage::StorageOverride;
 use fp_rpc::{ConvertTransaction, ConvertTransactionRuntimeApi, EthereumRuntimeRPCApi};
+use pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi;
 
 /// Extra dependencies for Ethereum compatibility.
 pub struct EthDeps<B: BlockT, C, P, CT, CIDP> {
@@ -82,7 +83,8 @@ where
 	C::Api: AuraApi<B, AuraId>
 		+ BlockBuilderApi<B>
 		+ ConvertTransactionRuntimeApi<B>
-		+ EthereumRuntimeRPCApi<B>,
+		+ EthereumRuntimeRPCApi<B>
+		+ ShieldedPoolRuntimeApi<B>,
 	C: HeaderBackend<B> + HeaderMetadata<B, Error = BlockChainError>,
 	C: BlockchainEvents<B> + AuxStore + UsageProvider<B> + StorageProvider<B, BE> + 'static,
 	BE: Backend<B> + 'static,

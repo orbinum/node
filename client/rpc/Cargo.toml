@@ -61,6 +61,7 @@ fp-evm = { workspace = true, features = ["default"] }
 fp-rpc = { workspace = true, features = ["default"] }
 fp-storage = { workspace = true, features = ["default"] }
 pallet-evm = { workspace = true, features = ["default"] }
+pallet-shielded-pool-runtime-api = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 tempfile = "3.21.0"
