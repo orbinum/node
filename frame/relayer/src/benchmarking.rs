@@ -45,8 +45,7 @@ mod benchmarks {
 	/// Worst case: full list of `MaxAllowedSelectors` entries.
 	#[benchmark]
 	fn set_allowed_selectors(n: Linear<0, { T::MaxAllowedSelectors::get() }>) {
-		let selectors: sp_std::vec::Vec<[u8; 4]> =
-			(0..n).map(|i| (i as u32).to_le_bytes()).collect();
+		let selectors: sp_std::vec::Vec<[u8; 4]> = (0..n).map(|i| i.to_le_bytes()).collect();
 
 		#[extrinsic_call]
 		set_allowed_selectors(RawOrigin::Root, selectors);
