@@ -9,6 +9,7 @@
 //!   `ShieldedPoolRuntimeApi::relay_config()`.
 //! - **Registry**: EVM address → AccountId binding so fee attribution is
 //!   unambiguous even when the EVM and substrate keys differ.
+//!   Only validator nodes (as determined by `T::IsValidator`) may register.
 //! - **Fee accounting**: `PendingRelayerFees` tracks accrued relay fees per
 //!   (AccountId, asset_id).  Other pallets (pallet-shielded-pool) call
 //!   `T::Relayer::accumulate_relay_fee()` and `T::Relayer::consume_relay_fee()`
@@ -56,7 +57,7 @@ mod tests;
 #[frame_support::pallet]
 pub mod pallet {
 	use super::{RelayerInterface, WeightInfo};
-	use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
+	use frame_support::{dispatch::DispatchResult, pallet_prelude::*, traits::Contains};
 	use frame_system::pallet_prelude::*;
 	use sp_core::H160;
 	use sp_std::vec::Vec;
@@ -72,6 +73,12 @@ pub mod pallet {
 		/// Overridable at runtime by `set_min_relay_fee` (governance/sudo).
 		#[pallet::constant]
 		type DefaultMinRelayFee: Get<u128>;
+
+		/// Returns whether an account is currently a validator node.
+		///
+		/// Only accounts recognised as validators may call `register_relayer`.
+		/// Wire this to a session-validator or Aura-authority check in the runtime.
+		type IsValidator: frame_support::traits::Contains<Self::AccountId>;
 
 		/// Origin allowed to update relay configuration (fee, selectors).
 		/// Use `EnsureRoot` for testnets; a governance pallet for mainnet.
@@ -105,6 +112,7 @@ pub mod pallet {
 		StorageValue<_, BoundedVec<[u8; 4], T::MaxAllowedSelectors>, ValueQuery>;
 
 	/// On-chain registry: EVM address → substrate AccountId.
+	/// Only validator nodes may have entries here.
 	#[pallet::storage]
 	pub type RelayerRegistry<T: Config> =
 		StorageMap<_, Blake2_128Concat, H160, T::AccountId, OptionQuery>;
@@ -135,12 +143,12 @@ pub mod pallet {
 		MinRelayFeeUpdated { new_fee: u128 },
 		/// `ManageOrigin` updated the allowed selector whitelist.
 		AllowedSelectorsUpdated { count: u32 },
-		/// An EVM address was registered for a substrate account.
+		/// A validator node registered an EVM address.
 		RelayerRegistered {
 			evm_address: H160,
 			account: T::AccountId,
 		},
-		/// An EVM address was unregistered.
+		/// A validator node unregistered its EVM address.
 		RelayerUnregistered {
 			evm_address: H160,
 			account: T::AccountId,
@@ -163,12 +171,15 @@ pub mod pallet {
 
 	#[pallet::error]
 	pub enum Error<T> {
-		/// Caller is not the AccountId that owns this EVM address.
-		NotOwner,
+		/// Caller is not a validator node. Only validators may register as relayers.
+		NotValidator,
 		/// No EVM address registered for this account.
 		NotRegistered,
 		/// The EVM address already has a registered AccountId.
 		AlreadyRegistered,
+		/// The calling account already has an active EVM registration.
+		/// Call `unregister_relayer` first.
+		AccountAlreadyRegistered,
 		/// Requested amount exceeds pending relay fees.
 		InsufficientPendingFees,
 		/// Selector list exceeds `MaxAllowedSelectors`.
@@ -217,13 +228,21 @@ pub mod pallet {
 		}
 
 		/// Register a substrate account as the owner of an EVM relay address.
+		///
+		/// Only validator nodes (as determined by `T::IsValidator`) may call this.
+		/// Non-validator accounts are rejected with `NotValidator`.
 		#[pallet::call_index(2)]
 		#[pallet::weight(T::WeightInfo::register_relayer())]
 		pub fn register_relayer(origin: OriginFor<T>, evm_address: H160) -> DispatchResult {
 			let who = ensure_signed(origin)?;
+			ensure!(T::IsValidator::contains(&who), Error::<T>::NotValidator);
 			ensure!(
 				!RelayerRegistry::<T>::contains_key(evm_address),
 				Error::<T>::AlreadyRegistered
+			);
+			ensure!(
+				!RelayerByAccount::<T>::contains_key(&who),
+				Error::<T>::AccountAlreadyRegistered
 			);
 			RelayerRegistry::<T>::insert(evm_address, who.clone());
 			RelayerByAccount::<T>::insert(who.clone(), evm_address);
@@ -235,6 +254,8 @@ pub mod pallet {
 		}
 
 		/// Remove the caller's EVM address from the relay registry.
+		///
+		/// The caller must be a registered validator node.
 		#[pallet::call_index(3)]
 		#[pallet::weight(T::WeightInfo::unregister_relayer())]
 		pub fn unregister_relayer(origin: OriginFor<T>) -> DispatchResult {
@@ -329,6 +350,10 @@ pub mod pallet {
 				amount,
 			});
 			Ok(())
+		}
+
+		fn registered_evm_address(who: &T::AccountId) -> Option<sp_core::H160> {
+			RelayerByAccount::<T>::get(who)
 		}
 	}
 }

@@ -54,4 +54,11 @@ pub trait RelayerInterface {
 		asset_id: u32,
 		amount: u128,
 	) -> frame_support::dispatch::DispatchResult;
+
+	/// Return the EVM address registered for a substrate account, if any.
+	///
+	/// Reverse lookup of `resolve_relayer`.  Used by `pallet-shielded-pool`
+	/// to derive the H160 mirror AccountId when paying relay fees directly
+	/// to the EVM account.
+	fn registered_evm_address(who: &Self::AccountId) -> Option<sp_core::H160>;
 }

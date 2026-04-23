@@ -31,9 +31,18 @@ impl frame_support::traits::Get<Option<u64>> for MockBlockAuthor {
 	}
 }
 
+/// Accounts with ID >= 100 are treated as validator nodes in tests.
+pub struct MockValidators;
+impl frame_support::traits::Contains<u64> for MockValidators {
+	fn contains(who: &u64) -> bool {
+		*who >= 100
+	}
+}
+
 impl pallet_relayer::Config for Test {
 	type BlockAuthor = MockBlockAuthor;
 	type DefaultMinRelayFee = DefaultMinRelayFee;
+	type IsValidator = MockValidators;
 	type ManageOrigin = frame_system::EnsureRoot<u64>;
 	type MaxAllowedSelectors = MaxAllowedSelectors;
 	type WeightInfo = ();

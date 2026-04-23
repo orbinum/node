@@ -79,33 +79,60 @@ Emits: `RelayerUnregistered { evm_address, account }`.
 Decrements `amount` from the caller's pending fee balance (accounting only — no token transfer).  
 Emits: `RelayFeesConsumed { relayer, asset_id, amount }`.
 
-> **Note:** Validators should prefer `pallet-shielded-pool::claim_shielded_fees`, which additionally inserts a private note into the Merkle tree and delivers the funds as a ZK UTXO inside the shielded pool.
+> **Note:** This extrinsic only updates the `PendingRelayerFees` counter. To receive real tokens, the validator must call one of the two claim paths in `pallet-shielded-pool`:
+> - `claim_shielded_fees` — receives the fee as a private ZK note (requires a disclosure proof)
+> - `claim_relay_fees_to_evm` — transfers public ORB directly to the H160 mirror AccountId (no proof required; ideal for refilling the relayer's EVM gas wallet)
 
 ---
 
 ## Relay fee lifecycle
 
+Each node has **two separate identities**:
+
+| Identity | Type | Key | Purpose |
+|---|---|---|---|
+| `AccountId` (sr25519/Aura) | Substrate | Aura key | Receives and accumulates fees in `PendingRelayerFees` |
+| `H160` (ECDSA) | EVM | `--evm-relayer-key` | Signs EVM transactions, pays gas |
+
+Both are linked at startup via `register_relayer(evm_address)`, which writes both indexes (`RelayerRegistry` and `RelayerByAccount`).
+
 ```
 1. shield(1000)
    └─ PoolBalance[asset=0] += 1000
-      (tokens enter pool_account_id physically)
+      (tokens physically enter pool_account_id)
 
-2. unshield(amount=900, fee=100)
+2. unshield(amount=900, fee=100, relayer=H160)
    ├─ ZK proof verified
    ├─ T::Currency::transfer(pool → recipient, 900)
-   ├─ PoolBalance[asset=0] -= 900   (amount only; fee stays in pool)
-   └─ T::Relayer::accumulate_relay_fee(block_author, asset=0, 100)
-         └─ PendingRelayerFees[author][0] += 100
+   ├─ PoolBalance[asset=0] -= 900  (amount only; fee remains in the pool)
+   └─ T::Relayer::accumulate_relay_fee(resolve_relayer(H160), asset=0, 100)
+         └─ PendingRelayerFees[AccountId][0] += 100
 
-3. claim_shielded_fees(commitment, amount=100, asset_id=0, memo)   [in pallet-shielded-pool]
-   ├─ T::Relayer::pending_relay_fees(validator, 0) >= 100  ✓
-   ├─ T::Relayer::consume_relay_fee(validator, 0, 100)
-   │     └─ PendingRelayerFees[validator][0] -= 100
-   └─ MerkleTree ← commitment(100)
-         (validator now holds a private ZK note worth 100 planck)
+3a. claim_shielded_fees(commitment, amount=100, ...)   [pallet-shielded-pool, call_index 16]
+    ├─ Verifies ZK disclosure proof
+    ├─ consume_relay_fee(validator, 0, 100)
+    │     └─ PendingRelayerFees[validator][0] -= 100
+    └─ MerkleTree ← commitment(100)
+          (validator receives a private ZK note — full privacy)
+
+3b. claim_relay_fees_to_evm(asset_id=0, amount=100)   [pallet-shielded-pool, call_index 17]
+    ├─ registered_evm_address(validator) → H160
+    ├─ mirror = H160[0..20] ++ [0x00; 12]  (EeSuffixAddressMapping)
+    ├─ consume_relay_fee(validator, 0, 100)
+    │     └─ PendingRelayerFees[validator][0] -= 100
+    ├─ T::Currency::transfer(pool → mirror, 100)
+    └─ PoolBalance[asset=0] -= 100
+          (H160 EVM balance updated immediately → can pay gas)
 ```
 
-The fee **never leaves the pool as a public token**. The validator receives it as a private note inside the shielded pool, preserving privacy.
+**Key difference between 3a and 3b:**
+
+| | `claim_shielded_fees` | `claim_relay_fees_to_evm` |
+|---|---|---|
+| Result | Private note in Merkle tree | Public ORB on H160 EVM |
+| Privacy | Full (ZK UTXO) | Public (visible transfer) |
+| ZK proof required | Yes (disclosure circuit) | No |
+| Typical use | Accumulate private funds | Refill relayer gas wallet |
 
 ---
 
@@ -120,14 +147,18 @@ pub trait RelayerInterface {
     fn min_relay_fee() -> u128;
     fn allowed_selectors() -> Vec<[u8; 4]>;
     fn block_author() -> Option<Self::AccountId>;
+    fn resolve_relayer(evm_address: &H160) -> Option<Self::AccountId>;
     fn accumulate_relay_fee(author: &Self::AccountId, asset_id: u32, amount: u128);
     fn pending_relay_fees(who: &Self::AccountId, asset_id: u32) -> u128;
     fn consume_relay_fee(who: &Self::AccountId, asset_id: u32, amount: u128) -> DispatchResult;
+    fn registered_evm_address(who: &Self::AccountId) -> Option<H160>;
 }
 ```
 
+`registered_evm_address` is the reverse lookup of `resolve_relayer`: given an `AccountId` it returns the registered `H160`. Used by `pallet-shielded-pool::claim_relay_fees_to_evm` to derive the mirror AccountId of the H160 that receives the funds.
+
 In production: `type Relayer = pallet_relayer::Pallet<Runtime>`.  
-In `pallet-shielded-pool` unit tests: a lightweight mock struct in `mock.rs`.
+In `pallet-shielded-pool` unit tests: a lightweight mock struct in `mock.rs` backed by `sp_io::storage`.
 
 ---
 
@@ -186,12 +217,11 @@ cargo build --release --features runtime-benchmarks
 
 ```
 src/tests/
-├── config_tests.rs    — 9 tests: MinRelayFee and AllowedSelectors (governance gating, storage, events, capacity limits)
-├── registry_tests.rs  — 9 tests: register/unregister (duplicate guard, reverse index consistency, signed-only)
-└── fees_tests.rs      — 14 tests: accumulate, pending query, consume, claim (saturation, insufficient, events)
+├── config_tests.rs    — MinRelayFee and AllowedSelectors (governance gating, storage, events, capacity limits)
+├── registry_tests.rs  — register/unregister + registered_evm_address (duplicate guard, reverse index, signed-only, reverse lookup)
+└── fees_tests.rs      — accumulate, pending query, consume, claim (saturation, insufficient, events, per-account isolation)
 ```
 
 ```bash
 cargo test -p pallet-relayer
-# test result: ok. 43 passed; 0 failed
 ```

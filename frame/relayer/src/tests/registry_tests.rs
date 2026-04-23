@@ -1,39 +1,60 @@
 //! Tests for the EVM address ↔ AccountId registry.
 //!
-//! Covers:
-//! - `register_relayer`   — happy path, duplicate guard, signed-only
-//! - `unregister_relayer` — happy path, not-registered guard, signed-only
-//! - Reverse index consistency (`RelayerByAccount`)
+//! ## Account conventions (see mock.rs `MockValidators`)
+//! - Accounts 1–99: **non-validators** — rejected with `NotValidator`.
+//! - Accounts 100+: **validator nodes** — may register freely.
+//!
+//! ## Covers
+//! - `register_relayer`   — only validators accepted
+//! - `unregister_relayer` — cleans up registry
+//! - `registered_evm_address` — reverse lookup via RelayerInterface
 
-use crate::{Error, Event, RelayerByAccount, RelayerRegistry, mock::*};
+use crate::{Error, Event, RelayerByAccount, RelayerRegistry, mock::*, traits::RelayerInterface};
 use frame_support::{assert_noop, assert_ok};
 
 // ─── register_relayer ────────────────────────────────────────────────────────
 
 #[test]
-fn register_relayer_works() {
+fn validator_can_register() {
 	new_test_ext().execute_with(|| {
-		let evm = addr::alice_evm();
-		assert_ok!(Relayer::register_relayer(RuntimeOrigin::signed(1), evm));
-
-		// Forward lookup
-		assert_eq!(RelayerRegistry::<Test>::get(evm), Some(1u64));
-		// Reverse lookup
-		assert_eq!(RelayerByAccount::<Test>::get(1u64), Some(evm));
+		assert_ok!(Relayer::register_relayer(
+			RuntimeOrigin::signed(100),
+			addr::alice_evm()
+		));
+		assert_eq!(
+			RelayerRegistry::<Test>::get(addr::alice_evm()),
+			Some(100u64)
+		);
+		assert_eq!(
+			RelayerByAccount::<Test>::get(100u64),
+			Some(addr::alice_evm())
+		);
 	});
 }
 
 #[test]
-fn register_relayer_emits_event() {
+fn validator_register_emits_event() {
 	new_test_ext().execute_with(|| {
-		let evm = addr::alice_evm();
-		assert_ok!(Relayer::register_relayer(RuntimeOrigin::signed(1), evm));
+		assert_ok!(Relayer::register_relayer(
+			RuntimeOrigin::signed(100),
+			addr::alice_evm()
+		));
 		System::assert_last_event(
 			Event::RelayerRegistered {
-				evm_address: evm,
-				account: 1u64,
+				evm_address: addr::alice_evm(),
+				account: 100u64,
 			}
 			.into(),
+		);
+	});
+}
+
+#[test]
+fn non_validator_cannot_register() {
+	new_test_ext().execute_with(|| {
+		assert_noop!(
+			Relayer::register_relayer(RuntimeOrigin::signed(1), addr::alice_evm()),
+			Error::<Test>::NotValidator,
 		);
 	});
 }
@@ -49,67 +70,79 @@ fn register_relayer_requires_signed() {
 }
 
 #[test]
-fn register_relayer_fails_if_evm_already_taken() {
+fn register_fails_if_evm_already_taken() {
 	new_test_ext().execute_with(|| {
-		let evm = addr::alice_evm();
-		assert_ok!(Relayer::register_relayer(RuntimeOrigin::signed(1), evm));
-		// Account 2 tries to claim the same EVM address
+		assert_ok!(Relayer::register_relayer(
+			RuntimeOrigin::signed(100),
+			addr::alice_evm()
+		));
 		assert_noop!(
-			Relayer::register_relayer(RuntimeOrigin::signed(2), evm),
+			Relayer::register_relayer(RuntimeOrigin::signed(101), addr::alice_evm()),
 			Error::<Test>::AlreadyRegistered,
 		);
 	});
 }
 
 #[test]
-fn register_relayer_same_account_different_evm_fails_if_already_registered() {
-	// A second registration from the same account uses a different EVM address
-	// but the first one is still active — the old entry remains.
+fn register_fails_if_account_already_registered() {
 	new_test_ext().execute_with(|| {
 		assert_ok!(Relayer::register_relayer(
-			RuntimeOrigin::signed(1),
+			RuntimeOrigin::signed(100),
 			addr::alice_evm()
 		));
-		// bob_evm is free, but alice already has an entry in RelayerByAccount;
-		// the pallet doesn't block this — it overwrites the reverse index.
-		// (This is intentional: accounts can re-register with a new EVM key
-		//  after unregistering first.)
+		assert_noop!(
+			Relayer::register_relayer(RuntimeOrigin::signed(100), addr::bob_evm()),
+			Error::<Test>::AccountAlreadyRegistered,
+		);
+	});
+}
+
+#[test]
+fn two_validators_can_register_different_evm_addresses() {
+	new_test_ext().execute_with(|| {
 		assert_ok!(Relayer::register_relayer(
-			RuntimeOrigin::signed(1),
+			RuntimeOrigin::signed(100),
+			addr::alice_evm()
+		));
+		assert_ok!(Relayer::register_relayer(
+			RuntimeOrigin::signed(101),
 			addr::bob_evm()
 		));
-
-		// Reverse index points to the latest registration
-		assert_eq!(RelayerByAccount::<Test>::get(1u64), Some(addr::bob_evm()));
-		// Old EVM address still maps to account 1 (orphaned forward entry)
-		assert_eq!(RelayerRegistry::<Test>::get(addr::alice_evm()), Some(1u64));
+		assert_eq!(
+			RelayerRegistry::<Test>::get(addr::alice_evm()),
+			Some(100u64)
+		);
+		assert_eq!(RelayerRegistry::<Test>::get(addr::bob_evm()), Some(101u64));
 	});
 }
 
 // ─── unregister_relayer ──────────────────────────────────────────────────────
 
 #[test]
-fn unregister_relayer_works() {
+fn unregister_works() {
 	new_test_ext().execute_with(|| {
-		let evm = addr::alice_evm();
-		assert_ok!(Relayer::register_relayer(RuntimeOrigin::signed(1), evm));
-		assert_ok!(Relayer::unregister_relayer(RuntimeOrigin::signed(1)));
-
-		assert!(!RelayerRegistry::<Test>::contains_key(evm));
-		assert!(!RelayerByAccount::<Test>::contains_key(1u64));
+		assert_ok!(Relayer::register_relayer(
+			RuntimeOrigin::signed(100),
+			addr::alice_evm()
+		));
+		assert_ok!(Relayer::unregister_relayer(RuntimeOrigin::signed(100)));
+		assert!(!RelayerRegistry::<Test>::contains_key(addr::alice_evm()));
+		assert!(!RelayerByAccount::<Test>::contains_key(100u64));
 	});
 }
 
 #[test]
-fn unregister_relayer_emits_event() {
+fn unregister_emits_event() {
 	new_test_ext().execute_with(|| {
-		let evm = addr::alice_evm();
-		assert_ok!(Relayer::register_relayer(RuntimeOrigin::signed(1), evm));
-		assert_ok!(Relayer::unregister_relayer(RuntimeOrigin::signed(1)));
+		assert_ok!(Relayer::register_relayer(
+			RuntimeOrigin::signed(100),
+			addr::alice_evm()
+		));
+		assert_ok!(Relayer::unregister_relayer(RuntimeOrigin::signed(100)));
 		System::assert_last_event(
 			Event::RelayerUnregistered {
-				evm_address: evm,
-				account: 1u64,
+				evm_address: addr::alice_evm(),
+				account: 100u64,
 			}
 			.into(),
 		);
@@ -117,17 +150,17 @@ fn unregister_relayer_emits_event() {
 }
 
 #[test]
-fn unregister_relayer_fails_if_not_registered() {
+fn unregister_fails_if_not_registered() {
 	new_test_ext().execute_with(|| {
 		assert_noop!(
-			Relayer::unregister_relayer(RuntimeOrigin::signed(1)),
+			Relayer::unregister_relayer(RuntimeOrigin::signed(100)),
 			Error::<Test>::NotRegistered,
 		);
 	});
 }
 
 #[test]
-fn unregister_relayer_requires_signed() {
+fn unregister_requires_signed() {
 	new_test_ext().execute_with(|| {
 		assert_noop!(
 			Relayer::unregister_relayer(RuntimeOrigin::none()),
@@ -137,30 +170,77 @@ fn unregister_relayer_requires_signed() {
 }
 
 #[test]
-fn register_after_unregister_works() {
+fn can_re_register_after_unregister() {
 	new_test_ext().execute_with(|| {
-		let evm = addr::alice_evm();
-		assert_ok!(Relayer::register_relayer(RuntimeOrigin::signed(1), evm));
-		assert_ok!(Relayer::unregister_relayer(RuntimeOrigin::signed(1)));
-		// Can re-register with the same EVM address after unregistering
-		assert_ok!(Relayer::register_relayer(RuntimeOrigin::signed(1), evm));
-		assert_eq!(RelayerRegistry::<Test>::get(evm), Some(1u64));
+		assert_ok!(Relayer::register_relayer(
+			RuntimeOrigin::signed(100),
+			addr::alice_evm()
+		));
+		assert_ok!(Relayer::unregister_relayer(RuntimeOrigin::signed(100)));
+		assert_ok!(Relayer::register_relayer(
+			RuntimeOrigin::signed(100),
+			addr::alice_evm()
+		));
+		assert_eq!(
+			RelayerRegistry::<Test>::get(addr::alice_evm()),
+			Some(100u64)
+		);
+	});
+}
+
+// ─── registered_evm_address (RelayerInterface reverse lookup) ────────────────
+
+#[test]
+fn registered_evm_address_returns_none_for_unknown_account() {
+	new_test_ext().execute_with(|| {
+		assert_eq!(crate::Pallet::<Test>::registered_evm_address(&100u64), None);
 	});
 }
 
 #[test]
-fn different_accounts_can_register_different_evm_addresses() {
+fn registered_evm_address_returns_correct_address() {
 	new_test_ext().execute_with(|| {
 		assert_ok!(Relayer::register_relayer(
-			RuntimeOrigin::signed(1),
+			RuntimeOrigin::signed(100),
+			addr::alice_evm()
+		));
+		assert_eq!(
+			crate::Pallet::<Test>::registered_evm_address(&100u64),
+			Some(addr::alice_evm()),
+		);
+	});
+}
+
+#[test]
+fn registered_evm_address_returns_none_after_unregister() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(Relayer::register_relayer(
+			RuntimeOrigin::signed(100),
+			addr::alice_evm()
+		));
+		assert_ok!(Relayer::unregister_relayer(RuntimeOrigin::signed(100)));
+		assert_eq!(crate::Pallet::<Test>::registered_evm_address(&100u64), None);
+	});
+}
+
+#[test]
+fn registered_evm_address_is_account_specific() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(Relayer::register_relayer(
+			RuntimeOrigin::signed(100),
 			addr::alice_evm()
 		));
 		assert_ok!(Relayer::register_relayer(
-			RuntimeOrigin::signed(2),
+			RuntimeOrigin::signed(101),
 			addr::bob_evm()
 		));
-
-		assert_eq!(RelayerRegistry::<Test>::get(addr::alice_evm()), Some(1u64));
-		assert_eq!(RelayerRegistry::<Test>::get(addr::bob_evm()), Some(2u64));
+		assert_eq!(
+			crate::Pallet::<Test>::registered_evm_address(&100u64),
+			Some(addr::alice_evm()),
+		);
+		assert_eq!(
+			crate::Pallet::<Test>::registered_evm_address(&101u64),
+			Some(addr::bob_evm()),
+		);
 	});
 }

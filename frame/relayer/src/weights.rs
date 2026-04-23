@@ -80,25 +80,6 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	}
 	/// Storage: `Relayer::RelayerRegistry` (r:1 w:1)
 	/// Proof: `Relayer::RelayerRegistry` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `MaxEncodedLen`)
-	/// Storage: `System::Number` (r:1 w:0)
-	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::ExecutionPhase` (r:1 w:0)
-	/// Proof: `System::ExecutionPhase` (`max_values`: Some(1), `max_size`: Some(5), added: 500, mode: `MaxEncodedLen`)
-	/// Storage: `System::EventCount` (r:1 w:1)
-	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::Events` (r:1 w:1)
-	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	/// Storage: `Relayer::RelayerByAccount` (r:0 w:1)
-	/// Proof: `Relayer::RelayerByAccount` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `MaxEncodedLen`)
-	fn register_relayer() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `61`
-		//  Estimated: `3533`
-		// Minimum execution time: 10_000_000 picoseconds.
-		Weight::from_parts(10_000_000, 3533)
-			.saturating_add(T::DbWeight::get().reads(5_u64))
-			.saturating_add(T::DbWeight::get().writes(4_u64))
-	}
 	/// Storage: `Relayer::RelayerByAccount` (r:1 w:1)
 	/// Proof: `Relayer::RelayerByAccount` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `MaxEncodedLen`)
 	/// Storage: `System::Number` (r:1 w:0)
@@ -109,8 +90,27 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
+	fn register_relayer() -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `61`
+		//  Estimated: `3533`
+		// Minimum execution time: 9_000_000 picoseconds.
+		Weight::from_parts(9_000_000, 3533)
+			.saturating_add(T::DbWeight::get().reads(4_u64))
+			.saturating_add(T::DbWeight::get().writes(4_u64))
+	}
+	/// Storage: `Relayer::RelayerByAccount` (r:1 w:1)
+	/// Proof: `Relayer::RelayerByAccount` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `MaxEncodedLen`)
 	/// Storage: `Relayer::RelayerRegistry` (r:0 w:1)
 	/// Proof: `Relayer::RelayerRegistry` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `MaxEncodedLen`)
+	/// Storage: `System::Number` (r:1 w:0)
+	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `System::ExecutionPhase` (r:1 w:0)
+	/// Proof: `System::ExecutionPhase` (`max_values`: Some(1), `max_size`: Some(5), added: 500, mode: `MaxEncodedLen`)
+	/// Storage: `System::EventCount` (r:1 w:1)
+	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `System::Events` (r:1 w:1)
+	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
 	fn unregister_relayer() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `189`
@@ -184,25 +184,6 @@ impl WeightInfo for () {
 	}
 	/// Storage: `Relayer::RelayerRegistry` (r:1 w:1)
 	/// Proof: `Relayer::RelayerRegistry` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `MaxEncodedLen`)
-	/// Storage: `System::Number` (r:1 w:0)
-	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::ExecutionPhase` (r:1 w:0)
-	/// Proof: `System::ExecutionPhase` (`max_values`: Some(1), `max_size`: Some(5), added: 500, mode: `MaxEncodedLen`)
-	/// Storage: `System::EventCount` (r:1 w:1)
-	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::Events` (r:1 w:1)
-	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	/// Storage: `Relayer::RelayerByAccount` (r:0 w:1)
-	/// Proof: `Relayer::RelayerByAccount` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `MaxEncodedLen`)
-	fn register_relayer() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `61`
-		//  Estimated: `3533`
-		// Minimum execution time: 10_000_000 picoseconds.
-		Weight::from_parts(10_000_000, 3533)
-			.saturating_add(RocksDbWeight::get().reads(5_u64))
-			.saturating_add(RocksDbWeight::get().writes(4_u64))
-	}
 	/// Storage: `Relayer::RelayerByAccount` (r:1 w:1)
 	/// Proof: `Relayer::RelayerByAccount` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `MaxEncodedLen`)
 	/// Storage: `System::Number` (r:1 w:0)
@@ -213,8 +194,27 @@ impl WeightInfo for () {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
+	fn register_relayer() -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `61`
+		//  Estimated: `3533`
+		// Minimum execution time: 9_000_000 picoseconds.
+		Weight::from_parts(9_000_000, 3533)
+			.saturating_add(RocksDbWeight::get().reads(4_u64))
+			.saturating_add(RocksDbWeight::get().writes(4_u64))
+	}
+	/// Storage: `Relayer::RelayerByAccount` (r:1 w:1)
+	/// Proof: `Relayer::RelayerByAccount` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `MaxEncodedLen`)
 	/// Storage: `Relayer::RelayerRegistry` (r:0 w:1)
 	/// Proof: `Relayer::RelayerRegistry` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `MaxEncodedLen`)
+	/// Storage: `System::Number` (r:1 w:0)
+	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `System::ExecutionPhase` (r:1 w:0)
+	/// Proof: `System::ExecutionPhase` (`max_values`: Some(1), `max_size`: Some(5), added: 500, mode: `MaxEncodedLen`)
+	/// Storage: `System::EventCount` (r:1 w:1)
+	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `System::Events` (r:1 w:1)
+	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
 	fn unregister_relayer() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `189`

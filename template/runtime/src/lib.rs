@@ -548,12 +548,29 @@ impl frame_support::traits::Get<Option<AccountId>> for RelayerBlockAuthor {
 	}
 }
 
+/// Identifies validator nodes by checking if their AccountId corresponds
+/// to a current Aura authority.
+///
+/// In Substrate, a validator's AccountId IS their sr25519 public key (32 bytes),
+/// which is the same byte representation as AuraId. We compare raw bytes.
+pub struct AuraValidatorSet;
+impl frame_support::traits::Contains<AccountId> for AuraValidatorSet {
+	fn contains(who: &AccountId) -> bool {
+		let who_bytes: &[u8; 32] = who.as_ref();
+		pallet_aura::Authorities::<Runtime>::get()
+			.iter()
+			.any(|auth| <_ as AsRef<[u8]>>::as_ref(auth) == who_bytes)
+	}
+}
+
 impl pallet_relayer::Config for Runtime {
 	/// Block author for relay fee attribution.
 	type BlockAuthor = RelayerBlockAuthor;
 	/// Default minimum relay fee: 0.001 ORB = 1e15 planck (anti-spam).
 	/// Overridable at runtime via `set_min_relay_fee` (governance/sudo).
 	type DefaultMinRelayFee = ConstU128<1_000_000_000_000_000>;
+	/// Only validator nodes (Aura authorities) may register as relayers.
+	type IsValidator = AuraValidatorSet;
 	/// Only sudo/governance can update relay configuration.
 	type ManageOrigin = frame_system::EnsureRoot<AccountId>;
 	/// Allow up to 16 ABI selectors in the whitelist.
