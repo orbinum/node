@@ -45,6 +45,7 @@ frame-system-rpc-runtime-api = { workspace = true }
 pallet-account-mapping = { workspace = true }
 pallet-account-mapping-runtime-api = { workspace = true }
 pallet-aura = { workspace = true }
+pallet-authorship = { workspace = true }
 pallet-balances = { workspace = true, features = ["insecure_zero_ed"] }
 pallet-grandpa = { workspace = true }
 pallet-sudo = { workspace = true }
@@ -71,6 +72,8 @@ pallet-evm-precompile-sha3fips-benchmarking = { workspace = true }
 pallet-evm-precompile-simple = { workspace = true }
 
 # Orbinum Privacy
+pallet-relayer = { workspace = true }
+pallet-relayer-runtime-api = { workspace = true }
 pallet-shielded-pool = { workspace = true }
 pallet-shielded-pool-runtime-api = { workspace = true }
 pallet-zk-verifier = { workspace = true }
@@ -122,6 +125,7 @@ std = [
 	"frame-system-rpc-runtime-api/std",
 	"frame-system-benchmarking?/std",
 	"pallet-aura/std",
+	"pallet-authorship/std",
 	"pallet-account-mapping/std",
 	"pallet-account-mapping-runtime-api/std",
 	"pallet-balances/std",
@@ -149,6 +153,8 @@ std = [
 	"pallet-evm-precompile-account-mapping/std",
 	# Orbinum Privacy
 	"pallet-zk-verifier/std",
+	"pallet-relayer/std",
+	"pallet-relayer-runtime-api/std",
 	"pallet-shielded-pool/std",
 	"pallet-shielded-pool/poseidon-native",
 	"pallet-shielded-pool-runtime-api/std",
@@ -174,5 +180,6 @@ runtime-benchmarks = [
 	"pallet-evm-precompile-sha3fips-benchmarking/runtime-benchmarks",
 	"pallet-zk-verifier/runtime-benchmarks",
 	"pallet-shielded-pool/runtime-benchmarks",
+	"pallet-relayer/runtime-benchmarks",
 	"polkadot-runtime-common/runtime-benchmarks",
 ]

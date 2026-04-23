@@ -53,6 +53,12 @@ pub struct EthConfiguration {
 	#[arg(long)]
 	pub enable_dev_signer: bool,
 
+	/// EVM private key (hex, with or without 0x prefix) used by this node to relay
+	/// shielded-pool calls on behalf of users (gasless relay).
+	/// When set, the node exposes the `orbinum_relayShieldedCall` RPC endpoint.
+	#[arg(long, value_name = "HEX_KEY")]
+	pub evm_relayer_key: Option<String>,
+
 	/// The dynamic-fee pallet target gas price set by block author
 	#[arg(long, default_value = "1")]
 	pub target_gas_price: u64,

@@ -35,5 +35,6 @@ pub fn testnet() -> serde_json::Value {
 		vec![],
 		2700,
 		false,
+		1_000_000_000, // 1 gwei — economical; EIP-1559 adjusts upward with traffic
 	)
 }

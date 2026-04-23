@@ -16,6 +16,7 @@ mod cli;
 mod client;
 mod command;
 mod eth;
+mod relayer_register;
 mod rpc;
 mod service;
 

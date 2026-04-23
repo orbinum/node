@@ -23,6 +23,7 @@ pub use fc_rpc::{EthBlockDataCacheTask, EthConfig};
 pub use fc_rpc_core::types::{FeeHistoryCache, FeeHistoryCacheLimit, FilterPool};
 use fc_storage::StorageOverride;
 use fp_rpc::{ConvertTransaction, ConvertTransactionRuntimeApi, EthereumRuntimeRPCApi};
+use pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi;
 
 /// Extra dependencies for Ethereum compatibility.
 pub struct EthDeps<B: BlockT, C, P, CT, CIDP> {
@@ -36,6 +37,8 @@ pub struct EthDeps<B: BlockT, C, P, CT, CIDP> {
 	pub is_authority: bool,
 	/// Whether to enable dev signer
 	pub enable_dev_signer: bool,
+	/// Optional EVM private key (hex) for the node-native relay.
+	pub evm_relayer_key: Option<String>,
 	/// Network service
 	pub network: Arc<dyn NetworkService>,
 	/// Chain syncing service
@@ -80,7 +83,8 @@ where
 	C::Api: AuraApi<B, AuraId>
 		+ BlockBuilderApi<B>
 		+ ConvertTransactionRuntimeApi<B>
-		+ EthereumRuntimeRPCApi<B>,
+		+ EthereumRuntimeRPCApi<B>
+		+ ShieldedPoolRuntimeApi<B>,
 	C: HeaderBackend<B> + HeaderMetadata<B, Error = BlockChainError>,
 	C: BlockchainEvents<B> + AuxStore + UsageProvider<B> + StorageProvider<B, BE> + 'static,
 	BE: Backend<B> + 'static,
@@ -103,6 +107,7 @@ where
 		converter,
 		is_authority,
 		enable_dev_signer,
+		evm_relayer_key,
 		network,
 		sync,
 		frontier_backend,
@@ -194,7 +199,28 @@ where
 	)?;
 
 	#[cfg(feature = "txpool")]
-	io.merge(TxPool::new(client, pool).into_rpc())?;
+	io.merge(TxPool::new(client.clone(), pool.clone()).into_rpc())?;
+
+	// Orbinum EVM relay RPC (requires --evm-relayer-key)
+	if let Some(ref key_hex) = evm_relayer_key {
+		use fc_rpc::{EthValidatorSigner, OrbinumRelay, OrbinumRelayApiServer};
+		match EthValidatorSigner::from_hex(key_hex) {
+			Ok(signer) => {
+				static LOGGED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+				LOGGED.get_or_init(|| {
+					log::info!(
+						target: "rpc",
+						"🔑 EVM relay signer active: {}",
+						signer.address()
+					);
+				});
+				io.merge(OrbinumRelay::new(client.clone(), pool.clone(), signer).into_rpc())?;
+			}
+			Err(e) => {
+				log::error!(target: "rpc", "Invalid --evm-relayer-key: {e}");
+			}
+		}
+	}
 
 	Ok(io)
 }

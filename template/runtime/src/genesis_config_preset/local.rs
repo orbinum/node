@@ -61,5 +61,6 @@ pub fn local_testnet() -> serde_json::Value {
 		vec![],
 		2700,
 		false,
+		1_000_000_000, // 1 gwei — local testnet: same as dev
 	)
 }
