@@ -48,8 +48,6 @@ members = [
 	"primitives/self-contained",
 	"primitives/zk-core",
 	"primitives/zk-verifier",
-	"primitives/zk-circuits",
-	"primitives/encrypted-memo",
 	"template/node",
 	"template/runtime",
 	"precompiles",
@@ -225,8 +223,6 @@ fp-rpc = { path = "primitives/rpc", default-features = false }
 fp-self-contained = { path = "primitives/self-contained", default-features = false }
 fp-storage = { path = "primitives/storage", default-features = false }
 # Orbinum ZK Primitives
-orbinum-encrypted-memo = { path = "primitives/encrypted-memo", default-features = false }
-orbinum-zk-circuits = { path = "primitives/zk-circuits", default-features = false }
 orbinum-zk-core = { path = "primitives/zk-core", default-features = false }
 orbinum-zk-verifier = { path = "primitives/zk-verifier", default-features = false }
 
