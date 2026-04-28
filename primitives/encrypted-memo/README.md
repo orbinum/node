@@ -9,18 +9,21 @@ Encrypted memo primitives for private transaction metadata in Orbinum Network.
 
 - **ChaCha20Poly1305 AEAD**: Authenticated encryption for memo data
 - **Viewing key encryption**: Only recipient can decrypt note details
-- **Selective disclosure**: ZK proofs for partial data revelation
-- **Key derivation**: Deterministic keys from spending key
+- **Selective disclosure**: ZK proof structures for partial data revelation
+- **Key derivation**: Deterministic keys from spending key via SHA-256
 - **no_std compatible**: WASM runtime support
 
 ## Installation
 
 ```toml
 [dependencies]
-orbinum-encrypted-memo = "0.2"
+orbinum-encrypted-memo = "1.0"
 
-# For selective disclosure (ZK proofs)
-orbinum-encrypted-memo = { version = "0.2", features = ["disclosure"] }
+# Enable random nonce generation (requires std/rand)
+orbinum-encrypted-memo = { version = "1.0", features = ["encrypt"] }
+
+# Enable SCALE codec + TypeInfo (Substrate runtime)
+orbinum-encrypted-memo = { version = "1.0", features = ["parity-scale-codec", "scale-info"] }
 ```
 
 ## Usage
@@ -28,172 +31,133 @@ orbinum-encrypted-memo = { version = "0.2", features = ["disclosure"] }
 ### Basic Encryption/Decryption
 
 ```rust
-use orbinum_encrypted_memo::{
-    domain::entities::types::{MemoData, ViewingKey, Commitment, Nonce},
-    domain::services::encryption::{encrypt_memo, decrypt_memo},
-};
+use orbinum_encrypted_memo::{MemoData, KeySet, encrypt_memo, decrypt_memo};
 
-// Create memo data
-let memo = MemoData::new(
-    1000,           // value
-    owner_pubkey,   // owner public key
-    blinding,       // blinding factor
-    0,              // asset_id
-);
+// Derive keys from master spending key
+let keys = KeySet::from_spending_key(spending_key);
 
-// Encrypt for recipient
-let nonce = Nonce::random();
-let encrypted = encrypt_memo(&memo, &commitment, &recipient_vk, &nonce)?;
+// Create memo
+let memo = MemoData::new(1000, owner_pubkey, blinding, 0);
 
-// Recipient decrypts
-let decrypted = decrypt_memo(&encrypted, &commitment, &my_viewing_key)?;
+// Encrypt (nonce must be unique per note)
+let encrypted = encrypt_memo(&memo, &commitment, keys.viewing_key.as_bytes(), &nonce)?;
+
+// Decrypt
+let decrypted = decrypt_memo(&encrypted, &commitment, keys.viewing_key.as_bytes())?;
 assert_eq!(decrypted.value, 1000);
 ```
 
 ### Key Derivation from Spending Key
 
 ```rust
-use orbinum_encrypted_memo::domain::aggregates::keyset::KeySet;
+use orbinum_encrypted_memo::{KeySet, derive_viewing_key_from_spending};
 
-// Derive all keys from master spending key
-let keys = KeySet::from_spending_key(&spending_key);
+// Derive all sub-keys at once
+let keys = KeySet::from_spending_key(spending_key);
+let vk  = keys.viewing_key.as_bytes();   // decrypt notes
+let nk  = keys.nullifier_key.as_bytes(); // compute nullifiers
+let ek  = keys.eddsa_key.as_bytes();     // sign transactions
 
-// Access derived keys
-let viewing_key = &keys.viewing_key;      // For decryption
-let nullifier_key = &keys.nullifier_key;  // For double-spend prevention
-let eddsa_key = &keys.eddsa_key;          // For signatures
-
-// Decrypt with viewing key
-let memo = decrypt_memo(&encrypted, &commitment, viewing_key)?;
+// Or derive a single key
+let vk = derive_viewing_key_from_spending(spending_key);
 ```
 
-### Selective Disclosure with ZK Proofs
+### Note Scanning (Wallet)
 
 ```rust
-use orbinum_encrypted_memo::{
-    domain::aggregates::disclosure::{DisclosureMask, DisclosureProof},
-    application::disclosure::generate_disclosure_proof,
-};
+use orbinum_encrypted_memo::try_decrypt_memo;
 
-// Create mask (reveal only value, hide owner and blinding)
-let mask = DisclosureMask::only_value();
-
-// Load circuit artifacts (client responsibility)
-let proving_key_bytes = load_artifact("disclosure_pk.ark")?;
-let wasm_bytes = load_artifact("disclosure.wasm")?;
-
-// Generate ZK proof
-let proof = generate_disclosure_proof(
-    &memo_data,
-    &mask,
-    &viewing_key,
-    commitment,
-    &proving_key_bytes,
-    &wasm_bytes,
-)?;
-
-// Extract revealed data
-let partial = proof.extract_partial_memo(&mask);
-assert_eq!(partial.value, Some(1000));
-assert_eq!(partial.owner_pk, None);  // Hidden
-```
-
-### Note Scanning (Wallet Use Case)
-
-```rust
-use orbinum_encrypted_memo::domain::services::encryption::decrypt_memo;
-
-// Scan blockchain for owned notes
 for (commitment, encrypted_memo) in blockchain_notes {
-    // Try to decrypt with viewing key
-    if let Ok(memo) = decrypt_memo(&encrypted_memo, &commitment, &my_vk) {
-        println!("Found owned note: value={}, owner={}",
-            memo.value, memo.owner_pk);
-
-        // Save to wallet database
+    if let Some(memo) = try_decrypt_memo(&encrypted_memo, &commitment, viewing_key) {
         wallet.add_note(commitment, memo);
     }
 }
 ```
 
+### Selective Disclosure
+
+```rust
+use orbinum_encrypted_memo::{DisclosureMask, DisclosureProof, PartialMemoData};
+
+// Build mask (reveal only value; blinding is always hidden)
+let mask = DisclosureMask::only_value();
+
+// PartialMemoData shows only disclosed fields
+let partial = PartialMemoData::from_disclosure(&memo, &mask);
+assert_eq!(partial.value, Some(1000));
+assert!(partial.owner_pk.is_none());
+
+// Serialize proof bundle for on-chain submission
+let proof = DisclosureProof::new(groth16_proof_bytes, public_signals, mask);
+proof.validate()?;
+let bytes = proof.to_bytes();
+
+// Deserialize on the other side
+let proof = DisclosureProof::from_bytes(&bytes)?;
+```
+
 ## Encryption Scheme
 
-Uses ChaCha20Poly1305 AEAD with per-note key derivation:
+ChaCha20Poly1305 AEAD with per-note key derivation:
 
 ```text
-encryption_key = SHA256(viewing_key || commitment || domain_separator)
-ciphertext = ChaCha20Poly1305(memo_data, encryption_key, nonce)
-encrypted_memo = nonce(12) || ciphertext(76) || mac(16) = 104 bytes
+encryption_key = SHA256(viewing_key || commitment || "orbinum-note-encryption-v1")
+ciphertext     = ChaCha20Poly1305(plaintext=76B, key=encryption_key, nonce=12B)
+encrypted_memo = nonce(12) || ciphertext(76) || mac(16)  →  104 bytes total
 ```
 
 ## Key Derivation Hierarchy
 
 ```text
-spending_key (master secret, 32 bytes)
+spending_key  (32 bytes, never shared)
       │
-      ├── viewing_key = SHA256(spending_key || "orbinum-viewing-key-v1")
+      ├── viewing_key   = SHA256(spending_key || "orbinum-viewing-key-v1")
       ├── nullifier_key = SHA256(spending_key || "orbinum-nullifier-key-v1")
-      └── eddsa_key = SHA256(spending_key || "orbinum-eddsa-key-v1")
+      └── eddsa_key     = SHA256(spending_key || "orbinum-eddsa-key-v1")
 ```
 
 ## Memo Structure
 
 | Field | Type | Size | Description |
 |-------|------|------|-------------|
-| `value` | u64 | 8 bytes | Note amount |
-| `owner_pk` | FieldElement | 32 bytes | Owner public key |
-| `blinding` | FieldElement | 32 bytes | Blinding factor |
-| `asset_id` | u32 | 4 bytes | Asset identifier |
+| `value` | `u64` | 8 bytes | Note amount |
+| `owner_pk` | `[u8; 32]` | 32 bytes | Owner public key |
+| `blinding` | `[u8; 32]` | 32 bytes | Blinding factor |
+| `asset_id` | `u32` | 4 bytes | Asset identifier |
 
-**Total plaintext**: 76 bytes
-**Encrypted memo**: 104 bytes (with nonce + MAC)
+**Plaintext**: 76 bytes — **Encrypted memo**: 104 bytes (nonce + ciphertext + MAC)
 
-## Selective Disclosure Features
+## Selective Disclosure Masks
 
-With the `disclosure` feature flag:
+| Constructor | Reveals | Use Case |
+|---|---|---|
+| `DisclosureMask::all()` | value, owner, asset_id | Full compliance disclosure |
+| `DisclosureMask::only_value()` | value | Prove amount without revealing identity |
+| `DisclosureMask::value_and_asset()` | value + asset_id | Asset-specific compliance |
+| `DisclosureMask::none()` | nothing | Custom mask starting point |
 
-| Disclosure Mask | Reveals | Use Case |
-|-----------------|---------|----------|
-| `only_value()` | Amount only | Prove balance without revealing identity |
-| `only_owner()` | Owner only | Prove ownership without revealing amount |
-| `value_and_owner()` | Amount + Owner | Compliance disclosure |
-| `none()` | Nothing | Prove knowledge without revealing anything |
+`disclose_blinding` is always rejected by `validate()` — exposing the blinding factor breaks commitment privacy.
 
 ## Circuit Artifacts
 
-⚠️ **Client Responsibility**: This crate does NOT bundle circuit artifacts (WASM, proving keys).
+This crate provides **data types only** — it does not generate ZK proofs. Proof generation
+is done client-side using the Circom disclosure circuit. Artifacts are bundled in the
+node repository under `/artifacts/`:
 
-Download from: [orbinum/circuits releases](https://github.com/orbinum/circuits/releases)
-
-```bash
-# Download disclosure circuit artifacts (v0.1.0)
-curl -L -o disclosure.wasm \
-  https://github.com/orbinum/circuits/releases/download/v0.1.0/disclosure.wasm
-curl -L -o disclosure_pk.ark \
-  https://github.com/orbinum/circuits/releases/download/v0.1.0/disclosure_pk.ark
-
-# Verify checksums
-sha256sum -c checksums.txt
+```
+artifacts/
+  disclosure.wasm           # Witness generator (client)
+  disclosure.zkey            # Proving key (client)
+  verification_key_disclosure.json  # Verification key (runtime)
 ```
 
 ## Security Properties
 
 - **Confidentiality**: Only viewing key holder can decrypt
 - **Authenticity**: AEAD MAC prevents tampering
-- **Unlinkability**: Unique encryption key per note (derived from commitment)
-- **Forward Secrecy**: Compromising one key doesn't reveal others
+- **Unlinkability**: Unique encryption key per note (commitment-bound)
+- **Forward Secrecy**: Subkey compromise does not expose spending key
 - **Zero-Knowledge**: Selective disclosure without revealing hidden fields
-
-## Performance
-
-| Operation | Time | Notes |
-|-----------|------|-------|
-| Encrypt | 15μs | ChaCha20Poly1305 |
-| Decrypt | 20μs | Includes verification |
-| Key Derivation | 8μs | SHA256 hashing |
-| Disclosure Proof | 150ms | ZK proof generation |
-
-*Measured on Apple M1*
 
 ## License
 
