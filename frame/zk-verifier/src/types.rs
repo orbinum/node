@@ -1,17 +1,10 @@
-//! Types for the ZK Verifier pallet
-//!
-//! This module contains ONLY runtime types for FRAME storage and extrinsics.
-//! Domain types are in domain/, primitive adapters are in infrastructure/adapters.
-//!
-//! Following Clean Architecture:
-//! - These types are for the Presentation/Infrastructure boundary (FRAME runtime)
-//! - They are converted to domain types before use case execution via extrinsics.rs
-//! - They should NOT be used directly in domain logic
-//! - Primitives (orbinum-zk-verifier, orbinum-zk-core) are accessed ONLY via infrastructure/adapters
+//! Types for the ZK Verifier pallet.
 
 use frame_support::pallet_prelude::*;
 use parity_scale_codec::DecodeWithMemTracking;
 use serde::{Deserialize, Serialize};
+
+extern crate alloc;
 
 /// Circuit identifier type (pallet-specific wrapper)
 #[derive(
@@ -136,4 +129,38 @@ pub struct VkEntry {
 	/// Set this version as active after registration.
 	/// If no active version exists for the circuit, it is activated regardless.
 	pub set_active: bool,
+}
+
+// ─── Runtime API response types ───────────────────────────────────────────────
+
+/// (version, VK hash) pair used in [`CircuitVersionInfo`].
+#[derive(
+	Clone,
+	PartialEq,
+	Eq,
+	parity_scale_codec::Encode,
+	parity_scale_codec::Decode,
+	scale_info::TypeInfo,
+	Debug
+)]
+pub struct VkVersionHash {
+	pub version: u32,
+	pub vk_hash: [u8; 32],
+}
+
+/// Versioning summary for one circuit, returned by runtime API queries.
+#[derive(
+	Clone,
+	PartialEq,
+	Eq,
+	parity_scale_codec::Encode,
+	parity_scale_codec::Decode,
+	scale_info::TypeInfo,
+	Debug
+)]
+pub struct CircuitVersionInfo {
+	pub circuit_id: u32,
+	pub active_version: u32,
+	pub supported_versions: alloc::vec::Vec<u32>,
+	pub vk_hashes: alloc::vec::Vec<VkVersionHash>,
 }
