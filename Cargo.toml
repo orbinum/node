@@ -60,7 +60,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-authors = ["Orbinum Team <dev@orbinum.net>"]
+authors = ["Orbinum Team <contact@orbinum.net>"]
 edition = "2021"
 repository = "https://github.com/orbinum/node"
 homepage = "https://orbinum.net"
