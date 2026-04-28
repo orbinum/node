@@ -1076,16 +1076,14 @@ pub mod pallet {
 			let copy_len = address.len().min(32);
 			addr_fe_bytes[..copy_len].copy_from_slice(&address[..copy_len]);
 
-			let inner = orbinum_zk_core::infrastructure::host_interface
-                ::poseidon_host_interface::poseidon_hash_2(
-                    &chain_id_fe_bytes,
-                    &addr_fe_bytes,
-                );
-			let computed_vec = orbinum_zk_core::infrastructure::host_interface
-                ::poseidon_host_interface::poseidon_hash_2(
-                    &inner,
-                    &blinding,
-                );
+			let inner = orbinum_zk_core::host_interface::poseidon_host_interface::poseidon_hash_2(
+				&chain_id_fe_bytes,
+				&addr_fe_bytes,
+			);
+			let computed_vec =
+				orbinum_zk_core::host_interface::poseidon_host_interface::poseidon_hash_2(
+					&inner, &blinding,
+				);
 			let computed: [u8; 32] = computed_vec
 				.try_into()
 				.map_err(|_| Error::<T>::CommitmentMismatch)?;
