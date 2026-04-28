@@ -57,7 +57,7 @@ fn do_verify(vk_bytes: &[u8], proof_bytes: &[u8], raw_inputs: Vec<[u8; 32]>) -> 
 	#[cfg(any(feature = "runtime-benchmarks", test))]
 	{
 		let _ = (vk_bytes, proof_bytes, raw_inputs);
-		return true;
+		true
 	}
 
 	#[cfg(not(any(feature = "runtime-benchmarks", test)))]
