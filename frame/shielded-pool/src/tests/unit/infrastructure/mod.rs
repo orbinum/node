@@ -1,9 +1,0 @@
-//! Infrastructure layer tests
-
-pub mod encrypted_memo_tests;
-pub mod historic_roots_tests;
-pub mod merkle_tree_implementation_tests;
-pub mod merkle_tree_structure_tests;
-pub mod pool_account_tests;
-pub mod poseidon_host_interface_tests;
-pub mod type_tests;

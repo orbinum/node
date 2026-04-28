@@ -58,6 +58,8 @@ impl ZkVerifierPort for MockZkVerifier {
 		_merkle_root: &[u8; 32],
 		_nullifiers: &[[u8; 32]],
 		_commitments: &[[u8; 32]],
+		_asset_id: u32,
+		_fee: u128,
 		_version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
 		// Validate basic format (proof should not be empty)
@@ -68,6 +70,7 @@ impl ZkVerifierPort for MockZkVerifier {
 		Ok(true)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	fn verify_unshield_proof(
 		proof: &[u8],
 		_merkle_root: &[u8; 32],
@@ -75,6 +78,7 @@ impl ZkVerifierPort for MockZkVerifier {
 		_amount: u128,
 		_recipient: &[u8; 32],
 		_asset_id: u32,
+		_fee: u128,
 		_version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
 		// Validate basic format
@@ -139,6 +143,106 @@ impl pallet_shielded_pool::Config for Test {
 	type MaxHistoricRoots = MaxHistoricRoots;
 	type MinShieldAmount = MinShieldAmount;
 	type WeightInfo = ();
+	type RequestExpiration = RequestExpiration;
+	type Relayer = MockRelayer;
+}
+
+/// Mock implementation of `RelayerInterface` for unit tests.
+///
+/// - `min_relay_fee()` → 0 (no minimum in tests; set higher when testing fee enforcement)
+/// - `block_author()` → `Some(1u64)` (Alice)
+/// - Fee tracking is backed by raw `TestExternalities` storage (auto-reset per test).
+pub struct MockRelayer;
+
+/// Read a pending-fee balance from raw test storage.
+pub fn mock_pending_fees_get(who: u64, asset_id: u32) -> u128 {
+	use parity_scale_codec::{Decode, Encode};
+	let key = [
+		b"mock:fees:".as_ref(),
+		who.encode().as_slice(),
+		asset_id.encode().as_slice(),
+	]
+	.concat();
+	sp_io::storage::get(&key)
+		.and_then(|v| u128::decode(&mut &v[..]).ok())
+		.unwrap_or(0)
+}
+
+/// Write a pending-fee balance to raw test storage.
+pub fn mock_pending_fees_set(who: u64, asset_id: u32, amount: u128) {
+	use parity_scale_codec::Encode;
+	let key = [
+		b"mock:fees:".as_ref(),
+		who.encode().as_slice(),
+		asset_id.encode().as_slice(),
+	]
+	.concat();
+	sp_io::storage::set(&key, &amount.encode());
+}
+
+/// Read the registered EVM address for an account from raw test storage.
+pub fn mock_evm_address_get(who: u64) -> Option<sp_core::H160> {
+	use parity_scale_codec::{Decode, Encode};
+	let key = [b"mock:evm:".as_ref(), who.encode().as_slice()].concat();
+	sp_io::storage::get(&key)
+		.and_then(|v| <[u8; 20]>::decode(&mut &v[..]).ok())
+		.map(sp_core::H160::from)
+}
+
+/// Write the registered EVM address for an account to raw test storage.
+pub fn mock_evm_address_set(who: u64, addr: sp_core::H160) {
+	use parity_scale_codec::Encode;
+	let key = [b"mock:evm:".as_ref(), who.encode().as_slice()].concat();
+	// Encode as fixed [u8; 20] — no compact length prefix — so decode matches.
+	sp_io::storage::set(&key, &addr.as_fixed_bytes().encode());
+}
+
+impl pallet_relayer::RelayerInterface for MockRelayer {
+	type AccountId = u64;
+
+	fn resolve_relayer(_evm_address: &sp_core::H160) -> Option<u64> {
+		// No registry in shielded-pool unit tests; fees fall back to block_author.
+		None
+	}
+
+	fn min_relay_fee() -> u128 {
+		0
+	}
+
+	fn allowed_selectors() -> sp_std::vec::Vec<[u8; 4]> {
+		sp_std::vec![]
+	}
+
+	fn block_author() -> Option<u64> {
+		Some(1u64)
+	}
+
+	fn accumulate_relay_fee(author: &u64, asset_id: u32, amount: u128) {
+		let current = mock_pending_fees_get(*author, asset_id);
+		mock_pending_fees_set(*author, asset_id, current.saturating_add(amount));
+	}
+
+	fn pending_relay_fees(who: &u64, asset_id: u32) -> u128 {
+		mock_pending_fees_get(*who, asset_id)
+	}
+
+	fn consume_relay_fee(
+		who: &u64,
+		asset_id: u32,
+		amount: u128,
+	) -> frame_support::dispatch::DispatchResult {
+		let balance = mock_pending_fees_get(*who, asset_id);
+		if balance >= amount {
+			mock_pending_fees_set(*who, asset_id, balance - amount);
+			Ok(())
+		} else {
+			Err(sp_runtime::DispatchError::Other("InsufficientPendingFees"))
+		}
+	}
+
+	fn registered_evm_address(who: &u64) -> Option<sp_core::H160> {
+		mock_evm_address_get(*who)
+	}
 }
 
 /// Build genesis storage for testing
