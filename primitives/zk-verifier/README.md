@@ -1,67 +1,90 @@
 # orbinum-zk-verifier
 
-Groth16 (BN254) verification primitive for Orbinum.
+Groth16 (BN254) proof verification primitive for Orbinum Network.
 
-This crate implements a 3-layer clean architecture (`domain`, `application`, `infrastructure`) and does not manage on-chain verification key storage. VK resolution and versioning are handled by the `frame/zk-verifier` pallet.
+This crate handles the cryptographic verification layer only. On-chain VK storage,
+versioning, and circuit dispatch are managed by `frame/zk-verifier`.
 
-## Architecture
+## Modules
 
-- `domain/`
-  - ports (`VerifierPort`), services (`ProofValidator`), and value objects (`Proof`, `VerifyingKey`, `PublicInputs`, `VerifierError`).
-- `application/`
-  - use cases (`VerifyProofUseCase`) and output DTOs.
-- `infrastructure/`
-  - concrete implementation (`Groth16Verifier`) and adapters (`snarkjs_adapter`, `std` feature only).
-
-## Basic Usage
-
-```rust
-use orbinum_zk_verifier::{
-    application::use_cases::VerifyProofUseCase,
-    domain::value_objects::{Proof, PublicInputs, VerifyingKey},
-    infrastructure::verification::Groth16Verifier,
-};
-
-let verifier = Groth16Verifier::new();
-let use_case = VerifyProofUseCase::new(verifier);
-
-let result = use_case.execute(
-    &vk,
-    &public_inputs,
-    &proof,
-    expected_input_count,
-);
-
-assert!(result.is_ok());
-```
-
-## Substrate Integration
-
-```toml
-[dependencies]
-orbinum-zk-verifier = { version = "0.6.2", default-features = false, features = ["substrate"] }
-```
-
-## Supported Circuits
-
-| Circuit ID | Name | Public Inputs |
-|---|---|---|
-| 1 | transfer | 5 |
-| 2 | unshield | 5 |
-| 4 | disclosure | 4 |
-| 5 | private_link | 2 |
+| Module | Contents |
+|---|---|
+| `types` | `Proof`, `VerifyingKey`, `PublicInputs`, `VerifierError`, circuit constants |
+| `verifier` | `Groth16Verifier` — static `verify`, `verify_with_prepared_vk`, `batch_verify` |
+| `field_utils` | `bytes_to_field`, `field_to_bytes`, `field_to_u64`, `u64_to_field` |
+| `snarkjs` | `parse_proof_from_snarkjs`, `parse_public_inputs_from_snarkjs` (`std` only) |
 
 ## Features
 
-- `std` (default): enables standard-library utilities and `snarkjs` adapters.
-- `substrate`: enables SCALE codec integration (`parity-scale-codec`, `scale-info`) for runtime use.
+| Feature | Description | Default |
+|---|---|---|
+| `std` | Standard library + snarkjs JSON adapters | ✓ |
+| `substrate` | SCALE codec (`parity-scale-codec`, `scale-info`) | — |
 
-## Design Notes
+## Usage
 
-- `Groth16Verifier` implements `VerifierPort` to decouple use cases from the concrete cryptographic library.
-- Structural validation (input count and minimum proof/VK size) is executed in the domain layer before cryptographic verification.
-- `batch_verify` is available at the infrastructure layer for optimization scenarios.
+### Single proof
+
+```rust
+use orbinum_zk_verifier::{Groth16Verifier, Proof, PublicInputs, VerifyingKey};
+
+let result = Groth16Verifier::verify(&vk, &public_inputs, &proof);
+assert!(result.is_ok());
+```
+
+### Optimized — pre-prepared VK
+
+```rust
+use orbinum_zk_verifier::{Groth16Verifier, VerifyingKey};
+
+// Prepare once, reuse for every verification call.
+let pvk = vk.prepare()?;
+let result = Groth16Verifier::verify_with_prepared_vk(&pvk, &public_inputs, &proof);
+```
+
+### Batch verification
+
+```rust
+use orbinum_zk_verifier::Groth16Verifier;
+
+// All proofs must belong to the same circuit (same VK).
+let ok = Groth16Verifier::batch_verify(&vk, &all_inputs, &proofs)?;
+```
+
+### snarkjs adapter (std only)
+
+```rust
+use orbinum_zk_verifier::{parse_proof_from_snarkjs, parse_public_inputs_from_snarkjs, SnarkjsProofPoints};
+
+let proof = parse_proof_from_snarkjs(SnarkjsProofPoints {
+    a_x: "...", a_y: "...",
+    b_x0: "...", b_x1: "...", b_y0: "...", b_y1: "...",
+    c_x: "...", c_y: "...",
+})?;
+
+let inputs = parse_public_inputs_from_snarkjs(&["12345", "67890"])?;
+```
+
+## Supported circuits
+
+| Circuit ID | Name | Public inputs |
+|---|---|---|
+| 1 | `transfer` | 7 |
+| 2 | `unshield` | 6 |
+| 4 | `disclosure` | 4 |
+| 5 | `private_link` | 2 |
+
+## Weight estimation
+
+```rust
+use orbinum_zk_verifier::Groth16Verifier;
+
+// Returns BASE_VERIFICATION_COST + num_inputs * PER_INPUT_COST
+let weight = Groth16Verifier::estimate_verification_cost(7);
+```
 
 ## License
 
-Dual: Apache-2.0 OR GPL-3.0-or-later.
+Licensed under either of [Apache License, Version 2.0](../../LICENSE-APACHE2)
+or [GPL v3](../../LICENSE-GPL3) at your option.
+
