@@ -281,3 +281,4 @@ codegen-units = 1
 sp-core = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
 sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
 sp-std = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
+orbinum-zk-core = { path = "primitives/zk-core" }
