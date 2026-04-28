@@ -1,7 +1,7 @@
 [package]
 name = "orbinum-zk-circuits"
 version = "0.2.3"
-authors = ["Orbinum Network <dev@orbinum.net>"]
+authors = ["Orbinum Network <contact@orbinum.net>"]
 edition = "2021"
 license = "Apache-2.0 OR GPL-3.0-or-later"
 description = "Zero-Knowledge R1CS circuits and gadgets for Orbinum Network"
@@ -13,11 +13,20 @@ categories = ["cryptography", "no-std"]
 
 [dependencies]
 # ZK Primitives (native crypto)
-orbinum-zk-core = { version = "0.5.0", default-features = false }
+orbinum-zk-core = { path = "../zk-core", default-features = false }
 
 # Arkworks cryptography stack
 # Version 0.5.0 to match zk-core (required for light-poseidon-nostd compatibility)
 ark-bn254 = { version = "0.5.0", default-features = false, features = ["curve"] }
+
+# Arkworks field arithmetic (direct dep for MontFp! macro and PrimeField trait)
+ark-ff = { version = "0.5.0", default-features = false }
+
+# Arkworks elliptic curve primitives (for TECurveConfig and CurveGroup traits)
+ark-ec = { version = "0.5.0", default-features = false }
+
+# Baby JubJub (twisted Edwards on BN254 Fr) — for EdDSA ownership proofs
+ark-ed-on-bn254 = { version = "0.5.0", default-features = false, features = ["r1cs"] }
 
 # Arkworks constraint system (R1CS)
 # Must match ark-bn254 version for API compatibility
@@ -28,7 +37,10 @@ ark-relations = { version = "0.5.0", default-features = false }
 default = ["std"]
 std = [
 	"orbinum-zk-core/std",
+	"ark-ff/std",
+	"ark-ec/std",
 	"ark-bn254/std",
+	"ark-ed-on-bn254/std",
 	"ark-r1cs-std/std",
 	"ark-relations/std",
 ]

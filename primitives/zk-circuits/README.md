@@ -5,141 +5,116 @@
 
 R1CS circuits and constraint gadgets for off-chain ZK proof generation.
 
-## Features
+Intended for off-chain use (proof generation, testing). The runtime only needs
+`orbinum-zk-verifier` for on-chain proof verification.
 
-- **Arkworks gadgets**: Poseidon, Merkle, commitment, nullifier circuits
-- **Type-safe constraints**: Compile-time validation of circuit logic
-- **Compatible**: Works with circom, SnarkJS toolchain
-- **BN254 curve**: Same as Ethereum's alt_bn128
-- **32 tests**: Full circuit validation suite
+## Modules
+
+| Module | Contents |
+|--------|----------|
+| `types` | Core data types: `Note`, `MerklePath`, `TreeDepth`, `CircuitValidator` |
+| `gadgets` | R1CS gadgets: Poseidon hash, commitment, nullifier, Merkle verification, EdDSA |
+| `circuits` | Full circuits: `TransferCircuit`, `UnshieldCircuit` |
 
 ## Installation
 
 ```toml
 [dependencies]
 orbinum-zk-circuits = "0.2"
-ark-r1cs-std = "0.4"
-ark-bn254 = "0.4"
-orbinum-zk-core = "0.2"  # For native crypto validation
-```
-
-## Usage
-
-### Generate Transfer Proof (Private Transaction)
-
-```rust
-use orbinum_zk_circuits::application::{
-    use_cases::TransferCircuit,
-    dto::{TransferWitness, TransferPublicInputs, MerklePath},
-};
-use ark_bn254::{Bn254, Fr};
-use ark_groth16::Groth16;
-use ark_snark::SNARK;
-
-// Create circuit with witness data
-let witness = TransferWitness {
-    input_note_value: Fr::from(1000u64),
-    input_note_asset_id: Fr::from(1u64),
-    input_note_owner: Fr::from(12345u64),
-    input_note_blinding: Fr::from(67890u64),
-    merkle_path: MerklePath::new(vec![
-        Fr::from(0), Fr::from(1), // ... siblings
-    ]),
-    leaf_index: 5,
-    spending_key: Fr::from(999u64),
-    output_note_value: Fr::from(800u64),
-    output_note_recipient: Fr::from(54321u64),
-    output_note_blinding: Fr::from(11111u64),
-};
-
-let public_inputs = TransferPublicInputs {
-    merkle_root: Fr::from(123),
-    nullifier: Fr::from(456),
-    output_commitment: Fr::from(789),
-};
-
-let circuit = TransferCircuit::new(witness, public_inputs);
-
-// Generate proof (requires trusted setup from artifacts/)
-let (pk, vk) = setup::<Bn254, _, _>(&circuit, &mut rng);
-let proof = Groth16::<Bn254>::prove(&pk, circuit, &mut rng)?;
-```
-
-### Generate Unshield Proof (Withdraw)
-
-```rust
-use orbinum_zk_circuits::application::{
-    use_cases::UnshieldCircuit,
-    dto::{UnshieldWitness, UnshieldPublicInputs},
-};
-
-let witness = UnshieldWitness {
-    note_value: Fr::from(500u64),
-    note_asset_id: Fr::from(1u64),
-    note_owner: Fr::from(12345u64),
-    note_blinding: Fr::from(67890u64),
-    merkle_path: MerklePath::new(siblings),
-    leaf_index: 3,
-    spending_key: Fr::from(999u64),
-};
-
-let public_inputs = UnshieldPublicInputs {
-    merkle_root: Fr::from(123),
-    nullifier: Fr::from(456),
-    recipient: Fr::from(99999u64),  // Public destination account
-    amount: Fr::from(500u64),
-    asset_id: Fr::from(1u64),
-};
-
-let circuit = UnshieldCircuit::new(witness, public_inputs);
-let proof = Groth16::<Bn254>::prove(&pk, circuit, &mut rng)?;
-```
-
-### Validate Circuit Constraints
-
-```rust
-use ark_relations::r1cs::ConstraintSystem;
-
-let cs = ConstraintSystem::<Fr>::new_ref();
-circuit.generate_constraints(cs.clone())?;
-
-assert!(cs.is_satisfied().unwrap(), "Circuit constraints failed!");
-println!("Constraints: {}", cs.num_constraints());
+ark-bn254 = "0.5"
+ark-groth16 = "0.5"
+orbinum-zk-core = "1.0"
 ```
 
 ## Supported Circuits
 
-| Circuit | Purpose | Public Inputs | Private Inputs |
-|---------|---------|---------------|----------------|
-| **TransferCircuit** | Private transfer | merkle_root, nullifier, output_commitment | input_note, spending_key, merkle_path, output_note |
-| **UnshieldCircuit** | Withdraw to public | merkle_root, nullifier, recipient, amount, asset_id | note, spending_key, merkle_path |
-| **DisclosureCircuit** | Prove ownership | commitment, owner_pubkey | note (value, asset_id, blinding) |
+### TransferCircuit — 2-in / 2-out private transfer
 
-## Performance
+Public inputs (7, matches `nPublic: 7` in `verification_key_transfer.json`):
+`merkle_root`, `nullifiers[0]`, `nullifiers[1]`, `output_commitments[0]`, `output_commitments[1]`, `asset_id`, `fee`
 
-| Operation | Constraints | Prove Time | Verify Time |
-|-----------|-------------|------------|-------------|
-| Transfer | ~4,200 | 300ms | 2ms |
-| Unshield | ~3,800 | 280ms | 2ms |
-| Disclosure | ~1,500 | 120ms | 2ms |
+Constraints enforced:
+- Input commitment correctness: `Poseidon4(value, asset_id, Ax, blinding)`
+- Merkle membership: `MerkleProof(commitment, path) == merkle_root`
+- EdDSA ownership: `S × Base8 == R8 + Poseidon5(R8x, R8y, Ax, Ay, c) × A`
+- Nullifier correctness: `Poseidon2(commitment, spending_key)`
+- Output commitment correctness
+- Balance conservation: `sum(inputs) == sum(outputs) + fee`
+- Asset consistency across all notes
 
-*Measured on Apple M1, BN254 curve, Groth16*
+```rust
+use orbinum_zk_circuits::{TransferCircuit, TransferWitness, Note};
 
-## Key Concepts
+let witness = TransferWitness::new(
+    input_notes,   // [Note; 2]
+    spending_keys, // [Bn254Fr; 2]
+    paths,         // [MerklePath; 2]
+    indices,       // [u64; 2]
+    output_notes,  // [Note; 2]
+    fee,           // Bn254Fr
+);
+witness.validate()?;
 
-- **R1CS**: Rank-1 Constraint System (a × b = c format)
-- **Witness**: Private circuit inputs (not revealed in proof)
-- **Public Inputs**: Values exposed in the proof
-- **Gadget**: Reusable constraint generator
-- **ConstraintSystem**: Accumulates R1CS equations
+let circuit = TransferCircuit::new(witness, merkle_root);
+```
 
-## Integration with Toolchain
+### UnshieldCircuit — withdraw to public account
 
-Compatible with circom circuits in `/circuits`:
-- Use circom for rapid prototyping
-- Use this crate for Rust-native proof generation
-- Same BN254 curve, same verification keys
-- Can verify proofs generated by either toolchain
+Public inputs (6, matches `nPublic: 6` in `verification_key_unshield.json`):
+`merkle_root`, `nullifier`, `amount`, `recipient`, `asset_id`, `fee`
+
+Constraints enforced:
+- Commitment correctness: `Poseidon4(note_value, asset_id, owner_pk, blinding)`
+- Merkle membership: `MerkleProof(commitment, path) == merkle_root`
+- Nullifier correctness: `Poseidon2(commitment, spending_key) == nullifier`
+- Balance: `note_value == amount + fee`
+
+```rust
+use orbinum_zk_circuits::{UnshieldCircuit, UnshieldWitness, Note};
+
+let witness = UnshieldWitness::new(
+    note,         // Note
+    spending_key, // Bn254Fr
+    path,         // MerklePath
+    leaf_index,   // u64
+    amount,       // Bn254Fr
+    fee,          // Bn254Fr
+);
+witness.validate()?;
+
+let circuit = UnshieldCircuit::new(witness, public_inputs);
+```
+
+### Validate constraints
+
+```rust
+use ark_relations::r1cs::ConstraintSystem;
+use ark_bn254::Fr;
+
+let cs = ConstraintSystem::<Fr>::new_ref();
+circuit.generate_constraints(cs.clone())?;
+assert!(cs.is_satisfied().unwrap());
+```
+
+## Gadgets
+
+| Gadget | Function |
+|--------|----------|
+| `poseidon_hash_2` / `poseidon_hash_4` | Native Poseidon hash (non-R1CS) |
+| `poseidon_hash_var` | In-circuit Poseidon gadget |
+| `note_commitment` | R1CS commitment: `Poseidon4(value, asset_id, owner_pk, blinding)` |
+| `nullifier` | R1CS nullifier: `Poseidon2(commitment, spending_key)` |
+| `merkle_tree_verifier` / `verify_merkle_proof` | Merkle path verification gadget |
+| `verify_eddsa` | Baby JubJub EdDSA-Poseidon ownership proof |
+
+## Circom Compatibility
+
+Circuits are aligned with the production Circom circuits used by the Orbinum shielded pool.
+Public input order and count match the corresponding `verification_key_*.json` artifacts.
+
+Proof generation reference:
+- Transfer: `ts-sdk/src/proof-generator/transfer.ts`
+- Unshield: `ts-sdk/src/proof-generator/unshield.ts`
 
 ## License
 
