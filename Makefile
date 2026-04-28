@@ -76,9 +76,13 @@ benchmark-pallet:
 	./target/release/orbinum-node benchmark pallet --chain=dev --pallet=$(PALLET) --extrinsic='*' --steps=50 --repeat=20 --output=./frame/$(PALLET)/src/weights.rs --template=./scripts/frame-weight-template.hbs
 
 .PHONY: run-dev
-# Run node in development mode with temporary storage
+# Override the relayer key with: make run-dev EVM_RELAYER_KEY=0x<your_key>
+EVM_RELAYER_KEY ?= XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 run-dev:
-	./target/release/orbinum-node --dev --tmp
+	./target/release/orbinum-node --dev --tmp \
+		--evm-relayer-key=$(EVM_RELAYER_KEY) \
+		--max-runtime-instances=32 \
+		--runtime-cache-size=8
 
 .PHONY: audit
 # Run security audit (ignoring known Polkadot SDK transitive dependencies via deny.toml)
