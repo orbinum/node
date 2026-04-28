@@ -11,8 +11,6 @@ readme = "README.md"
 keywords = ["cryptography", "zero-knowledge", "circuits", "r1cs", "orbinum"]
 categories = ["cryptography", "no-std"]
 
-[workspace]
-
 [dependencies]
 # ZK Primitives (native crypto)
 orbinum-zk-core = { path = "../zk-core", default-features = false }
