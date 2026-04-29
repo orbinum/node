@@ -238,7 +238,7 @@ mod tests {
 		new_test_ext().execute_with(|| {
 			let err = <Pallet<Test> as ZkVerifierPort>::verify_disclosure_proof(
 				&proof(),
-				&vec![0u8; 75],
+				&[0u8; 75],
 				None,
 			)
 			.unwrap_err();
@@ -251,7 +251,7 @@ mod tests {
 		new_test_ext().execute_with(|| {
 			let err = <Pallet<Test> as ZkVerifierPort>::verify_disclosure_proof(
 				&proof(),
-				&vec![0u8; 77],
+				&[0u8; 77],
 				None,
 			)
 			.unwrap_err();

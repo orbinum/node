@@ -316,10 +316,7 @@ mod tests {
 	#[test]
 	fn test_batch_verify_empty_arrays() {
 		let vk_wrapper = VerifyingKey::from_ark_vk(&create_mock_ark_vk(5)).unwrap();
-		assert_eq!(
-			Groth16Verifier::batch_verify(&vk_wrapper, &[], &[]).unwrap(),
-			true
-		);
+		assert!(Groth16Verifier::batch_verify(&vk_wrapper, &[], &[]).unwrap());
 	}
 
 	#[test]
