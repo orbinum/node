@@ -19,8 +19,7 @@ pub struct UnshieldOperation;
 impl UnshieldOperation {
 	#[allow(clippy::too_many_arguments)]
 	pub fn execute<T: Config>(
-		#[cfg_attr(feature = "runtime-benchmarks", allow(unused_variables))]
-		proof: &[u8],
+		#[cfg_attr(feature = "runtime-benchmarks", allow(unused_variables))] proof: &[u8],
 		merkle_root: [u8; 32],
 		nullifier: Nullifier,
 		asset_id: u32,
