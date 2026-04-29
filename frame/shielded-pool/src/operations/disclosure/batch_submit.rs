@@ -286,4 +286,125 @@ mod tests {
 			assert_eq!(ts, Some(1u64));
 		});
 	}
+
+	// ── Flujo A + Flujo B mixed batch ─────────────────────────────────────────
+	//
+	// Mixing self-disclosure (auditor: None) and audited disclosure
+	// (auditor: Some(...)) in the same batch is intentional: each submission is
+	// processed independently inside `batch_submit_proofs`. Mixing is valid as
+	// long as every individual entry satisfies its own access policy.
+	// These tests document and pin that behaviour.
+
+	#[test]
+	fn mixed_batch_flujo_a_and_flujo_b_both_succeed() {
+		new_test_ext().execute_with(|| {
+			let owner: u64 = 1;
+			let auditor: u64 = 2;
+
+			// Flujo A commitment — no auditor required
+			let c_a = commitment(0x70);
+			register_commitment(c_a);
+
+			// Flujo B commitment — requires policy + pending request
+			let c_b = commitment(0x71);
+			register_commitment(c_b);
+			set_policy_simple(owner, auditor);
+			make_request(owner, auditor);
+
+			let submissions = BoundedVec::try_from(vec![
+				submission(c_a),                       // Flujo A
+				submission_with_auditor(c_b, auditor), // Flujo B
+			])
+			.unwrap();
+
+			assert_ok!(batch_submit_proofs::<Test>(&owner, submissions));
+
+			// Both records stored under the owner key
+			assert!(AuditRepository::has_disclosure_record::<Test>(c_a, &owner));
+			assert!(AuditRepository::has_disclosure_record::<Test>(c_b, &owner));
+		});
+	}
+
+	#[test]
+	fn mixed_batch_emits_correct_events_per_entry() {
+		new_test_ext().execute_with(|| {
+			let owner: u64 = 1;
+			let auditor: u64 = 2;
+
+			let c_a = commitment(0x72);
+			register_commitment(c_a);
+
+			let c_b = commitment(0x73);
+			register_commitment(c_b);
+			set_policy_simple(owner, auditor);
+			make_request(owner, auditor);
+
+			let submissions =
+				BoundedVec::try_from(vec![submission(c_a), submission_with_auditor(c_b, auditor)])
+					.unwrap();
+			assert_ok!(batch_submit_proofs::<Test>(&owner, submissions));
+
+			let events = frame_system::Pallet::<Test>::events();
+			let disclosed: Vec<_> = events
+				.iter()
+				.filter_map(|r| {
+					if let crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::Disclosed {
+						who,
+						commitment,
+						auditor: aud,
+					}) = &r.event
+					{
+						Some((*who, *commitment, aud.clone()))
+					} else {
+						None
+					}
+				})
+				.collect();
+
+			assert_eq!(disclosed.len(), 2);
+
+			// Flujo A: auditor field must be None
+			assert!(
+				disclosed
+					.iter()
+					.any(|(who, c, aud)| *who == owner && *c == c_a && aud.is_none()),
+				"Expected Disclosed event with auditor=None for Flujo A"
+			);
+			// Flujo B: auditor field must be Some(auditor)
+			assert!(
+				disclosed
+					.iter()
+					.any(|(who, c, aud)| *who == owner && *c == c_b && *aud == Some(auditor)),
+				"Expected Disclosed event with auditor=Some({auditor}) for Flujo B"
+			);
+		});
+	}
+
+	#[test]
+	fn mixed_batch_fails_when_flujo_b_entry_has_no_policy() {
+		new_test_ext().execute_with(|| {
+			let owner: u64 = 1;
+			let auditor: u64 = 3; // no policy set for this auditor
+
+			let c_a = commitment(0x74);
+			register_commitment(c_a);
+			let c_b = commitment(0x75);
+			register_commitment(c_b);
+			// Deliberately NOT calling set_policy_simple / make_request
+
+			let submissions =
+				BoundedVec::try_from(vec![submission(c_a), submission_with_auditor(c_b, auditor)])
+					.unwrap();
+
+			// The whole batch must be rejected — atomicity guarantees no partial state.
+			assert_noop!(
+				batch_submit_proofs::<Test>(&owner, submissions),
+				crate::pallet::Error::<Test>::UnauthorizedAuditor
+			);
+
+			// Neither record should have been stored
+			assert!(!AuditRepository::has_disclosure_record::<Test>(c_a, &owner));
+			assert!(!AuditRepository::has_disclosure_record::<Test>(c_b, &owner));
+		});
+	}
 }

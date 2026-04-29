@@ -86,6 +86,7 @@ pub struct AssetBalanceResponse {
 pub struct PoolStatsResponse {
 	pub merkle_root: String,
 	pub commitment_count: u32,
+	pub nullifier_count: u64,
 	pub total_balance: u128,
 	pub asset_balances: Vec<AssetBalanceResponse>,
 	pub tree_depth: u32,
@@ -429,9 +430,18 @@ where
 			}
 		}
 
+		// Nullifier count — O(1) read of TotalNullifiersSpent counter.
+		// Defaults to 0 if the storage item is absent (pool with no spent notes yet).
+		let nullifier_count =
+			match read_storage(&*self.client, best_hash, value_key(b"TotalNullifiersSpent"))? {
+				Some(raw) => u64::decode(&mut &raw[..]).unwrap_or(0),
+				None => 0,
+			};
+
 		Ok(PoolStatsResponse {
 			merkle_root: format!("0x{}", hex::encode(root.as_bytes())),
 			commitment_count,
+			nullifier_count,
 			total_balance,
 			asset_balances,
 			tree_depth: DEFAULT_TREE_DEPTH as u32,
@@ -671,6 +681,7 @@ mod tests {
 			let resp = PoolStatsResponse {
 				merkle_root: "0x01".to_string(),
 				commitment_count: 5,
+				nullifier_count: 3,
 				total_balance: 1_000,
 				asset_balances: vec![
 					AssetBalanceResponse {
@@ -686,6 +697,7 @@ mod tests {
 			};
 			let json = serde_json::to_value(&resp).unwrap();
 			assert_eq!(json["commitment_count"], 5u64);
+			assert_eq!(json["nullifier_count"], 3u64);
 			assert_eq!(json["total_balance"].as_u64().unwrap(), 1_000u64);
 			let ab = json["asset_balances"].as_array().unwrap();
 			assert_eq!(ab.len(), 2);
@@ -698,6 +710,7 @@ mod tests {
 			let orig = PoolStatsResponse {
 				merkle_root: "0xff".to_string(),
 				commitment_count: 1,
+				nullifier_count: 0,
 				total_balance: 42,
 				asset_balances: vec![AssetBalanceResponse {
 					asset_id: 0,
@@ -708,6 +721,25 @@ mod tests {
 			let back: PoolStatsResponse =
 				serde_json::from_str(&serde_json::to_string(&orig).unwrap()).unwrap();
 			assert_eq!(orig, back);
+		}
+
+		#[test]
+		fn pool_stats_response_nullifier_count_field_present() {
+			let resp = PoolStatsResponse {
+				merkle_root: "0xab".to_string(),
+				commitment_count: 10,
+				nullifier_count: 4,
+				total_balance: 0,
+				asset_balances: vec![],
+				tree_depth: 20,
+			};
+			let json = serde_json::to_value(&resp).unwrap();
+			// nullifier_count must be present and correctly serialised
+			assert_eq!(json["nullifier_count"], 4u64);
+			// active notes estimate: commitment_count - nullifier_count
+			let active = json["commitment_count"].as_u64().unwrap()
+				- json["nullifier_count"].as_u64().unwrap();
+			assert_eq!(active, 6);
 		}
 	}
 

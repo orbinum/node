@@ -20,36 +20,6 @@ pub struct MerkleProof {
 	pub siblings: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ShieldedEvent {
-	pub block_number: u64,
-	pub extrinsic_index: u32,
-	pub event_type: ShieldedEventType,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(tag = "type")]
-pub enum ShieldedEventType {
-	Shield {
-		depositor: String,
-		amount: u128,
-		commitment: String,
-		leaf_index: u32,
-		encrypted_memo: Option<String>,
-	},
-	PrivateTransfer {
-		nullifiers: Vec<String>,
-		commitments: Vec<String>,
-		leaf_indices: Vec<u32>,
-		encrypted_memos: Option<Vec<String>>,
-	},
-	Unshield {
-		nullifier: String,
-		amount: u128,
-		recipient: String,
-	},
-}
-
 #[rpc(client, server)]
 pub trait ShieldedPoolApi<BlockHash> {
 	#[method(name = "shieldedPool_getMerkleTreeInfo")]
@@ -57,9 +27,6 @@ pub trait ShieldedPoolApi<BlockHash> {
 
 	#[method(name = "shieldedPool_getMerkleProof")]
 	fn get_merkle_proof(&self, commitment: String) -> RpcResult<MerkleProof>;
-
-	#[method(name = "shieldedPool_scanEvents")]
-	fn scan_events(&self, from_block: u64, to_block: u64) -> RpcResult<Vec<ShieldedEvent>>;
 }
 
 pub struct ShieldedPool<C, B> {
@@ -136,19 +103,5 @@ where
 				.map(|h| format!("0x{}", hex::encode(h)))
 				.collect(),
 		})
-	}
-
-	fn scan_events(&self, _from_block: u64, _to_block: u64) -> RpcResult<Vec<ShieldedEvent>> {
-		// Event scanning is not implemented via runtime API
-		// This functionality should be implemented by:
-		// 1. Indexing events in an off-chain database (recommended)
-		// 2. Using Substrate's archive node with state queries
-		// 3. Implementing a custom indexer service
-		//
-		// Returning empty list as placeholder.
-		// TODO: Implement proper event indexing strategy
-
-		log::warn!("scan_events called but not implemented - use event indexer instead");
-		Ok(Vec::new())
 	}
 }

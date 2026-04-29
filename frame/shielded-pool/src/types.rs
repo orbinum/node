@@ -332,6 +332,15 @@ impl EncryptedMemo {
 		Self::new(bytes.to_vec())
 	}
 	pub fn nonce(&self) -> &[u8] {
+		// Invariant: EncryptedMemo is always exactly MAX_ENCRYPTED_MEMO_SIZE bytes after
+		// construction. from_bytes() enforces this; the else branch is unreachable in practice.
+		debug_assert_eq!(
+			self.0.len(),
+			MAX_ENCRYPTED_MEMO_SIZE as usize,
+			"EncryptedMemo invariant violated: expected {} bytes, got {}",
+			MAX_ENCRYPTED_MEMO_SIZE,
+			self.0.len()
+		);
 		if self.0.len() >= 12 {
 			&self.0[..12]
 		} else {
@@ -339,6 +348,14 @@ impl EncryptedMemo {
 		}
 	}
 	pub fn ciphertext(&self) -> &[u8] {
+		// Invariant: see nonce(). ciphertext occupies bytes 12..120.
+		debug_assert_eq!(
+			self.0.len(),
+			MAX_ENCRYPTED_MEMO_SIZE as usize,
+			"EncryptedMemo invariant violated: expected {} bytes, got {}",
+			MAX_ENCRYPTED_MEMO_SIZE,
+			self.0.len()
+		);
 		if self.0.len() >= 120 {
 			&self.0[12..120]
 		} else {
@@ -346,6 +363,14 @@ impl EncryptedMemo {
 		}
 	}
 	pub fn tag(&self) -> &[u8] {
+		// Invariant: see nonce(). tag (MAC) occupies bytes 120..136.
+		debug_assert_eq!(
+			self.0.len(),
+			MAX_ENCRYPTED_MEMO_SIZE as usize,
+			"EncryptedMemo invariant violated: expected {} bytes, got {}",
+			MAX_ENCRYPTED_MEMO_SIZE,
+			self.0.len()
+		);
 		if self.0.len() >= 136 {
 			&self.0[120..136]
 		} else {
