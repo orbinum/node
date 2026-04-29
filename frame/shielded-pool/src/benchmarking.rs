@@ -38,7 +38,7 @@ mod benchmarks {
 		if Assets::<T>::get(asset_id).is_none() {
 			let name: BoundedVec<u8, ConstU32<64>> = vec![1u8; 32].try_into().unwrap();
 			let symbol: BoundedVec<u8, ConstU32<16>> = vec![1u8; 4].try_into().unwrap();
-			let metadata = crate::domain::entities::AssetMetadata {
+			let metadata = crate::AssetMetadata {
 				id: asset_id,
 				name,
 				symbol,
@@ -128,6 +128,7 @@ mod benchmarks {
 			encrypted_memos,
 			asset_id,
 			fee,
+			None,
 		);
 	}
 
@@ -162,6 +163,7 @@ mod benchmarks {
 			amount,
 			recipient,
 			fee,
+			None,
 		);
 	}
 
@@ -361,7 +363,7 @@ mod benchmarks {
 		DisclosureRecords::<T>::insert(
 			commitment,
 			&caller,
-			crate::domain::entities::audit::DisclosureRecord {
+			crate::DisclosureRecord {
 				revealed_value: None,
 				revealed_asset_id: None,
 				revealed_owner_hash: None,
