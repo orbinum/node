@@ -98,7 +98,7 @@ mod benchmarks {
 
 	#[benchmark]
 	fn private_transfer() {
-		let (caller, _) = setup_benchmark_env::<T>();
+		let (_caller, _) = setup_benchmark_env::<T>();
 		let merkle_root = [1u8; 32];
 
 		// Setup valid root in storage
@@ -134,7 +134,7 @@ mod benchmarks {
 
 	#[benchmark]
 	fn unshield() {
-		let (caller, asset_id) = setup_benchmark_env::<T>();
+		let (_caller, asset_id) = setup_benchmark_env::<T>();
 		let recipient: T::AccountId = account("recipient", 0, 0);
 		let merkle_root = [1u8; 32];
 		let amount: BalanceOf<T> = T::MinShieldAmount::get() * 10u32.into();
