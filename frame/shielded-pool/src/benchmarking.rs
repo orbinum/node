@@ -120,7 +120,7 @@ mod benchmarks {
 
 		#[extrinsic_call]
 		private_transfer(
-			RawOrigin::Signed(caller),
+			RawOrigin::None,
 			proof,
 			merkle_root,
 			nullifiers,
@@ -155,7 +155,7 @@ mod benchmarks {
 
 		#[extrinsic_call]
 		unshield(
-			RawOrigin::Signed(caller),
+			RawOrigin::None,
 			proof,
 			merkle_root,
 			nullifier,
