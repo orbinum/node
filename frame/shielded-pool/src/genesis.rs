@@ -2,7 +2,8 @@
 
 use crate::{
 	pallet::{
-		Assets, Config, HistoricPoseidonRoots, HistoricRootsOrder, NextAssetId, PoseidonRoot,
+		Assets, Config, HistoricPoseidonRoots, HistoricRootsOrder, MerkleTreeFrontier, NextAssetId,
+		PoseidonRoot,
 	},
 	types::AssetMetadata,
 	types::Hash,
@@ -15,6 +16,11 @@ use sp_runtime::traits::AccountIdConversion;
 pub fn initialize_genesis<T: Config>(initial_root: Hash) {
 	// Initialize Poseidon Merkle tree with genesis root
 	PoseidonRoot::<T>::put(initial_root);
+
+	// Initialize incremental frontier to all zeros (empty tree state).
+	// Must be set before any insert_leaf call so the O(depth) algorithm
+	// starts from the correct baseline.
+	MerkleTreeFrontier::<T>::put([[0u8; 32]; 20]);
 
 	// Add genesis root to historic roots
 	HistoricPoseidonRoots::<T>::insert(initial_root, true);

@@ -181,6 +181,15 @@ pub mod pallet {
 	#[pallet::getter(fn merkle_tree_size)]
 	pub type MerkleTreeSize<T> = StorageValue<_, u32, ValueQuery>;
 
+	/// Incremental Merkle tree frontier for O(depth) root updates.
+	///
+	/// Stores the last left-sibling at each of the 20 levels of the tree.
+	/// Updated in O(depth) on every `insert_leaf`, replacing the former
+	/// O(n) full recomputation from all leaves.
+	/// Depth is fixed at `DEFAULT_TREE_DEPTH = 20`.
+	#[pallet::storage]
+	pub type MerkleTreeFrontier<T> = StorageValue<_, [[u8; 32]; 20], ValueQuery>;
+
 	/// Merkle tree leaves (index -> commitment)
 	#[pallet::storage]
 	pub type MerkleLeaves<T> = StorageMap<_, Blake2_128Concat, u32, Commitment, OptionQuery>;

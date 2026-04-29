@@ -309,6 +309,9 @@ pub struct MerkleTreeService;
 
 impl MerkleTreeService {
 	/// Insert a new leaf into the Merkle tree.
+	///
+	/// Uses an incremental frontier algorithm: O(depth) hashes per insert,
+	/// replacing the former O(n) full recomputation from all leaves.
 	pub fn insert_leaf<T: Config>(commitment: Commitment) -> Result<u32, DispatchError> {
 		let index = MerkleRepository::get_tree_size::<T>();
 		let max_leaves = 2u32.saturating_pow(T::MaxTreeDepth::get());
@@ -318,27 +321,40 @@ impl MerkleTreeService {
 			Error::<T>::CommitmentAlreadyExists
 		);
 
+		// Load frontier from storage and run one incremental update.
+		// Depth is always DEFAULT_TREE_DEPTH (20) — matches the fixed-size frontier array.
+		let mut frontier = MerkleRepository::get_frontier::<T>();
+		let mut current_hash = commitment.0;
+		let mut current_index = index;
+
+		for (level, frontier_slot) in frontier.iter_mut().enumerate() {
+			if current_index % 2 == 0 {
+				// Left node: save in frontier, pair with zero-sibling
+				*frontier_slot = current_hash;
+				let zero = get_zero_hash_cached(level);
+				current_hash = hash_pair(&current_hash, &zero);
+			} else {
+				// Right node: combine with stored left sibling
+				current_hash = hash_pair(frontier_slot, &current_hash);
+			}
+			current_index /= 2;
+		}
+
+		let new_poseidon_root = current_hash;
+		let old_poseidon_root = MerkleRepository::get_poseidon_root::<T>();
+
 		MerkleRepository::insert_leaf::<T>(index, commitment);
 		MerkleRepository::set_tree_size::<T>(index.saturating_add(1));
-
-		let new_poseidon_root = Self::compute_poseidon_merkle_root::<T>();
+		MerkleRepository::set_frontier::<T>(frontier);
 		MerkleRepository::set_poseidon_root::<T>(new_poseidon_root);
 		Self::add_poseidon_historic_root::<T>(new_poseidon_root);
 
 		Pallet::<T>::deposit_event(Event::MerkleRootUpdated {
-			old_root: [0u8; 32],
+			old_root: old_poseidon_root,
 			new_root: new_poseidon_root,
 			tree_size: index.saturating_add(1),
 		});
 		Ok(index)
-	}
-
-	fn compute_poseidon_merkle_root<T: Config>() -> Hash {
-		let leaves = MerkleRepository::get_all_leaves::<T>();
-		if leaves.is_empty() {
-			return [0u8; 32];
-		}
-		compute_root_from_leaves_poseidon::<20>(&leaves)
 	}
 
 	fn add_poseidon_historic_root<T: Config>(poseidon_root: Hash) {
@@ -716,5 +732,133 @@ mod tests {
 			assert_eq!(MerkleTreeService::find_leaf_index::<Test>(&c0), Some(0));
 			assert_eq!(MerkleTreeService::find_leaf_index::<Test>(&c1), Some(1));
 		});
+	}
+
+	// ── Incremental frontier vs batch consistency ────────────────────────────
+
+	#[test]
+	fn incremental_root_matches_batch_root_after_single_insert() {
+		new_test_ext().execute_with(|| {
+			let leaf = [0x11u8; 32];
+			MerkleTreeService::insert_leaf::<Test>(Commitment::new(leaf)).unwrap();
+
+			let incremental_root = crate::storage::MerkleRepository::get_poseidon_root::<Test>();
+			let batch_root = compute_root_from_leaves_poseidon::<20>(&[leaf]);
+			assert_eq!(
+				incremental_root, batch_root,
+				"incremental and batch roots must agree after 1 insert"
+			);
+		});
+	}
+
+	#[test]
+	fn incremental_root_matches_batch_root_after_multiple_inserts() {
+		new_test_ext().execute_with(|| {
+			let leaves = [
+				[0x01u8; 32],
+				[0x02u8; 32],
+				[0x03u8; 32],
+				[0x04u8; 32],
+				[0x05u8; 32],
+			];
+			for &leaf in &leaves {
+				MerkleTreeService::insert_leaf::<Test>(Commitment::new(leaf)).unwrap();
+			}
+
+			let incremental_root = crate::storage::MerkleRepository::get_poseidon_root::<Test>();
+			let batch_root = compute_root_from_leaves_poseidon::<20>(&leaves);
+			assert_eq!(
+				incremental_root, batch_root,
+				"incremental and batch roots must agree after multiple inserts"
+			);
+		});
+	}
+
+	#[test]
+	fn incremental_proof_verifies_against_incremental_root() {
+		new_test_ext().execute_with(|| {
+			let leaves = [[0x0Au8; 32], [0x0Bu8; 32], [0x0Cu8; 32]];
+			for &leaf in &leaves {
+				MerkleTreeService::insert_leaf::<Test>(Commitment::new(leaf)).unwrap();
+			}
+
+			// Proof computed from all leaves (batch), root stored incrementally.
+			// Both must be consistent.
+			let root = crate::storage::MerkleRepository::get_poseidon_root::<Test>();
+			for (i, &leaf) in leaves.iter().enumerate() {
+				let path = MerkleTreeService::get_merkle_path::<Test>(i as u32).unwrap();
+				assert!(
+					MerkleTreeService::verify_merkle_proof(&root, &leaf, &path),
+					"proof for leaf {i} must verify against incremental root"
+				);
+			}
+		});
+	}
+
+	#[test]
+	fn merkle_root_updated_event_carries_correct_old_root() {
+		use crate::mock::RuntimeEvent;
+		new_test_ext().execute_with(|| {
+			let c0 = Commitment::new([0xA0u8; 32]);
+			let c1 = Commitment::new([0xA1u8; 32]);
+			MerkleTreeService::insert_leaf::<Test>(c0).unwrap();
+			let root_after_first = crate::storage::MerkleRepository::get_poseidon_root::<Test>();
+			MerkleTreeService::insert_leaf::<Test>(c1).unwrap();
+
+			// The second MerkleRootUpdated event must carry the root stored after the first insert.
+			let found = frame_system::Pallet::<Test>::events().into_iter().any(|r| {
+				matches!(
+					&r.event,
+					RuntimeEvent::ShieldedPool(crate::Event::MerkleRootUpdated {
+						old_root, ..
+					}) if *old_root == root_after_first
+				)
+			});
+			assert!(
+				found,
+				"MerkleRootUpdated event must carry the previous root as old_root"
+			);
+		});
+	}
+
+	// Simulates storage round-trip across multiple separate execute_with calls,
+	// mimicking the frontier being persisted between blocks.
+	// Verifies SCALE serialization of [[u8; 32]; 20] survives storage read/write cycles.
+	#[test]
+	fn frontier_survives_storage_round_trip_across_separate_calls() {
+		use crate::pallet::MerkleTreeFrontier;
+
+		let mut ext = new_test_ext();
+
+		// Block 1: insert first leaf
+		let root_b1 = ext.execute_with(|| {
+			MerkleTreeService::insert_leaf::<Test>(Commitment::new([0x01u8; 32])).unwrap();
+			MerkleRepository::get_poseidon_root::<Test>()
+		});
+
+		// Block 2: insert second leaf — frontier must be correctly recovered from storage
+		let root_b2 = ext.execute_with(|| {
+			// Frontier was written in block 1; verify it is non-zero (was persisted)
+			let frontier = MerkleTreeFrontier::<Test>::get();
+			assert_ne!(
+				frontier[0], [0u8; 32],
+				"frontier slot 0 must be set after first insert"
+			);
+
+			MerkleTreeService::insert_leaf::<Test>(Commitment::new([0x02u8; 32])).unwrap();
+			MerkleRepository::get_poseidon_root::<Test>()
+		});
+
+		assert_ne!(root_b1, root_b2, "root must change with each insert");
+
+		// Block 3: the root after 2 incremental inserts must equal the batch root for same leaves
+		let expected = ext.execute_with(|| {
+			compute_root_from_leaves_poseidon::<20>(&[[0x01u8; 32], [0x02u8; 32]])
+		});
+
+		assert_eq!(
+			root_b2, expected,
+			"frontier root after 2 round-trips must match batch root"
+		);
 	}
 }
