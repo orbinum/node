@@ -589,7 +589,7 @@ impl pallet_shielded_pool::Config for Runtime {
 	/// Groth16 proof verifier for unshield/transfer operations
 	type ZkVerifier = ZkVerifier;
 	/// Relay config, fee accumulation and block-author — delegated to pallet-relayer.
-	// type Relayer = pallet_relayer::Pallet<Runtime>;
+	type Relayer = pallet_relayer::Pallet<Runtime>;
 	/// PalletId for the pool account
 	type PalletId = ShieldedPoolPalletId;
 	/// Merkle tree depth: 2^20 = 1M notes max (see MERKLE_TREE_SCALABILITY.md)
@@ -599,7 +599,8 @@ impl pallet_shielded_pool::Config for Runtime {
 	/// Minimum shield amount: prevents spam, 1 ORB = 1e18 wei
 	type MinShieldAmount = ConstU128<1_000_000_000_000_000_000>;
 	type WeightInfo = pallet_shielded_pool::weights::SubstrateWeight<Runtime>;
-	// type RequestExpiration = ConstU32<14400>; /// Disclosure requests expire after 14400 blocks (~1 day at 6s/block)
+	/// Disclosure requests expire after 14400 blocks (~1 day at 6s/block)
+	type RequestExpiration = ConstU32<14400>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.

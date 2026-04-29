@@ -1,7 +1,7 @@
 [package]
 name = "orbinum-encrypted-memo"
 version = "0.3.0"
-authors = ["Orbinum Network <dev@orbinum.net>"]
+authors = ["Orbinum Network <contact@orbinum.net>"]
 edition = "2021"
 license = "Apache-2.0 OR GPL-3.0-or-later"
 description = "Encrypted memo primitives for Orbinum shielded transactions"
@@ -9,6 +9,8 @@ repository = "https://github.com/orbinum/node"
 homepage = "https://orbinum.network"
 keywords = ["cryptography", "encryption", "privacy", "blockchain", "orbinum"]
 categories = ["cryptography", "no-std"]
+
+[workspace]
 
 [dependencies]
 # Core cryptography

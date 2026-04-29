@@ -88,7 +88,7 @@ where
 	use substrate_frame_rpc_system::{System, SystemApiServer};
 
 	// Orbinum Privacy RPC
-	use fc_rpc_v2::{PrivacyApiServer, PrivacyRpcServer, SubstrateStorageAdapter};
+	use fc_rpc_v2::{PrivacyApiServer, PrivacyRpc};
 
 	let mut io = RpcModule::new(());
 	let FullDeps {
@@ -106,9 +106,7 @@ where
 	io.merge(Relayer::new(client.clone()).into_rpc())?;
 
 	// Orbinum Privacy RPC
-	let privacy_adapter = SubstrateStorageAdapter::new(client.clone());
-	let privacy_rpc = PrivacyRpcServer::new(privacy_adapter);
-	io.merge(privacy_rpc.into_rpc())?;
+	io.merge(PrivacyRpc::new(client.clone()).into_rpc())?;
 
 	if let Some(command_sink) = command_sink {
 		io.merge(

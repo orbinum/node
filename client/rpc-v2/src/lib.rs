@@ -22,7 +22,9 @@
 // Orbinum Privacy RPC
 // ============================================================================
 
-pub mod orbinum;
+pub mod privacy;
 
-// Re-exportar tipos principales para facilitar importación
-pub use orbinum::{PrivacyApiServer, PrivacyRpcServer, SubstrateStorageAdapter};
+pub use privacy::{
+	AssetBalanceResponse, MerkleProofResponse, NullifierStatusResponse, PoolStatsResponse,
+	PrivacyApiServer, PrivacyRpc,
+};

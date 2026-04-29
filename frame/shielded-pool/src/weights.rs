@@ -32,17 +32,18 @@ pub trait WeightInfo {
 	fn shield() -> Weight;
 	fn private_transfer() -> Weight;
 	fn unshield() -> Weight;
-	fn set_disclosure_verifying_key() -> Weight;
 	fn set_audit_policy() -> Weight;
 	fn request_disclosure() -> Weight;
-	fn approve_disclosure() -> Weight;
+	fn disclose() -> Weight;
 	fn reject_disclosure() -> Weight;
-	fn submit_disclosure() -> Weight;
 	fn batch_submit_disclosure_proofs(n: u32) -> Weight;
 	fn shield_batch(n: u32) -> Weight;
 	fn register_asset() -> Weight;
 	fn verify_asset() -> Weight;
 	fn unverify_asset() -> Weight;
+	fn prune_expired_request() -> Weight;
+	fn revoke_disclosure_record() -> Weight;
+	fn claim_shielded_fees() -> Weight;
 }
 
 /// Weights for pallet_shielded_pool using the Substrate node and recommended hardware.
@@ -135,23 +136,17 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(10_u64))
 			.saturating_add(T::DbWeight::get().writes(6_u64))
 	}
-	fn set_disclosure_verifying_key() -> Weight {
-		Weight::from_parts(150_000, 0).saturating_add(T::DbWeight::get().writes(1))
-	}
 	fn set_audit_policy() -> Weight {
 		Weight::from_parts(100_000, 0).saturating_add(T::DbWeight::get().writes(1))
 	}
 	fn request_disclosure() -> Weight {
 		Weight::from_parts(50_000, 0).saturating_add(T::DbWeight::get().reads_writes(2, 1))
 	}
-	fn approve_disclosure() -> Weight {
-		Weight::from_parts(200_000, 0).saturating_add(T::DbWeight::get().reads_writes(3, 2))
+	fn disclose() -> Weight {
+		Weight::from_parts(500_000, 0).saturating_add(T::DbWeight::get().reads_writes(4, 3))
 	}
 	fn reject_disclosure() -> Weight {
 		Weight::from_parts(30_000, 0).saturating_add(T::DbWeight::get().writes(1))
-	}
-	fn submit_disclosure() -> Weight {
-		Weight::from_parts(500_000, 0).saturating_add(T::DbWeight::get().reads_writes(4, 2))
 	}
 	fn batch_submit_disclosure_proofs(n: u32) -> Weight {
 		// Base cost for 1 proof is ~500k.
@@ -178,6 +173,21 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	}
 	fn unverify_asset() -> Weight {
 		Weight::from_parts(50_000, 0).saturating_add(T::DbWeight::get().reads_writes(1, 1))
+	}
+	/// Storage: `ShieldedPool::DisclosureRequests` (r:1 w:1)
+	/// Storage: `System::Number` (r:1 w:0)
+	fn prune_expired_request() -> Weight {
+		Weight::from_parts(30_000, 0).saturating_add(T::DbWeight::get().reads_writes(2, 1))
+	}
+	/// Storage: `ShieldedPool::DisclosureRecords` (r:1 w:1)
+	fn revoke_disclosure_record() -> Weight {
+		Weight::from_parts(40_000, 0).saturating_add(T::DbWeight::get().reads_writes(1, 1))
+	}
+	fn claim_shielded_fees() -> Weight {
+		// 1 read (PendingValidatorFees) + Merkle insert (reads/writes) + 1 write (CommitmentMemos)
+		Weight::from_parts(70_000_000, 3581)
+			.saturating_add(T::DbWeight::get().reads(3_u64))
+			.saturating_add(T::DbWeight::get().writes(4_u64))
 	}
 }
 
@@ -270,23 +280,17 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(10_u64))
 			.saturating_add(RocksDbWeight::get().writes(6_u64))
 	}
-	fn set_disclosure_verifying_key() -> Weight {
-		Weight::from_parts(150_000, 0).saturating_add(RocksDbWeight::get().writes(1))
-	}
 	fn set_audit_policy() -> Weight {
 		Weight::from_parts(100_000, 0).saturating_add(RocksDbWeight::get().writes(1))
 	}
 	fn request_disclosure() -> Weight {
 		Weight::from_parts(50_000, 0).saturating_add(RocksDbWeight::get().reads_writes(2, 1))
 	}
-	fn approve_disclosure() -> Weight {
-		Weight::from_parts(200_000, 0).saturating_add(RocksDbWeight::get().reads_writes(3, 2))
+	fn disclose() -> Weight {
+		Weight::from_parts(500_000, 0).saturating_add(RocksDbWeight::get().reads_writes(4, 3))
 	}
 	fn reject_disclosure() -> Weight {
 		Weight::from_parts(30_000, 0).saturating_add(RocksDbWeight::get().writes(1))
-	}
-	fn submit_disclosure() -> Weight {
-		Weight::from_parts(500_000, 0).saturating_add(RocksDbWeight::get().reads_writes(4, 2))
 	}
 	fn batch_submit_disclosure_proofs(n: u32) -> Weight {
 		let base_weight = 500_000;
@@ -310,5 +314,16 @@ impl WeightInfo for () {
 	}
 	fn unverify_asset() -> Weight {
 		Weight::from_parts(50_000, 0).saturating_add(RocksDbWeight::get().reads_writes(1, 1))
+	}
+	fn prune_expired_request() -> Weight {
+		Weight::from_parts(30_000, 0).saturating_add(RocksDbWeight::get().reads_writes(2, 1))
+	}
+	fn revoke_disclosure_record() -> Weight {
+		Weight::from_parts(40_000, 0).saturating_add(RocksDbWeight::get().reads_writes(1, 1))
+	}
+	fn claim_shielded_fees() -> Weight {
+		Weight::from_parts(70_000_000, 3581)
+			.saturating_add(RocksDbWeight::get().reads(3_u64))
+			.saturating_add(RocksDbWeight::get().writes(4_u64))
 	}
 }

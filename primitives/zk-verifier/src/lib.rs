@@ -1,31 +1,39 @@
 //! # orbinum-zk-verifier
 //!
-//! Groth16 proof verification for Substrate runtime.
+//! Groth16 proof verification for Substrate runtime (BN254 curve).
 //!
 //! ## Example
 //!
 //! ```rust,ignore
-//! use orbinum_zk_verifier::{
-//!     application::use_cases::VerifyProofUseCase,
-//!     infrastructure::verification::Groth16Verifier,
-//!     domain::value_objects::{Proof, PublicInputs, VerifyingKey},
-//! };
+//! use orbinum_zk_verifier::{Groth16Verifier, Proof, PublicInputs, VerifyingKey};
 //!
-//! let verifier = Groth16Verifier::new();
-//! let use_case = VerifyProofUseCase::new(verifier);
-//! let result = use_case.execute(&vk, &public_inputs, &proof, expected_inputs);
+//! let result = Groth16Verifier::verify(&vk, &public_inputs, &proof);
 //! ```
-//!
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
 
-// Type Aliases
+mod field_utils;
+mod snarkjs;
+mod types;
+mod verifier;
+
+// ─── Type aliases ─────────────────────────────────────────────────────────────
+
 pub type Bn254Fr = ark_bn254::Fr;
 pub use ark_bn254::Bn254;
 
-// Clean Architecture Layers
-pub mod application;
-pub mod domain;
-pub mod infrastructure;
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+pub use field_utils::{bytes_to_field, field_to_bytes, field_to_u64, u64_to_field};
+pub use snarkjs::SnarkjsProofPoints;
+#[cfg(feature = "std")]
+pub use snarkjs::{parse_proof_from_snarkjs, parse_public_inputs_from_snarkjs};
+pub use types::{
+	Proof, PublicInputs, VerifierError, VerifyingKey, BASE_VERIFICATION_COST,
+	CIRCUIT_ID_DISCLOSURE, CIRCUIT_ID_PRIVATE_LINK, CIRCUIT_ID_TRANSFER, CIRCUIT_ID_UNSHIELD,
+	DISCLOSURE_PUBLIC_INPUTS, MAX_PUBLIC_INPUTS, PER_INPUT_COST, PRIVATE_LINK_PUBLIC_INPUTS,
+	TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS,
+};
+pub use verifier::Groth16Verifier;

@@ -6,7 +6,7 @@ mod private_dispatch;
 mod private_links;
 
 pub(super) fn make_commitment(chain_id: u32, address: &[u8], blinding: &[u8; 32]) -> [u8; 32] {
-	use orbinum_zk_core::infrastructure::host_interface::poseidon_host_interface;
+	use orbinum_zk_core::host_interface::poseidon_host_interface;
 
 	let mut chain_id_bytes = [0u8; 32];
 	chain_id_bytes[..4].copy_from_slice(&chain_id.to_le_bytes());

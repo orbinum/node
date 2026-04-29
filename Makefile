@@ -76,26 +76,41 @@ benchmark-pallet:
 	./target/release/orbinum-node benchmark pallet --chain=dev --pallet=$(PALLET) --extrinsic='*' --steps=50 --repeat=20 --output=./frame/$(PALLET)/src/weights.rs --template=./scripts/frame-weight-template.hbs
 
 .PHONY: run-dev
-# Run node in development mode with temporary storage
+# Override the relayer key with: make run-dev EVM_RELAYER_KEY=0x<your_key>
+EVM_RELAYER_KEY ?= XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 run-dev:
-	./target/release/orbinum-node --dev --tmp
+	./target/release/orbinum-node --dev --tmp \
+		--evm-relayer-key=$(EVM_RELAYER_KEY) \
+		--max-runtime-instances=32 \
+		--runtime-cache-size=8
 
 .PHONY: audit
 # Run security audit (ignoring known Polkadot SDK transitive dependencies via deny.toml)
 audit:
 	@cargo deny check advisories
 
-.PHONY: sync-circuits sync-circuits-version
-# Sync ZK verification keys from latest circuits release
-sync-circuits:
-	bash ./scripts/sync-circuits/sync-circuit-artifacts.sh
-# Sync ZK verification keys from a specific circuits release (usage: make sync-circuits-version VERSION=v0.3.1)
-sync-circuits-version:
-	@if [ -z "$(VERSION)" ]; then \
-		echo "Error: VERSION variable is required. Usage: make sync-circuits-version VERSION=v0.3.1"; \
-		exit 1; \
-	fi
-	bash ./scripts/sync-circuits/sync-circuit-artifacts.sh $(VERSION)
+.PHONY: deploy-runtime
+# Deploy runtime upgrade on-chain (usage: make deploy-runtime WASM=<path> RPC=<ws_url> SEED=<seed>)
+deploy-runtime:
+	@if [ -z "$(WASM)" ]; then \
+		WASM="target/release/wbuild/orbinum-runtime/orbinum_runtime.compact.compressed.wasm"; \
+	else \
+		WASM="$(WASM)"; \
+	fi; \
+	bash ./scripts/deploy-runtime.sh "$$WASM" "$(RPC)" "$(SEED)"
+
+.PHONY: rolling-update
+# Rolling update node binary on remote servers (usage: make rolling-update VALIDATORS=<ip1,ip2> RPC_NODE=<ip>)
+rolling-update:
+	bash ./scripts/rolling-update.sh \
+		--binary target/release/orbinum-node \
+		--validators "$(VALIDATORS)" \
+		--rpc-node "$(RPC_NODE)"
+
+.PHONY: healthcheck
+# Check network health (usage: make healthcheck RPC=<url>)
+healthcheck:
+	bash ./scripts/healthcheck.sh "$(RPC)"
 
 .PHONY: help
 # Show help

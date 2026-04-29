@@ -1,112 +1,101 @@
 # orbinum-zk-core
 
-[![crates.io](https://img.shields.io/crates/v/orbinum-zk-core.svg)](https://crates.io/crates/orbinum-zk-core)
-[![Documentation](https://docs.rs/orbinum-zk-core/badge.svg)](https://docs.rs/orbinum-zk-core)
+Poseidon-based cryptographic primitives for ZK-SNARK operations in Orbinum Network.
 
-Native zero-knowledge cryptographic primitives for Orbinum Network.
+## Modules
+
+| Module | Contents |
+|---|---|
+| `types` | `FieldElement`, `Commitment`, `Nullifier`, `Blinding`, `OwnerPubkey`, `SpendingKey`, `Note`, constants |
+| `hash` | `PoseidonHasher` trait, `LightPoseidonHasher` (WASM), `NativePoseidonHasher` (native), `poseidon_hash_1` |
+| `ops` | `compute_commitment`, `compute_nullifier`, `merkle_hash` |
+| `host_interface` | `sp-runtime-interface` host functions (requires `poseidon-native` feature) |
 
 ## Features
 
-- **Fast native crypto**: Poseidon, commitments, nullifiers, Merkle trees
-- **no_std compatible**: Full WASM runtime support
-- **ZK-friendly**: Circomlib-compatible Poseidon hash
-- **Type-safe**: Prevents common ZK errors at compile time
-- **Well-tested**: 88 unit tests with 100% coverage
-
-## Installation
-
-```toml
-[dependencies]
-orbinum-zk-core = "0.2"
-
-# For no-std/WASM
-orbinum-zk-core = { version = "0.2", default-features = false }
-
-# For Substrate with native optimizations (~3x faster)
-orbinum-zk-core = { version = "0.2", features = ["native-poseidon"] }
-```
+| Feature | Description | Default |
+|---|---|---|
+| `std` | Enable standard library | ✓ |
+| `poseidon-native` | `NativePoseidonHasher` + host functions (~3× faster in native runtime) | ✓ |
 
 ## Usage
 
-### Basic Note Operations
+### Note commitment
 
 ```rust
-use orbinum_zk_core::{
-    domain::entities::Note,
-    domain::value_objects::{OwnerPubkey, Blinding, FieldElement},
-    domain::services::CommitmentService,
-    infrastructure::crypto::LightPoseidonHasher,
-};
+use orbinum_zk_core::{LightPoseidonHasher, OwnerPubkey, Blinding, compute_commitment};
+use ark_bn254::Fr;
 
-// Create a note
-let note = Note::new(
-    1000,  // value
-    1,     // asset_id
-    OwnerPubkey::new(FieldElement::from_u64(12345)),
-    Blinding::new(FieldElement::from_u64(67890)),
+let commitment = compute_commitment(
+    &LightPoseidonHasher,
+    1000,                                   // value
+    1,                                      // asset_id
+    OwnerPubkey::from(Fr::from(12345u64)),
+    Blinding::from(Fr::from(67890u64)),
 );
+```
 
-// Generate commitment
+### Nullifier
+
+```rust
+use orbinum_zk_core::{LightPoseidonHasher, SpendingKey, compute_nullifier};
+use ark_bn254::Fr;
+
+let nullifier = compute_nullifier(
+    &LightPoseidonHasher,
+    commitment,
+    SpendingKey::from(Fr::from(999u64)),
+);
+```
+
+### Note helper
+
+```rust
+use orbinum_zk_core::{Note, OwnerPubkey, Blinding, LightPoseidonHasher};
+use ark_bn254::Fr;
+
 let hasher = LightPoseidonHasher;
-let service = CommitmentService::new(hasher);
-let commitment = service.create_commitment(
-    note.value(),
-    note.asset_id(),
-    note.owner_pubkey(),
-    note.blinding(),
-);
+let note = Note::new(1000, 1, OwnerPubkey::from(Fr::from(1u64)), Blinding::from(Fr::from(2u64)));
+
+let commitment = note.commitment(&hasher);
+let nullifier  = note.nullifier(&hasher, spending_key);
 ```
 
-### Nullifier Generation
+### Single-element hash (disclosure circuit)
 
 ```rust
-use orbinum_zk_core::{
-    domain::services::NullifierService,
-    domain::value_objects::SpendingKey,
-};
+use orbinum_zk_core::{poseidon_hash_1, FieldElement};
 
-let nullifier_service = NullifierService::new(hasher);
-let spending_key = SpendingKey::new(FieldElement::from_u64(999));
-let nullifier = nullifier_service.compute_nullifier(&commitment, &spending_key);
+// viewing_key = Poseidon(owner_pubkey)
+let viewing_key = poseidon_hash_1(FieldElement::from_u64(owner_pk));
 ```
 
-### Merkle Tree Operations
+### Custom hasher (testing)
 
 ```rust
-use orbinum_zk_core::domain::services::MerkleService;
+use orbinum_zk_core::{PoseidonHasher, FieldElement};
 
-let merkle_service = MerkleService::new(hasher);
-let leaves = vec![commitment1, commitment2, commitment3];
-let root = merkle_service.compute_root(&leaves);
-
-// Generate Merkle proof
-let proof = merkle_service.generate_proof(&leaves, 1);
-assert!(merkle_service.verify_proof(&root, &leaves[1], &proof, 1));
+struct MockHasher;
+impl PoseidonHasher for MockHasher {
+    fn hash_2(&self, _: [FieldElement; 2]) -> FieldElement { FieldElement::from_u64(0) }
+    fn hash_4(&self, _: [FieldElement; 4]) -> FieldElement { FieldElement::from_u64(0) }
+    fn hash_5(&self, _: [FieldElement; 5]) -> FieldElement { FieldElement::from_u64(0) }
+}
 ```
 
-## Key Concepts
+## Cryptographic formulas
 
-- **Note**: UTXO-like primitive for private values
-- **Commitment**: Hiding binding to note data (Poseidon hash)
-- **Nullifier**: Prevents double-spending (derived from commitment + key)
-- **Merkle Tree**: Accumulates commitments for membership proofs
+```
+commitment  = Poseidon(value, asset_id, owner_pubkey, blinding)           // hash_4
+nullifier   = Poseidon(commitment, spending_key)                           // hash_2
+merkle_node = Poseidon(left, right)                                        // hash_2
+eddsa_h     = Poseidon(R8x, R8y, Ax, Ay, msg)                             // hash_5
+viewing_key = Poseidon(owner_pubkey)                                       // hash_1 (disclosure)
+```
 
-## Poseidon Hash
-
-Uses `light-poseidon-nostd` for circomlib compatibility:
-- S-Box: x^5
-- Full rounds: 8
-- Partial rounds: 57 (for 2 inputs), 56 (for 4 inputs)
-- ~300 constraints (vs ~25,000 for SHA-256)
-
-## Performance
-
-| Operation | Native | WASM | With native-poseidon |
-|-----------|--------|------|----------------------|
-| Commitment | 50μs | 150μs | 15μs |
-| Nullifier | 40μs | 120μs | 12μs |
-| Merkle Root (depth 20) | 1ms | 3ms | 300μs |
+All hashes use circomlib-compatible Poseidon (BN254, iden3 parameters).
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE2) or [GPL v3](LICENSE-GPL3) at your option.
+Licensed under either of [Apache License, Version 2.0](../../LICENSE-APACHE2) or [GPL v3](../../LICENSE-GPL3) at your option.
+

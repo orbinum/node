@@ -58,16 +58,17 @@ pub use pallet::*;
 #[cfg(test)]
 mod mock;
 
-#[cfg(test)]
-mod tests;
-
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
 
-// Clean Architecture layers
-pub mod application;
-pub mod domain;
-pub mod infrastructure;
+// Business layers
+pub mod genesis;
+pub mod helpers;
+pub mod merkle;
+pub mod operations;
+pub mod storage;
+pub mod types;
+pub mod validate_unsigned;
 
 // Pallet weights
 pub mod weights;
@@ -77,24 +78,16 @@ pub use weights::WeightInfo;
 // Runtime API implementation
 mod runtime_api_impl;
 
-// Re-export domain types for external use
-pub use application::DepositInfo;
-pub use domain::{
-	Commitment, Note, Nullifier,
-	entities::{
-		AssetMetadata,
-		audit::{AuditPolicy, AuditTrail, DisclosureProof, DisclosureRequest},
-	},
-	value_objects::{
-		AssetId, DEFAULT_TREE_DEPTH, DefaultMerklePath, Hash, MAX_MEMO_SIZE, MAX_TREE_DEPTH,
-		MerklePath, StandardEncryptedMemo,
-		audit::{Auditor, DisclosureCondition},
-	},
+// Re-export types for external use
+pub use types::{
+	AssetId, AssetMetadata, AuditPolicy, AuditTrail, Auditor, Commitment, DEFAULT_TREE_DEPTH,
+	DefaultMerklePath, DisclosureCondition, DisclosureRecord, DisclosureRequest,
+	EncryptedMemo as FrameEncryptedMemo, Hash, MAX_ENCRYPTED_MEMO_SIZE, MAX_TREE_DEPTH, MerklePath,
+	Note, Nullifier,
 };
-// Re-export FRAME-specific EncryptedMemo for storage compatibility
-pub use infrastructure::frame_types::EncryptedMemo as FrameEncryptedMemo;
 
 #[frame_support::pallet]
+#[allow(clippy::too_many_arguments)]
 pub mod pallet {
 	use super::*;
 	use frame_support::{
@@ -105,7 +98,6 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 	use pallet_zk_verifier::ZkVerifierPort;
 	use parity_scale_codec::{Decode, DecodeWithMemTracking, Encode, MaxEncodedLen};
-	use sp_runtime::traits::AccountIdConversion;
 
 	/// The balance type for this pallet
 	pub type BalanceOf<T> =
@@ -114,7 +106,7 @@ pub mod pallet {
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
 
-	/// Input data for a batch disclosure proof submission
+	/// Input data for a batch disclosure submission
 	#[derive(
 		Clone,
 		Encode,
@@ -125,15 +117,16 @@ pub mod pallet {
 		RuntimeDebug,
 		MaxEncodedLen
 	)]
-	pub struct BatchDisclosureSubmission {
+	pub struct BatchDisclosureSubmission<AccountId> {
 		/// The commitment being disclosed
 		pub commitment: Commitment,
-		/// ZK proof (Groth16)
-		pub proof: BoundedVec<u8, ConstU32<2048>>,
-		/// Public signals for the proof (76 bytes)
-		pub public_signals: BoundedVec<u8, ConstU32<128>>,
-		/// Disclosed data (encrypted for auditor)
-		pub disclosed_data: BoundedVec<u8, ConstU32<512>>,
+		/// ZK proof (Groth16, max 256 bytes)
+		pub proof: BoundedVec<u8, ConstU32<256>>,
+		/// Public signals (76 bytes): [commitment(32)][value(8)][asset_id(4)][owner_hash(32)]
+		pub public_signals: BoundedVec<u8, ConstU32<76>>,
+		/// Optional auditor. `Some` → Flujo B (requires active DisclosureRequest).
+		/// `None` → Flujo A (self-disclosure).
+		pub auditor: Option<AccountId>,
 	}
 
 	/// Configuration trait for the pallet
@@ -144,6 +137,12 @@ pub mod pallet {
 
 		/// ZK proof verifier (domain port)
 		type ZkVerifier: ZkVerifierPort;
+
+		/// Relay configuration, fee accounting and block-author lookup.
+		///
+		/// In production: `pallet_relayer::Pallet<Runtime>`.
+		/// In tests: a lightweight mock struct in `mock.rs`.
+		type Relayer: pallet_relayer::RelayerInterface<AccountId = Self::AccountId>;
 
 		/// The pallet's ID, used for deriving the pool account
 		#[pallet::constant]
@@ -160,9 +159,12 @@ pub mod pallet {
 		/// Minimum amount that can be shielded
 		#[pallet::constant]
 		type MinShieldAmount: Get<BalanceOf<Self>>;
-
 		/// Weight information for extrinsics in this pallet
 		type WeightInfo: WeightInfo;
+
+		/// Number of blocks after which a disclosure request expires
+		#[pallet::constant]
+		type RequestExpiration: Get<BlockNumberFor<Self>>;
 	}
 
 	// ========================================================================
@@ -188,11 +190,6 @@ pub mod pallet {
 	pub type NullifierSet<T: Config> =
 		StorageMap<_, Blake2_128Concat, Nullifier, BlockNumberFor<T>, OptionQuery>;
 
-	/// Total balance held in the shielded pool
-	#[pallet::storage]
-	#[pallet::getter(fn pool_balance)]
-	pub type PoolBalance<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
-
 	/// Historic Poseidon Merkle roots (for proving against recent states)
 	#[pallet::storage]
 	pub type HistoricPoseidonRoots<T> = StorageMap<_, Blake2_128Concat, Hash, bool, ValueQuery>;
@@ -202,16 +199,6 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type HistoricRootsOrder<T: Config> =
 		StorageValue<_, BoundedVec<Hash, T::MaxHistoricRoots>, ValueQuery>;
-
-	/// Deposit information for tracking
-	#[pallet::storage]
-	pub type Deposits<T: Config> = StorageMap<
-		_,
-		Blake2_128Concat,
-		Commitment,
-		DepositInfo<T::AccountId, BalanceOf<T>, BlockNumberFor<T>>,
-		OptionQuery,
-	>;
 
 	/// Encrypted memos for commitments
 	///
@@ -227,17 +214,8 @@ pub mod pallet {
 		StorageMap<_, Blake2_128Concat, Commitment, FrameEncryptedMemo, OptionQuery>;
 
 	// ========================================================================
-	// Audit Policies Storage (Phase 4)
+	// Audit Policies Storage
 	// ========================================================================
-
-	/// Disclosure verifying key
-	///
-	/// Stores the verifying key for disclosure ZK proofs.
-	/// Only governance (root) can update this key.
-	/// Format: Raw bytes of ark-groth16 VerifyingKey serialized
-	#[pallet::storage]
-	pub type DisclosureVerifyingKey<T> =
-		StorageValue<_, BoundedVec<u8, ConstU32<4096>>, OptionQuery>;
 
 	/// Audit policies defined by users
 	///
@@ -265,12 +243,21 @@ pub mod pallet {
 		OptionQuery,
 	>;
 
-	/// Approved disclosures
+	/// Disclosure records (parsed results of verified ZK disclosures)
 	///
-	/// Maps commitment to disclosure proof
+	/// Double-map: (commitment, key) → DisclosureRecord
+	/// - Flujo A (self): key = note owner
+	/// - Flujo B (audited): key = auditor, record.requester = target
 	#[pallet::storage]
-	pub type DisclosureProofs<T: Config> =
-		StorageMap<_, Blake2_128Concat, Commitment, DisclosureProof, OptionQuery>;
+	pub type DisclosureRecords<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat,
+		Commitment,
+		Blake2_128Concat,
+		T::AccountId,
+		DisclosureRecord<T::AccountId, BlockNumberFor<T>>,
+		OptionQuery,
+	>;
 
 	/// Audit trail for compliance
 	///
@@ -336,6 +323,22 @@ pub mod pallet {
 		OptionQuery,
 	>;
 
+	/// Disclosure counters for O(1) rate limiting
+	///
+	/// Maps (target_account, auditor) to the total number of completed disclosures.
+	/// Incremented on approve_disclosure and submit_disclosure (with auditor).
+	/// Replaces the O(n) AuditTrailStorage::iter() scan in request_disclosure.
+	#[pallet::storage]
+	pub type DisclosureCounters<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat,
+		T::AccountId, // target account
+		Blake2_128Concat,
+		T::AccountId, // auditor
+		u32,
+		ValueQuery,
+	>;
+
 	// ========================================================================
 	// Genesis Config
 	// ========================================================================
@@ -352,8 +355,8 @@ pub mod pallet {
 	#[pallet::genesis_build]
 	impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
 		fn build(&self) {
-			// Delegate to infrastructure layer for genesis initialization
-			crate::infrastructure::genesis::initialize_genesis::<T>(self.initial_root);
+			// Delegate to genesis module for initialization
+			crate::genesis::initialize_genesis::<T>(self.initial_root);
 		}
 	}
 
@@ -382,11 +385,11 @@ pub mod pallet {
 		PrivateTransfer {
 			/// Nullifiers of spent notes
 			nullifiers: BoundedVec<Nullifier, ConstU32<2>>,
-			/// New commitments created
+			/// New commitments created (recipient notes)
 			commitments: BoundedVec<Commitment, ConstU32<2>>,
 			/// Encrypted memos for new notes
 			encrypted_memos: BoundedVec<FrameEncryptedMemo, ConstU32<2>>,
-			/// Indices of new leaves
+			/// Indices of new leaves in the Merkle tree
 			leaf_indices: BoundedVec<u32, ConstU32<2>>,
 		},
 
@@ -418,45 +421,17 @@ pub mod pallet {
 			version: u32,
 		},
 
-		/// Disclosure verifying key was updated
-		DisclosureVerifyingKeyUpdated {
-			/// Size of the new VK in bytes
-			vk_size: u32,
-		},
-
-		/// Disclosure proof was submitted on-chain
-		DisclosureSubmitted {
-			/// Account that submitted the proof
+		/// A selective disclosure was successfully verified and recorded
+		Disclosed {
+			/// Account that submitted the disclosure (note owner)
 			who: T::AccountId,
-			/// Commitment being disclosed
+			/// Commitment whose note was disclosed
 			commitment: Commitment,
-			/// Size of the proof in bytes
-			proof_size: u32,
+			/// Auditor when Flujo B; `None` for self-disclosure (Flujo A)
+			auditor: Option<T::AccountId>,
 		},
 
-		/// Disclosure proof was verified successfully
-		DisclosureVerified {
-			/// Account that submitted the proof
-			who: T::AccountId,
-			/// Commitment that was verified
-			commitment: Commitment,
-			/// Whether verification succeeded
-			verified: bool,
-		},
-
-		/// Audit trail was recorded for compliance
-		AuditTrailRecorded {
-			/// Account being audited
-			account: T::AccountId,
-			/// Auditor performing audit
-			auditor: T::AccountId,
-			/// Commitment disclosed
-			commitment: Commitment,
-			/// Audit trail hash
-			trail_hash: Hash,
-		},
-
-		/// Disclosure request was submitted
+		/// Disclosure request was submitted by auditor
 		DisclosureRequested {
 			/// Target account to audit
 			target: T::AccountId,
@@ -464,18 +439,6 @@ pub mod pallet {
 			auditor: T::AccountId,
 			/// Request reason
 			reason: BoundedVec<u8, ConstU32<256>>,
-		},
-
-		/// Disclosure was approved and proof submitted
-		DisclosureApproved {
-			/// Target account
-			target: T::AccountId,
-			/// Auditor
-			auditor: T::AccountId,
-			/// Commitment disclosed
-			commitment: Commitment,
-			/// Audit trail hash
-			trail_hash: Hash,
 		},
 
 		/// Disclosure request was rejected
@@ -486,6 +449,22 @@ pub mod pallet {
 			auditor: T::AccountId,
 			/// Reason for rejection
 			reason: BoundedVec<u8, ConstU32<256>>,
+		},
+
+		/// An expired disclosure request was pruned
+		DisclosureRequestExpired {
+			/// Target account (the account that received the request)
+			target: T::AccountId,
+			/// Auditor that submitted the request
+			auditor: T::AccountId,
+		},
+
+		/// A disclosure record was revoked by its creator (Flujo A only)
+		DisclosureRecordRevoked {
+			/// Account that revoked the record
+			who: T::AccountId,
+			/// Commitment whose record was revoked
+			commitment: Commitment,
 		},
 
 		/// Asset was registered in the registry
@@ -504,6 +483,32 @@ pub mod pallet {
 		AssetUnverified {
 			/// The asset ID
 			asset_id: u32,
+		},
+
+		/// Validator claimed their accumulated fees as a private shielded note
+		ValidatorFeesClaimed {
+			/// The validator account that claimed
+			validator: T::AccountId,
+			/// Asset ID of the fees claimed
+			asset_id: u32,
+			/// Amount claimed
+			amount: BalanceOf<T>,
+			/// Commitment inserted into the Merkle tree
+			commitment: Commitment,
+			/// Leaf index of the new note
+			leaf_index: u32,
+		},
+
+		/// Relay fees were claimed and sent directly to the relayer's EVM account
+		RelayFeesClaimedToEvm {
+			/// The validator substrate account that claimed
+			validator: T::AccountId,
+			/// The EVM address that received the funds
+			evm_address: sp_core::H160,
+			/// Asset ID of the fees claimed
+			asset_id: u32,
+			/// Amount transferred to the EVM mirror account
+			amount: BalanceOf<T>,
 		},
 	}
 
@@ -542,6 +547,7 @@ pub mod pallet {
 		/// Auditor not authorized
 		AuditorNotAuthorized,
 		/// Disclosure conditions not met
+		DisclosureConditionsNotMet,
 		/// Asset ID does not exist in the registry
 		InvalidAssetId,
 		/// Asset is not verified for use
@@ -550,19 +556,16 @@ pub mod pallet {
 		AssetIdMismatch,
 		/// Recipient address is zero (burn address)
 		InvalidRecipient,
-		DisclosureConditionsNotMet,
+		/// Gasless fee is below the required minimum
+		FeeTooLow,
 		/// Disclosure request already exists
 		DisclosureRequestAlreadyExists,
 		/// Disclosure request not found
 		DisclosureRequestNotFound,
-		/// Invalid disclosure proof
-		InvalidDisclosureProof,
+		/// Invalid disclosure record (ZK proof failed or data inconsistent)
+		InvalidDisclosureRecord,
 		/// Audit policy version mismatch
 		AuditPolicyVersionMismatch,
-		/// Invalid verifying key format
-		InvalidVerifyingKey,
-		/// Verifying key not set
-		VerifyingKeyNotSet,
 		/// Invalid public signals (length or consistency)
 		InvalidPublicSignals,
 		/// Invalid disclosure mask (blinding revealed or no fields disclosed)
@@ -577,10 +580,28 @@ pub mod pallet {
 		TooManyAuditors,
 		/// Too many conditions in policy
 		TooManyConditions,
-		/// Disclosure frequency limit exceeded
-		DisclosureFrequencyLimitExceeded,
 		/// Too many disclosure requests
 		TooManyDisclosureRequests,
+		/// No auditors provided (at least one required)
+		NoAuditorsProvided,
+		/// Disclosure record already exists for this (commitment, key) pair
+		DisclosureRecordAlreadyExists,
+		/// Duplicate auditor entry in policy (each auditor must appear at most once)
+		DuplicateAuditor,
+		/// Disclosure request has expired and can no longer be fulfilled
+		DisclosureRequestExpired,
+		/// Disclosure request has not yet expired and cannot be pruned
+		DisclosureRequestNotExpired,
+		/// Audit policy has expired (valid_until block has passed)
+		AuditPolicyExpired,
+		/// Disclosure record not found for the given commitment
+		DisclosureRecordNotFound,
+		/// Caller is not the owner of the disclosure record
+		NotRecordOwner,
+		/// Pending validator fees are less than the requested claim amount
+		InsufficientPendingFees,
+		/// Caller has no EVM address registered in the relayer registry
+		RelayerNotRegistered,
 	}
 
 	// ========================================================================
@@ -617,8 +638,8 @@ pub mod pallet {
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
-			// Delegate to application service
-			crate::application::services::shield_service::ShieldService::execute::<T>(
+			// Delegate to business operation
+			crate::operations::shield::ShieldOperation::execute::<T>(
 				who,
 				asset_id,
 				amount,
@@ -663,7 +684,7 @@ pub mod pallet {
 
 			// Process each shield operation
 			for (asset_id, amount, commitment, encrypted_memo) in operations.into_iter() {
-				crate::application::services::shield_service::ShieldService::execute::<T>(
+				crate::operations::shield::ShieldOperation::execute::<T>(
 					who.clone(),
 					asset_id,
 					amount,
@@ -679,25 +700,28 @@ pub mod pallet {
 		///
 		/// This spends existing notes (via nullifiers) and creates new notes
 		/// (via commitments). A ZK proof verifies the transfer is valid without
-		/// revealing amounts or participants. Encrypted memos enable note recovery
-		/// and selective disclosure.
+		/// revealing amounts or participants. The fee is embedded in the ZK proof
+		/// (input_sum == output_sum + fee) and paid to the fee collector without
+		/// a transaction signer, preserving full sender privacy.
 		///
 		/// # Arguments
-		/// * `origin` - Any signed account (sender identity is hidden)
+		/// * `origin` - Must be none (unsigned transaction)
 		/// * `proof` - The ZK proof of valid transfer
 		/// * `merkle_root` - The Merkle root the proof was computed against
 		/// * `nullifiers` - Nullifiers for notes being spent
 		/// * `commitments` - Commitments for new notes being created
 		/// * `encrypted_memos` - Encrypted metadata for each new note
+		/// * `asset_id` - Asset being transferred (public input of the proof)
+		/// * `fee` - Gasless fee (must match proof's fee public input)
 		///
 		/// # Errors
 		/// * `UnknownMerkleRoot` - Root is not in historic roots
 		/// * `NullifierAlreadyUsed` - Double-spend attempt
 		/// * `InvalidProof` - ZK proof verification failed
-		/// * `InvalidMemoSize` - Encrypted memo is not exactly 104 bytes
-		/// * `MemoCommitmentMismatch` - Number of memos doesn't match commitments
+		/// * `FeeTooLow` - Fee is below `T::Relayer::min_relay_fee()`
 		#[pallet::call_index(1)]
 		#[pallet::weight(T::WeightInfo::private_transfer())]
+		#[allow(clippy::too_many_arguments)]
 		pub fn private_transfer(
 			origin: OriginFor<T>,
 			#[allow(unused_variables)] proof: BoundedVec<u8, ConstU32<512>>,
@@ -705,16 +729,23 @@ pub mod pallet {
 			nullifiers: BoundedVec<Nullifier, ConstU32<2>>,
 			commitments: BoundedVec<Commitment, ConstU32<2>>,
 			encrypted_memos: BoundedVec<FrameEncryptedMemo, ConstU32<2>>,
+			asset_id: u32,
+			fee: BalanceOf<T>,
+			// EVM address of the relay node that signed the tx (from precompile caller); None for direct Substrate.
+			relayer: Option<sp_core::H160>,
 		) -> DispatchResult {
-			ensure_signed(origin)?;
+			ensure_none(origin)?;
 
-			// Delegate to application service
-			crate::application::services::transfer_service::TransferService::execute::<T>(
+			// Delegate to business operation
+			crate::operations::private_transfer::PrivateTransferOperation::execute::<T>(
 				proof,
 				merkle_root,
 				nullifiers,
 				commitments,
 				encrypted_memos,
+				asset_id,
+				fee,
+				relayer,
 			)
 		}
 
@@ -722,22 +753,28 @@ pub mod pallet {
 		///
 		/// This spends a private note and transfers the tokens to a public recipient.
 		/// A ZK proof verifies ownership of the note without revealing which note.
+		/// The fee is embedded in the ZK proof (note_value == amount + fee) and
+		/// paid to the fee collector without a transaction signer.
 		///
 		/// # Arguments
-		/// * `origin` - Any signed account
+		/// * `origin` - Must be none (unsigned transaction)
 		/// * `proof` - The ZK proof of valid withdrawal
 		/// * `merkle_root` - The Merkle root the proof was computed against
 		/// * `nullifier` - Nullifier for the note being spent
-		/// * `amount` - Amount to withdraw
+		/// * `asset_id` - Asset being unshielded
+		/// * `amount` - Net amount to withdraw (recipient receives this)
 		/// * `recipient` - Public account to receive tokens
+		/// * `fee` - Gasless fee (must match proof's fee public input)
 		///
 		/// # Errors
 		/// * `UnknownMerkleRoot` - Root is not in historic roots
 		/// * `NullifierAlreadyUsed` - Double-spend attempt
 		/// * `InvalidProof` - ZK proof verification failed
 		/// * `InsufficientPoolBalance` - Pool doesn't have enough tokens
+		/// * `FeeTooLow` - Fee is below `T::Relayer::min_relay_fee()`
 		#[pallet::call_index(2)]
 		#[pallet::weight(T::WeightInfo::unshield())]
+		#[allow(clippy::too_many_arguments)]
 		pub fn unshield(
 			origin: OriginFor<T>,
 			#[allow(unused_variables)] proof: BoundedVec<u8, ConstU32<512>>,
@@ -746,44 +783,23 @@ pub mod pallet {
 			asset_id: u32,
 			amount: BalanceOf<T>,
 			recipient: T::AccountId,
+			fee: BalanceOf<T>,
+			// EVM address of the relay node that signed the tx (from precompile caller); None for direct Substrate.
+			relayer: Option<sp_core::H160>,
 		) -> DispatchResult {
-			ensure_signed(origin)?;
+			ensure_none(origin)?;
 
-			// Delegate to application service
-			crate::application::services::unshield_service::UnshieldService::execute::<T>(
+			// Delegate to business operation
+			crate::operations::unshield::UnshieldOperation::execute::<T>(
 				&proof,
 				merkle_root,
 				nullifier,
 				asset_id,
 				amount,
 				recipient,
+				fee,
+				relayer,
 			)
-		}
-
-		/// Set disclosure verifying key (governance only)
-		///
-		/// Configures the verifying key used to verify disclosure ZK proofs.
-		/// This should be the disclosure_vk.json generated from the disclosure circuit.
-		/// Only root/governance can call this extrinsic.
-		///
-		/// # Arguments
-		/// * `origin` - Must be root
-		/// * `vk_bytes` - Serialized verifying key (ark-groth16 format)
-		///
-		/// # Errors
-		/// * `BadOrigin` - Caller is not root
-		/// * `InvalidVerifyingKey` - VK format is invalid (size < 100 bytes)
-		#[pallet::call_index(3)]
-		#[pallet::weight(T::WeightInfo::set_disclosure_verifying_key())]
-		pub fn set_disclosure_verifying_key(
-			origin: OriginFor<T>,
-			vk_bytes: BoundedVec<u8, ConstU32<4096>>,
-		) -> DispatchResult {
-			ensure_root(origin)?;
-
-			crate::application::services::disclosure_service::DisclosureService::set_verifying_key::<
-				T,
-			>(vk_bytes)
 		}
 
 		/// Set or update audit policy for selective disclosure
@@ -797,14 +813,16 @@ pub mod pallet {
 				ConstU32<10>,
 			>,
 			max_frequency: Option<BlockNumberFor<T>>,
+			valid_until: Option<BlockNumberFor<T>>,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
-			crate::application::services::disclosure_service::DisclosureService::set_audit_policy::<T>(
+			crate::operations::disclosure::DisclosureOperation::set_audit_policy::<T>(
 				&who,
 				auditors,
 				conditions,
 				max_frequency,
+				valid_until,
 			)
 		}
 
@@ -815,30 +833,48 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			target: T::AccountId,
 			reason: BoundedVec<u8, ConstU32<256>>,
-			evidence: Option<BoundedVec<u8, ConstU32<1024>>>,
 		) -> DispatchResult {
 			let auditor = ensure_signed(origin)?;
 
-			crate::application::services::disclosure_service::DisclosureService::request_disclosure::<
-				T,
-			>(&auditor, &target, reason, evidence)
+			crate::operations::disclosure::DisclosureOperation::request_disclosure::<T>(
+				&auditor, &target, reason,
+			)
 		}
 
-		/// Approve disclosure request and submit proof
+		/// Submit a selective disclosure proof for a specific commitment.
+		///
+		/// Unifies Flujo A (self-disclosure) and Flujo B (audited) into a single
+		/// extrinsic. The `auditor` parameter selects the flow:
+		///
+		/// - `None`  → **Flujo A**: self-disclosure. Optional AuditPolicy is checked.
+		///   Record stored at `(commitment, who)` and revocable by the owner.
+		/// - `Some(auditor)` → **Flujo B**: audited disclosure. Requires an active
+		///   `DisclosureRequest` and matching `AuditPolicy`. Record stored at
+		///   `(commitment, auditor)` and permanent (not revocable).
+		///
+		/// # SAFETY
+		/// Commitment ownership is enforced by the ZK proof: the Groth16 circuit
+		/// reconstructs `commitment` from private inputs, so a passing proof can only
+		/// have been generated by the note owner.
 		#[pallet::call_index(6)]
-		#[pallet::weight(T::WeightInfo::approve_disclosure())]
-		pub fn approve_disclosure(
+		#[pallet::weight(T::WeightInfo::disclose())]
+		pub fn disclose(
 			origin: OriginFor<T>,
-			auditor: T::AccountId,
 			commitment: Commitment,
-			zk_proof: BoundedVec<u8, ConstU32<2048>>,
-			disclosed_data: BoundedVec<u8, ConstU32<512>>,
+			proof_bytes: BoundedVec<u8, ConstU32<256>>,
+			// public_signals (76 bytes): [commitment(32)][value(8)][asset_id(4)][owner_hash(32)]
+			public_signals: BoundedVec<u8, ConstU32<76>>,
+			auditor: Option<T::AccountId>,
 		) -> DispatchResult {
-			let target = ensure_signed(origin)?;
+			let who = ensure_signed(origin)?;
 
-			crate::application::services::disclosure_service::DisclosureService::approve_disclosure::<
-				T,
-			>(&target, &auditor, commitment, zk_proof, disclosed_data)
+			crate::operations::disclosure::DisclosureOperation::disclose::<T>(
+				&who,
+				commitment,
+				proof_bytes,
+				public_signals,
+				auditor.as_ref(),
+			)
 		}
 
 		/// Reject disclosure request
@@ -851,82 +887,23 @@ pub mod pallet {
 		) -> DispatchResult {
 			let target = ensure_signed(origin)?;
 
-			crate::application::services::disclosure_service::DisclosureService::reject_disclosure::<
-				T,
-			>(&target, &auditor, reason)
+			crate::operations::disclosure::DisclosureOperation::reject_disclosure::<T>(
+				&target, &auditor, reason,
+			)
 		}
 
-		/// Submit disclosure proof on-chain for verification
-		///
-		/// Permite al usuario submeter una prueba de selective disclosure para un memo
-		/// específico. La prueba es verificada on-chain usando el ZK verifier.
-		///
-		/// # Arguments
-		/// * `origin` - Cuenta del usuario que posee el memo
-		/// * `commitment` - Commitment del memo a divulgar
-		/// * `proof_bytes` - Groth16 proof serializado (256 bytes)
-		/// * `public_signals` - Public signals (97 bytes):
-		///   - commitment (32)
-		///   - viewing_key_hash (32)
-		///   - mask_bitmap (1)
-		///   - revealed_owner_hash (32)
-		/// * `partial_data` - Datos revelados según máscara
-		/// * `auditor` - Optional auditor account requesting disclosure
-		///
-		/// # Errors
-		/// * `InvalidProof` - Prueba no pasa verificación ZK
-		/// * `VerifyingKeyNotSet` - VK del circuit no configurado
-		/// * `CommitmentNotFound` - Commitment no existe on-chain
-		/// * `InvalidPublicSignals` - Public signals inconsistentes con commitment
-		/// * `UnauthorizedAuditor` - Auditor no autorizado en policy
-		/// * `DisclosureFrequencyExceeded` - Disclosure demasiado frecuente
-		#[pallet::call_index(8)]
-		#[pallet::weight(T::WeightInfo::submit_disclosure())]
-		pub fn submit_disclosure(
-			origin: OriginFor<T>,
-			commitment: Commitment,
-			proof_bytes: BoundedVec<u8, ConstU32<256>>,
-			public_signals: BoundedVec<u8, ConstU32<76>>,
-			partial_data: BoundedVec<u8, ConstU32<256>>,
-			auditor: Option<T::AccountId>,
-		) -> DispatchResult {
-			let who = ensure_signed(origin)?;
-
-			crate::application::services::disclosure_service::DisclosureService::submit_disclosure::<
-				T,
-			>(
-				&who,
-				commitment,
-				proof_bytes,
-				public_signals,
-				partial_data,
-				auditor.as_ref(),
-			)?;
-
-			// Also emit DisclosureSubmitted for backwards compatibility
-			Self::deposit_event(Event::DisclosureSubmitted {
-				who: who.clone(),
-				commitment,
-				proof_size: 256, // Fixed size for Groth16
-			});
-
-			Ok(())
-		}
-
-		/// Submit multiple disclosure proofs in a single transaction (batch optimization).
-		///
-		/// **OPT-2.1:** Native Batching that verifies up to 10 disclosure proofs simultaneously.
 		#[pallet::call_index(13)]
 		#[pallet::weight(T::WeightInfo::batch_submit_disclosure_proofs(submissions.len() as u32))]
 		pub fn batch_submit_disclosure_proofs(
 			origin: OriginFor<T>,
-			submissions: BoundedVec<BatchDisclosureSubmission, ConstU32<10>>,
+			submissions: BoundedVec<BatchDisclosureSubmission<T::AccountId>, ConstU32<10>>,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
-			crate::application::services::disclosure_service::DisclosureService::batch_submit_proofs::<
-				T,
-			>(&who, submissions)
+			crate::operations::disclosure::DisclosureOperation::batch_submit_proofs::<T>(
+				&who,
+				submissions,
+			)
 		}
 
 		/// Register a new asset for use in the shielded pool
@@ -947,7 +924,7 @@ pub mod pallet {
 		/// # Events
 		/// * `AssetRegistered` - Asset was successfully registered
 		#[pallet::call_index(9)]
-		#[pallet::weight(Weight::from_parts(100_000, 0) + T::DbWeight::get().reads_writes(1, 2))]
+		#[pallet::weight(T::WeightInfo::register_asset())]
 		pub fn register_asset(
 			origin: OriginFor<T>,
 			name: BoundedVec<u8, ConstU32<64>>,
@@ -957,7 +934,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			ensure_root(origin)?;
 
-			let _asset_id = crate::application::services::asset_service::AssetService::register::<T>(
+			let _asset_id = crate::operations::assets::AssetOperation::register::<T>(
 				name,
 				symbol,
 				decimals,
@@ -983,11 +960,11 @@ pub mod pallet {
 		/// # Events
 		/// * `AssetVerified` - Asset was successfully verified
 		#[pallet::call_index(10)]
-		#[pallet::weight(Weight::from_parts(50_000, 0) + T::DbWeight::get().reads_writes(1, 1))]
+		#[pallet::weight(T::WeightInfo::verify_asset())]
 		pub fn verify_asset(origin: OriginFor<T>, asset_id: u32) -> DispatchResult {
 			ensure_root(origin)?;
 
-			crate::application::services::asset_service::AssetService::verify::<T>(asset_id)
+			crate::operations::assets::AssetOperation::verify::<T>(asset_id)
 		}
 
 		/// Unverify an asset, preventing its use in new transactions
@@ -1006,141 +983,187 @@ pub mod pallet {
 		/// # Events
 		/// * `AssetUnverified` - Asset was successfully unverified
 		#[pallet::call_index(11)]
-		#[pallet::weight(Weight::from_parts(50_000, 0) + T::DbWeight::get().reads_writes(1, 1))]
+		#[pallet::weight(T::WeightInfo::unverify_asset())]
 		pub fn unverify_asset(origin: OriginFor<T>, asset_id: u32) -> DispatchResult {
 			ensure_root(origin)?;
 
-			crate::application::services::asset_service::AssetService::unverify::<T>(asset_id)
+			crate::operations::assets::AssetOperation::unverify::<T>(asset_id)
+		}
+
+		/// Remove an expired disclosure request from storage.
+		///
+		/// Permissionless cleanup: any account can prune a request whose `expires_at`
+		/// block has passed. This prevents storage bloat without requiring an
+		/// O(n) on_initialize hook.
+		///
+		/// # Errors
+		/// * `DisclosureRequestNotFound` - No request for (target, auditor)
+		/// * `DisclosureRequestNotExpired` - `expires_at` has not passed yet
+		#[pallet::call_index(14)]
+		#[pallet::weight(T::WeightInfo::prune_expired_request())]
+		pub fn prune_expired_request(
+			origin: OriginFor<T>,
+			target: T::AccountId,
+			auditor: T::AccountId,
+		) -> DispatchResult {
+			let _ = ensure_signed(origin)?;
+
+			let request = DisclosureRequests::<T>::get(&target, &auditor)
+				.ok_or(Error::<T>::DisclosureRequestNotFound)?;
+			let current_block = frame_system::Pallet::<T>::block_number();
+			ensure!(
+				current_block > request.expires_at,
+				Error::<T>::DisclosureRequestNotExpired
+			);
+			DisclosureRequests::<T>::remove(&target, &auditor);
+			Self::deposit_event(Event::DisclosureRequestExpired { target, auditor });
+			Ok(())
+		}
+
+		/// Revoke a Flujo A (self-disclosure) record created by the caller.
+		///
+		/// Removes the `DisclosureRecord` stored at `(commitment, caller)`. Only
+		/// applies to self-disclosures — Flujo B records (stored under the auditor
+		/// key) are permanent once approved.
+		///
+		/// # Errors
+		/// * `DisclosureRecordNotFound` - No self-disclosure record for `commitment`
+		#[pallet::call_index(15)]
+		#[pallet::weight(T::WeightInfo::revoke_disclosure_record())]
+		pub fn revoke_disclosure_record(
+			origin: OriginFor<T>,
+			commitment: Commitment,
+		) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+
+			ensure!(
+				DisclosureRecords::<T>::contains_key(commitment, &who),
+				Error::<T>::DisclosureRecordNotFound
+			);
+			DisclosureRecords::<T>::remove(commitment, &who);
+			Self::deposit_event(Event::DisclosureRecordRevoked { who, commitment });
+			Ok(())
+		}
+
+		/// Claim accumulated validator fees as a private shielded note.
+		///
+		/// Converts pending relay fee credits into a Merkle tree commitment.
+		/// A selective-disclosure ZK proof (disclosure circuit) must be supplied
+		/// proving that `commitment` encodes exactly `amount` and `asset_id`.
+		/// This closes the KNOWN LIMITATION that existed in the previous design.
+		///
+		/// # Errors
+		/// * `InvalidProof` - ZK proof verification failed or wrong length (expected 128 bytes)
+		/// * `InvalidPublicSignals` - Signals mismatch commitment/amount/asset_id, or wrong length (expected 76 bytes)
+		/// * `InvalidAmount` - Amount exceeds u64::MAX (circuit signal size)
+		/// * `InsufficientPendingFees` - Caller has fewer pending fees than `amount`
+		/// * `InvalidAssetId` - No such asset registered
+		/// * `MerkleTreeFull` - Merkle tree cannot accept more leaves
+		#[pallet::call_index(16)]
+		#[pallet::weight(T::WeightInfo::claim_shielded_fees())]
+		pub fn claim_shielded_fees(
+			origin: OriginFor<T>,
+			commitment: Commitment,
+			amount: BalanceOf<T>,
+			asset_id: u32,
+			memo: FrameEncryptedMemo,
+			proof: sp_std::vec::Vec<u8>,
+			public_signals: sp_std::vec::Vec<u8>,
+		) -> DispatchResult {
+			let validator = ensure_signed(origin)?;
+			crate::operations::fees::FeeOperation::claim_shielded::<T>(
+				validator,
+				commitment,
+				amount,
+				asset_id,
+				memo,
+				proof,
+				public_signals,
+			)
+		}
+
+		/// Claim accumulated relay fees and transfer them directly to the
+		/// relayer's EVM account.
+		///
+		/// Converts the pending relay-fee balance for (`origin`, `asset_id`) into
+		/// real tokens sent to the H160 EVM mirror account
+		/// (`H160[0..20] ++ [0x00; 12]`).  The EVM sees the balance immediately —
+		/// no ZK proof or `unshield` step required.
+		///
+		/// This is the preferred path for gasless relayers: the H160 that pays
+		/// EVM gas fees is automatically refunded without any manual token bridging.
+		///
+		/// # Arguments
+		/// * `origin` - Signed validator/relayer (sr25519 / Aura key)
+		/// * `asset_id` - Asset whose pending fees to claim
+		/// * `amount` - Amount to transfer (must be ≤ pending balance)
+		///
+		/// # Errors
+		/// * `InvalidAssetId` - Asset is not registered
+		/// * `RelayerNotRegistered` - Caller has no H160 in the relayer registry
+		/// * `InsufficientPendingFees` - Pending balance < `amount`
+		/// * `InsufficientPoolBalance` - Pool lacks tokens (invariant violation)
+		#[pallet::call_index(17)]
+		#[pallet::weight(T::WeightInfo::claim_shielded_fees())]
+		pub fn claim_relay_fees_to_evm(
+			origin: OriginFor<T>,
+			asset_id: u32,
+			amount: BalanceOf<T>,
+		) -> DispatchResult {
+			let validator = ensure_signed(origin)?;
+			crate::operations::fees::FeeOperation::claim_to_evm::<T>(validator, asset_id, amount)
 		}
 	}
 
 	// ========================================================================
-	// Helper Functions
+	// Unsigned Transaction Validation (Gasless Privacy)
 	// ========================================================================
+	//
+	// Lightweight anti-spam checks only — full ZK verification happens in each
+	// extrinsic body.  Logic lives in `crate::validate_unsigned` for testability.
 
-	impl<T: Config> Pallet<T> {
-		/// Get the pool's account ID (derived from PalletId)
-		pub fn pool_account_id() -> T::AccountId {
-			T::PalletId::get().into_account_truncating()
-		}
+	/// Validate unsigned private_transfer and unshield transactions before
+	/// they enter the transaction pool.  Full ZK proof verification happens
+	/// inside the extrinsic; here we do lightweight anti-spam checks only.
+	#[pallet::validate_unsigned]
+	impl<T: Config> sp_runtime::traits::ValidateUnsigned for Pallet<T> {
+		type Call = Call<T>;
 
-		/// Verify disclosure proof using ZK verifier
-		///
-		/// Valida una prueba de selective disclosure usando el verifier trait.
-		/// La prueba debe ser Groth16 con 256 bytes.
-		///
-		/// # Arguments
-		/// * `proof_bytes` - Groth16 proof serializado
-		/// * `public_signals` - 97 bytes de public signals
-		///
-		/// # Returns
-		/// * `Ok(())` si la prueba es válida
-		/// * `Err` si la prueba falla o hay error de verificación
-		pub fn verify_disclosure_proof_internal(
-			proof_bytes: &[u8],
-			public_signals: &[u8],
-		) -> DispatchResult {
-			crate::infrastructure::services::disclosure_validation_service::DisclosureValidationService::verify_proof_internal::<T>(
-				proof_bytes,
-				public_signals,
-			)
-		}
+		fn validate_unsigned(
+			_source: sp_runtime::transaction_validity::TransactionSource,
+			call: &Self::Call,
+		) -> sp_runtime::transaction_validity::TransactionValidity {
+			use sp_runtime::transaction_validity::InvalidTransaction;
 
-		/// Validate public signals consistency
-		///
-		/// Verifica que los public signals sean consistentes con el commitment on-chain:
-		/// 1. commitment en signals coincide con el argumento
-		/// 2. viewing_key_hash es válido (no zero)
-		/// 3. mask_bitmap es válido (no revela blinding, revela al menos 1 campo)
-		/// 4. revealed_owner_hash coherente con mask
-		///
-		/// # Arguments
-		/// * `commitment` - Commitment del memo
-		/// * `public_signals` - 97 bytes: [commitment(32)][vk_hash(32)][mask(1)][owner_hash(32)]
-		pub fn validate_public_signals(
-			commitment: &Commitment,
-			public_signals: &[u8],
-		) -> DispatchResult {
-			crate::infrastructure::services::disclosure_validation_service::DisclosureValidationService::validate_public_signals::<T>(
-				commitment,
-				public_signals,
-			)
-		}
+			match call {
+				Call::private_transfer {
+					merkle_root,
+					nullifiers,
+					fee,
+					..
+				} => crate::validate_unsigned::validate_private_transfer::<T>(
+					merkle_root,
+					nullifiers,
+					fee,
+				),
 
-		/// Validate disclosure access control and rate limiting
-		///
-		/// Verifica que el disclosure sea autorizado:
-		/// 1. Si hay AuditPolicy configurada, validar auditor autorizado
-		/// 2. Validar rate limiting (max_frequency)
-		/// 3. Si hay DisclosureRequest, verificar que auditor coincida
-		///
-		/// # Arguments
-		/// * `who` - Account que genera el disclosure (owner del memo)
-		/// * `commitment` - Commitment del memo
-		/// * `auditor` - Optional auditor account
-		///
-		/// # Returns
-		/// * `Ok(())` si el disclosure está autorizado
-		/// * `Err` si no autorizado o excede rate limit
-		pub fn validate_disclosure_access(
-			who: &T::AccountId,
-			commitment: &Commitment,
-			auditor: Option<&T::AccountId>,
-		) -> DispatchResult {
-			crate::infrastructure::services::disclosure_validation_service::DisclosureValidationService::validate_disclosure_access::<T>(
-				who,
-				commitment,
-				auditor,
-			)
-		}
+				Call::unshield {
+					merkle_root,
+					nullifier,
+					asset_id,
+					amount,
+					fee,
+					..
+				} => crate::validate_unsigned::validate_unshield::<T>(
+					merkle_root,
+					nullifier,
+					asset_id,
+					amount,
+					fee,
+				),
 
-		/// Insert a new leaf into the Merkle tree
-		pub fn insert_leaf(commitment: Commitment) -> Result<u32, DispatchError> {
-			crate::infrastructure::services::merkle_tree_service::MerkleTreeService::insert_leaf::<T>(
-				commitment,
-			)
-		}
-
-		/// Get the Merkle path for a leaf (for generating proofs off-chain)
-		///
-		/// Returns the sibling hashes and path indices needed to prove
-		/// membership in the Merkle tree.
-		pub fn get_merkle_path(leaf_index: u32) -> Option<DefaultMerklePath> {
-			crate::infrastructure::services::merkle_tree_service::MerkleTreeService::get_merkle_path::<
-				T,
-			>(leaf_index)
-		}
-
-		/// Verify a Merkle proof for a given leaf
-		pub fn verify_merkle_proof(root: &Hash, leaf: &Hash, path: &DefaultMerklePath) -> bool {
-			crate::infrastructure::services::merkle_tree_service::MerkleTreeService::verify_merkle_proof(
-				root,
-				leaf,
-				path,
-			)
-		}
-
-		/// Get leaf index for a commitment (Linear scan - expensive, only for RPC)
-		pub fn get_leaf_index(commitment: &Commitment) -> Option<u32> {
-			crate::infrastructure::services::merkle_tree_service::MerkleTreeService::find_leaf_index::<
-				T,
-			>(commitment)
-		}
-
-		/// Verify disclosure proof (cryptographic verification)
-		///
-		/// Realiza verificación criptográfica completa del ZK proof de disclosure.
-		/// Usa el verifying key almacenado en chain para verificar el Groth16 proof.
-		pub fn verify_disclosure_proof(
-			proof: &BoundedVec<u8, ConstU32<2048>>,
-			commitment: &Commitment,
-			disclosed_data: &BoundedVec<u8, ConstU32<512>>,
-		) -> Result<(), DispatchError> {
-			crate::infrastructure::services::disclosure_validation_service::DisclosureValidationService::verify_disclosure_proof::<T>(
-				proof,
-				commitment,
-				disclosed_data,
-			)
+				_ => InvalidTransaction::Call.into(),
+			}
 		}
 	}
 }

@@ -1,58 +1,93 @@
 # pallet-shielded-pool
 
-Shielded Pool pallet for private transactions in Orbinum.
+FRAME pallet for privacy-preserving transactions in Orbinum using ZK-SNARKs.
 
-## Overview
+## Status
 
-This pallet implements a privacy pool based on the UTXO model with commitments and nullifiers. It allows users to:
+MVP in active development. Core shield / transfer / unshield flows are functional. Audit and disclosure features are present but under active review.
 
-- **Shield**: Deposit public tokens into the private pool
-- **Private Transfer**: Transfer tokens privately within the pool using ZK proofs
-- **Unshield**: Withdraw tokens from the private pool to a public account
+## What this pallet does
 
-## Architecture
+Implements a UTXO-style shielded pool where:
 
-The shielded pool uses a **UTXO (Unspent Transaction Output)** model where:
+- Public tokens enter via `shield` — converted to on-chain commitments.
+- Value moves privately via `private_transfer` — only nullifiers and new commitments appear on-chain.
+- Tokens exit via `unshield` — revealed when the user chooses.
 
-1. Funds enter the pool via `shield()` - converting to private "notes"
-2. Transfers are private - only commitments visible on-chain
-3. Funds exit via `unshield()` - revealed when user chooses
+A Poseidon Merkle tree tracks all commitments. A nullifier set prevents double-spending. All state transitions require a valid Groth16 proof verified by `pallet-zk-verifier`.
 
-### Key Components
+## Extrinsics
 
-- **Merkle Tree**: Stores commitments of all notes (depth 32)
-- **Nullifier Set**: Prevents double-spending
-- **ZK Proofs**: Verify transaction validity without revealing details
+| Extrinsic | Origin | Description |
+|-----------|--------|-------------|
+| `shield` | Signed | Deposit tokens; insert one commitment into the Merkle tree |
+| `shield_batch` | Signed | Deposit and insert multiple commitments in one call |
+| `private_transfer` | Signed | ZK-proven private transfer between notes |
+| `unshield` | Signed | ZK-proven withdrawal to a public account |
+| `disclose` | Signed | Selective disclosure of a note to an auditor |
+| `register_asset` | Signed | Register a new asset for multi-asset support |
 
-## Usage
+## Storage
 
-### Shield (Deposit)
+| Item | Description |
+|------|-------------|
+| `PoseidonRoot` | Current Merkle root |
+| `MerkleTreeSize` | Number of inserted commitments |
+| `MerkleLeaves` | Commitments indexed by position |
+| `NullifierSet` | Spent nullifiers with block number |
+| `HistoricPoseidonRoots` | Past roots (accepted for proofs) |
+| `HistoricRootsOrder` | Bounded ordered list of historic roots |
+| `CommitmentMemos` | Encrypted memos per commitment |
+| `AuditPolicies` | Per-account audit policies |
+| `DisclosureRequests` | Pending disclosure requests by `(target, auditor)` |
+| `DisclosureRecords` | Completed disclosures by `(who, commitment)` |
+| `AuditTrailStorage` | Full audit trail entries |
+| `NextAuditTrailId` | Auto-increment for audit trail entries |
+| `Assets` | Registered asset metadata |
+| `NextAssetId` | Auto-increment for asset IDs |
+| `PoolBalancePerAsset` | Total shielded balance per asset |
+| `LastDisclosureTimestamp` | Rate-limiting per `(who, auditor)` |
+| `DisclosureCounters` | Disclosure count per `(who, auditor)` |
 
-```rust
-// Deposit 100 tokens into the pool
-ShieldedPool::shield(origin, 100, commitment)?;
+## Module layout
+
+```
+src/
+  lib.rs               — Config, Storage, Events, Errors, extrinsics
+  types.rs             — Commitment, Nullifier, Hash, EncryptedMemo and aliases
+  merkle.rs            — Poseidon Merkle tree insertion and root update
+  operations.rs        — Proof verification dispatch and business logic helpers
+  storage.rs           — Storage helper functions (nullifier checks, root lookups)
+  helpers.rs           — Miscellaneous internal helpers
+  genesis.rs           — GenesisConfig and BuildGenesisConfig impl
+  validate_unsigned.rs — ValidateUnsigned impl for unsigned extrinsics
+  benchmarking.rs      — FRAME benchmarks
+  weights.rs           — WeightInfo trait and generated weights
 ```
 
-### Private Transfer
+The previous Clean Architecture layers (`domain/`, `application/`, `infrastructure/`, `presentation/`, `tests/`) have been removed. All logic lives in `lib.rs` and the focused modules above.
 
-```rust
-// Transfer privately using a ZK proof
-ShieldedPool::private_transfer(origin, proof)?;
+## Security properties
+
+- Double-spend prevention: nullifiers are recorded on first use and rejected thereafter.
+- Merkle root validation: only the current root and historic roots within `MaxHistoricRoots` are accepted.
+- ZK proof verification: all state-changing extrinsics require a Groth16 proof validated by `pallet-zk-verifier`.
+
+These are design properties of the current MVP. No formal security audit has been performed.
+
+## Dependencies
+
+- `pallet-zk-verifier`: proof verification via `ZkVerifierPort`.
+- `orbinum-zk-core`: Poseidon hash, commitment and nullifier types.
+- `orbinum-encrypted-memo`: encrypted memo types.
+- FRAME: `frame-support`, `frame-system`, `sp-runtime`.
+
+## Testing
+
+```bash
+cargo test -p pallet-shielded-pool
 ```
-
-### Unshield (Withdraw)
-
-```rust
-// Withdraw to a public account
-ShieldedPool::unshield(origin, proof, nullifier, 100, recipient)?;
-```
-
-## Security Considerations
-
-- **Double-spend prevention**: Nullifiers are checked before processing transfers
-- **Merkle root validation**: Only known roots are accepted
-- **ZK verification**: All operations require valid ZK proofs
 
 ## License
 
-GPL-3.0-or-later
+Dual-licensed under Apache-2.0 and GPL-3.0-or-later.

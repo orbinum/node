@@ -474,10 +474,14 @@ mod benchmarks {
 		let mut addr_fe = [0u8; 32];
 		let copy_len = addr_bytes.len().min(32);
 		addr_fe[..copy_len].copy_from_slice(&addr_bytes[..copy_len]);
-		let inner = orbinum_zk_core::infrastructure::host_interface::poseidon_host_interface
-			::poseidon_hash_2(&chain_id_fe, &addr_fe);
-		let commitment: [u8; 32] = orbinum_zk_core::infrastructure::host_interface
-			::poseidon_host_interface::poseidon_hash_2(&inner, &blinding)
+		let inner = orbinum_zk_core::host_interface::poseidon_host_interface::poseidon_hash_2(
+			&chain_id_fe,
+			&addr_fe,
+		);
+		let commitment: [u8; 32] =
+			orbinum_zk_core::host_interface::poseidon_host_interface::poseidon_hash_2(
+				&inner, &blinding,
+			)
 			.try_into()
 			.expect("Poseidon output is 32 bytes");
 
