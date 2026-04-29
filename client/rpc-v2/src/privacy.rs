@@ -602,6 +602,7 @@ mod tests {
 			let path = build_merkle_path(&[leaf(0xFF)], 0);
 			// After level 0 the single leaf is hashed with zero_hash[0] to form the
 			// level-1 node. The sibling at level 1 must be zero_hash[1], and so on.
+			#[allow(clippy::needless_range_loop)]
 			for level in 1..TREE_DEPTH {
 				assert_eq!(path[level], get_zero_hash_cached(level));
 			}
