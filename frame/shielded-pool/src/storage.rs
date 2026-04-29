@@ -7,8 +7,9 @@ use crate::{
 	pallet::{
 		Assets, AuditPolicies, AuditTrailStorage, BalanceOf, CommitmentMemos, Config,
 		DisclosureCounters, DisclosureRecords, DisclosureRequests, Error, HistoricPoseidonRoots,
-		HistoricRootsOrder, LastDisclosureTimestamp, MerkleLeaves, MerkleTreeSize, NextAssetId,
-		NextAuditTrailId, NullifierSet, PoolBalancePerAsset, PoseidonRoot,
+		HistoricRootsOrder, LastDisclosureTimestamp, MerkleLeaves, MerkleTreeFrontier,
+		MerkleTreeSize, NextAssetId, NextAuditTrailId, NullifierSet, PoolBalancePerAsset,
+		PoseidonRoot,
 	},
 	types::{
 		AssetMetadata, AuditPolicy, AuditTrail, Commitment, DisclosureRecord, DisclosureRequest,
@@ -121,6 +122,12 @@ impl MerkleRepository {
 	}
 	pub fn set_historic_roots_order<T: Config>(order: BoundedVec<Hash, T::MaxHistoricRoots>) {
 		HistoricRootsOrder::<T>::put(order);
+	}
+	pub fn get_frontier<T: Config>() -> [[u8; 32]; 20] {
+		MerkleTreeFrontier::<T>::get()
+	}
+	pub fn set_frontier<T: Config>(frontier: [[u8; 32]; 20]) {
+		MerkleTreeFrontier::<T>::put(frontier);
 	}
 	pub fn find_leaf_index<T: Config>(commitment: &Commitment) -> Option<u32> {
 		let size = Self::get_tree_size::<T>();
