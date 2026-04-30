@@ -8107,7 +8107,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-shielded-pool"
-version = "0.5.0"
+version = "0.5.2"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.5.0",
@@ -8134,7 +8134,6 @@ version = "0.1.0"
 dependencies = [
  "hex",
  "jsonrpsee",
- "log",
  "pallet-shielded-pool",
  "pallet-shielded-pool-runtime-api",
  "parity-scale-codec",

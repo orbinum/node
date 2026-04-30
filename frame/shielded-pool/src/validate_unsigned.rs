@@ -341,4 +341,83 @@ mod tests {
 			assert!(result.is_ok());
 		});
 	}
+
+	// ── fee floor (anti-spam) ─────────────────────────────────────────────────
+	//
+	// T2: Verify that both validate_private_transfer and validate_unshield
+	// enforce the minimum relay fee set by T::Relayer::min_relay_fee().
+	// The mock returns 0 by default; mock_set_min_relay_fee lets individual
+	// tests raise the floor to exercise the Payment rejection path.
+
+	#[test]
+	fn private_transfer_fee_below_minimum_rejected() {
+		new_test_ext().execute_with(|| {
+			crate::mock::mock_set_min_relay_fee(100);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			// fee=50 < min_relay_fee=100 → InvalidTransaction::Payment
+			let result =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers_of(&[0x01]), &50u128);
+			assert!(result.is_err(), "fee below minimum must be rejected");
+			assert_eq!(
+				result.unwrap_err(),
+				sp_runtime::transaction_validity::TransactionValidityError::Invalid(
+					sp_runtime::transaction_validity::InvalidTransaction::Payment
+				),
+			);
+		});
+	}
+
+	#[test]
+	fn private_transfer_fee_at_minimum_accepted() {
+		new_test_ext().execute_with(|| {
+			crate::mock::mock_set_min_relay_fee(100);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			// fee == min_relay_fee → accept
+			let result =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers_of(&[0x01]), &100u128);
+			assert!(result.is_ok(), "fee equal to minimum must be accepted");
+		});
+	}
+
+	#[test]
+	fn unshield_fee_below_minimum_rejected() {
+		new_test_ext().execute_with(|| {
+			crate::mock::mock_set_min_relay_fee(200);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			PoolBalanceRepository::set_asset_balance::<Test>(0, 10_000u128);
+			// fee=50 < min_relay_fee=200 → InvalidTransaction::Payment
+			let result = validate_unshield::<Test>(
+				&KNOWN_ROOT,
+				&make_nullifier(0x60),
+				&0u32,
+				&100u128,
+				&50u128,
+			);
+			assert!(result.is_err(), "fee below minimum must be rejected");
+			assert_eq!(
+				result.unwrap_err(),
+				sp_runtime::transaction_validity::TransactionValidityError::Invalid(
+					sp_runtime::transaction_validity::InvalidTransaction::Payment
+				),
+			);
+		});
+	}
+
+	#[test]
+	fn unshield_fee_at_minimum_accepted() {
+		new_test_ext().execute_with(|| {
+			crate::mock::mock_set_min_relay_fee(200);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			PoolBalanceRepository::set_asset_balance::<Test>(0, 10_000u128);
+			// fee == min_relay_fee → accept (pool has enough for amount+fee)
+			let result = validate_unshield::<Test>(
+				&KNOWN_ROOT,
+				&make_nullifier(0x60),
+				&0u32,
+				&100u128,
+				&200u128,
+			);
+			assert!(result.is_ok(), "fee equal to minimum must be accepted");
+		});
+	}
 }

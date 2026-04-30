@@ -194,6 +194,15 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type MerkleLeaves<T> = StorageMap<_, Blake2_128Concat, u32, Commitment, OptionQuery>;
 
+	/// Reverse index: commitment -> leaf index.
+	///
+	/// Populated on every `insert_leaf`. Enables O(1) lookup for Merkle proof
+	/// generation and duplicate-commitment checks, replacing the former O(n)
+	/// linear scan over `MerkleLeaves`.
+	#[pallet::storage]
+	pub type CommitmentToLeafIndex<T> =
+		StorageMap<_, Blake2_128Concat, Commitment, u32, OptionQuery>;
+
 	/// Set of used nullifiers (nullifier -> block number when used)
 	#[pallet::storage]
 	pub type NullifierSet<T: Config> =
@@ -347,6 +356,22 @@ pub mod pallet {
 		u32,
 		ValueQuery,
 	>;
+
+	/// Total number of commitments ever inserted into the Merkle tree.
+	///
+	/// Monotonically increasing counter. Incremented once per successful
+	/// `insert_leaf` (shield, private_transfer output, claim_shielded_fees).
+	/// Enables O(1) pool stats without scanning `MerkleLeaves` key prefixes.
+	#[pallet::storage]
+	pub type TotalCommitmentsInserted<T> = StorageValue<_, u64, ValueQuery>;
+
+	/// Total number of nullifiers ever spent (notes consumed).
+	///
+	/// Monotonically increasing counter. Incremented once per
+	/// `NullifierRepository::mark_as_used` (unshield, private_transfer input).
+	/// Enables O(1) pool stats without scanning `NullifierSet` key prefixes.
+	#[pallet::storage]
+	pub type TotalNullifiersSpent<T> = StorageValue<_, u64, ValueQuery>;
 
 	// ========================================================================
 	// Genesis Config

@@ -5,11 +5,11 @@
 
 use crate::{
 	pallet::{
-		Assets, AuditPolicies, AuditTrailStorage, BalanceOf, CommitmentMemos, Config,
-		DisclosureCounters, DisclosureRecords, DisclosureRequests, Error, HistoricPoseidonRoots,
-		HistoricRootsOrder, LastDisclosureTimestamp, MerkleLeaves, MerkleTreeFrontier,
-		MerkleTreeSize, NextAssetId, NextAuditTrailId, NullifierSet, PoolBalancePerAsset,
-		PoseidonRoot,
+		Assets, AuditPolicies, AuditTrailStorage, BalanceOf, CommitmentMemos,
+		CommitmentToLeafIndex, Config, DisclosureCounters, DisclosureRecords, DisclosureRequests,
+		Error, HistoricPoseidonRoots, HistoricRootsOrder, LastDisclosureTimestamp, MerkleLeaves,
+		MerkleTreeFrontier, MerkleTreeSize, NextAssetId, NextAuditTrailId, NullifierSet,
+		PoolBalancePerAsset, PoseidonRoot, TotalCommitmentsInserted, TotalNullifiersSpent,
 	},
 	types::{
 		AssetMetadata, AuditPolicy, AuditTrail, Commitment, DisclosureRecord, DisclosureRequest,
@@ -129,17 +129,14 @@ impl MerkleRepository {
 	pub fn set_frontier<T: Config>(frontier: [[u8; 32]; 20]) {
 		MerkleTreeFrontier::<T>::put(frontier);
 	}
+	pub fn get_commitment_leaf_index<T: Config>(commitment: &Commitment) -> Option<u32> {
+		CommitmentToLeafIndex::<T>::get(commitment)
+	}
+	pub fn set_commitment_leaf_index<T: Config>(commitment: Commitment, index: u32) {
+		CommitmentToLeafIndex::<T>::insert(commitment, index);
+	}
 	pub fn find_leaf_index<T: Config>(commitment: &Commitment) -> Option<u32> {
-		let size = Self::get_tree_size::<T>();
-		for i in 0..size {
-			#[allow(clippy::collapsible_if)]
-			if let Some(c) = Self::get_leaf::<T>(i) {
-				if c == *commitment {
-					return Some(i);
-				}
-			}
-		}
-		None
+		Self::get_commitment_leaf_index::<T>(commitment)
 	}
 	pub fn get_all_leaves<T: Config>() -> sp_std::vec::Vec<Hash> {
 		let size = Self::get_tree_size::<T>();
@@ -161,11 +158,33 @@ impl NullifierRepository {
 	}
 	pub fn mark_as_used<T: Config>(nullifier: crate::types::Nullifier, block: BlockNumberFor<T>) {
 		NullifierSet::<T>::insert(nullifier, block);
+		PoolStatsRepository::increment_nullifiers_spent::<T>();
 	}
 	pub fn get_usage_block<T: Config>(
 		nullifier: &crate::types::Nullifier,
 	) -> Option<BlockNumberFor<T>> {
 		NullifierSet::<T>::get(nullifier)
+	}
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PoolStatsRepository
+// ════════════════════════════════════════════════════════════════════════════
+
+pub struct PoolStatsRepository;
+
+impl PoolStatsRepository {
+	pub fn increment_commitments_inserted<T: Config>() {
+		TotalCommitmentsInserted::<T>::mutate(|n| *n = n.saturating_add(1));
+	}
+	pub fn get_total_commitments_inserted<T: Config>() -> u64 {
+		TotalCommitmentsInserted::<T>::get()
+	}
+	pub fn increment_nullifiers_spent<T: Config>() {
+		TotalNullifiersSpent::<T>::mutate(|n| *n = n.saturating_add(1));
+	}
+	pub fn get_total_nullifiers_spent<T: Config>() -> u64 {
+		TotalNullifiersSpent::<T>::get()
 	}
 }
 
@@ -548,12 +567,37 @@ mod tests {
 	}
 
 	#[test]
+	fn merkle_repo_commitment_to_leaf_index_get_set() {
+		new_test_ext().execute_with(|| {
+			let c = test_commitment(0xDE);
+			// Before insertion: returns None
+			assert_eq!(
+				MerkleRepository::get_commitment_leaf_index::<Test>(&c),
+				None
+			);
+			// After set: returns the stored index
+			MerkleRepository::set_commitment_leaf_index::<Test>(c, 7);
+			assert_eq!(
+				MerkleRepository::get_commitment_leaf_index::<Test>(&c),
+				Some(7)
+			);
+			// A different commitment is unaffected
+			assert_eq!(
+				MerkleRepository::get_commitment_leaf_index::<Test>(&test_commitment(0xAB)),
+				None
+			);
+		});
+	}
+
+	#[test]
 	fn merkle_repo_find_leaf_index_returns_correct_positions() {
 		new_test_ext().execute_with(|| {
 			let c0 = test_commitment(0xA1);
 			let c1 = test_commitment(0xA2);
 			MerkleRepository::insert_leaf::<Test>(0, c0);
+			MerkleRepository::set_commitment_leaf_index::<Test>(c0, 0);
 			MerkleRepository::insert_leaf::<Test>(1, c1);
+			MerkleRepository::set_commitment_leaf_index::<Test>(c1, 1);
 			MerkleRepository::set_tree_size::<Test>(2);
 			assert_eq!(MerkleRepository::find_leaf_index::<Test>(&c0), Some(0));
 			assert_eq!(MerkleRepository::find_leaf_index::<Test>(&c1), Some(1));
@@ -607,6 +651,49 @@ mod tests {
 				NullifierRepository::get_usage_block::<Test>(&n),
 				Some(100u64)
 			);
+		});
+	}
+
+	// ── PoolStatsRepository ───────────────────────────────────────────────────
+
+	#[test]
+	fn pool_stats_commitments_zero_by_default() {
+		new_test_ext().execute_with(|| {
+			assert_eq!(
+				PoolStatsRepository::get_total_commitments_inserted::<Test>(),
+				0
+			);
+		});
+	}
+
+	#[test]
+	fn pool_stats_commitments_increments_correctly() {
+		new_test_ext().execute_with(|| {
+			PoolStatsRepository::increment_commitments_inserted::<Test>();
+			PoolStatsRepository::increment_commitments_inserted::<Test>();
+			PoolStatsRepository::increment_commitments_inserted::<Test>();
+			assert_eq!(
+				PoolStatsRepository::get_total_commitments_inserted::<Test>(),
+				3
+			);
+		});
+	}
+
+	#[test]
+	fn pool_stats_nullifiers_zero_by_default() {
+		new_test_ext().execute_with(|| {
+			assert_eq!(PoolStatsRepository::get_total_nullifiers_spent::<Test>(), 0);
+		});
+	}
+
+	#[test]
+	fn pool_stats_nullifiers_incremented_by_mark_as_used() {
+		new_test_ext().execute_with(|| {
+			let n0 = test_nullifier(0xE0);
+			let n1 = test_nullifier(0xE1);
+			NullifierRepository::mark_as_used::<Test>(n0, 1u64);
+			NullifierRepository::mark_as_used::<Test>(n1, 2u64);
+			assert_eq!(PoolStatsRepository::get_total_nullifiers_spent::<Test>(), 2);
 		});
 	}
 

@@ -103,7 +103,11 @@ impl ZkVerifierPort for MockZkVerifier {
 				"Invalid public signals length",
 			));
 		}
-		// Always return true for testing (bypass ZK verification)
+		// Sentinel: a proof whose first byte is 0x00 is treated as cryptographically
+		// rejected (simulates Groth16 returning false). All other non-empty proofs pass.
+		if proof[0] == 0x00 {
+			return Ok(false);
+		}
 		Ok(true)
 	}
 
@@ -116,7 +120,11 @@ impl ZkVerifierPort for MockZkVerifier {
 		if proofs.len() != public_signals.len() {
 			return Err(sp_runtime::DispatchError::Other("Mismatched array lengths"));
 		}
-		// Always return true for testing (bypass ZK verification)
+		// Sentinel: any proof in the batch starting with 0x00 causes the whole batch
+		// to return Ok(false), simulating a failed cryptographic batch verification.
+		if proofs.iter().any(|p| p.first() == Some(&0x00)) {
+			return Ok(false);
+		}
 		Ok(true)
 	}
 
@@ -197,6 +205,13 @@ pub fn mock_evm_address_set(who: u64, addr: sp_core::H160) {
 	sp_io::storage::set(&key, &addr.as_fixed_bytes().encode());
 }
 
+/// Write a minimum relay fee to raw test storage.
+/// By default `MockRelayer::min_relay_fee()` returns 0; call this to raise the floor.
+pub fn mock_set_min_relay_fee(fee: u128) {
+	use parity_scale_codec::Encode;
+	sp_io::storage::set(b"mock:min_relay_fee", &fee.encode());
+}
+
 impl pallet_relayer::RelayerInterface for MockRelayer {
 	type AccountId = u64;
 
@@ -206,7 +221,10 @@ impl pallet_relayer::RelayerInterface for MockRelayer {
 	}
 
 	fn min_relay_fee() -> u128 {
-		0
+		use parity_scale_codec::Decode;
+		sp_io::storage::get(b"mock:min_relay_fee")
+			.and_then(|v| u128::decode(&mut &v[..]).ok())
+			.unwrap_or(0)
 	}
 
 	fn allowed_selectors() -> sp_std::vec::Vec<[u8; 4]> {

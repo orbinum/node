@@ -6,7 +6,7 @@
 
 use crate::{
 	pallet::{CommitmentMemos, Config, Error, Event, Pallet},
-	storage::MerkleRepository,
+	storage::{MerkleRepository, PoolStatsRepository},
 	types::{Commitment, DefaultMerklePath, Hash, MerklePath},
 };
 use alloc::boxed::Box;
@@ -344,7 +344,9 @@ impl MerkleTreeService {
 		let old_poseidon_root = MerkleRepository::get_poseidon_root::<T>();
 
 		MerkleRepository::insert_leaf::<T>(index, commitment);
+		MerkleRepository::set_commitment_leaf_index::<T>(commitment, index);
 		MerkleRepository::set_tree_size::<T>(index.saturating_add(1));
+		PoolStatsRepository::increment_commitments_inserted::<T>();
 		MerkleRepository::set_frontier::<T>(frontier);
 		MerkleRepository::set_poseidon_root::<T>(new_poseidon_root);
 		Self::add_poseidon_historic_root::<T>(new_poseidon_root);
@@ -731,6 +733,59 @@ mod tests {
 			MerkleTreeService::insert_leaf::<Test>(c1).unwrap();
 			assert_eq!(MerkleTreeService::find_leaf_index::<Test>(&c0), Some(0));
 			assert_eq!(MerkleTreeService::find_leaf_index::<Test>(&c1), Some(1));
+		});
+	}
+
+	#[test]
+	fn insert_leaf_populates_commitment_to_leaf_index() {
+		use crate::storage::MerkleRepository;
+		new_test_ext().execute_with(|| {
+			let c0 = Commitment::new([0xD0u8; 32]);
+			let c1 = Commitment::new([0xD1u8; 32]);
+			let c2 = Commitment::new([0xD2u8; 32]);
+			MerkleTreeService::insert_leaf::<Test>(c0).unwrap();
+			MerkleTreeService::insert_leaf::<Test>(c1).unwrap();
+			MerkleTreeService::insert_leaf::<Test>(c2).unwrap();
+			// Reverse index must be populated for every inserted commitment
+			assert_eq!(
+				MerkleRepository::get_commitment_leaf_index::<Test>(&c0),
+				Some(0)
+			);
+			assert_eq!(
+				MerkleRepository::get_commitment_leaf_index::<Test>(&c1),
+				Some(1)
+			);
+			assert_eq!(
+				MerkleRepository::get_commitment_leaf_index::<Test>(&c2),
+				Some(2)
+			);
+			// Unknown commitment returns None
+			assert_eq!(
+				MerkleRepository::get_commitment_leaf_index::<Test>(&Commitment::new([0xFFu8; 32])),
+				None
+			);
+		});
+	}
+
+	#[test]
+	fn insert_leaf_increments_total_commitments_counter() {
+		use crate::storage::PoolStatsRepository;
+		new_test_ext().execute_with(|| {
+			assert_eq!(
+				PoolStatsRepository::get_total_commitments_inserted::<Test>(),
+				0
+			);
+			MerkleTreeService::insert_leaf::<Test>(Commitment::new([0xF0u8; 32])).unwrap();
+			assert_eq!(
+				PoolStatsRepository::get_total_commitments_inserted::<Test>(),
+				1
+			);
+			MerkleTreeService::insert_leaf::<Test>(Commitment::new([0xF1u8; 32])).unwrap();
+			MerkleTreeService::insert_leaf::<Test>(Commitment::new([0xF2u8; 32])).unwrap();
+			assert_eq!(
+				PoolStatsRepository::get_total_commitments_inserted::<Test>(),
+				3
+			);
 		});
 	}
 

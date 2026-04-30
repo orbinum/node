@@ -413,6 +413,73 @@ mod tests {
 
 	// ── ZK proof / public_signals validation ─────────────────────────────────
 
+	/// A proof of 128 zero bytes — the MockZkVerifier sentinel for "cryptographically
+	/// rejected" (returns Ok(false)). Distinct from `make_proof()` (first byte 0x01)
+	/// which the mock accepts.
+	fn make_rejected_proof() -> Vec<u8> {
+		vec![0x00u8; 128]
+	}
+
+	// T1 — Integration tests for claim_shielded ZK path
+	//
+	// These tests exercise the `ensure!(is_valid, Error::InvalidProof)` guard that
+	// sits after the ZK verifier call — the path that fires when the verifier itself
+	// returns Ok(false) (cryptographically invalid proof, correct format).
+	// The MockZkVerifier returns Ok(false) for any proof whose first byte is 0x00.
+
+	#[test]
+	fn claim_shielded_with_cryptographically_invalid_proof_returns_invalid_proof_error() {
+		new_test_ext().execute_with(|| {
+			let validator: u64 = 1;
+			let asset_id = setup_asset();
+			let amount = 100u128;
+			let commitment = make_commitment();
+			mock_pending_fees_set(validator, asset_id, amount);
+
+			// Proof has correct length (128) and correct signals, but the mock
+			// verifier returns Ok(false) for proofs starting with 0x00.
+			assert_noop!(
+				FeeOperation::claim_shielded::<Test>(
+					validator,
+					commitment,
+					amount,
+					asset_id,
+					make_memo(),
+					make_rejected_proof(), // Ok(false) from verifier
+					make_signals(&commitment, amount, asset_id),
+				),
+				crate::pallet::Error::<Test>::InvalidProof
+			);
+		});
+	}
+
+	#[test]
+	fn claim_shielded_rejected_proof_leaves_no_state_changes() {
+		// A rejected proof must not insert the commitment or consume fees.
+		new_test_ext().execute_with(|| {
+			let validator: u64 = 1;
+			let asset_id = setup_asset();
+			let amount = 200u128;
+			let commitment = make_commitment();
+			mock_pending_fees_set(validator, asset_id, amount);
+
+			let _ = FeeOperation::claim_shielded::<Test>(
+				validator,
+				commitment,
+				amount,
+				asset_id,
+				make_memo(),
+				make_rejected_proof(),
+				make_signals(&commitment, amount, asset_id),
+			);
+
+			// Commitment must NOT be in the tree
+			assert!(!CommitmentRepository::exists::<Test>(&commitment));
+			// Pending fees must NOT have been consumed
+			assert_eq!(mock_pending_fees_get(validator, asset_id), amount);
+		});
+	}
+
 	#[test]
 	fn claim_shielded_empty_proof_fails() {
 		new_test_ext().execute_with(|| {
