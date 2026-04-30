@@ -30,6 +30,7 @@ impl UnshieldOperation {
 	) -> DispatchResult {
 		let asset = AssetRepository::get_asset::<T>(asset_id).ok_or(Error::<T>::InvalidAssetId)?;
 		ensure!(asset.is_verified, Error::<T>::AssetNotVerified);
+		ensure!(!amount.is_zero(), Error::<T>::InvalidAmount);
 		ensure!(
 			recipient != Pallet::<T>::pool_account_id(),
 			Error::<T>::InvalidRecipient
@@ -231,6 +232,32 @@ mod tests {
 					None,
 				),
 				crate::pallet::Error::<Test>::AssetNotVerified
+			);
+		});
+	}
+
+	#[test]
+	fn execute_zero_amount_fails() {
+		// amount == 0 must be rejected before any ZK check so that benchmark mode
+		// (which skips the verifier) cannot mark a nullifier as spent without moving
+		// any funds.
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			fund_pool(asset_id, 1_000u128);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			assert_noop!(
+				UnshieldOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifier(0x77),
+					asset_id,
+					0u128,
+					2u64,
+					0u128,
+					None,
+				),
+				crate::pallet::Error::<Test>::InvalidAmount
 			);
 		});
 	}

@@ -25,6 +25,10 @@ impl PrivateTransferOperation {
 		relayer_evm: Option<sp_core::H160>,
 	) -> DispatchResult {
 		ensure!(
+			nullifiers.len() == commitments.len(),
+			Error::<T>::TooManyInputsOrOutputs
+		);
+		ensure!(
 			encrypted_memos.len() == commitments.len(),
 			Error::<T>::MemoCommitmentMismatch
 		);
@@ -569,6 +573,30 @@ mod tests {
 					None,
 				),
 				Error::<Test>::InvalidAmount
+			);
+		});
+	}
+
+	#[test]
+	fn execute_nullifier_commitment_count_mismatch_fails() {
+		// 1 nullifier but 2 output commitments: structurally inconsistent with the
+		// fixed 2-in/2-out circuit. Must be rejected by the pallet before the ZK check
+		// so that benchmark mode (no verifier) cannot break value conservation.
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			assert_noop!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[0xF1]),        // 1 nullifier
+					commitments_of(&[0xF2, 0xF3]), // 2 commitments
+					memos_of(2),
+					0u32,
+					0u128,
+					None,
+				),
+				Error::<Test>::TooManyInputsOrOutputs
 			);
 		});
 	}

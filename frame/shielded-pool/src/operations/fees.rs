@@ -47,6 +47,8 @@ impl FeeOperation {
 
 		let amount_u128: u128 = amount.saturated_into();
 
+		ensure!(!amount.is_zero(), Error::<T>::InvalidAmount);
+
 		// amount must fit in u64 (circuit signal size)
 		ensure!(amount_u128 <= u64::MAX as u128, Error::<T>::InvalidAmount);
 
@@ -124,6 +126,8 @@ impl FeeOperation {
 		);
 
 		let amount_u128: u128 = amount.saturated_into();
+
+		ensure!(!amount.is_zero(), Error::<T>::InvalidAmount);
 
 		// Resolve the registered H160 for this validator.
 		let evm_address = T::Relayer::registered_evm_address(&validator)
@@ -407,6 +411,32 @@ mod tests {
 					make_signals(&commitment, 1u128, asset_id),
 				),
 				crate::pallet::Error::<Test>::InsufficientPendingFees
+			);
+		});
+	}
+
+	#[test]
+	fn claim_shielded_zero_amount_fails_with_invalid_amount() {
+		// amount == 0 must be rejected before the ZK check. A disclosure proof that
+		// encodes value=0 is cryptographically valid but inserts a worthless leaf into
+		// the Merkle tree — cheap spam that wastes tree capacity.
+		new_test_ext().execute_with(|| {
+			let validator: u64 = 1;
+			let asset_id = setup_asset();
+			mock_pending_fees_set(validator, asset_id, 500u128);
+
+			let commitment = make_commitment();
+			assert_noop!(
+				FeeOperation::claim_shielded::<Test>(
+					validator,
+					commitment,
+					0u128,
+					asset_id,
+					make_memo(),
+					make_proof(),
+					make_signals(&commitment, 0u128, asset_id),
+				),
+				crate::pallet::Error::<Test>::InvalidAmount
 			);
 		});
 	}
@@ -840,6 +870,25 @@ mod tests {
 			);
 			// Pending fees also decreased
 			assert_eq!(mock_pending_fees_get(validator, asset_id), total - claim);
+		});
+	}
+
+	#[test]
+	fn claim_to_evm_zero_amount_fails() {
+		// amount == 0 must be rejected: a zero-value EVM claim is a no-op that wastes
+		// block space and emits a misleading event without moving any funds.
+		new_test_ext().execute_with(|| {
+			let validator: u64 = 1;
+			let asset_id = setup_asset();
+
+			mock_evm_address_set(validator, alice_evm());
+			mock_pending_fees_set(validator, asset_id, 500u128);
+			fund_pool(asset_id, 500u128);
+
+			assert_noop!(
+				FeeOperation::claim_to_evm::<Test>(validator, asset_id, 0u128),
+				crate::pallet::Error::<Test>::InvalidAmount
+			);
 		});
 	}
 }

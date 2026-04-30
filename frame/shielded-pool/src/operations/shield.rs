@@ -31,6 +31,11 @@ impl ShieldOperation {
 			Error::<T>::InvalidMemoSize
 		);
 
+		ensure!(
+			!CommitmentRepository::exists::<T>(&commitment),
+			Error::<T>::CommitmentAlreadyExists
+		);
+
 		T::Currency::transfer(
 			&depositor,
 			&Pallet::<T>::pool_account_id(),
@@ -316,6 +321,31 @@ mod tests {
 			let sym = frame_support::BoundedVec::try_from(b"OTH".to_vec()).unwrap();
 			let id2 = AssetOperation::register_asset::<Test>(name, sym, 6, None, 2u64).unwrap();
 			assert!(!ShieldOperation::is_asset_verified::<Test>(id2));
+		});
+	}
+
+	#[test]
+	fn execute_duplicate_commitment_fails() {
+		// A second shield call with the same commitment bytes must be rejected to prevent
+		// Merkle-tree spam: an attacker could flood the tree with duplicate leaves,
+		// consuming tree capacity while the associated notes remain unspendable (a single
+		// nullifier can only be used once).
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let c = commitment(0xDE);
+
+			assert_ok!(ShieldOperation::execute::<Test>(
+				1u64,
+				asset_id,
+				500u128,
+				c,
+				memo_valid(),
+			));
+
+			assert_noop!(
+				ShieldOperation::execute::<Test>(1u64, asset_id, 500u128, c, memo_valid()),
+				crate::pallet::Error::<Test>::CommitmentAlreadyExists
+			);
 		});
 	}
 }

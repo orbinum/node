@@ -32,7 +32,12 @@ use std::{marker::PhantomData, sync::Arc};
 // ============================================================================
 
 const PALLET: &[u8] = b"ShieldedPool";
-const TREE_DEPTH: usize = 20;
+
+/// Maximum number of Merkle leaves the RPC will load per request.
+/// Prevents DoS via unbounded O(n) storage reads on deep trees.
+/// At tree depth 20 the theoretical maximum is 2^20 ≈ 1M leaves;
+/// we cap far below that to keep RPC latency bounded.
+const MAX_RPC_LEAVES: u32 = 100_000;
 
 /// Builds `twox_128(pallet) ++ twox_128(item)` (32 bytes — `StorageValue` key).
 fn value_key(item: &[u8]) -> Vec<u8> {
@@ -168,6 +173,25 @@ fn pool_not_initialized() -> ErrorObject<'static> {
 	)
 }
 
+fn pool_is_empty() -> ErrorObject<'static> {
+	ErrorObject::owned(
+		ErrorCode::InternalError.code(),
+		"Shielded pool has no commitments",
+		None::<()>,
+	)
+}
+
+fn too_many_leaves(size: u32) -> ErrorObject<'static> {
+	ErrorObject::owned(
+		ErrorCode::InternalError.code(),
+		format!(
+			"tree_size {size} exceeds RPC limit {MAX_RPC_LEAVES}; \
+				use an archive node or paginated access"
+		),
+		None::<()>,
+	)
+}
+
 // ============================================================================
 // Storage helper — shared across all handler methods
 // ============================================================================
@@ -186,15 +210,15 @@ fn read_storage<B: BlockT, C: ScStorageProvider<B, BE>, BE: sc_client_api::Backe
 // Pure Merkle path builder — extracted for testability
 //
 // Mirrors `IncrementalMerkleTree::generate_proof` in the pallet exactly.
-// Returns a `TREE_DEPTH`-element sibling path (raw bytes).
+// Returns a `DEFAULT_TREE_DEPTH`-element sibling path (raw bytes).
 // ============================================================================
 
 fn build_merkle_path(leaves: &[[u8; 32]], leaf_index: usize) -> Vec<[u8; 32]> {
 	let mut current_level = leaves.to_vec();
-	let mut path = Vec::with_capacity(TREE_DEPTH);
+	let mut path = Vec::with_capacity(DEFAULT_TREE_DEPTH);
 	let mut target = leaf_index;
 
-	for level in 0..TREE_DEPTH {
+	for level in 0..DEFAULT_TREE_DEPTH {
 		// Pad odd levels with the canonical zero hash for this level.
 		if current_level.len() % 2 != 0 {
 			current_level.push(get_zero_hash_cached(level));
@@ -254,7 +278,10 @@ where
 		let tree_size = u32::decode(&mut &size_data[..]).map_err(internal_error)?;
 
 		if tree_size == 0 {
-			return Err(pool_not_initialized());
+			return Err(pool_is_empty());
+		}
+		if tree_size > MAX_RPC_LEAVES {
+			return Err(too_many_leaves(tree_size));
 		}
 		if leaf_index >= tree_size {
 			return Err(invalid_params(format!(
@@ -292,7 +319,7 @@ where
 			root: format!("0x{}", hex::encode(root.as_bytes())),
 			path,
 			leaf_index,
-			tree_depth: TREE_DEPTH as u32,
+			tree_depth: DEFAULT_TREE_DEPTH as u32,
 		})
 	}
 
@@ -316,7 +343,10 @@ where
 		let tree_size = u32::decode(&mut &size_data[..]).map_err(internal_error)?;
 
 		if tree_size == 0 {
-			return Err(pool_not_initialized());
+			return Err(pool_is_empty());
+		}
+		if tree_size > MAX_RPC_LEAVES {
+			return Err(too_many_leaves(tree_size));
 		}
 
 		// Load all leaves; find the matching commitment
@@ -358,7 +388,7 @@ where
 			root: format!("0x{}", hex::encode(root.as_bytes())),
 			path,
 			leaf_index,
-			tree_depth: TREE_DEPTH as u32,
+			tree_depth: DEFAULT_TREE_DEPTH as u32,
 		})
 	}
 
@@ -401,7 +431,7 @@ where
 		let commitment_count = u32::decode(&mut &size_data[..]).map_err(internal_error)?;
 
 		if commitment_count == 0 {
-			return Err(pool_not_initialized());
+			return Err(pool_is_empty());
 		}
 
 		// Next asset ID — drives the per-asset balance scan
@@ -550,8 +580,8 @@ mod tests {
 				let path = build_merkle_path(&leaves, 0);
 				assert_eq!(
 					path.len(),
-					TREE_DEPTH,
-					"path len must be {TREE_DEPTH} for n={n}"
+					DEFAULT_TREE_DEPTH,
+					"path len must be {DEFAULT_TREE_DEPTH} for n={n}"
 				);
 			}
 		}
@@ -613,7 +643,7 @@ mod tests {
 			// After level 0 the single leaf is hashed with zero_hash[0] to form the
 			// level-1 node. The sibling at level 1 must be zero_hash[1], and so on.
 			#[allow(clippy::needless_range_loop)]
-			for level in 1..TREE_DEPTH {
+			for level in 1..DEFAULT_TREE_DEPTH {
 				assert_eq!(path[level], get_zero_hash_cached(level));
 			}
 		}
@@ -866,6 +896,83 @@ mod tests {
 			let zero = format!("0x{}", "00".repeat(32));
 			let h256 = parse_commitment_hex(&zero).unwrap();
 			assert_eq!(h256, H256::zero());
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// Error constructors
+	// -------------------------------------------------------------------------
+
+	mod error_constructors {
+		use super::*;
+		use jsonrpsee::types::error::ErrorCode;
+
+		#[test]
+		fn pool_not_initialized_uses_internal_error_code() {
+			let e = pool_not_initialized();
+			assert_eq!(e.code(), ErrorCode::InternalError.code());
+		}
+
+		#[test]
+		fn pool_is_empty_uses_internal_error_code() {
+			let e = pool_is_empty();
+			assert_eq!(e.code(), ErrorCode::InternalError.code());
+		}
+
+		#[test]
+		fn pool_is_empty_message_differs_from_not_initialized() {
+			let empty = pool_is_empty();
+			let uninit = pool_not_initialized();
+			// Must produce distinct messages so callers can distinguish the two states.
+			assert_ne!(empty.message(), uninit.message());
+		}
+
+		#[test]
+		fn too_many_leaves_includes_tree_size_in_message() {
+			let e = too_many_leaves(999_999);
+			assert!(
+				e.message().contains("999999"),
+				"message must contain the tree_size"
+			);
+		}
+
+		#[test]
+		fn too_many_leaves_includes_limit_in_message() {
+			let e = too_many_leaves(1);
+			assert!(
+				e.message().contains(&MAX_RPC_LEAVES.to_string()),
+				"message must contain MAX_RPC_LEAVES"
+			);
+		}
+
+		#[test]
+		fn too_many_leaves_uses_internal_error_code() {
+			let e = too_many_leaves(1);
+			assert_eq!(e.code(), ErrorCode::InternalError.code());
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// MAX_RPC_LEAVES constant sanity
+	// -------------------------------------------------------------------------
+
+	mod rpc_leaf_cap {
+		use super::*;
+
+		#[test]
+		fn max_rpc_leaves_is_below_tree_capacity() {
+			// Tree capacity = 2^DEFAULT_TREE_DEPTH. Cap must be strictly less
+			// to provide meaningful DoS protection.
+			let capacity: u64 = 1u64 << DEFAULT_TREE_DEPTH;
+			assert!(
+				(MAX_RPC_LEAVES as u64) < capacity,
+				"MAX_RPC_LEAVES {MAX_RPC_LEAVES} must be < tree capacity {capacity}"
+			);
+		}
+
+		#[test]
+		fn max_rpc_leaves_is_nonzero() {
+			assert!(MAX_RPC_LEAVES > 0);
 		}
 	}
 }

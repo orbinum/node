@@ -205,6 +205,13 @@ pub mod pallet {
 				verification_key.len() >= 256,
 				Error::<T>::InvalidVerificationKey
 			);
+			// Prevent silent overwrite of an existing VK. Replacing a key that is
+			// already referenced by recorded stats would desync the stats from the
+			// actual key in use. Use set_active_version to switch active versions.
+			ensure!(
+				!VerificationKeys::<T>::contains_key(circuit_id, version),
+				Error::<T>::CircuitAlreadyExists
+			);
 
 			VerificationKeys::<T>::insert(
 				circuit_id,
@@ -336,6 +343,11 @@ pub mod pallet {
 				ensure!(
 					entry.verification_key.len() >= 256,
 					Error::<T>::InvalidVerificationKey
+				);
+				// Same silent-overwrite protection as single register.
+				ensure!(
+					!VerificationKeys::<T>::contains_key(entry.circuit_id, entry.version),
+					Error::<T>::CircuitAlreadyExists
 				);
 
 				VerificationKeys::<T>::insert(
@@ -599,6 +611,30 @@ mod tests {
 				CircuitId::UNSHIELD,
 				1u32
 			));
+		});
+	}
+
+	#[test]
+	fn register_vk_rejects_duplicate_circuit_version() {
+		// A second Root call with the same (circuit_id, version) must be rejected.
+		// Silently overwriting would desync VerificationStats from the actual key in
+		// use and could replace a live key without an on-chain trace.
+		new_test_ext().execute_with(|| {
+			assert_ok!(ZkVerifier::register_verification_key(
+				root().into(),
+				CircuitId::TRANSFER,
+				1,
+				vk_bytes()
+			));
+			assert_noop!(
+				ZkVerifier::register_verification_key(
+					root().into(),
+					CircuitId::TRANSFER,
+					1,
+					vk_bytes()
+				),
+				Error::<Test>::CircuitAlreadyExists
+			);
 		});
 	}
 
@@ -1048,6 +1084,24 @@ mod tests {
 			assert!(has_event(Event::BatchVerificationKeysRegistered {
 				count: 10
 			}));
+		});
+	}
+
+	#[test]
+	fn batch_register_rejects_duplicate_circuit_version() {
+		// If any entry in the batch tries to overwrite an existing (circuit_id, version)
+		// the entire batch must fail atomically — no partial state changes.
+		new_test_ext().execute_with(|| {
+			insert_vk(CircuitId::TRANSFER, 1);
+
+			let entries: BoundedVec<VkEntry, frame_support::traits::ConstU32<10>> =
+				vec![make_vk_entry(CircuitId::TRANSFER, 1, false)] // version 1 already exists
+					.try_into()
+					.unwrap();
+			assert_noop!(
+				ZkVerifier::batch_register_verification_keys(root().into(), entries),
+				Error::<Test>::CircuitAlreadyExists
+			);
 		});
 	}
 
