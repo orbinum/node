@@ -354,7 +354,7 @@ mod tests {
 						auditor: aud,
 					}) = &r.event
 					{
-						Some((*who, *commitment, aud.clone()))
+						Some((*who, *commitment, *aud))
 					} else {
 						None
 					}
