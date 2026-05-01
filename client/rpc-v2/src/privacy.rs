@@ -972,7 +972,7 @@ mod tests {
 
 		#[test]
 		fn max_rpc_leaves_is_nonzero() {
-			assert!(MAX_RPC_LEAVES > 0);
+			const _: () = assert!(MAX_RPC_LEAVES > 0);
 		}
 	}
 }
