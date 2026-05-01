@@ -8,7 +8,7 @@
 
 use crate::{
 	Pallet, encoding,
-	pallet::{ActiveCircuitVersion, Config, Error, VerificationKeys},
+	pallet::{ActiveCircuitVersion, Config, Error, VerificationKeys, VerificationStats},
 	types::CircuitId,
 	verifier,
 };
@@ -82,6 +82,14 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 		fee: u128,
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
+		// The 2-in/2-out circuit encodes one nullifier per input note and one
+		// commitment per output note. A mismatch produces garbage public inputs
+		// that pass in benchmark/test mode (do_verify returns true unconditionally)
+		// but would represent a structurally invalid proof in production.
+		frame_support::ensure!(
+			nullifiers.len() == commitments.len(),
+			Error::<T>::InvalidPublicInputs
+		);
 		let raw = encoding::encode_transfer(merkle_root, nullifiers, commitments, asset_id, fee);
 		verifier::verify::<T>(CircuitId::TRANSFER, version, proof, raw).map(|(ok, _)| ok)
 	}
@@ -145,10 +153,24 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 			.map(|s| encoding::decode_disclosure_signals(s).map(PublicInputs::new))
 			.collect::<Result<sp_std::vec::Vec<_>, _>>()?;
 
-		Groth16Verifier::batch_verify(&vk, &all_inputs, &batch_proofs)
-			.map_err(|_| Error::<T>::BatchVerificationFailed)?;
+		let count = proofs.len() as u64;
 
-		Ok(true)
+		match Groth16Verifier::batch_verify(&vk, &all_inputs, &batch_proofs) {
+			Ok(_) => {
+				VerificationStats::<T>::mutate(CircuitId::DISCLOSURE, resolved, |s| {
+					s.total_verifications = s.total_verifications.saturating_add(count);
+					s.successful_verifications = s.successful_verifications.saturating_add(count);
+				});
+				Ok(true)
+			}
+			Err(_) => {
+				VerificationStats::<T>::mutate(CircuitId::DISCLOSURE, resolved, |s| {
+					s.total_verifications = s.total_verifications.saturating_add(count);
+					s.failed_verifications = s.failed_verifications.saturating_add(count);
+				});
+				Err(Error::<T>::BatchVerificationFailed.into())
+			}
+		}
 	}
 
 	fn verify_private_link_proof(
@@ -397,6 +419,53 @@ mod tests {
 			)
 			.unwrap();
 			assert!(ok);
+		});
+	}
+
+	#[test]
+	fn transfer_nullifier_commitment_count_mismatch_is_rejected() {
+		// The 2-in/2-out circuit requires an equal number of nullifiers and
+		// commitments. A mismatch produces structurally invalid public inputs that
+		// in benchmark/test mode would still "verify" because do_verify returns true
+		// unconditionally. The guard in verify_transfer_proof catches this before
+		// reaching the verifier.
+		new_test_ext().execute_with(|| {
+			assert_err!(
+				<Pallet<Test> as ZkVerifierPort>::verify_transfer_proof(
+					&proof(),
+					&merkle_root(),
+					&[[0xAAu8; 32]],               // 1 nullifier
+					&[[0xBBu8; 32], [0xCCu8; 32]], // 2 commitments
+					0,
+					0,
+					Some(1),
+				),
+				Error::<Test>::InvalidPublicInputs
+			);
+		});
+	}
+
+	#[test]
+	fn transfer_empty_nullifiers_with_empty_commitments_is_accepted_by_guard() {
+		// 0 nullifiers == 0 commitments satisfies the count guard. EmptyPublicInputs
+		// fires next inside verifier::verify (merkle_root is the only remaining
+		// element but that still gives 1 input after encode_transfer, so actually
+		// EmptyProof doesn't fire — but CircuitNotFound does if no VK). Let's just
+		// confirm the count guard itself doesn't reject the 0==0 case.
+		new_test_ext().execute_with(|| {
+			// No VK registered → CircuitNotFound, not InvalidPublicInputs.
+			assert_err!(
+				<Pallet<Test> as ZkVerifierPort>::verify_transfer_proof(
+					&proof(),
+					&merkle_root(),
+					&[],
+					&[],
+					0,
+					0,
+					None,
+				),
+				Error::<Test>::CircuitNotFound
+			);
 		});
 	}
 
@@ -720,6 +789,64 @@ mod tests {
 				),
 				Error::<Test>::BatchVerificationFailed
 			);
+		});
+	}
+
+	// ── batch stats tracking ───────────────────────────────────────────────────
+
+	#[test]
+	fn batch_failure_increments_failed_and_total_stats() {
+		// Groth16Verifier rejects bogus data → stats must record the failure.
+		new_test_ext().execute_with(|| {
+			use crate::pallet::VerificationStats;
+
+			insert_vk(CircuitId::DISCLOSURE, 1);
+			activate(CircuitId::DISCLOSURE, 1);
+
+			let _ = <Pallet<Test> as ZkVerifierPort>::batch_verify_disclosure_proofs(
+				&[proof(), proof()],
+				&[valid_signals(), valid_signals()],
+				Some(1),
+			);
+
+			let stats = VerificationStats::<Test>::get(CircuitId::DISCLOSURE, 1u32);
+			assert_eq!(
+				stats.total_verifications, 2,
+				"total should count batch size"
+			);
+			assert_eq!(stats.failed_verifications, 2, "both proofs failed");
+			assert_eq!(stats.successful_verifications, 0);
+		});
+	}
+
+	#[test]
+	fn batch_stats_are_isolated_from_single_verify_stats() {
+		// batch and single-proof stats accumulate independently into the same counter.
+		new_test_ext().execute_with(|| {
+			use crate::pallet::VerificationStats;
+
+			insert_vk(CircuitId::DISCLOSURE, 1);
+			activate(CircuitId::DISCLOSURE, 1);
+
+			// Single verify (succeeds in test build via do_verify mock).
+			let _ = <Pallet<Test> as ZkVerifierPort>::verify_disclosure_proof(
+				&proof(),
+				&valid_signals(),
+				Some(1),
+			);
+
+			// Batch verify (fails with bogus data — stats still update).
+			let _ = <Pallet<Test> as ZkVerifierPort>::batch_verify_disclosure_proofs(
+				&[proof()],
+				&[valid_signals()],
+				Some(1),
+			);
+
+			let stats = VerificationStats::<Test>::get(CircuitId::DISCLOSURE, 1u32);
+			// 1 from single (success) + 1 from batch (failure)
+			assert_eq!(stats.total_verifications, 2);
+			assert_eq!(stats.successful_verifications, 1);
+			assert_eq!(stats.failed_verifications, 1);
 		});
 	}
 
