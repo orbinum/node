@@ -27,8 +27,8 @@ pub const CIRCUIT_ID_PRIVATE_LINK: u8 = 5;
 /// Public inputs: [merkle_root, nullifier1, nullifier2, commitment1, commitment2]
 pub const TRANSFER_PUBLIC_INPUTS: usize = 5;
 /// Number of public inputs for the unshield circuit.
-/// Public inputs: [merkle_root, nullifier, recipient, amount, asset_id]
-pub const UNSHIELD_PUBLIC_INPUTS: usize = 5;
+/// Public inputs: [merkle_root, nullifier, amount, recipient, asset_id, fee, change_commitment]
+pub const UNSHIELD_PUBLIC_INPUTS: usize = 7;
 /// Number of public inputs for the disclosure circuit.
 /// Public inputs: [commitment, revealed_value, revealed_asset_id, revealed_owner_hash]
 pub const DISCLOSURE_PUBLIC_INPUTS: usize = 4;
@@ -284,7 +284,7 @@ mod tests {
 	#[test]
 	fn test_public_input_counts_are_expected() {
 		assert_eq!(TRANSFER_PUBLIC_INPUTS, 5);
-		assert_eq!(UNSHIELD_PUBLIC_INPUTS, 5);
+		assert_eq!(UNSHIELD_PUBLIC_INPUTS, 7);
 		assert_eq!(DISCLOSURE_PUBLIC_INPUTS, 4);
 		assert_eq!(PRIVATE_LINK_PUBLIC_INPUTS, 2);
 	}
