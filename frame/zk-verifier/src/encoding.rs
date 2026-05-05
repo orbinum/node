@@ -36,10 +36,10 @@ pub fn encode_transfer(
 
 /// Encode unshield (pool withdrawal) public inputs.
 ///
-/// Order: `merkle_root | nullifier | amount | recipient_le | asset_id | fee`
+/// Order: `merkle_root | nullifier | amount | recipient | asset_id | fee | change_commitment`
 ///
-/// `recipient` is treated as big-endian (AccountId32 form) and reversed to LE
-/// for BN254 field encoding.
+/// `recipient` is passed as-is (LE field element, same convention used by the
+/// TypeScript SDK: `bytesToBigintLE(accountId32Bytes)`).
 pub fn encode_unshield(
 	merkle_root: &[u8; 32],
 	nullifier: &[u8; 32],
@@ -47,14 +47,10 @@ pub fn encode_unshield(
 	recipient: &[u8; 32],
 	asset_id: u32,
 	fee: u128,
+	change_commitment: &[u8; 32],
 ) -> Vec<[u8; 32]> {
 	let mut amount_bytes = [0u8; 32];
 	amount_bytes[..16].copy_from_slice(&amount.to_le_bytes());
-
-	let mut recipient_le = [0u8; 32];
-	for (i, b) in recipient.iter().rev().enumerate() {
-		recipient_le[i] = *b;
-	}
 
 	let mut asset_bytes = [0u8; 32];
 	asset_bytes[..4].copy_from_slice(&asset_id.to_le_bytes());
@@ -66,9 +62,10 @@ pub fn encode_unshield(
 		*merkle_root,
 		*nullifier,
 		amount_bytes,
-		recipient_le,
+		*recipient,
 		asset_bytes,
 		fee_bytes,
+		*change_commitment,
 	]
 }
 
@@ -127,15 +124,28 @@ mod tests {
 
 	#[test]
 	fn encode_unshield_correct_length() {
-		let raw = encode_unshield(&[1u8; 32], &[2u8; 32], 100, &[3u8; 32], 1, 5);
-		assert_eq!(raw.len(), 6);
+		let raw = encode_unshield(&[1u8; 32], &[2u8; 32], 100, &[3u8; 32], 1, 5, &[6u8; 32]);
+		assert_eq!(raw.len(), 7);
+	}
+
+	#[test]
+	fn encode_unshield_change_commitment_appended() {
+		let change = [0xABu8; 32];
+		let raw = encode_unshield(&[0u8; 32], &[0u8; 32], 0, &[0u8; 32], 0, 0, &change);
+		assert_eq!(raw[6], change);
+	}
+
+	#[test]
+	fn encode_unshield_zero_change_commitment() {
+		let raw = encode_unshield(&[0u8; 32], &[0u8; 32], 0, &[0u8; 32], 0, 0, &[0u8; 32]);
+		assert_eq!(raw[6], [0u8; 32]);
 	}
 
 	#[test]
 	fn encode_unshield_recipient_reversed() {
 		let mut recipient = [0u8; 32];
 		recipient[31] = 0xFF;
-		let raw = encode_unshield(&[0u8; 32], &[0u8; 32], 0, &recipient, 0, 0);
+		let raw = encode_unshield(&[0u8; 32], &[0u8; 32], 0, &recipient, 0, 0, &[0u8; 32]);
 		// LE reversal: first byte should be 0xFF
 		assert_eq!(raw[3][0], 0xFF);
 	}
