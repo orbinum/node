@@ -146,8 +146,8 @@ mod tests {
 		let mut recipient = [0u8; 32];
 		recipient[31] = 0xFF;
 		let raw = encode_unshield(&[0u8; 32], &[0u8; 32], 0, &recipient, 0, 0, &[0u8; 32]);
-		// LE reversal: first byte should be 0xFF
-		assert_eq!(raw[3][0], 0xFF);
+		// recipient is passed as-is (LE format), so last byte should be 0xFF
+		assert_eq!(raw[3][31], 0xFF);
 	}
 
 	#[test]
