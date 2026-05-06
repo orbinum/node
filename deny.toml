@@ -35,6 +35,8 @@ ignore = [
     # Unmaintained (transitive)
     "RUSTSEC-2025-0161",  # libsecp256k1 0.7.2 unmaintained (from fc-rpc, fp-account/pallet-evm)
     "RUSTSEC-2026-0105",  # core2 0.4.0 unmaintained, all versions yanked (from litep2p → cid, no upgrade path)
+    "RUSTSEC-2026-0119",  # hickory-proto 0.24.4 - O(n²) CPU exhaustion in DNS name compression (from libp2p-dns → sc-network)
+    "RUSTSEC-2026-0118",  # hickory-proto 0.25.2 - unbounded loop in NSEC3 validation (from libp2p-dns → sc-network)
 
     # Allowed warnings (8 total)
     "RUSTSEC-2024-0388",  # derivative 2.2.0 unmaintained (from ark-r1cs-std)
