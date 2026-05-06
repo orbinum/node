@@ -1,0 +1,51 @@
+[package]
+name = "pallet-evm-precompile-shielded-pool"
+version = "0.1.0"
+authors = { workspace = true }
+edition = "2021"
+description = "EVM Precompile for Orbinum Shielded Pool Pallet."
+license = "Apache-2.0"
+
+[dependencies]
+# Substrate CORE
+sp-core = { workspace = true }
+sp-runtime = { workspace = true }
+sp-std = { workspace = true }
+
+# Substrate FRAME
+frame-support = { workspace = true }
+frame-system = { workspace = true }
+
+# Frontier EVM
+fp-evm = { workspace = true }
+pallet-evm = { workspace = true }
+precompile-utils = { workspace = true }
+
+# Orbinum Pallets
+pallet-shielded-pool = { workspace = true }
+
+[features]
+default = ["std"]
+std = [
+	"sp-core/std",
+	"sp-std/std",
+	"sp-runtime/std",
+	"frame-support/std",
+	"frame-system/std",
+	"fp-evm/std",
+	"pallet-evm/std",
+	"precompile-utils/std",
+	"pallet-shielded-pool/std",
+]
+
+[dev-dependencies]
+frame-system = { workspace = true, features = ["default"] }
+pallet-balances = { workspace = true, features = ["default"] }
+pallet-relayer = { workspace = true, features = ["default"] }
+pallet-timestamp = { workspace = true, features = ["default"] }
+pallet-zk-verifier = { workspace = true, features = ["default"] }
+scale-codec = { workspace = true, features = ["derive", "std"] }
+scale-info = { workspace = true, features = ["derive", "std"] }
+sp-core = { workspace = true, features = ["default"] }
+sp-io = { workspace = true, features = ["default"] }
+sp-runtime = { workspace = true, features = ["default"] }

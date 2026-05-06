@@ -24,6 +24,16 @@ precompile-utils = { workspace = true }
 # Orbinum Pallets
 pallet-account-mapping = { workspace = true }
 
+[dev-dependencies]
+frame-system = { workspace = true, features = ["default"] }
+pallet-balances = { workspace = true, features = ["default"] }
+pallet-timestamp = { workspace = true, features = ["default"] }
+scale-codec = { workspace = true, features = ["derive", "std"] }
+scale-info = { workspace = true, features = ["derive", "std"] }
+sp-core = { workspace = true, features = ["default"] }
+sp-io = { workspace = true, features = ["default"] }
+sp-runtime = { workspace = true, features = ["default"] }
+
 [features]
 default = ["std"]
 std = [
