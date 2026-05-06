@@ -145,6 +145,7 @@ fn encode_private_transfer(
 }
 
 /// `unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32)`  selector `0xd21d9a79`
+#[allow(clippy::too_many_arguments)]
 fn encode_unshield(
 	proof: &[u8],
 	merkle_root: [u8; 32],
