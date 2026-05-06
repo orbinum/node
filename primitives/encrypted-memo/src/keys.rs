@@ -1,9 +1,6 @@
 //! Key types and derivation for Orbinum shielded transactions.
 //!
-//! All sub-keys are derived from a single 32-byte spending key via SHA-256
-//! with domain separation. The spending key itself is never exposed over the wire.
-//!
-//! # Key hierarchy
+//! # Symmetric key hierarchy (server-side / legacy)
 //!
 //! ```text
 //! spending_key
@@ -11,8 +8,26 @@
 //!   ├── nullifier_key   SHA256(sk || "orbinum-nullifier-key-v1")
 //!   └── eddsa_key       SHA256(sk || "orbinum-eddsa-key-v1")
 //!
-//! encryption_key(commitment)  SHA256(viewing_key || commitment || "orbinum-note-encryption-v1")
+//! encryption_key(commitment)  SHA256(shared_secret || commitment || "orbinum-note-encryption-v1")
 //! ```
+//!
+//! # ECDH mode (wallet / TypeScript client)
+//!
+//! In the ECDH scheme the wallet never embeds `viewing_key` in addresses.
+//! Instead it derives an ephemeral BabyJubJub keypair and performs ECDH:
+//!
+//! ```text
+//! ivsk        = HKDF-SHA256(spendingKey_bytes, info="orbinum-ivk-v1")  ← secret
+//! ivk_point   = BJJ_mul(Base8, ivsk_scalar)                            ← public, in address
+//! ephSk       = random BJJ scalar
+//! ephPk       = BJJ_mul(Base8, ephSk)                                  ← appended to memo
+//! shared_sec  = BJJ_mul(ivk_point, ephSk)[0]  (x-coordinate, LE)     ← encrypt key input
+//! enc_key     = SHA256(shared_sec || commitment || "orbinum-note-encryption-v1")
+//! ```
+//!
+//! The `derive_encryption_key` function below works for both schemes; callers
+//! must pass the correct 32-byte `shared_secret` (viewing_key in symmetric mode,
+//! ECDH x-coordinate in ECDH mode).
 
 use sha2::{Digest, Sha256};
 
@@ -164,10 +179,15 @@ pub fn derive_eddsa_key_from_spending(spending_key: &[u8; 32]) -> EdDSAKey {
 	EdDSAKey(h.finalize().into())
 }
 
-/// Derives the per-note encryption key: `SHA256(viewing_key || commitment || KEY_DOMAIN)`
-pub(crate) fn derive_encryption_key(viewing_key: &[u8; 32], commitment: &[u8; 32]) -> [u8; 32] {
+/// Derives the per-note encryption key from shared secret material and commitment.
+///
+/// `SHA256(shared_secret || commitment || "orbinum-note-encryption-v1")`
+///
+/// In symmetric mode `shared_secret` is the `viewing_key` bytes.
+/// In ECDH mode `shared_secret` is the x-coordinate of the BabyJubJub shared point (LE).
+pub(crate) fn derive_encryption_key(shared_secret: &[u8; 32], commitment: &[u8; 32]) -> [u8; 32] {
 	let mut h = Sha256::new();
-	h.update(viewing_key);
+	h.update(shared_secret);
 	h.update(commitment);
 	h.update(KEY_DOMAIN);
 	h.finalize().into()

@@ -17,13 +17,13 @@ Encrypted memo primitives for private transaction metadata in Orbinum Network.
 
 ```toml
 [dependencies]
-orbinum-encrypted-memo = "1.0"
+orbinum-encrypted-memo = "0.4"
 
 # Enable random nonce generation (requires std/rand)
-orbinum-encrypted-memo = { version = "1.0", features = ["encrypt"] }
+orbinum-encrypted-memo = { version = "0.4", features = ["encrypt"] }
 
 # Enable SCALE codec + TypeInfo (Substrate runtime)
-orbinum-encrypted-memo = { version = "1.0", features = ["parity-scale-codec", "scale-info"] }
+orbinum-encrypted-memo = { version = "0.4", features = ["parity-scale-codec", "scale-info"] }
 ```
 
 ## Usage
@@ -36,15 +36,23 @@ use orbinum_encrypted_memo::{MemoData, KeySet, encrypt_memo, decrypt_memo};
 // Derive keys from master spending key
 let keys = KeySet::from_spending_key(spending_key);
 
-// Create memo
-let memo = MemoData::new(1000, owner_pubkey, blinding, 0);
+// Create memo with counterparty (private transfer)
+let memo = MemoData::new(1000, owner_pubkey, blinding, 0, counterparty_pk);
+
+// Create memo without counterparty (shield / unshield)
+let memo = MemoData::new_without_counterparty(1000, owner_pubkey, blinding, 0);
 
 // Encrypt (nonce must be unique per note)
 let encrypted = encrypt_memo(&memo, &commitment, keys.viewing_key.as_bytes(), &nonce)?;
 
-// Decrypt
+// Decrypt (symmetric mode — viewing_key as shared_secret)
 let decrypted = decrypt_memo(&encrypted, &commitment, keys.viewing_key.as_bytes())?;
 assert_eq!(decrypted.value, 1000);
+
+// Decrypt (ECDH mode — derive shared_secret from ephPk appended to encrypted[136..168])
+// let eph_pk = &encrypted[136..168];
+// let shared_secret = bjj_ecdh(ivsk_scalar, eph_pk);
+// let decrypted = decrypt_memo(&encrypted, &commitment, &shared_secret)?;
 ```
 
 ### Key Derivation from Spending Key
@@ -101,12 +109,18 @@ let proof = DisclosureProof::from_bytes(&bytes)?;
 ChaCha20Poly1305 AEAD with per-note key derivation:
 
 ```text
-encryption_key = SHA256(viewing_key || commitment || "orbinum-note-encryption-v1")
-ciphertext     = ChaCha20Poly1305(plaintext=76B, key=encryption_key, nonce=12B)
-encrypted_memo = nonce(12) || ciphertext(76) || mac(16)  →  104 bytes total
+Plaintext  (MemoData):  value(8) | owner_pk(32) | blinding(32) | asset_id(4) | counterparty_pk(32) = 108 bytes
+
+encryption_key = SHA256(shared_secret || commitment || "orbinum-note-encryption-v1")
+ciphertext     = ChaCha20Poly1305(plaintext=108B, key=encryption_key, nonce=12B)
+encrypted_memo = nonce(12) | ciphertext(108) | MAC(16) | ephPk(32)  →  168 bytes total
 ```
 
+`shared_secret` is either the `viewing_key` (symmetric mode) or the ECDH x-coordinate (wallet mode). See **Key Derivation Hierarchy** below.
+
 ## Key Derivation Hierarchy
+
+### Symmetric mode (server-side / legacy)
 
 ```text
 spending_key  (32 bytes, never shared)
@@ -114,6 +128,19 @@ spending_key  (32 bytes, never shared)
       ├── viewing_key   = SHA256(spending_key || "orbinum-viewing-key-v1")
       ├── nullifier_key = SHA256(spending_key || "orbinum-nullifier-key-v1")
       └── eddsa_key     = SHA256(spending_key || "orbinum-eddsa-key-v1")
+
+encryption_key(commitment) = SHA256(viewing_key || commitment || "orbinum-note-encryption-v1")
+```
+
+### ECDH mode (wallet / TypeScript client)
+
+```text
+ivsk       = HKDF-SHA256(spendingKey_bytes, info="orbinum-ivk-v1")  ← secret
+ivk_point  = BJJ_mul(Base8, ivsk_scalar)                            ← public, in address
+ephSk      = random BJJ scalar
+ephPk      = BJJ_mul(Base8, ephSk)                                  ← appended to encrypted[136..168]
+shared_sec = BJJ_mul(ivk_point, ephSk)[0]   (x-coordinate, LE)
+enc_key    = SHA256(shared_sec || commitment || "orbinum-note-encryption-v1")
 ```
 
 ## Memo Structure
@@ -121,11 +148,14 @@ spending_key  (32 bytes, never shared)
 | Field | Type | Size | Description |
 |-------|------|------|-------------|
 | `value` | `u64` | 8 bytes | Note amount |
-| `owner_pk` | `[u8; 32]` | 32 bytes | Owner public key |
+| `owner_pk` | `[u8; 32]` | 32 bytes | Owner BabyJubJub public key (Ax, LE) |
 | `blinding` | `[u8; 32]` | 32 bytes | Blinding factor |
 | `asset_id` | `u32` | 4 bytes | Asset identifier |
+| `counterparty_pk` | `[u8; 32]` | 32 bytes | Other party's Ax (LE); `[0u8;32]` for shield/unshield |
 
-**Plaintext**: 76 bytes — **Encrypted memo**: 104 bytes (nonce + ciphertext + MAC)
+**Plaintext**: 108 bytes — **Encrypted wire format**: 168 bytes (`nonce(12) | ciphertext(108) | MAC(16) | ephPk(32)`)
+
+Use `MemoData::new_without_counterparty(value, owner_pk, blinding, asset_id)` for shield and unshield notes.
 
 ## Selective Disclosure Masks
 

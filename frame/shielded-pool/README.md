@@ -81,7 +81,6 @@ These are design properties of the current MVP. No formal security audit has bee
 
 - `pallet-zk-verifier`: proof verification via `ZkVerifierPort`.
 - `orbinum-zk-core`: Poseidon hash, commitment and nullifier types.
-- `orbinum-encrypted-memo`: encrypted memo types.
 - FRAME: `frame-support`, `frame-system`, `sp-runtime`.
 
 ## Testing

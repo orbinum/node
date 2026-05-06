@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! Plaintext  (MemoData):  value(8) | owner_pk(32) | blinding(32) | asset_id(4) | counterparty_pk(32) = 108 bytes
-//! Encrypted wire format:  nonce(12) | ciphertext(108) | MAC(16)                                      = 136 bytes
+//! Encrypted wire format:  nonce(12) | ciphertext(108) | MAC(16) | ephPk(32)                         = 168 bytes
 //! ```
 
 use alloc::vec::Vec;
@@ -26,8 +26,11 @@ pub const NONCE_SIZE: usize = 12;
 /// ChaCha20-Poly1305 MAC (authentication tag) size.
 pub const MAC_SIZE: usize = 16;
 
-/// Maximum encrypted memo size: `nonce(12) + plaintext(108) + MAC(16)`
-pub const MAX_ENCRYPTED_MEMO_SIZE: usize = NONCE_SIZE + MEMO_DATA_SIZE + MAC_SIZE;
+/// Ephemeral BabyJubJub public key (packed LE) appended to the memo for ECDH recipient decryption.
+pub const EPH_PK_SIZE: usize = 32;
+
+/// Maximum encrypted memo size: `nonce(12) + ciphertext(108) + MAC(16) + ephPk(32)`
+pub const MAX_ENCRYPTED_MEMO_SIZE: usize = NONCE_SIZE + MEMO_DATA_SIZE + MAC_SIZE + EPH_PK_SIZE;
 
 /// Minimum encrypted memo size: `nonce(12) + MAC(16)` (zero-length plaintext)
 pub const MIN_ENCRYPTED_MEMO_SIZE: usize = NONCE_SIZE + MAC_SIZE;
@@ -191,25 +194,30 @@ pub fn is_valid_encrypted_memo(data: &[u8]) -> bool {
 
 /// Encrypts memo data using ChaCha20-Poly1305.
 ///
-/// Returns `nonce(12) || ciphertext(76) || MAC(16)` = 104 bytes.
+/// Returns `nonce(12) || ciphertext(108) || MAC(16) || ephPk(32)` = 168 bytes.
+/// The ephemeral public key is set to all-zeros (symmetric / public-note mode).
+/// For full ECDH, compute the shared secret externally with BabyJubJub and pass it as
+/// `shared_secret`. The caller is responsible for appending the real ephPk after the call
+/// if needed for ECDH recipients (replace the trailing 32 zero bytes).
 ///
 /// **WARNING**: `nonce` MUST be unique per (key, message) pair and never reused.
 pub fn encrypt_memo(
 	memo: &MemoData,
 	commitment: &[u8; 32],
-	recipient_viewing_key: &[u8; 32],
+	shared_secret: &[u8; 32],
 	nonce: &[u8; 12],
 ) -> Result<Vec<u8>, MemoError> {
-	let key = derive_encryption_key(recipient_viewing_key, commitment);
+	let key = derive_encryption_key(shared_secret, commitment);
 	let cipher = ChaCha20Poly1305::new((&key).into());
 	let nonce_obj = Nonce::from_slice(nonce);
 	let ciphertext = cipher
 		.encrypt(nonce_obj, memo.to_bytes().as_ref())
 		.map_err(|_| MemoError::EncryptionFailed)?;
 
-	let mut result = Vec::with_capacity(NONCE_SIZE + ciphertext.len());
+	let mut result = Vec::with_capacity(NONCE_SIZE + ciphertext.len() + EPH_PK_SIZE);
 	result.extend_from_slice(nonce);
 	result.extend_from_slice(&ciphertext);
+	result.extend_from_slice(&[0u8; EPH_PK_SIZE]); // zero ephPk = symmetric / public-note mode
 	Ok(result)
 }
 
@@ -220,21 +228,28 @@ pub fn encrypt_memo(
 pub fn encrypt_memo_random(
 	memo: &MemoData,
 	commitment: &[u8; 32],
-	recipient_viewing_key: &[u8; 32],
+	shared_secret: &[u8; 32],
 ) -> Result<Vec<u8>, MemoError> {
 	use rand::{rngs::OsRng, RngCore};
 	let mut nonce = [0u8; 12];
 	OsRng.fill_bytes(&mut nonce);
-	encrypt_memo(memo, commitment, recipient_viewing_key, &nonce)
+	encrypt_memo(memo, commitment, shared_secret, &nonce)
 }
 
-/// Decrypts an encrypted memo using a viewing key.
+/// Decrypts an encrypted memo.
 ///
-/// Expects `nonce(12) || ciphertext + MAC` as produced by [`encrypt_memo`].
+/// Expects `nonce(12) || ciphertext + MAC(124) || ephPk(32)` (168 bytes).
+/// The trailing `ephPk` bytes are stripped; the first 136 bytes are fed to ChaCha20-Poly1305.
+///
+/// **ECDH callers**: extract `ephPk = encrypted[136..168]`, derive the BabyJubJub ECDH
+/// shared secret externally (x-coordinate of `BJJ_mul(ephPk_point, ivsk_scalar)`), then
+/// pass that 32-byte value as `shared_secret`.
+///
+/// **Symmetric / public-note callers**: pass the viewing key directly as `shared_secret`.
 pub fn decrypt_memo(
 	encrypted: &[u8],
 	commitment: &[u8; 32],
-	viewing_key: &[u8; 32],
+	shared_secret: &[u8; 32],
 ) -> Result<MemoData, MemoError> {
 	if encrypted.len() < MIN_ENCRYPTED_MEMO_SIZE {
 		return Err(MemoError::DataTooShort);
@@ -242,10 +257,12 @@ pub fn decrypt_memo(
 	if encrypted.len() > MAX_ENCRYPTED_MEMO_SIZE {
 		return Err(MemoError::DataTooLong);
 	}
+	// Strip trailing ephemeral public key bytes (v2 ECDH layout).
+	let cipher_data = &encrypted[..encrypted.len().min(MAX_ENCRYPTED_MEMO_SIZE - EPH_PK_SIZE)];
 
-	let (nonce_bytes, ciphertext) = encrypted.split_at(NONCE_SIZE);
+	let (nonce_bytes, ciphertext) = cipher_data.split_at(NONCE_SIZE);
 	let nonce = Nonce::from_slice(nonce_bytes);
-	let key = derive_encryption_key(viewing_key, commitment);
+	let key = derive_encryption_key(shared_secret, commitment);
 	let cipher = ChaCha20Poly1305::new((&key).into());
 	let plaintext = cipher
 		.decrypt(nonce, ciphertext)
@@ -260,9 +277,9 @@ pub fn decrypt_memo(
 pub fn try_decrypt_memo(
 	encrypted: &[u8],
 	commitment: &[u8; 32],
-	viewing_key: &[u8; 32],
+	shared_secret: &[u8; 32],
 ) -> Option<MemoData> {
-	decrypt_memo(encrypted, commitment, viewing_key).ok()
+	decrypt_memo(encrypted, commitment, shared_secret).ok()
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -286,12 +303,13 @@ mod tests {
 		assert_eq!(MEMO_DATA_SIZE, 108);
 		assert_eq!(NONCE_SIZE, 12);
 		assert_eq!(MAC_SIZE, 16);
+		assert_eq!(EPH_PK_SIZE, 32);
 		assert_eq!(
 			MAX_ENCRYPTED_MEMO_SIZE,
-			NONCE_SIZE + MEMO_DATA_SIZE + MAC_SIZE
+			NONCE_SIZE + MEMO_DATA_SIZE + MAC_SIZE + EPH_PK_SIZE
 		);
 		assert_eq!(MIN_ENCRYPTED_MEMO_SIZE, NONCE_SIZE + MAC_SIZE);
-		assert_eq!(MAX_ENCRYPTED_MEMO_SIZE, 136);
+		assert_eq!(MAX_ENCRYPTED_MEMO_SIZE, 168);
 		assert_eq!(MIN_ENCRYPTED_MEMO_SIZE, 28);
 	}
 
