@@ -251,8 +251,7 @@ fn register_alias_ok() {
 
 		assert!(
 			result.is_ok(),
-			"registerAlias with funded account must succeed: {:?}",
-			result
+			"registerAlias with funded account must succeed: {result:?}"
 		);
 		assert_eq!(result.unwrap().exit_status, ExitSucceed::Stopped);
 	});
@@ -330,8 +329,7 @@ fn register_private_link_ok() {
 
 		assert!(
 			result.is_ok(),
-			"registerPrivateLink must succeed: {:?}",
-			result
+			"registerPrivateLink must succeed: {result:?}"
 		);
 	});
 }
@@ -363,11 +361,7 @@ fn remove_private_link_ok() {
 		let mut handle = MockHandle::new(input);
 		let result = AccountMappingPrecompile::<crate::mock::Test>::execute(&mut handle);
 
-		assert!(
-			result.is_ok(),
-			"removePrivateLink must succeed: {:?}",
-			result
-		);
+		assert!(result.is_ok(), "removePrivateLink must succeed: {result:?}");
 	});
 }
 

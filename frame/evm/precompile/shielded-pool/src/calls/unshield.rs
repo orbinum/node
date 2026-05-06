@@ -61,7 +61,11 @@ where
 			.try_into()
 			.map_err(|_| err("unshield: proof too long"))?;
 
-	let merkle_root: pallet_shielded_pool::Hash = abi::read_bytes32(params, 32)?;
+	if proof.is_empty() {
+		return Err(err("unshield: proof must be non-empty"));
+	}
+
+	let merkle_root: pallet_shielded_pool::Hash = abi::read_bytes32(params, 32)?
 
 	let nullifier = pallet_shielded_pool::Nullifier::from(abi::read_bytes32(params, 64)?);
 
