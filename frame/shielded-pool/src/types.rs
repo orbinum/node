@@ -289,8 +289,8 @@ pub type DefaultMerklePath = MerklePath<DEFAULT_TREE_DEPTH>;
 // EncryptedMemo (concrete, FRAME-compatible — used in storage & extrinsics)
 // ════════════════════════════════════════════════════════════════════════════
 
-/// Max encrypted memo size: `nonce(12) + note_data(108) + MAC(16) = 136`.
-pub const MAX_ENCRYPTED_MEMO_SIZE: u32 = 136;
+/// Max encrypted memo size: `nonce(12) + ciphertext(108) + MAC(16) + ephPk(32) = 168`.
+pub const MAX_ENCRYPTED_MEMO_SIZE: u32 = 168;
 
 /// Encrypted memo attached to a commitment (ChaCha20-Poly1305).
 #[derive(
@@ -363,7 +363,7 @@ impl EncryptedMemo {
 		}
 	}
 	pub fn tag(&self) -> &[u8] {
-		// Invariant: see nonce(). tag (MAC) occupies bytes 120..136.
+		// Layout: nonce(0..12) | ciphertext(12..120) | tag/MAC(120..136) | ephPk(136..168)
 		debug_assert_eq!(
 			self.0.len(),
 			MAX_ENCRYPTED_MEMO_SIZE as usize,
@@ -373,6 +373,21 @@ impl EncryptedMemo {
 		);
 		if self.0.len() >= 136 {
 			&self.0[120..136]
+		} else {
+			&[]
+		}
+	}
+	pub fn eph_pk(&self) -> &[u8] {
+		// Ephemeral BabyJubJub public key (packed, LE) occupies bytes 136..168.
+		debug_assert_eq!(
+			self.0.len(),
+			MAX_ENCRYPTED_MEMO_SIZE as usize,
+			"EncryptedMemo invariant violated: expected {} bytes, got {}",
+			MAX_ENCRYPTED_MEMO_SIZE,
+			self.0.len()
+		);
+		if self.0.len() >= 168 {
+			&self.0[136..168]
 		} else {
 			&[]
 		}
@@ -755,6 +770,7 @@ mod tests {
 		assert_eq!(memo.nonce().len(), 12);
 		assert_eq!(memo.ciphertext().len(), 108);
 		assert_eq!(memo.tag().len(), 16);
+		assert_eq!(memo.eph_pk().len(), 32);
 	}
 
 	#[test]
