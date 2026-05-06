@@ -163,7 +163,8 @@ mod benchmarks {
 			amount,
 			recipient,
 			fee,
-			None,
+			Hash::default(), // change_commitment: [0u8; 32] for total unshield
+			None, // relayer
 		);
 	}
 
