@@ -1,7 +1,11 @@
 use crate::{
+	merkle::MerkleTreeService,
 	pallet::{Config, Error, Event, Pallet},
-	storage::{AssetRepository, MerkleRepository, NullifierRepository, PoolBalanceRepository},
-	types::Nullifier,
+	storage::{
+		AssetRepository, CommitmentRepository, MerkleRepository, NullifierRepository,
+		PoolBalanceRepository,
+	},
+	types::{Commitment, Nullifier},
 };
 use frame_support::{
 	pallet_prelude::*,
@@ -26,6 +30,7 @@ impl UnshieldOperation {
 		amount: <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance,
 		recipient: <T as frame_system::Config>::AccountId,
 		fee: <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance,
+		change_commitment: [u8; 32],
 		relayer_evm: Option<sp_core::H160>,
 	) -> DispatchResult {
 		let asset = AssetRepository::get_asset::<T>(asset_id).ok_or(Error::<T>::InvalidAssetId)?;
@@ -43,6 +48,16 @@ impl UnshieldOperation {
 			!NullifierRepository::is_used::<T>(&nullifier),
 			Error::<T>::NullifierAlreadyUsed
 		);
+
+		// If a change note is present, ensure its commitment is not already in the tree.
+		let has_change = change_commitment != [0u8; 32];
+		if has_change {
+			let change_comm = Commitment::new(change_commitment);
+			ensure!(
+				!CommitmentRepository::exists::<T>(&change_comm),
+				Error::<T>::CommitmentAlreadyExists
+			);
+		}
 
 		let total = amount.checked_add(&fee).ok_or(Error::<T>::InvalidAmount)?;
 		ensure!(
@@ -67,6 +82,7 @@ impl UnshieldOperation {
 				&recipient_bytes,
 				asset_id,
 				fee_u128,
+				&change_commitment,
 				None,
 			)?;
 
@@ -97,6 +113,12 @@ impl UnshieldOperation {
 
 		PoolBalanceRepository::decrease_balance::<T>(asset_id, amount);
 
+		// Insert the change note commitment into the Merkle tree (partial unshield).
+		if has_change {
+			let change_comm = Commitment::new(change_commitment);
+			MerkleTreeService::insert_leaf::<T>(change_comm)?;
+		}
+
 		let current_block = frame_system::Pallet::<T>::block_number();
 		NullifierRepository::mark_as_used::<T>(nullifier, current_block);
 
@@ -104,6 +126,11 @@ impl UnshieldOperation {
 			nullifier,
 			amount,
 			recipient,
+			change_commitment: if has_change {
+				Some(change_commitment)
+			} else {
+				None
+			},
 		});
 
 		Ok(())
@@ -135,8 +162,10 @@ mod tests {
 		mock::{Test, new_test_ext},
 		operations::assets::AssetOperation,
 		pallet::Event as PalletEvent,
-		storage::{MerkleRepository, NullifierRepository, PoolBalanceRepository},
-		types::Nullifier,
+		storage::{
+			CommitmentRepository, MerkleRepository, NullifierRepository, PoolBalanceRepository,
+		},
+		types::{Commitment, Nullifier},
 	};
 	use frame_support::{assert_noop, assert_ok, traits::Currency};
 
@@ -185,7 +214,8 @@ mod tests {
 				asset_id,
 				amount,
 				2u64, // recipient
-				fee,
+				0u128,
+				[0u8; 32],
 				None,
 			));
 		});
@@ -204,6 +234,7 @@ mod tests {
 					100u128,
 					2u64,
 					0u128,
+					[0u8; 32],
 					None,
 				),
 				crate::pallet::Error::<Test>::InvalidAssetId
@@ -229,6 +260,7 @@ mod tests {
 					100u128,
 					2u64,
 					0u128,
+					[0u8; 32],
 					None,
 				),
 				crate::pallet::Error::<Test>::AssetNotVerified
@@ -255,6 +287,7 @@ mod tests {
 					0u128,
 					2u64,
 					0u128,
+					[0u8; 32],
 					None,
 				),
 				crate::pallet::Error::<Test>::InvalidAmount
@@ -279,6 +312,7 @@ mod tests {
 					100u128,
 					pool, // recipient == pool → rejected
 					0u128,
+					[0u8; 32],
 					None,
 				),
 				crate::pallet::Error::<Test>::InvalidRecipient
@@ -302,6 +336,7 @@ mod tests {
 					100u128,
 					2u64,
 					0u128,
+					[0u8; 32],
 					None,
 				),
 				crate::pallet::Error::<Test>::UnknownMerkleRoot
@@ -328,6 +363,7 @@ mod tests {
 					500u128,
 					2u64,
 					0u128,
+					[0u8; 32],
 					None,
 				),
 				crate::pallet::Error::<Test>::NullifierAlreadyUsed
@@ -352,6 +388,7 @@ mod tests {
 					100u128,
 					2u64,
 					0u128,
+					[0u8; 32],
 					None,
 				),
 				crate::pallet::Error::<Test>::InsufficientPoolBalance
@@ -376,6 +413,7 @@ mod tests {
 				300u128,
 				2u64,
 				0u128,
+				[0u8; 32],
 				None,
 			));
 			assert!(UnshieldOperation::is_nullifier_used::<Test>(&n));
@@ -398,6 +436,7 @@ mod tests {
 				amount,
 				2u64,
 				0u128,
+				[0u8; 32],
 				None,
 			));
 
@@ -425,6 +464,7 @@ mod tests {
 				amount,
 				recipient,
 				0u128,
+				[0u8; 32],
 				None,
 			));
 
@@ -449,6 +489,7 @@ mod tests {
 				200u128,
 				2u64,
 				0u128,
+				[0u8; 32],
 				None,
 			));
 
@@ -460,6 +501,7 @@ mod tests {
 						nullifier: en,
 						amount: 200,
 						recipient: 2,
+						change_commitment: None,
 					}) if en == n
 				)
 			});
@@ -484,12 +526,153 @@ mod tests {
 				amount,
 				2u64,
 				fee,
+				[0u8; 32],
 				None,
 			));
 
 			// MockRelayer block_author returns Some(1); fee should be accumulated there
 			let pending = crate::mock::mock_pending_fees_get(1u64, asset_id);
 			assert_eq!(pending, fee);
+		});
+	}
+
+	// ── partial unshield ─────────────────────────────────────────────────────
+
+	#[test]
+	fn execute_partial_unshield_creates_change_note() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			// Fund pool with the full note value (amount + change_value).
+			fund_pool(asset_id, 1_000u128);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			let change_comm_bytes = [0xCCu8; 32];
+			let amount = 600u128;
+
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x10),
+				asset_id,
+				amount,
+				2u64,
+				0u128,
+				change_comm_bytes,
+				None,
+			));
+
+			// The change commitment must now exist as a leaf in the Merkle tree.
+			assert_eq!(
+				MerkleRepository::get_tree_size::<Test>(),
+				1,
+				"change commitment should have been inserted as a Merkle leaf"
+			);
+			assert!(
+				MerkleRepository::find_leaf_index::<Test>(&Commitment::new(change_comm_bytes))
+					.is_some(),
+				"change commitment not found in Merkle tree leaves"
+			);
+
+			// Pool balance must have decreased only by `amount`, not by the full note value.
+			let pool_bal = PoolBalanceRepository::get_asset_balance::<Test>(asset_id);
+			assert_eq!(
+				pool_bal,
+				1_000u128 - amount,
+				"pool balance should only decrease by amount"
+			);
+
+			// Event must carry the change_commitment.
+			let events = frame_system::Pallet::<Test>::events();
+			let found = events.iter().any(|r| {
+				matches!(
+					&r.event,
+					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::Unshielded {
+						change_commitment: Some(cc),
+						..
+					}) if cc == &change_comm_bytes
+				)
+			});
+			assert!(found, "Unshielded event did not carry change_commitment");
+		});
+	}
+
+	#[test]
+	fn execute_total_unshield_with_zero_change_works() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let amount = 800u128;
+			fund_pool(asset_id, amount);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x11),
+				asset_id,
+				amount,
+				2u64,
+				0u128,
+				[0u8; 32], // zero change_commitment = total unshield
+				None,
+			));
+
+			// Pool balance must be zero.
+			let pool_bal = PoolBalanceRepository::get_asset_balance::<Test>(asset_id);
+			assert_eq!(pool_bal, 0u128, "pool balance should be fully drained");
+
+			// No change commitment in tree (tree size remains 0 since no insert happened).
+			assert_eq!(
+				MerkleRepository::get_tree_size::<Test>(),
+				0,
+				"tree should have no leaves for total unshield"
+			);
+
+			// Event carries change_commitment: None.
+			let events = frame_system::Pallet::<Test>::events();
+			let found = events.iter().any(|r| {
+				matches!(
+					r.event,
+					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::Unshielded {
+						change_commitment: None,
+						..
+					})
+				)
+			});
+			assert!(
+				found,
+				"Unshielded event should have change_commitment: None"
+			);
+		});
+	}
+
+	#[test]
+	fn execute_change_commitment_duplicate_fails() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			fund_pool(asset_id, 2_000u128);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			let change_comm_bytes = [0xDDu8; 32];
+			let change_comm = Commitment::new(change_comm_bytes);
+
+			// Mark commitment as already existing in the pool.
+			CommitmentRepository::store_memo::<Test>(change_comm, Default::default());
+
+			// Attempting to reuse the same commitment as a change note must fail.
+			assert_noop!(
+				UnshieldOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifier(0x12),
+					asset_id,
+					500u128,
+					2u64,
+					0u128,
+					change_comm_bytes,
+					None,
+				),
+				Error::<Test>::CommitmentAlreadyExists
+			);
 		});
 	}
 

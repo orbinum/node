@@ -435,6 +435,8 @@ pub mod pallet {
 			amount: BalanceOf<T>,
 			/// Recipient account
 			recipient: T::AccountId,
+			/// Change note commitment inserted into the Merkle tree (None for total unshield)
+			change_commitment: Option<Hash>,
 		},
 
 		/// Merkle root was updated
@@ -818,6 +820,9 @@ pub mod pallet {
 			amount: BalanceOf<T>,
 			recipient: T::AccountId,
 			fee: BalanceOf<T>,
+			// Commitment of the change note. Must be [0u8; 32] for total unshield.
+			// For partial unshield, must equal NoteCommitment(change_value, asset_id, change_owner_pk, change_blinding).
+			change_commitment: Hash,
 			// EVM address of the relay node that signed the tx (from precompile caller); None for direct Substrate.
 			relayer: Option<sp_core::H160>,
 		) -> DispatchResult {
@@ -832,6 +837,7 @@ pub mod pallet {
 				amount,
 				recipient,
 				fee,
+				change_commitment,
 				relayer,
 			)
 		}

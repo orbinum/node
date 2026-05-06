@@ -127,14 +127,23 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
+	/// Storage: `ShieldedPool::CommitmentMemos` (r:1 w:0)  [partial unshield: duplicate check]
+	/// Storage: `ShieldedPool::MerkleTreeSize` (r:1 w:1)  [partial unshield: conditional insert]
+	/// Storage: `ShieldedPool::MerkleFrontier` (r:1 w:1)  [partial unshield: conditional insert]
+	/// Storage: `ShieldedPool::MerkleLeaves` (r:0 w:1)    [partial unshield: conditional insert]
+	/// Storage: `ShieldedPool::CommitmentLeafIndex` (r:0 w:1) [partial unshield: conditional insert]
+	/// Storage: `ShieldedPool::PoseidonRoot` (r:1 w:1)    [partial unshield: conditional insert]
+	/// Storage: `ShieldedPool::HistoricRootsOrder` (r:1 w:1)  [partial unshield: conditional insert]
 	fn unshield() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `497`
 		//  Estimated: `6172`
 		// Minimum execution time: 52_000_000 picoseconds.
+		// Worst-case path: partial unshield — includes CommitmentMemos existence check
+		// and MerkleTreeService::insert_leaf for the change note (+3 reads, +6 writes).
 		Weight::from_parts(52_000_000, 6172)
-			.saturating_add(T::DbWeight::get().reads(10_u64))
-			.saturating_add(T::DbWeight::get().writes(6_u64))
+			.saturating_add(T::DbWeight::get().reads(13_u64))
+			.saturating_add(T::DbWeight::get().writes(12_u64))
 	}
 	fn set_audit_policy() -> Weight {
 		Weight::from_parts(100_000, 0).saturating_add(T::DbWeight::get().writes(1))
@@ -271,14 +280,23 @@ impl WeightInfo for () {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
+	/// Storage: `ShieldedPool::CommitmentMemos` (r:1 w:0)  [partial unshield: duplicate check]
+	/// Storage: `ShieldedPool::MerkleTreeSize` (r:1 w:1)  [partial unshield: conditional insert]
+	/// Storage: `ShieldedPool::MerkleFrontier` (r:1 w:1)  [partial unshield: conditional insert]
+	/// Storage: `ShieldedPool::MerkleLeaves` (r:0 w:1)    [partial unshield: conditional insert]
+	/// Storage: `ShieldedPool::CommitmentLeafIndex` (r:0 w:1) [partial unshield: conditional insert]
+	/// Storage: `ShieldedPool::PoseidonRoot` (r:1 w:1)    [partial unshield: conditional insert]
+	/// Storage: `ShieldedPool::HistoricRootsOrder` (r:1 w:1)  [partial unshield: conditional insert]
 	fn unshield() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `497`
 		//  Estimated: `6172`
 		// Minimum execution time: 52_000_000 picoseconds.
+		// Worst-case path: partial unshield — includes CommitmentMemos existence check
+		// and MerkleTreeService::insert_leaf for the change note (+3 reads, +6 writes).
 		Weight::from_parts(52_000_000, 6172)
-			.saturating_add(RocksDbWeight::get().reads(10_u64))
-			.saturating_add(RocksDbWeight::get().writes(6_u64))
+			.saturating_add(RocksDbWeight::get().reads(13_u64))
+			.saturating_add(RocksDbWeight::get().writes(12_u64))
 	}
 	fn set_audit_policy() -> Weight {
 		Weight::from_parts(100_000, 0).saturating_add(RocksDbWeight::get().writes(1))

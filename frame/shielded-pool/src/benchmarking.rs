@@ -64,7 +64,7 @@ mod benchmarks {
 		let (caller, asset_id) = setup_benchmark_env::<T>();
 		let amount: BalanceOf<T> = T::MinShieldAmount::get() * 10u32.into();
 		let commitment = Commitment([1u8; 32]);
-		// Memo must be exactly 136 bytes (MAX_ENCRYPTED_MEMO_SIZE): nonce(12) + data(108) + MAC(16)
+		// Memo must be exactly 168 bytes (MAX_ENCRYPTED_MEMO_SIZE): nonce(12) + data(108) + MAC(16) + ephPk(32)
 		let memo_bytes = vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
 		let encrypted_memo = FrameEncryptedMemo(memo_bytes.try_into().unwrap());
 
@@ -163,7 +163,8 @@ mod benchmarks {
 			amount,
 			recipient,
 			fee,
-			None,
+			Hash::default(), // change_commitment: [0u8; 32] for total unshield
+			None,            // relayer
 		);
 	}
 

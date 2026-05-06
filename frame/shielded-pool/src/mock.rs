@@ -79,6 +79,7 @@ impl ZkVerifierPort for MockZkVerifier {
 		_recipient: &[u8; 32],
 		_asset_id: u32,
 		_fee: u128,
+		_change_commitment: &[u8; 32],
 		_version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
 		// Validate basic format

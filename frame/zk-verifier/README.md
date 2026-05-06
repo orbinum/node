@@ -63,9 +63,10 @@ pub trait ZkVerifierPort {
         merkle_root: &[u8; 32],
         nullifier: &[u8; 32],
         amount: u128,
-        recipient: &[u8; 32],
+        recipient: &[u8; 32],   // LE field element — NOT byte-reversed
         asset_id: u32,
         fee: u128,
+        change_commitment: &[u8; 32],  // [0u8;32] for total unshield
         version: Option<u32>,
     ) -> Result<bool, DispatchError>;
 
@@ -114,6 +115,24 @@ The previous Clean Architecture layers (`domain/`, `application/`, `infrastructu
 ```bash
 cargo test -p pallet-zk-verifier
 ```
+
+## Public-input encoding
+
+`encoding.rs` converts typed domain parameters to `Vec<[u8; 32]>` LE field elements.
+
+**Unshield** — 7 field elements in order:
+
+| Index | Field | Encoding |
+|-------|-------|----------|
+| 0 | `merkle_root` | 32 bytes as-is (LE) |
+| 1 | `nullifier` | 32 bytes as-is (LE) |
+| 2 | `amount` | u128 LE in first 16 bytes of a 32-byte slot |
+| 3 | `recipient` | 32 bytes as-is — LE field element (`bytesToBigintLE` convention) |
+| 4 | `asset_id` | u32 LE in first 4 bytes of a 32-byte slot |
+| 5 | `fee` | u128 LE in first 16 bytes of a 32-byte slot |
+| 6 | `change_commitment` | 32 bytes as-is; `[0u8;32]` for total unshield |
+
+The `recipient` is passed **without byte-reversal**. `PublicInputs::to_field_elements` calls `Bn254Fr::from_le_bytes_mod_order`, which matches the TypeScript SDK convention `bytesToBigintLE(accountId32Bytes)`.
 
 ## Notes and limitations
 

@@ -38,6 +38,7 @@ pub trait ZkVerifierPort {
 		recipient: &[u8; 32],
 		asset_id: u32,
 		fee: u128,
+		change_commitment: &[u8; 32],
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError>;
 
@@ -102,10 +103,18 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 		recipient: &[u8; 32],
 		asset_id: u32,
 		fee: u128,
+		change_commitment: &[u8; 32],
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
-		let raw =
-			encoding::encode_unshield(merkle_root, nullifier, amount, recipient, asset_id, fee);
+		let raw = encoding::encode_unshield(
+			merkle_root,
+			nullifier,
+			amount,
+			recipient,
+			asset_id,
+			fee,
+			change_commitment,
+		);
 		verifier::verify::<T>(CircuitId::UNSHIELD, version, proof, raw).map(|(ok, _)| ok)
 	}
 
@@ -483,6 +492,7 @@ mod tests {
 					&[0u8; 32],
 					0,
 					0,
+					&[0u8; 32],
 					Some(1),
 				),
 				Error::<Test>::EmptyProof
@@ -502,6 +512,7 @@ mod tests {
 					&[0u8; 32],
 					0,
 					0,
+					&[0u8; 32],
 					None,
 				),
 				Error::<Test>::CircuitNotFound
@@ -521,6 +532,7 @@ mod tests {
 					&[0u8; 32],
 					0,
 					0,
+					&[0u8; 32],
 					Some(99),
 				),
 				Error::<Test>::VerificationKeyNotFound
@@ -541,6 +553,7 @@ mod tests {
 				&[0xFFu8; 32],
 				0,
 				50,
+				&[0u8; 32],
 				None,
 			)
 			.unwrap();
@@ -562,6 +575,7 @@ mod tests {
 				&[0u8; 32],
 				2,
 				10,
+				&[0u8; 32],
 				Some(2),
 			)
 			.unwrap();
@@ -586,6 +600,7 @@ mod tests {
 				&recipient,
 				2,
 				10,
+				&[0u8; 32],
 				None,
 			)
 			.unwrap();

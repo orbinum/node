@@ -171,7 +171,7 @@ mod tests {
 	}
 
 	fn short_memo() -> EncryptedMemo {
-		// 32 bytes — too short (not 104)
+		// 32 bytes — too short (not 168)
 		EncryptedMemo::new(vec![0x01u8; 32]).unwrap()
 	}
 
