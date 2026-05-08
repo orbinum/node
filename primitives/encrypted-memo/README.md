@@ -17,13 +17,13 @@ Encrypted memo primitives for private transaction metadata in Orbinum Network.
 
 ```toml
 [dependencies]
-orbinum-encrypted-memo = "0.4"
+orbinum-encrypted-memo = "0.5"
 
 # Enable random nonce generation (requires std/rand)
-orbinum-encrypted-memo = { version = "0.4", features = ["encrypt"] }
+orbinum-encrypted-memo = { version = "0.5", features = ["encrypt"] }
 
 # Enable SCALE codec + TypeInfo (Substrate runtime)
-orbinum-encrypted-memo = { version = "0.4", features = ["parity-scale-codec", "scale-info"] }
+orbinum-encrypted-memo = { version = "0.5", features = ["parity-scale-codec", "scale-info"] }
 ```
 
 ## Usage
@@ -109,11 +109,12 @@ let proof = DisclosureProof::from_bytes(&bytes)?;
 ChaCha20Poly1305 AEAD with per-note key derivation:
 
 ```text
-Plaintext  (MemoData):  value(8) | owner_pk(32) | blinding(32) | asset_id(4) | counterparty_pk(32) = 108 bytes
+Plaintext  (MemoData):  value_lo(8) | value_hi(8) | owner_pk(32) | blinding(32) | asset_id(4) | counterparty_pk(32) = 116 bytes
+                        (value = value_lo + value_hi × 2^64, supports u128)
 
 encryption_key = SHA256(shared_secret || commitment || "orbinum-note-encryption-v1")
-ciphertext     = ChaCha20Poly1305(plaintext=108B, key=encryption_key, nonce=12B)
-encrypted_memo = nonce(12) | ciphertext(108) | MAC(16) | ephPk(32)  →  168 bytes total
+ciphertext     = ChaCha20Poly1305(plaintext=116B, key=encryption_key, nonce=12B)
+encrypted_memo = nonce(12) | ciphertext(132) | MAC(16) | ephPk_packed(32)  →  176 bytes total
 ```
 
 `shared_secret` is either the `viewing_key` (symmetric mode) or the ECDH x-coordinate (wallet mode). See **Key Derivation Hierarchy** below.
@@ -137,25 +138,44 @@ encryption_key(commitment) = SHA256(viewing_key || commitment || "orbinum-note-e
 ```text
 ivsk       = HKDF-SHA256(spendingKey_bytes, info="orbinum-ivk-v1")  ← secret
 ivk_point  = BJJ_mul(Base8, ivsk_scalar)                            ← public, in address
-ephSk      = random BJJ scalar
-ephPk      = BJJ_mul(Base8, ephSk)                                  ← appended to encrypted[136..168]
+ephSk      = random BJJ scalar per note
+ephPk      = BJJ_mul(Base8, ephSk)                                  ← appended to encrypted[144..176]
 shared_sec = BJJ_mul(ivk_point, ephSk)[0]   (x-coordinate, LE)
 enc_key    = SHA256(shared_sec || commitment || "orbinum-note-encryption-v1")
 ```
+
+### Stealth Address Mode (change notes)
+
+Partial unshield creates stealth-addressed change notes:
+
+```text
+Sender generates ephSk = random() for change note
+shared_secret = ECDH(ephSk, recipient_ivk_point).Ax
+stealth_scalar = HKDF(shared_secret, salt=owner_pk_LE, info="orbinum-stealth-v1") % BABYJUB_ORDER
+stealth_owner_pk = (stealth_scalar × Base8 + owner_pk_point).Ax  ← unique per change note
+
+Change note commitment = Poseidon(value, asset_id, stealth_owner_pk, blinding)
+Change encrypted_memo = ChaCha20Poly1305(..., ephSk, ...)
+```
+
+This ensures change note commitments are **unlinkable** — they cannot be associated with sender's other notes.
 
 ## Memo Structure
 
 | Field | Type | Size | Description |
 |-------|------|------|-------------|
-| `value` | `u64` | 8 bytes | Note amount |
+| `value_lo` | `u64` LE | 8 bytes | Lower 64 bits of amount (value & 0xffff_ffff_ffff_ffff) |
+| `value_hi` | `u64` LE | 8 bytes | Upper 64 bits of amount ((value >> 64) & 0xffff_ffff_ffff_ffff) |
 | `owner_pk` | `[u8; 32]` | 32 bytes | Owner BabyJubJub public key (Ax, LE) |
 | `blinding` | `[u8; 32]` | 32 bytes | Blinding factor |
-| `asset_id` | `u32` | 4 bytes | Asset identifier |
-| `counterparty_pk` | `[u8; 32]` | 32 bytes | Other party's Ax (LE); `[0u8;32]` for shield/unshield |
+| `asset_id` | `u32` LE | 4 bytes | Asset identifier |
+| `counterparty_pk` | `[u8; 32]` | 32 bytes | Other party's Ax (LE); `[0u8;32]` for shield/unshield/change |
 
-**Plaintext**: 108 bytes — **Encrypted wire format**: 168 bytes (`nonce(12) | ciphertext(108) | MAC(16) | ephPk(32)`)
+**Plaintext**: 116 bytes — **Encrypted wire format**: 176 bytes (`nonce(12) | ciphertext(132) | MAC(16) | ephPk_packed(32)`)
 
-Use `MemoData::new_without_counterparty(value, owner_pk, blinding, asset_id)` for shield and unshield notes.
+**Value range**: u128 supporting ~340 billion tokens with 18 decimals per note
+
+Use `MemoData::new_without_counterparty(value, owner_pk, blinding, asset_id)` for shield, unshield, and change notes.
 
 ## Selective Disclosure Masks
 

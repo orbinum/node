@@ -415,15 +415,21 @@ pub mod pallet {
 			leaf_index: u32,
 		},
 
-		/// A private transfer was executed
-		PrivateTransfer {
-			/// Nullifiers of spent notes
+		/// Input nullifiers were spent in a private transfer.
+		/// Emitted independently of CommitmentsInserted to prevent graph correlation.
+		NullifiersSpent {
+			/// Input nullifiers consumed — max 2.
 			nullifiers: BoundedVec<Nullifier, ConstU32<2>>,
-			/// New commitments created (recipient notes)
+		},
+
+		/// Output commitments were inserted into the Merkle tree in a private transfer.
+		/// Emitted independently of NullifiersSpent to prevent graph correlation.
+		CommitmentsInserted {
+			/// New commitments created — max 2.
 			commitments: BoundedVec<Commitment, ConstU32<2>>,
-			/// Encrypted memos for new notes
+			/// Encrypted memos for each output commitment — max 2.
 			encrypted_memos: BoundedVec<FrameEncryptedMemo, ConstU32<2>>,
-			/// Indices of new leaves in the Merkle tree
+			/// Leaf indices assigned in the Merkle tree — max 2.
 			leaf_indices: BoundedVec<u32, ConstU32<2>>,
 		},
 
@@ -437,6 +443,10 @@ pub mod pallet {
 			recipient: T::AccountId,
 			/// Change note commitment inserted into the Merkle tree (None for total unshield)
 			change_commitment: Option<Hash>,
+			/// Encrypted memo for the change note (None for total unshield)
+			change_encrypted_memo: Option<FrameEncryptedMemo>,
+			/// Leaf index of the change commitment in the Merkle tree (None for total unshield)
+			change_leaf_index: Option<u32>,
 		},
 
 		/// Merkle root was updated
@@ -662,7 +672,7 @@ pub mod pallet {
 		/// * `AmountTooSmall` - Amount is below minimum
 		/// * `MerkleTreeFull` - No more space in the tree
 		/// * `CommitmentAlreadyExists` - Duplicate commitment
-		/// * `InvalidMemoSize` - Encrypted memo is not exactly 104 bytes
+		/// * `InvalidMemoSize` - Encrypted memo is not exactly 168 bytes
 		#[pallet::call_index(0)]
 		#[pallet::weight(T::WeightInfo::shield())]
 		pub fn shield(
@@ -755,6 +765,8 @@ pub mod pallet {
 		/// * `NullifierAlreadyUsed` - Double-spend attempt
 		/// * `InvalidProof` - ZK proof verification failed
 		/// * `FeeTooLow` - Fee is below `T::Relayer::min_relay_fee()`
+		/// * `InvalidMemoSize` - Any encrypted memo is not exactly 168 bytes
+		/// * `MemoCommitmentMismatch` - Number of memos does not match number of commitments
 		#[pallet::call_index(1)]
 		#[pallet::weight(T::WeightInfo::private_transfer())]
 		#[allow(clippy::too_many_arguments)]
@@ -801,6 +813,8 @@ pub mod pallet {
 		/// * `amount` - Net amount to withdraw (recipient receives this)
 		/// * `recipient` - Public account to receive tokens
 		/// * `fee` - Gasless fee (must match proof's fee public input)
+		/// * `change_commitment` - Commitment of the change note (empty [0u8; 32] for total unshield)
+		/// * `change_encrypted_memo` - Encrypted memo for the change note (None for total unshield)
 		///
 		/// # Errors
 		/// * `UnknownMerkleRoot` - Root is not in historic roots
@@ -808,6 +822,7 @@ pub mod pallet {
 		/// * `InvalidProof` - ZK proof verification failed
 		/// * `InsufficientPoolBalance` - Pool doesn't have enough tokens
 		/// * `FeeTooLow` - Fee is below `T::Relayer::min_relay_fee()`
+		/// * `InvalidMemoSize` - Change encrypted memo is invalid size
 		#[pallet::call_index(2)]
 		#[pallet::weight(T::WeightInfo::unshield())]
 		#[allow(clippy::too_many_arguments)]
@@ -823,6 +838,9 @@ pub mod pallet {
 			// Commitment of the change note. Must be [0u8; 32] for total unshield.
 			// For partial unshield, must equal NoteCommitment(change_value, asset_id, change_owner_pk, change_blinding).
 			change_commitment: Hash,
+			// Encrypted memo for the change note. Must be [0u8; 0] for total unshield.
+			// For partial unshield, contains encrypted plaintext: [value_lo(8), value_hi(8), owner_pk(32), blinding(32), asset_id(4), counterparty_pk(32)].
+			change_encrypted_memo: FrameEncryptedMemo,
 			// EVM address of the relay node that signed the tx (from precompile caller); None for direct Substrate.
 			relayer: Option<sp_core::H160>,
 		) -> DispatchResult {
@@ -838,6 +856,7 @@ pub mod pallet {
 				recipient,
 				fee,
 				change_commitment,
+				change_encrypted_memo,
 				relayer,
 			)
 		}

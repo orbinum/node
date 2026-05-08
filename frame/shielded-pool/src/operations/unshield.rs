@@ -1,11 +1,11 @@
 use crate::{
 	merkle::MerkleTreeService,
-	pallet::{Config, Error, Event, Pallet},
+	pallet::{CommitmentMemos, Config, Error, Event, Pallet},
 	storage::{
 		AssetRepository, CommitmentRepository, MerkleRepository, NullifierRepository,
 		PoolBalanceRepository,
 	},
-	types::{Commitment, Nullifier},
+	types::{Commitment, EncryptedMemo as FrameEncryptedMemo, Nullifier},
 };
 use frame_support::{
 	pallet_prelude::*,
@@ -31,6 +31,7 @@ impl UnshieldOperation {
 		recipient: <T as frame_system::Config>::AccountId,
 		fee: <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance,
 		change_commitment: [u8; 32],
+		change_encrypted_memo: FrameEncryptedMemo,
 		relayer_evm: Option<sp_core::H160>,
 	) -> DispatchResult {
 		let asset = AssetRepository::get_asset::<T>(asset_id).ok_or(Error::<T>::InvalidAssetId)?;
@@ -56,6 +57,19 @@ impl UnshieldOperation {
 			ensure!(
 				!CommitmentRepository::exists::<T>(&change_comm),
 				Error::<T>::CommitmentAlreadyExists
+			);
+			// For partial unshield, memo must be valid size (176 bytes).
+			if !change_encrypted_memo.is_empty() {
+				ensure!(
+					change_encrypted_memo.is_valid_size(),
+					Error::<T>::InvalidMemoSize
+				);
+			}
+		} else {
+			// For total unshield, memo must be empty.
+			ensure!(
+				change_encrypted_memo.is_empty(),
+				Error::<T>::InvalidMemoSize
 			);
 		}
 
@@ -114,10 +128,19 @@ impl UnshieldOperation {
 		PoolBalanceRepository::decrease_balance::<T>(asset_id, amount);
 
 		// Insert the change note commitment into the Merkle tree (partial unshield).
-		if has_change {
+		let change_leaf_index = if has_change {
 			let change_comm = Commitment::new(change_commitment);
-			MerkleTreeService::insert_leaf::<T>(change_comm)?;
-		}
+			let idx = MerkleTreeService::insert_leaf::<T>(change_comm)?;
+
+			// Store the encrypted memo for note recovery and audit.
+			if !change_encrypted_memo.is_empty() {
+				CommitmentMemos::<T>::insert(change_comm, change_encrypted_memo.clone());
+			}
+
+			Some(idx)
+		} else {
+			None
+		};
 
 		let current_block = frame_system::Pallet::<T>::block_number();
 		NullifierRepository::mark_as_used::<T>(nullifier, current_block);
@@ -131,6 +154,12 @@ impl UnshieldOperation {
 			} else {
 				None
 			},
+			change_encrypted_memo: if has_change && !change_encrypted_memo.is_empty() {
+				Some(change_encrypted_memo)
+			} else {
+				None
+			},
+			change_leaf_index,
 		});
 
 		Ok(())
@@ -216,6 +245,7 @@ mod tests {
 				2u64, // recipient
 				0u128,
 				[0u8; 32],
+				FrameEncryptedMemo::default(),
 				None,
 			));
 		});
@@ -235,6 +265,7 @@ mod tests {
 					2u64,
 					0u128,
 					[0u8; 32],
+					FrameEncryptedMemo::default(),
 					None,
 				),
 				crate::pallet::Error::<Test>::InvalidAssetId
@@ -261,6 +292,7 @@ mod tests {
 					2u64,
 					0u128,
 					[0u8; 32],
+					FrameEncryptedMemo::default(),
 					None,
 				),
 				crate::pallet::Error::<Test>::AssetNotVerified
@@ -288,6 +320,7 @@ mod tests {
 					2u64,
 					0u128,
 					[0u8; 32],
+					FrameEncryptedMemo::default(),
 					None,
 				),
 				crate::pallet::Error::<Test>::InvalidAmount
@@ -313,6 +346,7 @@ mod tests {
 					pool, // recipient == pool → rejected
 					0u128,
 					[0u8; 32],
+					FrameEncryptedMemo::default(),
 					None,
 				),
 				crate::pallet::Error::<Test>::InvalidRecipient
@@ -337,6 +371,7 @@ mod tests {
 					2u64,
 					0u128,
 					[0u8; 32],
+					FrameEncryptedMemo::default(),
 					None,
 				),
 				crate::pallet::Error::<Test>::UnknownMerkleRoot
@@ -364,6 +399,7 @@ mod tests {
 					2u64,
 					0u128,
 					[0u8; 32],
+					FrameEncryptedMemo::default(),
 					None,
 				),
 				crate::pallet::Error::<Test>::NullifierAlreadyUsed
@@ -389,6 +425,7 @@ mod tests {
 					2u64,
 					0u128,
 					[0u8; 32],
+					FrameEncryptedMemo::default(),
 					None,
 				),
 				crate::pallet::Error::<Test>::InsufficientPoolBalance
@@ -414,6 +451,7 @@ mod tests {
 				2u64,
 				0u128,
 				[0u8; 32],
+				FrameEncryptedMemo::default(),
 				None,
 			));
 			assert!(UnshieldOperation::is_nullifier_used::<Test>(&n));
@@ -437,6 +475,7 @@ mod tests {
 				2u64,
 				0u128,
 				[0u8; 32],
+				FrameEncryptedMemo::default(),
 				None,
 			));
 
@@ -465,6 +504,7 @@ mod tests {
 				recipient,
 				0u128,
 				[0u8; 32],
+				FrameEncryptedMemo::default(),
 				None,
 			));
 
@@ -490,6 +530,7 @@ mod tests {
 				2u64,
 				0u128,
 				[0u8; 32],
+				FrameEncryptedMemo::default(),
 				None,
 			));
 
@@ -502,6 +543,8 @@ mod tests {
 						amount: 200,
 						recipient: 2,
 						change_commitment: None,
+						change_encrypted_memo: None,
+						change_leaf_index: None,
 					}) if en == n
 				)
 			});
@@ -527,6 +570,7 @@ mod tests {
 				2u64,
 				fee,
 				[0u8; 32],
+				FrameEncryptedMemo::default(),
 				None,
 			));
 
@@ -558,6 +602,7 @@ mod tests {
 				2u64,
 				0u128,
 				change_comm_bytes,
+				FrameEncryptedMemo::default(),
 				None,
 			));
 
@@ -613,6 +658,7 @@ mod tests {
 				2u64,
 				0u128,
 				[0u8; 32], // zero change_commitment = total unshield
+				FrameEncryptedMemo::default(),
 				None,
 			));
 
@@ -669,6 +715,7 @@ mod tests {
 					2u64,
 					0u128,
 					change_comm_bytes,
+					FrameEncryptedMemo::default(),
 					None,
 				),
 				Error::<Test>::CommitmentAlreadyExists

@@ -144,7 +144,7 @@ fn encode_private_transfer(
 	input
 }
 
-/// `unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32)`  selector `0xd21d9a79`
+/// `unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes)` selector `0xcc1a3b38`
 #[allow(clippy::too_many_arguments)]
 fn encode_unshield(
 	proof: &[u8],
@@ -155,11 +155,15 @@ fn encode_unshield(
 	recipient: [u8; 32],
 	fee: u128,
 	change_commitment: [u8; 32],
+	change_encrypted_memo: &[u8],
 ) -> Vec<u8> {
-	// head: 8 slots × 32 = 256 bytes; proof tail appended after
-	let mut input = vec![0xd2, 0x1d, 0x9a, 0x79];
-	let mut head = vec![0u8; 256];
-	head[0..32].copy_from_slice(&u256_word(256));
+	// head: 9 slots × 32 = 288 bytes; tails (proof, memo) appended after
+	let mut input = vec![0xcc, 0x1a, 0x3b, 0x38];
+	let mut head = vec![0u8; 288];
+	let proof_offset = 288usize;
+	let memo_offset = proof_offset + encode_bytes(proof).len();
+
+	head[0..32].copy_from_slice(&u256_word(proof_offset));
 	head[32..64].copy_from_slice(&merkle_root);
 	head[64..96].copy_from_slice(&nullifier);
 	head[124..128].copy_from_slice(&asset_id.to_be_bytes());
@@ -167,15 +171,17 @@ fn encode_unshield(
 	head[160..192].copy_from_slice(&recipient);
 	head[192..224].copy_from_slice(&u256_word_u128(fee));
 	head[224..256].copy_from_slice(&change_commitment);
+	head[256..288].copy_from_slice(&u256_word(memo_offset));
 	input.extend_from_slice(&head);
 	input.extend_from_slice(&encode_bytes(proof));
+	input.extend_from_slice(&encode_bytes(change_encrypted_memo));
 	input
 }
 
 // ─── Convenience: shield then return the current Merkle root ─────────────────
 
 fn do_shield(commitment: [u8; 32], value: u128) {
-	let input = encode_shield(0, commitment, &[0xAB; 168]);
+	let input = encode_shield(0, commitment, &[0xAB; 176]);
 	let mut h = MockHandle::with_value(input, value);
 	assert_success(ShieldedPoolPrecompile::<Test>::execute(&mut h));
 }
@@ -377,7 +383,7 @@ fn shield_rejects_below_min_amount() {
 fn shield_stores_commitment_and_updates_balance() {
 	new_test_ext().execute_with(|| {
 		let commitment = [0x11; 32];
-		let input = encode_shield(0, commitment, &[0xAB; 168]);
+		let input = encode_shield(0, commitment, &[0xAB; 176]);
 		let mut h = MockHandle::with_value(input, 1_000);
 		assert_success(ShieldedPoolPrecompile::<Test>::execute(&mut h));
 
@@ -450,7 +456,7 @@ fn private_transfer_rejects_empty_proof() {
 			root,
 			&[[0x11; 32], [0x22; 32]],
 			&[[0x33; 32], [0x44; 32]],
-			&[vec![0xAA; 168], vec![0xBB; 168]],
+			&[vec![0xAA; 176], vec![0xBB; 176]],
 			0,
 			0,
 		);
@@ -491,7 +497,7 @@ fn private_transfer_rejects_mismatched_nullifier_commitment_count() {
 			root,
 			&[[0x11; 32], [0x22; 32]], // 2 nullifiers
 			&[[0x33; 32]],             // 1 commitment
-			&[vec![0xAA; 168]],        // 1 memo
+			&[vec![0xAA; 176]],        // 1 memo
 			0,
 			0,
 		);
@@ -511,7 +517,7 @@ fn private_transfer_rejects_mismatched_commitment_memo_count() {
 			root,
 			&[[0x11; 32], [0x22; 32]], // 2 nullifiers
 			&[[0x33; 32], [0x44; 32]], // 2 commitments
-			&[vec![0xAA; 168]],        // 1 memo — mismatch
+			&[vec![0xAA; 176]],        // 1 memo — mismatch
 			0,
 			0,
 		);
@@ -535,7 +541,7 @@ fn private_transfer_happy_path() {
 			root,
 			&[nullifier_1, nullifier_2],
 			&[commitment_1, commitment_2],
-			&[vec![0xAA; 168], vec![0xBB; 168]],
+			&[vec![0xAA; 176], vec![0xBB; 176]],
 			0,
 			0,
 		);
@@ -577,7 +583,7 @@ fn private_transfer_rejects_double_spend() {
 			root,
 			&[nullifier, [0x02; 32]],
 			&[[0x03; 32], [0x04; 32]],
-			&[vec![0xAA; 168], vec![0xBB; 168]],
+			&[vec![0xAA; 176], vec![0xBB; 176]],
 			0,
 			0,
 		);
@@ -601,7 +607,7 @@ fn private_transfer_root_updates_after_outputs() {
 			root_before,
 			&[[0x11; 32], [0x22; 32]],
 			&[[0x33; 32], [0x44; 32]],
-			&[vec![0xAA; 168], vec![0xBB; 168]],
+			&[vec![0xAA; 176], vec![0xBB; 176]],
 			0,
 			0,
 		);
@@ -623,7 +629,7 @@ fn private_transfer_root_updates_after_outputs() {
 #[test]
 fn unshield_rejects_truncated_input() {
 	new_test_ext().execute_with(|| {
-		let mut h = MockHandle::new(vec![0xd2, 0x1d, 0x9a, 0x79]);
+		let mut h = MockHandle::new(vec![0xcc, 0x1a, 0x3b, 0x38]);
 		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
 	});
 }
@@ -642,6 +648,7 @@ fn unshield_rejects_empty_proof() {
 			recipient_bytes(),
 			0,
 			[0u8; 32],
+			&[],
 		);
 		let mut h = MockHandle::new(input);
 		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
@@ -664,6 +671,7 @@ fn unshield_happy_path() {
 			recipient_bytes(),
 			0,
 			[0u8; 32],
+			&[],
 		);
 		let mut h = MockHandle::new(input);
 		assert_success(ShieldedPoolPrecompile::<Test>::execute(&mut h));
@@ -697,6 +705,7 @@ fn unshield_rejects_double_spend() {
 			recipient_bytes(),
 			0,
 			[0u8; 32],
+			&[],
 		);
 		let mut h = MockHandle::new(input.clone());
 		assert_success(ShieldedPoolPrecompile::<Test>::execute(&mut h));
@@ -720,6 +729,7 @@ fn unshield_full_balance() {
 			recipient_bytes(),
 			0,
 			[0u8; 32],
+			&[],
 		);
 		let mut h = MockHandle::new(input);
 		assert_success(ShieldedPoolPrecompile::<Test>::execute(&mut h));
@@ -743,6 +753,7 @@ fn unshield_rejects_zero_recipient() {
 			[0u8; 32], // zero AccountId32
 			0,
 			[0u8; 32],
+			&[],
 		);
 		let mut h = MockHandle::new(input);
 		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
@@ -765,6 +776,7 @@ fn unshield_rejects_zero_amount() {
 			recipient_bytes(),
 			0,
 			[0u8; 32],
+			&[],
 		);
 		let mut h = MockHandle::new(input);
 		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
@@ -794,7 +806,7 @@ fn full_lifecycle_shield_transfer_unshield() {
 			root_1,
 			&[nullifier_in, [0x00; 32]],
 			&[commitment_out_1, commitment_out_2],
-			&[vec![0xAA; 168], vec![0xBB; 168]],
+			&[vec![0xAA; 176], vec![0xBB; 176]],
 			0,
 			0,
 		);
@@ -814,6 +826,7 @@ fn full_lifecycle_shield_transfer_unshield() {
 			recipient_bytes(),
 			0,
 			[0u8; 32],
+			&[],
 		);
 		let mut h_us = MockHandle::new(unshield_input);
 		assert_success(ShieldedPoolPrecompile::<Test>::execute(&mut h_us));

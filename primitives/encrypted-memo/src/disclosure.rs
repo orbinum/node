@@ -327,7 +327,7 @@ impl DisclosureProof {
 )]
 pub struct PartialMemoData {
 	/// Revealed token amount (`None` when not disclosed).
-	pub value: Option<u64>,
+	pub value: Option<u128>,
 	/// Revealed owner public key (`None` when not disclosed).
 	pub owner_pk: Option<[u8; 32]>,
 	/// Revealed blinding factor — should always be `None`.
@@ -397,15 +397,15 @@ impl PartialMemoData {
 		let mut off = 1;
 
 		let value = if (flags & 0b0001) != 0 {
-			if bytes.len() < off + 8 {
+			if bytes.len() < off + 16 {
 				return Err(MemoError::InvalidDisclosureData);
 			}
-			let v = u64::from_le_bytes(
-				bytes[off..off + 8]
+			let v = u128::from_le_bytes(
+				bytes[off..off + 16]
 					.try_into()
 					.map_err(|_| MemoError::InvalidDisclosureData)?,
 			);
-			off += 8;
+			off += 16;
 			Some(v)
 		} else {
 			None
