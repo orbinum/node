@@ -18,7 +18,7 @@
 //! let decrypted = decrypt_memo(&encrypted, &commitment, keys.viewing_key.as_bytes())?;
 //!
 //! // ECDH mode: derive shared_secret externally via BabyJubJub before calling decrypt_memo
-//! // let eph_pk = &encrypted[136..168];
+//! // let eph_pk = &encrypted[144..176];
 //! // let shared_secret = bjj_ecdh(ivsk_scalar, eph_pk);
 //! // let decrypted = decrypt_memo(&encrypted, &commitment, &shared_secret)?;
 //! ```

@@ -120,8 +120,10 @@ impl PrivateTransferOperation {
 			}
 		}
 
-		Pallet::<T>::deposit_event(Event::PrivateTransfer {
-			nullifiers,
+		Pallet::<T>::deposit_event(Event::NullifiersSpent {
+			nullifiers: nullifiers.clone(),
+		});
+		Pallet::<T>::deposit_event(Event::CommitmentsInserted {
 			commitments,
 			encrypted_memos,
 			leaf_indices,
@@ -395,17 +397,26 @@ mod tests {
 			));
 
 			let events = frame_system::Pallet::<Test>::events();
-			let found = events.iter().any(|r| {
+			let found_nullifiers = events.iter().any(|r| {
 				matches!(
 					&r.event,
-					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::PrivateTransfer {
+					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::NullifiersSpent {
 						nullifiers: en,
-						commitments: ec,
-						..
-					}) if en == &nullifiers && ec == &commitments
+					}) if en == &nullifiers
 				)
 			});
-			assert!(found, "PrivateTransfer event not emitted");
+			assert!(found_nullifiers, "NullifiersSpent event not emitted");
+
+			let found_commitments = events.iter().any(|r| {
+				matches!(
+					&r.event,
+					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::CommitmentsInserted {
+						commitments: ec,
+						..
+					}) if ec == &commitments
+				)
+			});
+			assert!(found_commitments, "CommitmentsInserted event not emitted");
 		});
 	}
 

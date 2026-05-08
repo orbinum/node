@@ -163,8 +163,9 @@ mod benchmarks {
 			amount,
 			recipient,
 			fee,
-			Hash::default(), // change_commitment: [0u8; 32] for total unshield
-			None,            // relayer
+			Hash::default(),    // change_commitment: [0u8; 32] for total unshield
+			Default::default(), // change_encrypted_memo: empty for total unshield
+			None,               // relayer
 		);
 	}
 
