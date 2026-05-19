@@ -23,9 +23,7 @@ use alloc::vec;
 mod benchmarks {
 	use super::*;
 	use crate::FrameEncryptedMemo;
-	use crate::pallet::{
-		Assets, CommitmentMemos, HistoricPoseidonRoots, NextAssetId, PoolBalancePerAsset,
-	};
+	use crate::pallet::{Assets, HistoricPoseidonRoots, NextAssetId, PoolBalancePerAsset};
 	use sp_std::vec::Vec;
 
 	fn setup_benchmark_env<T: Config>() -> (T::AccountId, u32) {
