@@ -80,8 +80,7 @@ mod runtime_api_impl;
 
 // Re-export types for external use
 pub use types::{
-	AssetId, AssetMetadata, AuditPolicy, AuditTrail, Auditor, Commitment, DEFAULT_TREE_DEPTH,
-	DefaultMerklePath, DisclosureCondition, DisclosureRecord, DisclosureRequest,
+	AssetId, AssetMetadata, Commitment, DEFAULT_TREE_DEPTH, DefaultMerklePath,
 	EncryptedMemo as FrameEncryptedMemo, Hash, MAX_ENCRYPTED_MEMO_SIZE, MAX_TREE_DEPTH, MerklePath,
 	Note, Nullifier,
 };
@@ -97,7 +96,6 @@ pub mod pallet {
 	};
 	use frame_system::pallet_prelude::*;
 	use pallet_zk_verifier::ZkVerifierPort;
-	use parity_scale_codec::{Decode, DecodeWithMemTracking, Encode, MaxEncodedLen};
 
 	/// The balance type for this pallet
 	pub type BalanceOf<T> =
@@ -105,29 +103,6 @@ pub mod pallet {
 
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
-
-	/// Input data for a batch disclosure submission
-	#[derive(
-		Clone,
-		Encode,
-		Decode,
-		DecodeWithMemTracking,
-		TypeInfo,
-		PartialEq,
-		RuntimeDebug,
-		MaxEncodedLen
-	)]
-	pub struct BatchDisclosureSubmission<AccountId> {
-		/// The commitment being disclosed
-		pub commitment: Commitment,
-		/// ZK proof (Groth16, max 256 bytes)
-		pub proof: BoundedVec<u8, ConstU32<256>>,
-		/// Public signals (76 bytes): [commitment(32)][value(8)][asset_id(4)][owner_hash(32)]
-		pub public_signals: BoundedVec<u8, ConstU32<76>>,
-		/// Optional auditor. `Some` → Flujo B (requires active DisclosureRequest).
-		/// `None` → Flujo A (self-disclosure).
-		pub auditor: Option<AccountId>,
-	}
 
 	/// Configuration trait for the pallet
 	#[pallet::config]
@@ -161,10 +136,6 @@ pub mod pallet {
 		type MinShieldAmount: Get<BalanceOf<Self>>;
 		/// Weight information for extrinsics in this pallet
 		type WeightInfo: WeightInfo;
-
-		/// Number of blocks after which a disclosure request expires
-		#[pallet::constant]
-		type RequestExpiration: Get<BlockNumberFor<Self>>;
 	}
 
 	// ========================================================================
@@ -221,77 +192,11 @@ pub mod pallet {
 	/// Encrypted memos for commitments
 	///
 	/// Maps each commitment to its associated encrypted memo.
-	/// Memos enable:
-	/// - Note recovery by scanning blockchain
-	/// - Selective disclosure to authorized auditors
-	/// - FATF Travel Rule compliance
-	///
+	/// Memos enable note recovery by scanning the blockchain.
 	/// Only the note owner (with the correct decryption key) can decrypt the memo.
 	#[pallet::storage]
 	pub type CommitmentMemos<T> =
 		StorageMap<_, Blake2_128Concat, Commitment, FrameEncryptedMemo, OptionQuery>;
-
-	// ========================================================================
-	// Audit Policies Storage
-	// ========================================================================
-
-	/// Audit policies defined by users
-	///
-	/// Maps account to their audit policy defining disclosure rules
-	#[pallet::storage]
-	pub type AuditPolicies<T: Config> = StorageMap<
-		_,
-		Blake2_128Concat,
-		T::AccountId,
-		AuditPolicy<T::AccountId, BalanceOf<T>, BlockNumberFor<T>>,
-		OptionQuery,
-	>;
-
-	/// Pending disclosure requests
-	///
-	/// Maps (target_account, auditor, request_id) to disclosure request
-	#[pallet::storage]
-	pub type DisclosureRequests<T: Config> = StorageDoubleMap<
-		_,
-		Blake2_128Concat,
-		T::AccountId, // target account
-		Blake2_128Concat,
-		T::AccountId, // auditor
-		DisclosureRequest<T::AccountId, BlockNumberFor<T>>,
-		OptionQuery,
-	>;
-
-	/// Disclosure records (parsed results of verified ZK disclosures)
-	///
-	/// Double-map: (commitment, key) → DisclosureRecord
-	/// - Flujo A (self): key = note owner
-	/// - Flujo B (audited): key = auditor, record.requester = target
-	#[pallet::storage]
-	pub type DisclosureRecords<T: Config> = StorageDoubleMap<
-		_,
-		Blake2_128Concat,
-		Commitment,
-		Blake2_128Concat,
-		T::AccountId,
-		DisclosureRecord<T::AccountId, BlockNumberFor<T>>,
-		OptionQuery,
-	>;
-
-	/// Audit trail for compliance
-	///
-	/// Stores all disclosure events for regulatory compliance
-	#[pallet::storage]
-	pub type AuditTrailStorage<T: Config> = StorageMap<
-		_,
-		Blake2_128Concat,
-		Hash, // audit trail hash
-		AuditTrail<T::AccountId, BlockNumberFor<T>>,
-		OptionQuery,
-	>;
-
-	/// Next audit trail ID for generating unique hashes
-	#[pallet::storage]
-	pub type NextAuditTrailId<T: Config> = StorageValue<_, u64, ValueQuery>;
 
 	// ========================================================================
 	// Multi-Asset Support Storage
@@ -323,37 +228,6 @@ pub mod pallet {
 		Blake2_128Concat,
 		u32, // asset_id
 		BalanceOf<T>,
-		ValueQuery,
-	>;
-
-	/// Last disclosure timestamp for rate limiting
-	///
-	/// Maps (account, commitment) to block number of last disclosure
-	/// Used to enforce max_frequency from AuditPolicy
-	#[pallet::storage]
-	pub type LastDisclosureTimestamp<T: Config> = StorageDoubleMap<
-		_,
-		Blake2_128Concat,
-		T::AccountId, // account owner
-		Blake2_128Concat,
-		Commitment,
-		BlockNumberFor<T>,
-		OptionQuery,
-	>;
-
-	/// Disclosure counters for O(1) rate limiting
-	///
-	/// Maps (target_account, auditor) to the total number of completed disclosures.
-	/// Incremented on approve_disclosure and submit_disclosure (with auditor).
-	/// Replaces the O(n) AuditTrailStorage::iter() scan in request_disclosure.
-	#[pallet::storage]
-	pub type DisclosureCounters<T: Config> = StorageDoubleMap<
-		_,
-		Blake2_128Concat,
-		T::AccountId, // target account
-		Blake2_128Concat,
-		T::AccountId, // auditor
-		u32,
 		ValueQuery,
 	>;
 
@@ -459,60 +333,6 @@ pub mod pallet {
 			tree_size: u32,
 		},
 
-		/// Audit policy was set or updated
-		AuditPolicySet {
-			/// Account that set the policy
-			account: T::AccountId,
-			/// Policy version
-			version: u32,
-		},
-
-		/// A selective disclosure was successfully verified and recorded
-		Disclosed {
-			/// Account that submitted the disclosure (note owner)
-			who: T::AccountId,
-			/// Commitment whose note was disclosed
-			commitment: Commitment,
-			/// Auditor when Flujo B; `None` for self-disclosure (Flujo A)
-			auditor: Option<T::AccountId>,
-		},
-
-		/// Disclosure request was submitted by auditor
-		DisclosureRequested {
-			/// Target account to audit
-			target: T::AccountId,
-			/// Auditor making the request
-			auditor: T::AccountId,
-			/// Request reason
-			reason: BoundedVec<u8, ConstU32<256>>,
-		},
-
-		/// Disclosure request was rejected
-		DisclosureRejected {
-			/// Target account
-			target: T::AccountId,
-			/// Auditor
-			auditor: T::AccountId,
-			/// Reason for rejection
-			reason: BoundedVec<u8, ConstU32<256>>,
-		},
-
-		/// An expired disclosure request was pruned
-		DisclosureRequestExpired {
-			/// Target account (the account that received the request)
-			target: T::AccountId,
-			/// Auditor that submitted the request
-			auditor: T::AccountId,
-		},
-
-		/// A disclosure record was revoked by its creator (Flujo A only)
-		DisclosureRecordRevoked {
-			/// Account that revoked the record
-			who: T::AccountId,
-			/// Commitment whose record was revoked
-			commitment: Commitment,
-		},
-
 		/// Asset was registered in the registry
 		AssetRegistered {
 			/// The asset ID
@@ -543,18 +363,6 @@ pub mod pallet {
 			commitment: Commitment,
 			/// Leaf index of the new note
 			leaf_index: u32,
-		},
-
-		/// Relay fees were claimed and sent directly to the relayer's EVM account
-		RelayFeesClaimedToEvm {
-			/// The validator substrate account that claimed
-			validator: T::AccountId,
-			/// The EVM address that received the funds
-			evm_address: sp_core::H160,
-			/// Asset ID of the fees claimed
-			asset_id: u32,
-			/// Amount transferred to the EVM mirror account
-			amount: BalanceOf<T>,
 		},
 	}
 
@@ -588,12 +396,6 @@ pub mod pallet {
 		InvalidMemoSize,
 		/// Mismatch between number of memos and commitments
 		MemoCommitmentMismatch,
-		/// Audit policy not found
-		AuditPolicyNotFound,
-		/// Auditor not authorized
-		AuditorNotAuthorized,
-		/// Disclosure conditions not met
-		DisclosureConditionsNotMet,
 		/// Asset ID does not exist in the registry
 		InvalidAssetId,
 		/// Asset is not verified for use
@@ -604,50 +406,12 @@ pub mod pallet {
 		InvalidRecipient,
 		/// Gasless fee is below the required minimum
 		FeeTooLow,
-		/// Disclosure request already exists
-		DisclosureRequestAlreadyExists,
-		/// Disclosure request not found
-		DisclosureRequestNotFound,
-		/// Invalid disclosure record (ZK proof failed or data inconsistent)
-		InvalidDisclosureRecord,
-		/// Audit policy version mismatch
-		AuditPolicyVersionMismatch,
 		/// Invalid public signals (length or consistency)
 		InvalidPublicSignals,
-		/// Invalid disclosure mask (blinding revealed or no fields disclosed)
-		InvalidDisclosureMask,
 		/// Commitment not found on-chain
 		CommitmentNotFound,
-		/// Auditor not authorized in policy
-		UnauthorizedAuditor,
-		/// Disclosure frequency limit exceeded
-		DisclosureFrequencyExceeded,
-		/// Too many auditors in policy
-		TooManyAuditors,
-		/// Too many conditions in policy
-		TooManyConditions,
-		/// Too many disclosure requests
-		TooManyDisclosureRequests,
-		/// No auditors provided (at least one required)
-		NoAuditorsProvided,
-		/// Disclosure record already exists for this (commitment, key) pair
-		DisclosureRecordAlreadyExists,
-		/// Duplicate auditor entry in policy (each auditor must appear at most once)
-		DuplicateAuditor,
-		/// Disclosure request has expired and can no longer be fulfilled
-		DisclosureRequestExpired,
-		/// Disclosure request has not yet expired and cannot be pruned
-		DisclosureRequestNotExpired,
-		/// Audit policy has expired (valid_until block has passed)
-		AuditPolicyExpired,
-		/// Disclosure record not found for the given commitment
-		DisclosureRecordNotFound,
-		/// Caller is not the owner of the disclosure record
-		NotRecordOwner,
 		/// Pending validator fees are less than the requested claim amount
 		InsufficientPendingFees,
-		/// Caller has no EVM address registered in the relayer registry
-		RelayerNotRegistered,
 	}
 
 	// ========================================================================
@@ -660,7 +424,7 @@ pub mod pallet {
 		///
 		/// This converts public tokens into a private note represented by a commitment.
 		/// The commitment is added to the Merkle tree, and an encrypted memo is stored
-		/// for note recovery and selective disclosure.
+		/// for note recovery.
 		///
 		/// # Arguments
 		/// * `origin` - The account depositing tokens
@@ -861,111 +625,6 @@ pub mod pallet {
 			)
 		}
 
-		/// Set or update audit policy for selective disclosure
-		#[pallet::call_index(4)]
-		#[pallet::weight(T::WeightInfo::set_audit_policy())]
-		pub fn set_audit_policy(
-			origin: OriginFor<T>,
-			auditors: BoundedVec<Auditor<T::AccountId>, ConstU32<10>>,
-			conditions: BoundedVec<
-				DisclosureCondition<BalanceOf<T>, BlockNumberFor<T>>,
-				ConstU32<10>,
-			>,
-			max_frequency: Option<BlockNumberFor<T>>,
-			valid_until: Option<BlockNumberFor<T>>,
-		) -> DispatchResult {
-			let who = ensure_signed(origin)?;
-
-			crate::operations::disclosure::DisclosureOperation::set_audit_policy::<T>(
-				&who,
-				auditors,
-				conditions,
-				max_frequency,
-				valid_until,
-			)
-		}
-
-		/// Request disclosure from a target account
-		#[pallet::call_index(5)]
-		#[pallet::weight(T::WeightInfo::request_disclosure())]
-		pub fn request_disclosure(
-			origin: OriginFor<T>,
-			target: T::AccountId,
-			reason: BoundedVec<u8, ConstU32<256>>,
-		) -> DispatchResult {
-			let auditor = ensure_signed(origin)?;
-
-			crate::operations::disclosure::DisclosureOperation::request_disclosure::<T>(
-				&auditor, &target, reason,
-			)
-		}
-
-		/// Submit a selective disclosure proof for a specific commitment.
-		///
-		/// Unifies Flujo A (self-disclosure) and Flujo B (audited) into a single
-		/// extrinsic. The `auditor` parameter selects the flow:
-		///
-		/// - `None`  → **Flujo A**: self-disclosure. Optional AuditPolicy is checked.
-		///   Record stored at `(commitment, who)` and revocable by the owner.
-		/// - `Some(auditor)` → **Flujo B**: audited disclosure. Requires an active
-		///   `DisclosureRequest` and matching `AuditPolicy`. Record stored at
-		///   `(commitment, auditor)` and permanent (not revocable).
-		///
-		/// # SAFETY
-		/// Commitment ownership is enforced by the ZK proof: the Groth16 circuit
-		/// reconstructs `commitment` from private inputs, so a passing proof can only
-		/// have been generated by the note owner.
-		#[pallet::call_index(6)]
-		#[pallet::weight(T::WeightInfo::disclose())]
-		pub fn disclose(
-			origin: OriginFor<T>,
-			commitment: Commitment,
-			proof_bytes: BoundedVec<u8, ConstU32<256>>,
-			// public_signals (76 bytes): [commitment(32)][value(8)][asset_id(4)][owner_hash(32)]
-			public_signals: BoundedVec<u8, ConstU32<76>>,
-			auditor: Option<T::AccountId>,
-		) -> DispatchResult {
-			let who = ensure_signed(origin)?;
-
-			crate::operations::disclosure::DisclosureOperation::disclose::<T>(
-				&who,
-				commitment,
-				proof_bytes,
-				public_signals,
-				auditor.as_ref(),
-			)
-		}
-
-		/// Reject disclosure request
-		#[pallet::call_index(7)]
-		#[pallet::weight(T::WeightInfo::reject_disclosure())]
-		pub fn reject_disclosure(
-			origin: OriginFor<T>,
-			auditor: T::AccountId,
-			reason: BoundedVec<u8, ConstU32<256>>,
-		) -> DispatchResult {
-			let target = ensure_signed(origin)?;
-
-			crate::operations::disclosure::DisclosureOperation::reject_disclosure::<T>(
-				&target, &auditor, reason,
-			)
-		}
-
-		#[pallet::call_index(13)]
-		#[pallet::weight(T::WeightInfo::batch_submit_disclosure_proofs(submissions.len() as u32))]
-		pub fn batch_submit_disclosure_proofs(
-			origin: OriginFor<T>,
-			submissions: BoundedVec<BatchDisclosureSubmission<T::AccountId>, ConstU32<10>>,
-		) -> DispatchResult {
-			let who = ensure_signed(origin)?;
-
-			crate::operations::disclosure::DisclosureOperation::batch_submit_proofs::<T>(
-				&who,
-				submissions,
-			)
-		}
-
-		/// Register a new asset for use in the shielded pool
 		///
 		/// Allows governance to register new assets that can be privately transferred.
 		/// Assets must be verified before they can be used in shield/unshield operations.
@@ -1049,67 +708,11 @@ pub mod pallet {
 			crate::operations::assets::AssetOperation::unverify::<T>(asset_id)
 		}
 
-		/// Remove an expired disclosure request from storage.
-		///
-		/// Permissionless cleanup: any account can prune a request whose `expires_at`
-		/// block has passed. This prevents storage bloat without requiring an
-		/// O(n) on_initialize hook.
-		///
-		/// # Errors
-		/// * `DisclosureRequestNotFound` - No request for (target, auditor)
-		/// * `DisclosureRequestNotExpired` - `expires_at` has not passed yet
-		#[pallet::call_index(14)]
-		#[pallet::weight(T::WeightInfo::prune_expired_request())]
-		pub fn prune_expired_request(
-			origin: OriginFor<T>,
-			target: T::AccountId,
-			auditor: T::AccountId,
-		) -> DispatchResult {
-			let _ = ensure_signed(origin)?;
-
-			let request = DisclosureRequests::<T>::get(&target, &auditor)
-				.ok_or(Error::<T>::DisclosureRequestNotFound)?;
-			let current_block = frame_system::Pallet::<T>::block_number();
-			ensure!(
-				current_block > request.expires_at,
-				Error::<T>::DisclosureRequestNotExpired
-			);
-			DisclosureRequests::<T>::remove(&target, &auditor);
-			Self::deposit_event(Event::DisclosureRequestExpired { target, auditor });
-			Ok(())
-		}
-
-		/// Revoke a Flujo A (self-disclosure) record created by the caller.
-		///
-		/// Removes the `DisclosureRecord` stored at `(commitment, caller)`. Only
-		/// applies to self-disclosures — Flujo B records (stored under the auditor
-		/// key) are permanent once approved.
-		///
-		/// # Errors
-		/// * `DisclosureRecordNotFound` - No self-disclosure record for `commitment`
-		#[pallet::call_index(15)]
-		#[pallet::weight(T::WeightInfo::revoke_disclosure_record())]
-		pub fn revoke_disclosure_record(
-			origin: OriginFor<T>,
-			commitment: Commitment,
-		) -> DispatchResult {
-			let who = ensure_signed(origin)?;
-
-			ensure!(
-				DisclosureRecords::<T>::contains_key(commitment, &who),
-				Error::<T>::DisclosureRecordNotFound
-			);
-			DisclosureRecords::<T>::remove(commitment, &who);
-			Self::deposit_event(Event::DisclosureRecordRevoked { who, commitment });
-			Ok(())
-		}
-
 		/// Claim accumulated validator fees as a private shielded note.
 		///
 		/// Converts pending relay fee credits into a Merkle tree commitment.
-		/// A selective-disclosure ZK proof (disclosure circuit) must be supplied
-		/// proving that `commitment` encodes exactly `amount` and `asset_id`.
-		/// This closes the KNOWN LIMITATION that existed in the previous design.
+		/// A value_proof ZK proof must be supplied, proving that `commitment`
+		/// encodes exactly `amount` and `asset_id`.
 		///
 		/// # Errors
 		/// * `InvalidProof` - ZK proof verification failed or wrong length (expected 128 bytes)
@@ -1139,38 +742,6 @@ pub mod pallet {
 				proof,
 				public_signals,
 			)
-		}
-
-		/// Claim accumulated relay fees and transfer them directly to the
-		/// relayer's EVM account.
-		///
-		/// Converts the pending relay-fee balance for (`origin`, `asset_id`) into
-		/// real tokens sent to the H160 EVM mirror account
-		/// (`H160[0..20] ++ [0x00; 12]`).  The EVM sees the balance immediately —
-		/// no ZK proof or `unshield` step required.
-		///
-		/// This is the preferred path for gasless relayers: the H160 that pays
-		/// EVM gas fees is automatically refunded without any manual token bridging.
-		///
-		/// # Arguments
-		/// * `origin` - Signed validator/relayer (sr25519 / Aura key)
-		/// * `asset_id` - Asset whose pending fees to claim
-		/// * `amount` - Amount to transfer (must be ≤ pending balance)
-		///
-		/// # Errors
-		/// * `InvalidAssetId` - Asset is not registered
-		/// * `RelayerNotRegistered` - Caller has no H160 in the relayer registry
-		/// * `InsufficientPendingFees` - Pending balance < `amount`
-		/// * `InsufficientPoolBalance` - Pool lacks tokens (invariant violation)
-		#[pallet::call_index(17)]
-		#[pallet::weight(T::WeightInfo::claim_shielded_fees())]
-		pub fn claim_relay_fees_to_evm(
-			origin: OriginFor<T>,
-			asset_id: u32,
-			amount: BalanceOf<T>,
-		) -> DispatchResult {
-			let validator = ensure_signed(origin)?;
-			crate::operations::fees::FeeOperation::claim_to_evm::<T>(validator, asset_id, amount)
 		}
 	}
 

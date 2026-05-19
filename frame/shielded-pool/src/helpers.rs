@@ -7,14 +7,10 @@
 use crate::{
 	Pallet,
 	merkle::MerkleTreeService,
-	operations::disclosure::validation::DisclosureValidationService,
 	pallet::Config,
 	types::{Commitment, DefaultMerklePath, Hash},
 };
-use frame_support::{
-	pallet_prelude::{DispatchError, DispatchResult},
-	traits::Get,
-};
+use frame_support::{pallet_prelude::DispatchError, traits::Get};
 use sp_runtime::traits::AccountIdConversion;
 
 impl<T: Config> Pallet<T> {
@@ -43,42 +39,6 @@ impl<T: Config> Pallet<T> {
 	/// Find the leaf index for a commitment (linear scan — expensive, only for RPC).
 	pub fn get_leaf_index(commitment: &Commitment) -> Option<u32> {
 		MerkleTreeService::find_leaf_index::<T>(commitment)
-	}
-
-	// ── Disclosure proof verification ────────────────────────────────────────
-
-	/// Verify a raw Groth16 disclosure proof (128-byte proof, 76-byte signals).
-	pub fn verify_disclosure_proof_internal(
-		proof_bytes: &[u8],
-		public_signals: &[u8],
-	) -> DispatchResult {
-		DisclosureValidationService::verify_proof_internal::<T>(proof_bytes, public_signals)
-	}
-
-	/// Validate public signals consistency against an on-chain commitment.
-	pub fn validate_public_signals(
-		commitment: &Commitment,
-		public_signals: &[u8],
-	) -> DispatchResult {
-		DisclosureValidationService::validate_public_signals::<T>(commitment, public_signals)
-	}
-
-	/// Validate disclosure access control and rate limiting for `who`.
-	pub fn validate_disclosure_access(
-		who: &T::AccountId,
-		commitment: &Commitment,
-		auditor: Option<&T::AccountId>,
-	) -> DispatchResult {
-		DisclosureValidationService::validate_disclosure_access::<T>(who, commitment, auditor)
-	}
-
-	/// Full cryptographic verification of a disclosure ZK proof with context.
-	pub fn verify_disclosure_proof(
-		proof: &[u8],
-		public_signals: &[u8],
-		commitment: &Commitment,
-	) -> Result<(), DispatchError> {
-		DisclosureValidationService::verify_disclosure_proof::<T>(proof, public_signals, commitment)
 	}
 }
 

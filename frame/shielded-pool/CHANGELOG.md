@@ -2,6 +2,44 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.8.0] - 2026-05-14
+
+### Added
+- **`claim_shielded_fees` extrinsic** — validators claim accrued relay fees as a private shielded note.
+  Requires a Groth16 `value_proof` (CircuitId 6) proving that the supplied commitment encodes exactly
+  `(amount, asset_id, owner_pubkey, blinding)` via Poseidon4. Prevents fee inflation attacks where a
+  relayer could craft a commitment encoding a larger value and later drain the pool via `unshield`.
+  Public signals layout (76 bytes): `commitment(32) | value(8) | asset_id(4) | owner_hash(32)`.
+- **`claim_relay_fees_to_evm` extrinsic** — signed extrinsic that transfers accrued relay fees to the
+  relayer's registered H160 EVM address.
+- **`verify_asset` / `unverify_asset` extrinsics** (Root origin) — mark or unmark a registered asset as
+  verified, enabling or disabling shielding for that asset.
+- **`operations/` module structure** — business logic split into dedicated sub-modules:
+  `shield.rs`, `private_transfer.rs`, `unshield.rs`, `fees.rs`, `assets.rs`.
+- **`runtime_api_impl.rs`** — Runtime API implementations (Merkle proofs, tree info) extracted from `lib.rs`.
+- **`pallet-relayer` integration** — relay fee accounting via `RelayerInterface` trait
+  (`accumulate_relay_fee`, `consume_relay_fee`).
+- **`verify_value_proof` mock** in `mock.rs` for unit testing `claim_shielded_fees` without on-chain VK.
+- **`claim_shielded_fees` weight** added to `WeightInfo` trait and both substrate/rocks implementations.
+
+### Removed
+- **Selective disclosure subsystem** — all disclosure extrinsics, storage, and types removed:
+  - Extrinsics: `set_audit_policy`, `request_disclosure`, `disclose`, `reject_disclosure`,
+    `batch_submit_disclosure_proofs`, `prune_expired_request`, `revoke_disclosure_record`.
+  - Storage: `AuditPolicies`, `DisclosureRequests`, `DisclosureRecords`, `AuditTrailStorage`,
+    `NextAuditTrailId`, `LastDisclosureTimestamp`, `DisclosureCounters`.
+  - Types: `AuditTrail`, `DisclosureRecord`, `DisclosureRequest`, `Auditor`, `DisclosureCondition`.
+  - Weight entries: all disclosure-related benchmark weights removed.
+  - `operations/disclosure/` module directory entirely removed.
+
+### Changed
+- **README**: updated extrinsic table — `disclose` row replaced by `claim_shielded_fees` and
+  `claim_relay_fees_to_evm`; removed disclosure storage rows; updated status note.
+- **README**: `operations.rs` monolith replaced by `operations/` module directory listing.
+- **`helpers.rs`**: storage imports cleaned up — `DisclosureRecords`, `DisclosureRequests` and
+  other disclosure-related storage removed from `mock.rs` and helpers.
+- **`benchmarking.rs`**: disclosure benchmarks removed; `claim_shielded_fees` benchmark retained.
+
 ## [0.7.0] - 2026-05-08
 
 ### Added

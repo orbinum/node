@@ -37,7 +37,6 @@ parameter_types! {
 	pub const MinShieldAmount: u128 = 100;
 	pub const MaxProofSize: u32 = 256;
 	pub const MaxPublicInputs: u32 = 10;
-	pub const RequestExpiration: u64 = 1000;
 }
 
 impl pallet_zk_verifier::Config for Test {
@@ -90,40 +89,15 @@ impl ZkVerifierPort for MockZkVerifier {
 		Ok(true)
 	}
 
-	fn verify_disclosure_proof(
+	fn verify_value_proof(
 		proof: &[u8],
-		public_signals: &[u8],
+		_public_signals: &[u8],
 		_version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
-		// Validate basic format
 		if proof.is_empty() {
 			return Err(sp_runtime::DispatchError::Other("Empty proof"));
 		}
-		if public_signals.len() != 76 {
-			return Err(sp_runtime::DispatchError::Other(
-				"Invalid public signals length",
-			));
-		}
-		// Sentinel: a proof whose first byte is 0x00 is treated as cryptographically
-		// rejected (simulates Groth16 returning false). All other non-empty proofs pass.
 		if proof[0] == 0x00 {
-			return Ok(false);
-		}
-		Ok(true)
-	}
-
-	fn batch_verify_disclosure_proofs(
-		proofs: &[sp_std::vec::Vec<u8>],
-		public_signals: &[sp_std::vec::Vec<u8>],
-		_version: Option<u32>,
-	) -> Result<bool, sp_runtime::DispatchError> {
-		// Validate basic format
-		if proofs.len() != public_signals.len() {
-			return Err(sp_runtime::DispatchError::Other("Mismatched array lengths"));
-		}
-		// Sentinel: any proof in the batch starting with 0x00 causes the whole batch
-		// to return Ok(false), simulating a failed cryptographic batch verification.
-		if proofs.iter().any(|p| p.first() == Some(&0x00)) {
 			return Ok(false);
 		}
 		Ok(true)
@@ -152,7 +126,6 @@ impl pallet_shielded_pool::Config for Test {
 	type MaxHistoricRoots = MaxHistoricRoots;
 	type MinShieldAmount = MinShieldAmount;
 	type WeightInfo = ();
-	type RequestExpiration = RequestExpiration;
 	type Relayer = MockRelayer;
 }
 

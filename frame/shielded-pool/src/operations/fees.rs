@@ -2,17 +2,11 @@
 
 use crate::{
 	pallet::{Assets, CommitmentMemos, Config, Error, Event, Pallet},
-	storage::PoolBalanceRepository,
 	types::{Commitment, EncryptedMemo},
 };
-use frame_support::{
-	ensure,
-	pallet_prelude::*,
-	traits::{Currency, ExistenceRequirement},
-};
+use frame_support::{ensure, pallet_prelude::*};
 use pallet_relayer::RelayerInterface as _;
 use pallet_zk_verifier::ZkVerifierPort;
-use parity_scale_codec::Decode;
 use sp_runtime::SaturatedConversion;
 
 pub type BalanceOf<T> = <<T as Config>::Currency as frame_support::traits::Currency<
@@ -24,10 +18,10 @@ pub struct FeeOperation;
 impl FeeOperation {
 	/// Claim accumulated relay fees as a private shielded commitment.
 	///
-	/// Verifies a selective-disclosure ZK proof (disclosure circuit) proving
-	/// that `commitment` encodes exactly `amount` and `asset_id`.  The proof
-	/// prevents validators from inserting inflated commitments while debiting
-	/// only a small pending-fee balance.
+	/// Requires a `value_proof` (Groth16 over `value_proof.circom`) proving that
+	/// the supplied `commitment` encodes exactly `(amount, asset_id, owner_pubkey,
+	/// blinding)` via `Poseidon4`.  Without this proof a relayer could craft a
+	/// commitment encoding an inflated amount and drain the pool on `unshield`.
 	///
 	/// # public_signals layout (76 bytes)
 	/// `commitment[0..32] | value[32..40] | asset_id[40..44] | owner_hash[44..76]`
@@ -52,11 +46,11 @@ impl FeeOperation {
 		// amount must fit in u64 (circuit signal size)
 		ensure!(amount_u128 <= u64::MAX as u128, Error::<T>::InvalidAmount);
 
-		// Verify ZK disclosure proof (proves commitment = Poseidon4(amount, assetId, pk, r))
+		// Verify ZK value_proof (proves commitment = Poseidon4(amount, assetId, pk, r))
 		ensure!(proof.len() == 128, Error::<T>::InvalidProof);
 		ensure!(public_signals.len() == 76, Error::<T>::InvalidPublicSignals);
 
-		let is_valid = T::ZkVerifier::verify_disclosure_proof(&proof, &public_signals, None)?;
+		let is_valid = T::ZkVerifier::verify_value_proof(&proof, &public_signals, None)?;
 		ensure!(is_valid, Error::<T>::InvalidProof);
 
 		// signals[0..32]: commitment must match the extrinsic argument
@@ -98,89 +92,19 @@ impl FeeOperation {
 
 		Ok(())
 	}
-
-	/// Claim accumulated relay fees and transfer them directly to the relayer's
-	/// EVM mirror account (H160[0..20] ++ [0x00; 12]).
-	///
-	/// This is the gasless-relayer convenience path: the relayer's H160 EVM
-	/// account is automatically funded with public ORB, so it can pay gas for
-	/// future relay transactions without any manual token bridging.
-	///
-	/// Unlike `claim_shielded`, no ZK proof is required — the transfer is
-	/// public.  Security comes from the `PendingRelayerFees` ledger: the
-	/// caller can only claim what the pool has already credited to them.
-	///
-	/// # Errors
-	/// * `InvalidAssetId` - Asset is not registered
-	/// * `RelayerNotRegistered` - Caller has no H160 in the relayer registry
-	/// * `InsufficientPendingFees` - Pending balance < `amount`
-	/// * `InsufficientPoolBalance` - Pool lacks tokens (should never happen)
-	pub fn claim_to_evm<T: Config>(
-		validator: T::AccountId,
-		asset_id: u32,
-		amount: BalanceOf<T>,
-	) -> DispatchResult {
-		ensure!(
-			Assets::<T>::contains_key(asset_id),
-			Error::<T>::InvalidAssetId
-		);
-
-		let amount_u128: u128 = amount.saturated_into();
-
-		ensure!(!amount.is_zero(), Error::<T>::InvalidAmount);
-
-		// Resolve the registered H160 for this validator.
-		let evm_address = T::Relayer::registered_evm_address(&validator)
-			.ok_or(Error::<T>::RelayerNotRegistered)?;
-
-		// Derive the EVM mirror AccountId: H160[0..20] ++ [0x00; 12].
-		let mut mirror_bytes = [0u8; 32];
-		mirror_bytes[..20].copy_from_slice(evm_address.as_bytes());
-		let mirror_account = T::AccountId::decode(&mut &mirror_bytes[..])
-			.map_err(|_| Error::<T>::InvalidRecipient)?;
-
-		ensure!(
-			T::Relayer::pending_relay_fees(&validator, asset_id) >= amount_u128,
-			Error::<T>::InsufficientPendingFees
-		);
-		T::Relayer::consume_relay_fee(&validator, asset_id, amount_u128)?;
-
-		// Transfer tokens from the shielded pool to the EVM mirror account.
-		T::Currency::transfer(
-			&Pallet::<T>::pool_account_id(),
-			&mirror_account,
-			amount,
-			ExistenceRequirement::AllowDeath,
-		)?;
-
-		// Keep the pool balance tracking consistent.
-		PoolBalanceRepository::decrease_balance::<T>(asset_id, amount);
-
-		Pallet::<T>::deposit_event(Event::RelayFeesClaimedToEvm {
-			validator,
-			evm_address,
-			asset_id,
-			amount,
-		});
-
-		Ok(())
-	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
 	use crate::{
-		mock::{
-			Test, mock_evm_address_set, mock_pending_fees_get, mock_pending_fees_set, new_test_ext,
-		},
+		mock::{Test, mock_pending_fees_get, mock_pending_fees_set, new_test_ext},
 		operations::assets::AssetOperation,
 		pallet::Event as PalletEvent,
-		storage::{CommitmentRepository, PoolBalanceRepository},
+		storage::CommitmentRepository,
 		types::{Commitment, EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE},
 	};
-	use frame_support::{assert_noop, assert_ok, traits::Currency};
-	use sp_core::H160;
+	use frame_support::{assert_noop, assert_ok};
 
 	// ── helpers ───────────────────────────────────────────────────────────────
 
@@ -417,7 +341,7 @@ mod tests {
 
 	#[test]
 	fn claim_shielded_zero_amount_fails_with_invalid_amount() {
-		// amount == 0 must be rejected before the ZK check. A disclosure proof that
+		// amount == 0 must be rejected before the ZK check. A value_proof that
 		// encodes value=0 is cryptographically valid but inserts a worthless leaf into
 		// the Merkle tree — cheap spam that wastes tree capacity.
 		new_test_ext().execute_with(|| {
@@ -654,240 +578,6 @@ mod tests {
 					make_signals(&commitment, amount, 999u32),
 				),
 				crate::pallet::Error::<Test>::InvalidPublicSignals
-			);
-		});
-	}
-
-	// ── helpers for claim_to_evm ──────────────────────────────────────────────
-
-	/// EVM address used across claim_to_evm tests (H160::from_low_u64_be(0xA11CE)).
-	fn alice_evm() -> H160 {
-		H160::from_low_u64_be(0xA11CE)
-	}
-
-	/// Deposit tokens into the pool (both Currency and PoolBalancePerAsset).
-	fn fund_pool(asset_id: u32, total: u128) {
-		let pool = crate::Pallet::<Test>::pool_account_id();
-		let _ = <pallet_balances::Pallet<Test> as Currency<u64>>::deposit_creating(&pool, total);
-		PoolBalanceRepository::set_asset_balance::<Test>(asset_id, total);
-	}
-
-	/// Derive the mirror AccountId for an H160 (H160[0..20] ++ [0x00; 12]).
-	fn mirror_account(evm: H160) -> u64 {
-		use parity_scale_codec::Decode;
-		let mut bytes = [0u8; 32];
-		bytes[..20].copy_from_slice(evm.as_bytes());
-		u64::decode(&mut &bytes[..]).unwrap()
-	}
-
-	// ── claim_to_evm ─────────────────────────────────────────────────────────
-
-	#[test]
-	fn claim_to_evm_works() {
-		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
-			let asset_id = setup_asset();
-			let amount = 500u128;
-
-			mock_evm_address_set(validator, alice_evm());
-			mock_pending_fees_set(validator, asset_id, amount);
-			fund_pool(asset_id, amount);
-
-			assert_ok!(FeeOperation::claim_to_evm::<Test>(
-				validator, asset_id, amount
-			));
-		});
-	}
-
-	#[test]
-	fn claim_to_evm_transfers_tokens_to_mirror_account() {
-		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
-			let asset_id = setup_asset();
-			let amount = 400u128;
-
-			mock_evm_address_set(validator, alice_evm());
-			mock_pending_fees_set(validator, asset_id, amount);
-			fund_pool(asset_id, amount);
-
-			assert_ok!(FeeOperation::claim_to_evm::<Test>(
-				validator, asset_id, amount
-			));
-
-			let mirror = mirror_account(alice_evm());
-			assert_eq!(
-				pallet_balances::Pallet::<Test>::free_balance(mirror),
-				amount,
-				"mirror account should hold the claimed amount"
-			);
-		});
-	}
-
-	#[test]
-	fn claim_to_evm_deducts_pending_fees() {
-		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
-			let asset_id = setup_asset();
-			let initial = 1000u128;
-			let claim = 300u128;
-
-			mock_evm_address_set(validator, alice_evm());
-			mock_pending_fees_set(validator, asset_id, initial);
-			fund_pool(asset_id, initial);
-
-			assert_ok!(FeeOperation::claim_to_evm::<Test>(
-				validator, asset_id, claim
-			));
-
-			assert_eq!(
-				mock_pending_fees_get(validator, asset_id),
-				initial - claim,
-				"pending fees must decrease by the claimed amount"
-			);
-		});
-	}
-
-	#[test]
-	fn claim_to_evm_decreases_pool_balance_tracker() {
-		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
-			let asset_id = setup_asset();
-			let amount = 250u128;
-
-			mock_evm_address_set(validator, alice_evm());
-			mock_pending_fees_set(validator, asset_id, amount);
-			fund_pool(asset_id, amount);
-
-			assert_ok!(FeeOperation::claim_to_evm::<Test>(
-				validator, asset_id, amount
-			));
-
-			assert_eq!(
-				PoolBalanceRepository::get_asset_balance::<Test>(asset_id),
-				0u128,
-				"PoolBalancePerAsset must reflect the withdrawal"
-			);
-		});
-	}
-
-	#[test]
-	fn claim_to_evm_emits_event() {
-		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
-			let asset_id = setup_asset();
-			let amount = 150u128;
-
-			mock_evm_address_set(validator, alice_evm());
-			mock_pending_fees_set(validator, asset_id, amount);
-			fund_pool(asset_id, amount);
-
-			assert_ok!(FeeOperation::claim_to_evm::<Test>(
-				validator, asset_id, amount
-			));
-
-			let events = frame_system::Pallet::<Test>::events();
-			let found = events.iter().any(|r| {
-				matches!(
-					&r.event,
-					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::RelayFeesClaimedToEvm {
-						validator: ev,
-						evm_address: ea,
-						asset_id: eid,
-						amount: eamt,
-					}) if *ev == validator && *ea == alice_evm() && *eid == asset_id && *eamt == amount
-				)
-			});
-			assert!(found, "RelayFeesClaimedToEvm event not emitted");
-		});
-	}
-
-	#[test]
-	fn claim_to_evm_fails_if_invalid_asset() {
-		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
-			mock_evm_address_set(validator, alice_evm());
-
-			assert_noop!(
-				FeeOperation::claim_to_evm::<Test>(validator, 9999u32, 100u128),
-				crate::pallet::Error::<Test>::InvalidAssetId
-			);
-		});
-	}
-
-	#[test]
-	fn claim_to_evm_fails_if_not_registered() {
-		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
-			let asset_id = setup_asset();
-			// No mock_evm_address_set → registered_evm_address returns None
-
-			mock_pending_fees_set(validator, asset_id, 500u128);
-
-			assert_noop!(
-				FeeOperation::claim_to_evm::<Test>(validator, asset_id, 100u128),
-				crate::pallet::Error::<Test>::RelayerNotRegistered
-			);
-		});
-	}
-
-	#[test]
-	fn claim_to_evm_fails_if_insufficient_pending_fees() {
-		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
-			let asset_id = setup_asset();
-
-			mock_evm_address_set(validator, alice_evm());
-			mock_pending_fees_set(validator, asset_id, 50u128); // only 50 available
-			fund_pool(asset_id, 1_000u128);
-
-			assert_noop!(
-				FeeOperation::claim_to_evm::<Test>(validator, asset_id, 100u128),
-				crate::pallet::Error::<Test>::InsufficientPendingFees
-			);
-		});
-	}
-
-	#[test]
-	fn claim_to_evm_partial_claim_leaves_remaining_in_pool() {
-		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
-			let asset_id = setup_asset();
-			let total = 800u128;
-			let claim = 200u128;
-
-			mock_evm_address_set(validator, alice_evm());
-			mock_pending_fees_set(validator, asset_id, total);
-			fund_pool(asset_id, total);
-
-			assert_ok!(FeeOperation::claim_to_evm::<Test>(
-				validator, asset_id, claim
-			));
-
-			// Pool balance tracker must reflect only the claimed portion removed
-			assert_eq!(
-				PoolBalanceRepository::get_asset_balance::<Test>(asset_id),
-				total - claim
-			);
-			// Pending fees also decreased
-			assert_eq!(mock_pending_fees_get(validator, asset_id), total - claim);
-		});
-	}
-
-	#[test]
-	fn claim_to_evm_zero_amount_fails() {
-		// amount == 0 must be rejected: a zero-value EVM claim is a no-op that wastes
-		// block space and emits a misleading event without moving any funds.
-		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
-			let asset_id = setup_asset();
-
-			mock_evm_address_set(validator, alice_evm());
-			mock_pending_fees_set(validator, asset_id, 500u128);
-			fund_pool(asset_id, 500u128);
-
-			assert_noop!(
-				FeeOperation::claim_to_evm::<Test>(validator, asset_id, 0u128),
-				crate::pallet::Error::<Test>::InvalidAmount
 			);
 		});
 	}
