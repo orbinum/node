@@ -33,7 +33,6 @@ pub trait WeightInfo {
 	fn set_allowed_selectors(n: u32, ) -> Weight;
 	fn register_relayer() -> Weight;
 	fn unregister_relayer() -> Weight;
-	fn claim_relay_fees() -> Weight;
 }
 
 /// Weights for pallet_relayer using the Substrate node and recommended hardware.
@@ -120,25 +119,6 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(5_u64))
 			.saturating_add(T::DbWeight::get().writes(4_u64))
 	}
-	/// Storage: `Relayer::PendingRelayerFees` (r:1 w:1)
-	/// Proof: `Relayer::PendingRelayerFees` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `MaxEncodedLen`)
-	/// Storage: `System::Number` (r:1 w:0)
-	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::ExecutionPhase` (r:1 w:0)
-	/// Proof: `System::ExecutionPhase` (`max_values`: Some(1), `max_size`: Some(5), added: 500, mode: `MaxEncodedLen`)
-	/// Storage: `System::EventCount` (r:1 w:1)
-	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::Events` (r:1 w:1)
-	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	fn claim_relay_fees() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `171`
-		//  Estimated: `3549`
-		// Minimum execution time: 11_000_000 picoseconds.
-		Weight::from_parts(12_000_000, 3549)
-			.saturating_add(T::DbWeight::get().reads(5_u64))
-			.saturating_add(T::DbWeight::get().writes(3_u64))
-	}
 }
 
 // For backwards compatibility and tests
@@ -223,24 +203,5 @@ impl WeightInfo for () {
 		Weight::from_parts(12_000_000, 3533)
 			.saturating_add(RocksDbWeight::get().reads(5_u64))
 			.saturating_add(RocksDbWeight::get().writes(4_u64))
-	}
-	/// Storage: `Relayer::PendingRelayerFees` (r:1 w:1)
-	/// Proof: `Relayer::PendingRelayerFees` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `MaxEncodedLen`)
-	/// Storage: `System::Number` (r:1 w:0)
-	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::ExecutionPhase` (r:1 w:0)
-	/// Proof: `System::ExecutionPhase` (`max_values`: Some(1), `max_size`: Some(5), added: 500, mode: `MaxEncodedLen`)
-	/// Storage: `System::EventCount` (r:1 w:1)
-	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::Events` (r:1 w:1)
-	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	fn claim_relay_fees() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `171`
-		//  Estimated: `3549`
-		// Minimum execution time: 11_000_000 picoseconds.
-		Weight::from_parts(12_000_000, 3549)
-			.saturating_add(RocksDbWeight::get().reads(5_u64))
-			.saturating_add(RocksDbWeight::get().writes(3_u64))
 	}
 }

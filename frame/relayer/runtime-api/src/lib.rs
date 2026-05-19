@@ -13,6 +13,18 @@ sp_api::decl_runtime_apis! {
 
 		/// Returns the registered EVM address for the relayer, if any.
 		fn registered_evm_address(account: sp_runtime::AccountId32) -> Option<[u8; 20]>;
+
+		/// Returns all (evm_address, substrate_account) pairs in the relay registry.
+		///
+		/// Used by clients to discover which validator nodes have relay active.
+		/// Capa 2 of the relay architecture.
+		fn get_active_relayers() -> alloc::vec::Vec<([u8; 20], sp_runtime::AccountId32)>;
+
+		/// Returns true if the given EVM address is registered as a relayer on-chain.
+		///
+		/// Used by `orbinum_relayerStatus` to surface registration state to operators.
+		/// Capa 2 of the relay architecture.
+		fn is_relayer_evm(evm_address: [u8; 20]) -> bool;
 	}
 }
 
