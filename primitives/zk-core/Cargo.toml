@@ -1,6 +1,6 @@
 [package]
 name = "orbinum-zk-core"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["Orbinum Network <contact@orbinum.net>"]
 edition = "2021"
 license = "Apache-2.0 OR GPL-3.0-or-later"
