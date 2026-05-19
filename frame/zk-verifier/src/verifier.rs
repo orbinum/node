@@ -213,7 +213,6 @@ mod tests {
 				CircuitId::TRANSFER,
 				CircuitId::UNSHIELD,
 				CircuitId::SHIELD,
-				CircuitId::DISCLOSURE,
 				CircuitId::PRIVATE_LINK,
 			] {
 				insert_vk(cid, 1);

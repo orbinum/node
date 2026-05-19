@@ -8,7 +8,7 @@
 
 use crate::{
 	Pallet, encoding,
-	pallet::{ActiveCircuitVersion, Config, Error, VerificationKeys, VerificationStats},
+	pallet::{Config, Error},
 	types::CircuitId,
 	verifier,
 };
@@ -42,23 +42,11 @@ pub trait ZkVerifierPort {
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError>;
 
-	/// Verify a selective disclosure proof.
-	///
-	/// `public_signals` must be exactly 76 bytes:
-	/// `commitment[0..32] | value[32..40] | asset_id[40..44] | owner_hash[44..76]`
-	fn verify_disclosure_proof(
+	/// Verify a value proof (76-byte layout: commitment | value | asset_id | owner_hash).
+	/// Used for gasless fee claiming.
+	fn verify_value_proof(
 		proof: &[u8],
 		public_signals: &[u8],
-		version: Option<u32>,
-	) -> Result<bool, sp_runtime::DispatchError>;
-
-	/// Batch-verify multiple disclosure proofs (optimised path via `ark-groth16`).
-	///
-	/// All `public_signals` slices must be exactly 76 bytes each.
-	/// Batch size is limited to 10.
-	fn batch_verify_disclosure_proofs(
-		proofs: &[sp_std::vec::Vec<u8>],
-		public_signals: &[sp_std::vec::Vec<u8>],
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError>;
 
@@ -118,68 +106,21 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 		verifier::verify::<T>(CircuitId::UNSHIELD, version, proof, raw).map(|(ok, _)| ok)
 	}
 
-	fn verify_disclosure_proof(
+	fn verify_value_proof(
 		proof: &[u8],
 		public_signals: &[u8],
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
-		let raw = encoding::decode_disclosure_signals(public_signals)?;
-		verifier::verify::<T>(CircuitId::DISCLOSURE, version, proof, raw).map(|(ok, _)| ok)
-	}
-
-	fn batch_verify_disclosure_proofs(
-		proofs: &[sp_std::vec::Vec<u8>],
-		public_signals: &[sp_std::vec::Vec<u8>],
-		version: Option<u32>,
-	) -> Result<bool, sp_runtime::DispatchError> {
-		use orbinum_zk_verifier::{Groth16Verifier, Proof, PublicInputs, VerifyingKey};
-
-		const MAX_BATCH: usize = 10;
-
-		frame_support::ensure!(
-			!proofs.is_empty() && proofs.len() <= MAX_BATCH,
-			Error::<T>::InvalidBatchSize
-		);
-		frame_support::ensure!(
-			proofs.len() == public_signals.len(),
-			Error::<T>::BatchLengthMismatch
-		);
-
-		let resolved = version
-			.or_else(|| ActiveCircuitVersion::<T>::get(CircuitId::DISCLOSURE))
-			.ok_or(Error::<T>::CircuitNotFound)?;
-
-		let vk_info = VerificationKeys::<T>::get(CircuitId::DISCLOSURE, resolved)
-			.ok_or(Error::<T>::VerificationKeyNotFound)?;
-
-		let vk = VerifyingKey::new(vk_info.key_data.to_vec());
-
-		let batch_proofs: sp_std::vec::Vec<Proof> =
-			proofs.iter().map(|p| Proof::new(p.clone())).collect();
-
-		let all_inputs = public_signals
-			.iter()
-			.map(|s| encoding::decode_disclosure_signals(s).map(PublicInputs::new))
-			.collect::<Result<sp_std::vec::Vec<_>, _>>()?;
-
-		let count = proofs.len() as u64;
-
-		match Groth16Verifier::batch_verify(&vk, &all_inputs, &batch_proofs) {
-			Ok(_) => {
-				VerificationStats::<T>::mutate(CircuitId::DISCLOSURE, resolved, |s| {
-					s.total_verifications = s.total_verifications.saturating_add(count);
-					s.successful_verifications = s.successful_verifications.saturating_add(count);
-				});
-				Ok(true)
-			}
-			Err(_) => {
-				VerificationStats::<T>::mutate(CircuitId::DISCLOSURE, resolved, |s| {
-					s.total_verifications = s.total_verifications.saturating_add(count);
-					s.failed_verifications = s.failed_verifications.saturating_add(count);
-				});
-				Err(Error::<T>::BatchVerificationFailed.into())
-			}
+		if public_signals.len() != 76 {
+			return Err(sp_runtime::DispatchError::Other(
+				"Invalid value proof signals length (expected 76 bytes)",
+			));
 		}
+		let signals: &[u8; 76] = public_signals
+			.try_into()
+			.map_err(|_| sp_runtime::DispatchError::Other("value proof signals slice error"))?;
+		let raw = encoding::encode_value_proof(signals);
+		verifier::verify::<T>(CircuitId::VALUE_PROOF, version, proof, raw).map(|(ok, _)| ok)
 	}
 
 	fn verify_private_link_proof(
@@ -237,11 +178,6 @@ mod tests {
 		[0x02u8; 32]
 	}
 
-	/// 76-byte buffer accepted by `decode_disclosure_signals`.
-	fn valid_signals() -> alloc::vec::Vec<u8> {
-		vec![0xAAu8; 76]
-	}
-
 	fn insert_vk(circuit_id: CircuitId, version: u32) {
 		VerificationKeys::<Test>::insert(
 			circuit_id,
@@ -256,64 +192,6 @@ mod tests {
 
 	fn activate(circuit_id: CircuitId, version: u32) {
 		ActiveCircuitVersion::<Test>::insert(circuit_id, version);
-	}
-
-	// ── decode_disclosure_signals (via verify_disclosure_proof) ───────────────
-	//
-	// The helper is private, so we exercise it through the public trait method.
-	// decode_disclosure_signals is called BEFORE verifier::verify, so VK setup
-	// is not required to hit the length check.
-
-	#[test]
-	fn signals_too_short_returns_dispatch_error_other() {
-		new_test_ext().execute_with(|| {
-			let err = <Pallet<Test> as ZkVerifierPort>::verify_disclosure_proof(
-				&proof(),
-				&[0u8; 75],
-				None,
-			)
-			.unwrap_err();
-			assert!(matches!(err, sp_runtime::DispatchError::Other(_)));
-		});
-	}
-
-	#[test]
-	fn signals_too_long_returns_dispatch_error_other() {
-		new_test_ext().execute_with(|| {
-			let err = <Pallet<Test> as ZkVerifierPort>::verify_disclosure_proof(
-				&proof(),
-				&[0u8; 77],
-				None,
-			)
-			.unwrap_err();
-			assert!(matches!(err, sp_runtime::DispatchError::Other(_)));
-		});
-	}
-
-	#[test]
-	fn signals_empty_returns_dispatch_error_other() {
-		new_test_ext().execute_with(|| {
-			let err =
-				<Pallet<Test> as ZkVerifierPort>::verify_disclosure_proof(&proof(), &[], None)
-					.unwrap_err();
-			assert!(matches!(err, sp_runtime::DispatchError::Other(_)));
-		});
-	}
-
-	#[test]
-	fn signals_exactly_76_bytes_passes_decode() {
-		// Confirms decode succeeds. CircuitNotFound fires next (no VK), not a
-		// length error.
-		new_test_ext().execute_with(|| {
-			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::verify_disclosure_proof(
-					&proof(),
-					&valid_signals(),
-					None,
-				),
-				Error::<Test>::CircuitNotFound
-			);
-		});
 	}
 
 	// ── verify_transfer_proof ──────────────────────────────────────────────────
@@ -605,263 +483,6 @@ mod tests {
 			)
 			.unwrap();
 			assert!(ok);
-		});
-	}
-
-	// ── verify_disclosure_proof ────────────────────────────────────────────────
-
-	#[test]
-	fn disclosure_empty_proof_is_rejected() {
-		// EmptyProof fires after successful signals decode, before VK lookup.
-		new_test_ext().execute_with(|| {
-			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::verify_disclosure_proof(
-					&[],
-					&valid_signals(),
-					Some(1),
-				),
-				Error::<Test>::EmptyProof
-			);
-		});
-	}
-
-	#[test]
-	fn disclosure_no_active_version_returns_circuit_not_found() {
-		new_test_ext().execute_with(|| {
-			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::verify_disclosure_proof(
-					&proof(),
-					&valid_signals(),
-					None,
-				),
-				Error::<Test>::CircuitNotFound
-			);
-		});
-	}
-
-	#[test]
-	fn disclosure_missing_vk_returns_not_found() {
-		new_test_ext().execute_with(|| {
-			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::verify_disclosure_proof(
-					&proof(),
-					&valid_signals(),
-					Some(99),
-				),
-				Error::<Test>::VerificationKeyNotFound
-			);
-		});
-	}
-
-	#[test]
-	fn disclosure_happy_path_returns_true() {
-		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::DISCLOSURE, 1);
-			activate(CircuitId::DISCLOSURE, 1);
-			let ok = <Pallet<Test> as ZkVerifierPort>::verify_disclosure_proof(
-				&proof(),
-				&valid_signals(),
-				None,
-			)
-			.unwrap();
-			assert!(ok);
-		});
-	}
-
-	#[test]
-	fn disclosure_explicit_version_overrides_active() {
-		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::DISCLOSURE, 1);
-			insert_vk(CircuitId::DISCLOSURE, 2);
-			activate(CircuitId::DISCLOSURE, 1);
-			let ok = <Pallet<Test> as ZkVerifierPort>::verify_disclosure_proof(
-				&proof(),
-				&valid_signals(),
-				Some(2),
-			)
-			.unwrap();
-			assert!(ok);
-		});
-	}
-
-	// ── batch_verify_disclosure_proofs ─────────────────────────────────────────
-
-	#[test]
-	fn batch_empty_proofs_returns_invalid_batch_size() {
-		new_test_ext().execute_with(|| {
-			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::batch_verify_disclosure_proofs(&[], &[], None,),
-				Error::<Test>::InvalidBatchSize
-			);
-		});
-	}
-
-	#[test]
-	fn batch_over_limit_returns_invalid_batch_size() {
-		new_test_ext().execute_with(|| {
-			let proofs: alloc::vec::Vec<_> = (0..11).map(|_| proof()).collect();
-			let signals: alloc::vec::Vec<_> = (0..11).map(|_| valid_signals()).collect();
-			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::batch_verify_disclosure_proofs(
-					&proofs, &signals, None,
-				),
-				Error::<Test>::InvalidBatchSize
-			);
-		});
-	}
-
-	#[test]
-	fn batch_length_mismatch_returns_error() {
-		new_test_ext().execute_with(|| {
-			let proofs = alloc::vec![proof(), proof()];
-			let signals = alloc::vec![valid_signals()]; // 2 vs 1
-			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::batch_verify_disclosure_proofs(
-					&proofs, &signals, None,
-				),
-				Error::<Test>::BatchLengthMismatch
-			);
-		});
-	}
-
-	#[test]
-	fn batch_no_active_version_returns_circuit_not_found() {
-		new_test_ext().execute_with(|| {
-			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::batch_verify_disclosure_proofs(
-					&[proof()],
-					&[valid_signals()],
-					None,
-				),
-				Error::<Test>::CircuitNotFound
-			);
-		});
-	}
-
-	#[test]
-	fn batch_missing_vk_returns_not_found() {
-		new_test_ext().execute_with(|| {
-			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::batch_verify_disclosure_proofs(
-					&[proof()],
-					&[valid_signals()],
-					Some(99),
-				),
-				Error::<Test>::VerificationKeyNotFound
-			);
-		});
-	}
-
-	#[test]
-	fn batch_invalid_signals_length_returns_dispatch_error_other() {
-		// decode_disclosure_signals runs during input collection, after VK is resolved.
-		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::DISCLOSURE, 1);
-			activate(CircuitId::DISCLOSURE, 1);
-			let err = <Pallet<Test> as ZkVerifierPort>::batch_verify_disclosure_proofs(
-				&[proof()],
-				&[vec![0u8; 50]],
-				Some(1),
-			)
-			.unwrap_err();
-			assert!(matches!(err, sp_runtime::DispatchError::Other(_)));
-		});
-	}
-
-	#[test]
-	fn batch_at_exact_limit_of_ten_is_accepted() {
-		// Validates upper bound is inclusive (10 items is still valid).
-		// batch_verify calls real Groth16 crypto (not mocked in port.rs),
-		// so with bogus VK/proof data it returns BatchVerificationFailed —
-		// confirming all guard conditions were passed.
-		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::DISCLOSURE, 1);
-			activate(CircuitId::DISCLOSURE, 1);
-			let proofs: alloc::vec::Vec<_> = (0..10).map(|_| proof()).collect();
-			let signals: alloc::vec::Vec<_> = (0..10).map(|_| valid_signals()).collect();
-			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::batch_verify_disclosure_proofs(
-					&proofs,
-					&signals,
-					Some(1),
-				),
-				Error::<Test>::BatchVerificationFailed
-			);
-		});
-	}
-
-	#[test]
-	fn batch_with_valid_setup_reaches_crypto_and_fails_on_bogus_data() {
-		// All storage guards pass; Groth16Verifier rejects the bogus VK/proof bytes.
-		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::DISCLOSURE, 1);
-			activate(CircuitId::DISCLOSURE, 1);
-			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::batch_verify_disclosure_proofs(
-					&[proof()],
-					&[valid_signals()],
-					Some(1),
-				),
-				Error::<Test>::BatchVerificationFailed
-			);
-		});
-	}
-
-	// ── batch stats tracking ───────────────────────────────────────────────────
-
-	#[test]
-	fn batch_failure_increments_failed_and_total_stats() {
-		// Groth16Verifier rejects bogus data → stats must record the failure.
-		new_test_ext().execute_with(|| {
-			use crate::pallet::VerificationStats;
-
-			insert_vk(CircuitId::DISCLOSURE, 1);
-			activate(CircuitId::DISCLOSURE, 1);
-
-			let _ = <Pallet<Test> as ZkVerifierPort>::batch_verify_disclosure_proofs(
-				&[proof(), proof()],
-				&[valid_signals(), valid_signals()],
-				Some(1),
-			);
-
-			let stats = VerificationStats::<Test>::get(CircuitId::DISCLOSURE, 1u32);
-			assert_eq!(
-				stats.total_verifications, 2,
-				"total should count batch size"
-			);
-			assert_eq!(stats.failed_verifications, 2, "both proofs failed");
-			assert_eq!(stats.successful_verifications, 0);
-		});
-	}
-
-	#[test]
-	fn batch_stats_are_isolated_from_single_verify_stats() {
-		// batch and single-proof stats accumulate independently into the same counter.
-		new_test_ext().execute_with(|| {
-			use crate::pallet::VerificationStats;
-
-			insert_vk(CircuitId::DISCLOSURE, 1);
-			activate(CircuitId::DISCLOSURE, 1);
-
-			// Single verify (succeeds in test build via do_verify mock).
-			let _ = <Pallet<Test> as ZkVerifierPort>::verify_disclosure_proof(
-				&proof(),
-				&valid_signals(),
-				Some(1),
-			);
-
-			// Batch verify (fails with bogus data — stats still update).
-			let _ = <Pallet<Test> as ZkVerifierPort>::batch_verify_disclosure_proofs(
-				&[proof()],
-				&[valid_signals()],
-				Some(1),
-			);
-
-			let stats = VerificationStats::<Test>::get(CircuitId::DISCLOSURE, 1u32);
-			// 1 from single (success) + 1 from batch (failure)
-			assert_eq!(stats.total_verifications, 2);
-			assert_eq!(stats.successful_verifications, 1);
-			assert_eq!(stats.failed_verifications, 1);
 		});
 	}
 
