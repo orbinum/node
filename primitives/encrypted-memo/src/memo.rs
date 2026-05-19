@@ -54,11 +54,7 @@ pub enum MemoError {
 	InvalidNoteData,
 	/// Commitment mismatch detected after decryption.
 	CommitmentMismatch,
-	/// Invalid disclosure mask configuration.
-	InvalidDisclosureMask(&'static str),
-	/// Invalid disclosed data format.
-	InvalidDisclosureData,
-	/// Invalid or inconsistent disclosure proof.
+	/// Invalid or inconsistent value proof.
 	InvalidProof(&'static str),
 }
 
@@ -71,9 +67,7 @@ impl core::fmt::Display for MemoError {
 			Self::EncryptionFailed => write!(f, "Encryption operation failed"),
 			Self::InvalidNoteData => write!(f, "Invalid note data format"),
 			Self::CommitmentMismatch => write!(f, "Commitment mismatch after decryption"),
-			Self::InvalidDisclosureMask(msg) => write!(f, "Invalid disclosure mask: {msg}"),
-			Self::InvalidDisclosureData => write!(f, "Invalid disclosed data format"),
-			Self::InvalidProof(msg) => write!(f, "Invalid disclosure proof: {msg}"),
+			Self::InvalidProof(msg) => write!(f, "Invalid value proof: {msg}"),
 		}
 	}
 }
@@ -329,7 +323,6 @@ mod tests {
 		assert!(format!("{}", MemoError::DecryptionFailed)
 			.to_lowercase()
 			.contains("decryption"));
-		assert!(format!("{}", MemoError::InvalidDisclosureMask("x")).contains("x"));
 		assert!(format!("{}", MemoError::InvalidProof("y")).contains("y"));
 	}
 

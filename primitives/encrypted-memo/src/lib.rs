@@ -4,7 +4,7 @@
 //!
 //! - [`keys`] — Key types (`ViewingKey`, `NullifierKey`, `EdDSAKey`), `KeySet`, derivation fns
 //! - [`memo`] — `MemoData`, `MemoError`, encrypt/decrypt functions, size constants
-//! - [`disclosure`] — `DisclosureMask`, `DisclosurePublicSignals`, `DisclosureProof`, `PartialMemoData`
+//! - [`value_proof`] — `ValueProofPublicSignals`, `ValueProof` (CircuitId 6)
 //!
 //! # Example
 //!
@@ -27,9 +27,9 @@
 
 extern crate alloc;
 
-mod disclosure;
 mod keys;
 mod memo;
+mod value_proof;
 
 // Keys
 pub use keys::{
@@ -47,5 +47,5 @@ pub use memo::{
 #[cfg(feature = "encrypt")]
 pub use memo::encrypt_memo_random;
 
-// Disclosure
-pub use disclosure::{DisclosureMask, DisclosureProof, DisclosurePublicSignals, PartialMemoData};
+// Value proof
+pub use value_proof::{ValueProof, ValueProofPublicSignals};
