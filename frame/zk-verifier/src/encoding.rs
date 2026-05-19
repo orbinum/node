@@ -76,31 +76,24 @@ pub fn encode_private_link(commitment: &[u8; 32], call_hash_fe: &[u8; 32]) -> Ve
 	alloc::vec![*commitment, *call_hash_fe]
 }
 
-/// Decode 76-byte selective disclosure public signals into 4 field elements.
+/// Encode value proof public inputs (CircuitId 6).
 ///
-/// Layout: `commitment[0..32] | value[32..40] | asset_id[40..44] | owner_hash[44..76]`
-pub fn decode_disclosure_signals(
-	signals: &[u8],
-) -> Result<Vec<[u8; 32]>, sp_runtime::DispatchError> {
-	if signals.len() != 76 {
-		return Err(sp_runtime::DispatchError::Other(
-			"Invalid disclosure signals length (expected 76 bytes)",
-		));
-	}
-
+/// Expands the compact 76-byte on-chain layout into 4 BN254 field elements:
+/// `commitment(32) | value_u64_le(8→32) | asset_id_u32_le(4→32) | owner_hash(32)`
+pub fn encode_value_proof(public_signals: &[u8; 76]) -> Vec<[u8; 32]> {
 	let mut commitment = [0u8; 32];
-	commitment.copy_from_slice(&signals[0..32]);
+	commitment.copy_from_slice(&public_signals[0..32]);
 
 	let mut value = [0u8; 32];
-	value[..8].copy_from_slice(&signals[32..40]);
+	value[..8].copy_from_slice(&public_signals[32..40]);
 
 	let mut asset_id = [0u8; 32];
-	asset_id[..4].copy_from_slice(&signals[40..44]);
+	asset_id[..4].copy_from_slice(&public_signals[40..44]);
 
 	let mut owner_hash = [0u8; 32];
-	owner_hash.copy_from_slice(&signals[44..76]);
+	owner_hash.copy_from_slice(&public_signals[44..76]);
 
-	Ok(alloc::vec![commitment, value, asset_id, owner_hash])
+	alloc::vec![commitment, value, asset_id, owner_hash]
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -157,24 +150,43 @@ mod tests {
 	}
 
 	#[test]
-	fn decode_disclosure_signals_valid() {
-		let mut signals = [0u8; 76];
-		signals[0] = 0xAA;
-		signals[32] = 0xBB;
-		signals[40] = 0xCC;
-		signals[44] = 0xDD;
-		let result = decode_disclosure_signals(&signals).unwrap();
-		assert_eq!(result.len(), 4);
-		assert_eq!(result[0][0], 0xAA);
-		assert_eq!(result[1][0], 0xBB);
-		assert_eq!(result[2][0], 0xCC);
-		assert_eq!(result[3][0], 0xDD);
+	fn encode_value_proof_correct_length() {
+		let signals = [0u8; 76];
+		let raw = encode_value_proof(&signals);
+		assert_eq!(raw.len(), 4);
 	}
 
 	#[test]
-	fn decode_disclosure_signals_wrong_length() {
-		assert!(decode_disclosure_signals(&[0u8; 75]).is_err());
-		assert!(decode_disclosure_signals(&[0u8; 77]).is_err());
-		assert!(decode_disclosure_signals(&[]).is_err());
+	fn encode_value_proof_commitment_field() {
+		let mut signals = [0u8; 76];
+		signals[0..32].copy_from_slice(&[0xAAu8; 32]);
+		let raw = encode_value_proof(&signals);
+		assert_eq!(raw[0], [0xAAu8; 32]);
+	}
+
+	#[test]
+	fn encode_value_proof_value_field_zero_padded() {
+		let mut signals = [0u8; 76];
+		signals[32..40].copy_from_slice(&100u64.to_le_bytes());
+		let raw = encode_value_proof(&signals);
+		assert_eq!(&raw[1][..8], &100u64.to_le_bytes());
+		assert_eq!(&raw[1][8..], &[0u8; 24]);
+	}
+
+	#[test]
+	fn encode_value_proof_asset_id_field_zero_padded() {
+		let mut signals = [0u8; 76];
+		signals[40..44].copy_from_slice(&42u32.to_le_bytes());
+		let raw = encode_value_proof(&signals);
+		assert_eq!(&raw[2][..4], &42u32.to_le_bytes());
+		assert_eq!(&raw[2][4..], &[0u8; 28]);
+	}
+
+	#[test]
+	fn encode_value_proof_owner_hash_field() {
+		let mut signals = [0u8; 76];
+		signals[44..76].copy_from_slice(&[0xBBu8; 32]);
+		let raw = encode_value_proof(&signals);
+		assert_eq!(raw[3], [0xBBu8; 32]);
 	}
 }

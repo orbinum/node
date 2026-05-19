@@ -269,7 +269,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_verify_with_disclosure_vk() {
+	fn test_verify_with_value_proof_vk() {
 		let vk_wrapper = VerifyingKey::from_ark_vk(&create_mock_ark_vk(4)).unwrap();
 		let result =
 			Groth16Verifier::verify(&vk_wrapper, &create_mock_inputs(4), &create_mock_proof());

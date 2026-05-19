@@ -14,13 +14,14 @@ use sp_runtime::traits::Dispatchable;
 
 /// EVM precompile that bridges Solidity calls into `pallet_shielded_pool` extrinsics.
 ///
-/// Three functions are exposed, each identified by a 4-byte ABI selector:
+/// Four functions are exposed, each identified by a 4-byte ABI selector:
 ///
-/// | Selector     | Solidity signature                                                        |
-/// |-------------|---------------------------------------------------------------------------|
-/// | `0x9feb22ea` | `shield(uint32,bytes32,bytes)` — payable, amount = `msg.value`           |
-/// | `0x8c0f5d24` | `privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)` |
-/// | `0x47fc44a2` | `unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256)`          |
+/// | Selector     | Solidity signature                                                                    |
+/// |-------------|---------------------------------------------------------------------------------------|
+/// | `0x9feb22ea` | `shield(uint32,bytes32,bytes)` — payable, amount = `msg.value`                       |
+/// | `0x8c0f5d24` | `privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)`           |
+/// | `0x47fc44a2` | `unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256)`                     |
+/// | `0x42e1e74c` | `claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes)` — signed (validators) |
 ///
 /// Selector computation: `bytes4(keccak256("functionName(argTypes)"))`.
 /// Verify with: `node -e "const {ethers}=require('ethers'); console.log(ethers.id('sig').slice(0,10))"`
@@ -62,6 +63,10 @@ where
 			calls::unshield::SELECTOR => {
 				let call = calls::unshield::decode::<T>(handle, &input)?;
 				dispatch::unsigned::<T>(handle, call)
+			}
+			calls::claim_shielded_fees::SELECTOR => {
+				let call = calls::claim_shielded_fees::decode::<T>(handle, &input)?;
+				dispatch::from_caller::<T>(handle, call)
 			}
 			_ => Err(PrecompileFailure::Error {
 				exit_status: ExitError::Other("unknown selector".into()),

@@ -599,8 +599,6 @@ impl pallet_shielded_pool::Config for Runtime {
 	/// Minimum shield amount: prevents spam, 1 ORB = 1e18 wei
 	type MinShieldAmount = ConstU128<1_000_000_000_000_000_000>;
 	type WeightInfo = pallet_shielded_pool::weights::SubstrateWeight<Runtime>;
-	/// Disclosure requests expire after 14400 blocks (~1 day at 6s/block)
-	type RequestExpiration = ConstU32<14400>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
@@ -1402,6 +1400,18 @@ impl_runtime_apis! {
 
 		fn registered_evm_address(account: sp_runtime::AccountId32) -> Option<[u8; 20]> {
 			pallet_relayer::RelayerByAccount::<Runtime>::get(&account).map(|h| h.0)
+		}
+
+		fn get_active_relayers() -> sp_std::vec::Vec<([u8; 20], sp_runtime::AccountId32)> {
+			pallet_relayer::RelayerRegistry::<Runtime>::iter()
+				.map(|(h160, account)| (h160.0, account))
+				.collect()
+		}
+
+		fn is_relayer_evm(evm_address: [u8; 20]) -> bool {
+			pallet_relayer::RelayerRegistry::<Runtime>::contains_key(
+				sp_core::H160::from(evm_address),
+			)
 		}
 	}
 

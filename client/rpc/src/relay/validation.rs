@@ -1,46 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
-//! Node-native EVM relay RPC.
+//! Pure calldata validation — no runtime or async dependencies.
 //!
-//! When the node is started with `--evm-relayer-key <hex>`, it exposes:
-//!
-//! - `orbinum_relayShieldedCall(calldata: "0x...")` → `txHash`
-//! - `orbinum_relayerStatus()` → `{ address, minFee, balanceWei, enabled }`
-//!
-//! The relay only accepts calls to the ShieldedPool precompile
-//! (`0x0000000000000000000000000000000000000801`) with selector
-//! `0x47fc44a2` (unshield) or `0x8c0f5d24` (privateTransfer).
-//! It checks the fee embedded in ABI slot 6 is ≥ the current `min_relay_fee` from
-//! `pallet-relayer` (queried dynamically via Runtime API so forkless upgrades take effect immediately).
+//! All functions here are synchronous and fully unit-testable without spinning up
+//! a Substrate node.  The tests at the bottom of this file cover every validation
+//! branch and fee-floor scenario.
 
-use std::sync::Arc;
-
-use ethereum::TransactionAction;
-use ethereum_types::{H160, H256, U256};
-use jsonrpsee::core::RpcResult;
-use jsonrpsee::proc_macros::rpc;
-use serde::{Deserialize, Serialize};
-// Substrate
-use sc_client_api::backend::{Backend, StorageProvider};
-use sc_transaction_pool_api::{TransactionPool, TransactionSource};
-use sp_api::ProvideRuntimeApi;
-use sp_blockchain::HeaderBackend;
-use sp_runtime::traits::Block as BlockT;
-// Frontier
-use fc_rpc_core::types::{Bytes, TransactionMessage};
 use fp_evm::ExitReason;
-use fp_rpc::{ConvertTransactionRuntimeApi, EthereumRuntimeRPCApi};
-// Orbinum
-use pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi;
 
-use crate::{internal_err, signer::EthValidatorSigner};
+use super::operations::default_operations;
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
 /// Maximum fee per gas paid by the relay tx (10 gwei).
 /// Used when building the EIP-1559 transaction.
-const MAX_FEE_PER_GAS_WEI: u64 = 10_000_000_000;
+pub(crate) const MAX_FEE_PER_GAS_WEI: u64 = 10_000_000_000;
 
 /// Gas limit used for relay transactions.
-const RELAY_GAS_LIMIT: u64 = 2_000_000;
+pub(crate) const RELAY_GAS_LIMIT: u64 = 2_000_000;
 
 /// Last-resort fallback minimum fee used ONLY when the Runtime API call fails entirely.
 ///
@@ -51,10 +30,10 @@ const RELAY_GAS_LIMIT: u64 = 2_000_000;
 ///
 /// Set to the same default as `pallet-relayer::DefaultMinRelayFee` (0.001 ORB) so all
 /// three sources are identical out of the box.
-const MIN_RELAY_FEE_FALLBACK: u128 = 1_000_000_000_000_000; // 0.001 ORB in planck
+pub(crate) const MIN_RELAY_FEE_FALLBACK: u128 = 1_000_000_000_000_000; // 0.001 ORB in planck
 
 /// Static fallback selector whitelist for when the Runtime API is unavailable.
-const SELECTORS_FALLBACK: [[u8; 4]; 2] = [
+pub(crate) const SELECTORS_FALLBACK: [[u8; 4]; 2] = [
 	[0x47, 0xfc, 0x44, 0xa2], // unshield
 	[0x8c, 0x0f, 0x5d, 0x24], // privateTransfer
 ];
@@ -64,22 +43,31 @@ const SELECTORS_FALLBACK: [[u8; 4]; 2] = [
 /// A realistic shielded-pool calldata is ~2–5 KB (256 B Groth16 proof + ABI head + Merkle path).
 /// This cap prevents DoS: an attacker could craft calldata that passes selector/fee checks
 /// but carries megabytes of data the relayer would have to pay calldata gas for.
-const MAX_CALLDATA_BYTES: usize = 32_768;
+pub(crate) const MAX_CALLDATA_BYTES: usize = 32_768;
 
 /// ShieldedPool precompile: 0x0000000000000000000000000000000000000801
-const SHIELDED_POOL_PRECOMPILE: [u8; 20] = [
+pub(crate) const SHIELDED_POOL_PRECOMPILE: [u8; 20] = [
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x08, 0x01,
 ];
 
-// Keep the static selector names as test helpers (used in build_calldata).
-#[cfg(test)]
-const SELECTOR_UNSHIELD: [u8; 4] = [0x47, 0xfc, 0x44, 0xa2];
-#[cfg(test)]
-const SELECTOR_PRIVATE_TRANSFER: [u8; 4] = [0x8c, 0x0f, 0x5d, 0x24];
+// ---------------------------------------------------------------------------
+// Pure validation functions
+// ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Calldata validation (pure, no runtime deps — unit-testable)
-// ---------------------------------------------------------------------------
+/// Computes the effective minimum fee the user must include in their calldata.
+///
+/// The relay must earn at least twice what it spends on EVM gas, so the floor is:
+///   `2 × RELAY_GAS_LIMIT × base_fee_per_gas`
+///
+/// The governance-set `min_fee_planck` is the absolute lower bound; the 2× gas floor
+/// applies on top whenever network gas prices are high enough to make it exceed governance.
+/// Both values are in planck (= wei in Orbinum's 1:1 mapping).
+pub(crate) fn compute_effective_min_fee(min_fee_planck: u128, base_fee_wei: u128) -> u128 {
+	let two_x_gas_floor = (RELAY_GAS_LIMIT as u128)
+		.saturating_mul(2)
+		.saturating_mul(base_fee_wei);
+	min_fee_planck.max(two_x_gas_floor)
+}
 
 /// Validates relay calldata against a runtime-provided minimum fee and selector whitelist.
 ///
@@ -99,26 +87,12 @@ const SELECTOR_PRIVATE_TRANSFER: [u8; 4] = [0x8c, 0x0f, 0x5d, 0x24];
 ///  bytes [196..228] slot 6  — uint256  fee        ← checked here
 /// ```
 /// Minimum head size = 4 + 7 × 32 = 228 bytes.
-/// Computes the effective minimum fee the user must include in their calldata.
-///
-/// The relay must earn at least twice what it spends on EVM gas, so the floor is:
-///   `2 × RELAY_GAS_LIMIT × base_fee_per_gas`
-///
-/// The governance-set `min_fee_planck` is the absolute lower bound; the 2× gas floor
-/// applies on top whenever network gas prices are high enough to make it exceed governance.
-/// Both values are in plank (= wei in Orbinum's 1:1 mapping).
-pub(crate) fn compute_effective_min_fee(min_fee_planck: u128, base_fee_wei: u128) -> u128 {
-	let two_x_gas_floor = (RELAY_GAS_LIMIT as u128)
-		.saturating_mul(2)
-		.saturating_mul(base_fee_wei);
-	min_fee_planck.max(two_x_gas_floor)
-}
-
 pub(crate) fn validate_relay_calldata(
 	data: &[u8],
 	min_fee_wei: u128,
 	allowed_selectors: &[[u8; 4]],
 ) -> Result<(), &'static str> {
+	// Global minimum: selector (4 B) + 6 ABI head slots (6 × 32 B) = 228 B.
 	if data.len() < 228 {
 		return Err("calldata too short");
 	}
@@ -131,10 +105,21 @@ pub(crate) fn validate_relay_calldata(
 		return Err("unsupported selector");
 	}
 
-	// Fee is in ABI slot 6 (7th param, 0-indexed): data[196..228].
-	let fee_bytes: [u8; 32] = data[196..228].try_into().unwrap();
-	let fee = U256::from_big_endian(&fee_bytes);
-	if fee < U256::from(min_fee_wei) {
+	// Capa 3: dispatch to the registered RelayableOperation for per-op fee extraction.
+	// If the governance whitelist contains a selector the node does not implement,
+	// the relay rejects it — requiring a node update to support new operations.
+	let op = default_operations()
+		.into_iter()
+		.find(|op| op.selector() == selector)
+		.ok_or("unsupported selector")?;
+
+	log::trace!(target: "orbinum-relay", "validating {} calldata ({} bytes)", op.name(), data.len());
+
+	if data.len() < op.min_calldata_len() {
+		return Err("calldata too short");
+	}
+
+	if op.extract_fee(data) < min_fee_wei {
 		return Err("fee below minimum");
 	}
 
@@ -155,282 +140,14 @@ pub(crate) fn check_dry_run_exit(exit_reason: &ExitReason) -> Result<(), String>
 }
 
 // ---------------------------------------------------------------------------
-// RPC trait
-// ---------------------------------------------------------------------------
-
-#[rpc(server)]
-pub trait OrbinumRelayApi {
-	/// Relay a shielded-pool call (unshield or privateTransfer) on behalf of a user.
-	///
-	/// `calldata` must be ABI-encoded EVM calldata for the ShieldedPool precompile,
-	/// including the 4-byte selector. The fee in ABI slot index 6 must be ≥ MIN_RELAY_FEE_WEI.
-	///
-	/// Returns the Ethereum transaction hash.
-	#[method(name = "orbinum_relayShieldedCall")]
-	async fn relay_shielded_call(&self, calldata: Bytes) -> RpcResult<H256>;
-
-	/// Returns the relay status: EVM address, minimum fee, current balance, and whether
-	/// the relay has sufficient funds to process at least one transaction.
-	#[method(name = "orbinum_relayerStatus")]
-	async fn relayer_status(&self) -> RpcResult<RelayerStatus>;
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RelayerStatus {
-	pub address: H160,
-	pub min_fee: String,
-	/// Current EVM balance of the relay wallet (wei). Lets callers verify the relay is funded.
-	pub balance_wei: String,
-	/// True only when balance ≥ MIN_RELAY_FEE_WEI (enough to cover at least one relay tx).
-	pub enabled: bool,
-}
-
-// ---------------------------------------------------------------------------
-// Server struct
-// ---------------------------------------------------------------------------
-
-pub struct OrbinumRelay<B: BlockT, C, P, BE> {
-	client: Arc<C>,
-	pool: Arc<P>,
-	signer: EthValidatorSigner,
-	/// Serializes relay submissions AND tracks the optimistic next-nonce.
-	///
-	/// Why `Option<U256>` instead of `()`:
-	///
-	/// Each submission is: (1) read confirmed nonce, (2) sign, (3) submit. With a plain
-	/// Mutex<()> two requests in the same block both read `confirmed = N`, sign with N,
-	/// and the second submission fails with "nonce already used", burning gas for nothing.
-	///
-	/// By storing the last submitted nonce we can compute:
-	///   actual_nonce = max(confirmed_nonce, memory_nonce)
-	/// which allows multiple submissions within the same block to use N, N+1, N+2…
-	/// On the next block `confirmed_nonce` catches up and `memory_nonce` resets naturally.
-	///
-	/// `None` = no submission has been made yet; read from runtime.
-	submit_lock: Arc<tokio::sync::Mutex<Option<U256>>>,
-	_phantom: std::marker::PhantomData<(B, BE)>,
-}
-
-impl<B, C, P, BE> OrbinumRelay<B, C, P, BE>
-where
-	B: BlockT,
-{
-	pub fn new(client: Arc<C>, pool: Arc<P>, signer: EthValidatorSigner) -> Self {
-		Self {
-			client,
-			pool,
-			signer,
-			submit_lock: Arc::new(tokio::sync::Mutex::new(None)),
-			_phantom: Default::default(),
-		}
-	}
-}
-
-#[jsonrpsee::core::async_trait]
-impl<B, C, P, BE> OrbinumRelayApiServer for OrbinumRelay<B, C, P, BE>
-where
-	B: BlockT,
-	C: ProvideRuntimeApi<B> + HeaderBackend<B> + StorageProvider<B, BE> + 'static,
-	C::Api: EthereumRuntimeRPCApi<B> + ConvertTransactionRuntimeApi<B> + ShieldedPoolRuntimeApi<B>,
-	BE: Backend<B> + 'static,
-	P: TransactionPool<Block = B, Hash = B::Hash> + 'static,
-{
-	async fn relay_shielded_call(&self, calldata: Bytes) -> RpcResult<H256> {
-		let data = calldata.into_vec();
-
-		// Load fee/selector config from the runtime on every call so governance changes
-		// (set_min_relay_fee extrinsic) take immediate effect without a node restart.
-		// MIN_RELAY_FEE_FALLBACK is only used when the Runtime API call fails entirely.
-		let best_hash = self.client.info().best_hash;
-		let (min_fee_planck, allowed_selectors) = {
-			match self.client.runtime_api().relay_config(best_hash) {
-				Ok(cfg) => (cfg.min_fee_planck, cfg.allowed_selectors),
-				Err(e) => {
-					log::warn!(
-						target: "orbinum-relay",
-						"relay_config Runtime API unavailable, using fallback: {e}"
-					);
-					(MIN_RELAY_FEE_FALLBACK, SELECTORS_FALLBACK.to_vec())
-				}
-			}
-		};
-
-		// Compute 2× gas floor: the relay must earn at least twice what it spends on EVM gas.
-		// 1 wei == 1 plank in Orbinum, so no unit conversion is required.
-		let base_fee_wei: u128 = self
-			.client
-			.runtime_api()
-			.gas_price(best_hash)
-			.map(|p| p.as_u128())
-			.unwrap_or(0);
-		let effective_min_fee = compute_effective_min_fee(min_fee_planck, base_fee_wei);
-
-		if let Err(e) = validate_relay_calldata(&data, effective_min_fee, &allowed_selectors) {
-			if e == "fee below minimum" {
-				// Extract the fee from slot 6 for the log (validated length already).
-				let provided_fee = if data.len() >= 228 {
-					U256::from_big_endian(&data[196..228])
-				} else {
-					U256::zero()
-				};
-				log::warn!(
-					target: "orbinum-relay",
-					"relay rejected: fee below minimum — provided={provided_fee} required={effective_min_fee} (base_fee={base_fee_wei} governance={min_fee_planck})",
-				);
-			}
-			return Err(internal_err(e));
-		}
-
-		// Dry-run: simulate the EVM call without broadcasting a transaction.
-		// This catches invalid ZK proofs, already-spent nullifiers, and any other
-		// on-chain rejection BEFORE the relayer signs and pays gas.
-		{
-			let relayer_addr = self.signer.address();
-			let dry_result = self.client.runtime_api().call(
-				best_hash,
-				relayer_addr,
-				H160::from(SHIELDED_POOL_PRECOMPILE),
-				data.clone(),
-				U256::zero(),
-				U256::from(RELAY_GAS_LIMIT),
-				Some(U256::from(MAX_FEE_PER_GAS_WEI)),
-				Some(U256::from(1_000_000_000u64)),
-				None,  // nonce — not needed for simulation
-				false, // estimate = false: real execution semantics
-				None,  // access_list
-				None,  // authorization_list
-			);
-			match dry_result {
-				Err(e) => {
-					log::warn!(
-						target: "orbinum-relay",
-						"dry-run Runtime API error: {e}"
-					);
-					return Err(internal_err(format!("dry-run runtime error: {e}")));
-				}
-				Ok(Err(dispatch_err)) => {
-					log::warn!(
-						target: "orbinum-relay",
-						"dry-run dispatch error: {dispatch_err:?}"
-					);
-					return Err(internal_err(format!(
-						"calldata rejected by runtime: {dispatch_err:?}"
-					)));
-				}
-				Ok(Ok(info)) => {
-					if let Err(e) = check_dry_run_exit(&info.exit_reason) {
-						log::warn!(
-							target: "orbinum-relay",
-							"dry-run EVM execution failed — exit={:?} revert_data={:?}",
-							info.exit_reason,
-							info.value
-						);
-						return Err(internal_err(e));
-					}
-				}
-			}
-		}
-
-		// Hold the lock for the full sign-and-submit sequence.
-		// The lock also carries the optimistic next-nonce so multiple submissions
-		// within the same block don't collide on the same confirmed nonce.
-		let mut nonce_guard = self.submit_lock.lock().await;
-
-		let relayer_addr = self.signer.address();
-
-		let (chain_id, nonce) = {
-			let api = self.client.runtime_api();
-			let chain_id = api
-				.chain_id(best_hash)
-				.map_err(|e| internal_err(format!("chain_id: {e}")))?;
-			let confirmed_nonce = api
-				.account_basic(best_hash, relayer_addr)
-				.map_err(|e| internal_err(format!("account_basic: {e}")))?
-				.nonce;
-			// Use the in-memory nonce when it's ahead of the confirmed one.
-			// This lets us submit N txs within a single block using nonces N, N+1, N+2…
-			// Once the block is imported the confirmed nonce catches up naturally.
-			let nonce = match *nonce_guard {
-				Some(mem) if mem > confirmed_nonce => mem,
-				_ => confirmed_nonce,
-			};
-			(chain_id, nonce)
-		};
-
-		let message = TransactionMessage::EIP1559(ethereum::EIP1559TransactionMessage {
-			chain_id,
-			nonce,
-			max_priority_fee_per_gas: U256::from(1_000_000_000u64),
-			max_fee_per_gas: U256::from(MAX_FEE_PER_GAS_WEI),
-			gas_limit: U256::from(RELAY_GAS_LIMIT),
-			action: TransactionAction::Call(H160::from(SHIELDED_POOL_PRECOMPILE)),
-			value: U256::zero(),
-			input: data,
-			access_list: vec![],
-		});
-
-		use crate::signer::EthSigner as _;
-		let transaction = self.signer.sign(message, &relayer_addr)?;
-		let tx_hash = transaction.hash();
-
-		let extrinsic = {
-			let api = self.client.runtime_api();
-			api.convert_transaction(best_hash, transaction)
-				.map_err(|e| internal_err(format!("convert_transaction: {e}")))?
-		};
-
-		let submit_result = self
-			.pool
-			.submit_one(best_hash, TransactionSource::Local, extrinsic)
-			.await
-			.map(|_| tx_hash)
-			.map_err(|e| internal_err(format!("pool submit: {e}")));
-
-		// Advance the in-memory nonce only after a successful submit.
-		// On failure the nonce slot is still free and the next call will retry with
-		// the same (or a freshly confirmed) nonce.
-		if submit_result.is_ok() {
-			*nonce_guard = Some(nonce + U256::one());
-		}
-
-		submit_result
-	}
-
-	async fn relayer_status(&self) -> RpcResult<RelayerStatus> {
-		let best_hash = self.client.info().best_hash;
-		let api = self.client.runtime_api();
-
-		let min_fee_planck = api
-			.relay_config(best_hash)
-			.map(|cfg| cfg.min_fee_planck)
-			.unwrap_or(MIN_RELAY_FEE_FALLBACK);
-
-		let base_fee_wei: u128 = api.gas_price(best_hash).map(|p| p.as_u128()).unwrap_or(0);
-		let min_fee = compute_effective_min_fee(min_fee_planck, base_fee_wei);
-
-		let balance = {
-			api.account_basic(best_hash, self.signer.address())
-				.map_err(|e| internal_err(format!("account_basic: {e}")))?
-				.balance
-		};
-		// Consider relay operational when it can cover at least one worst-case tx.
-		let min_operational = U256::from(min_fee);
-		Ok(RelayerStatus {
-			address: self.signer.address(),
-			min_fee: format!("{min_fee}"),
-			balance_wei: format!("{balance}"),
-			enabled: balance >= min_operational,
-		})
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Unit tests — pure validation logic, no runtime required
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
+	use ethereum_types::U256;
+
+	use super::super::operations::{SELECTOR_PRIVATE_TRANSFER, SELECTOR_UNSHIELD};
 	use super::*;
 
 	/// Build minimal valid calldata for the given selector and fee.

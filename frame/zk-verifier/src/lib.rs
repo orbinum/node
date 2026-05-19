@@ -981,7 +981,6 @@ mod tests {
 			let entries: BoundedVec<VkEntry, frame_support::traits::ConstU32<10>> = vec![
 				make_vk_entry(CircuitId::TRANSFER, 1, false),
 				make_vk_entry(CircuitId::UNSHIELD, 1, false),
-				make_vk_entry(CircuitId::DISCLOSURE, 1, false),
 			]
 			.try_into()
 			.unwrap();
@@ -997,12 +996,8 @@ mod tests {
 				CircuitId::UNSHIELD,
 				1u32
 			));
-			assert!(VerificationKeys::<Test>::contains_key(
-				CircuitId::DISCLOSURE,
-				1u32
-			));
 			assert!(has_event(Event::BatchVerificationKeysRegistered {
-				count: 3
+				count: 2
 			}));
 		});
 	}

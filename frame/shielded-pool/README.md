@@ -4,7 +4,7 @@ FRAME pallet for privacy-preserving transactions in Orbinum using ZK-SNARKs.
 
 ## Status
 
-MVP in active development. Core shield / transfer / unshield flows are functional, including partial unshield with automatic change note handling. Audit and disclosure features are present but under active review.
+MVP in active development. Core shield / transfer / unshield flows are functional, including partial unshield with automatic change note handling. Relay fee claiming uses the `value_proof` circuit.
 
 ## What this pallet does
 
@@ -35,8 +35,11 @@ This ensures change note commitments are **not linkable** to other notes belongi
 | `shield_batch` | Signed | Deposit and insert multiple commitments in one call |
 | `private_transfer` | Unsigned | ZK-proven private transfer between notes |
 | `unshield` | Unsigned | ZK-proven withdrawal to a public account. Accepts a `change_commitment` and `change_encrypted_memo` for partial unshield with stealth change notes |
-| `disclose` | Signed | Selective disclosure of a note to an auditor |
+| `claim_shielded_fees` | Unsigned | Claim accrued relay fees as a private ZK note (value_proof circuit) |
+| `claim_relay_fees_to_evm` | Signed | Transfer accrued relay fees to the relayer's H160 EVM address |
 | `register_asset` | Signed | Register a new asset for multi-asset support |
+| `verify_asset` | Root | Mark a registered asset as verified (enables shielding) |
+| `unverify_asset` | Root | Remove verified status from an asset |
 
 ## Storage
 
@@ -49,16 +52,9 @@ This ensures change note commitments are **not linkable** to other notes belongi
 | `HistoricPoseidonRoots` | Past roots (accepted for proofs) |
 | `HistoricRootsOrder` | Bounded ordered list of historic roots |
 | `CommitmentMemos` | Encrypted memos per commitment |
-| `AuditPolicies` | Per-account audit policies |
-| `DisclosureRequests` | Pending disclosure requests by `(target, auditor)` |
-| `DisclosureRecords` | Completed disclosures by `(who, commitment)` |
-| `AuditTrailStorage` | Full audit trail entries |
-| `NextAuditTrailId` | Auto-increment for audit trail entries |
 | `Assets` | Registered asset metadata |
 | `NextAssetId` | Auto-increment for asset IDs |
 | `PoolBalancePerAsset` | Total shielded balance per asset |
-| `LastDisclosureTimestamp` | Rate-limiting per `(who, auditor)` |
-| `DisclosureCounters` | Disclosure count per `(who, auditor)` |
 
 ## Module layout
 
@@ -67,11 +63,18 @@ src/
   lib.rs               — Config, Storage, Events, Errors, extrinsics
   types.rs             — Commitment, Nullifier, Hash, EncryptedMemo and aliases
   merkle.rs            — Poseidon Merkle tree insertion and root update
-  operations.rs        — Proof verification dispatch and business logic helpers
+  operations/
+    mod.rs             — module declarations
+    shield.rs          — shield / shield_batch logic
+    private_transfer.rs — private transfer proof dispatch
+    unshield.rs        — unshield logic (partial + full)
+    fees.rs            — relay fee claiming (claim_shielded_fees, claim_relay_fees_to_evm)
+    assets.rs          — register / verify / unverify asset logic
   storage.rs           — Storage helper functions (nullifier checks, root lookups)
   helpers.rs           — Miscellaneous internal helpers
   genesis.rs           — GenesisConfig and BuildGenesisConfig impl
   validate_unsigned.rs — ValidateUnsigned impl for unsigned extrinsics
+  runtime_api_impl.rs  — Runtime API implementations (Merkle proofs, tree info)
   benchmarking.rs      — FRAME benchmarks
   weights.rs           — WeightInfo trait and generated weights
 ```
@@ -97,6 +100,7 @@ These are design properties of the current MVP. No formal security audit has bee
 ## Dependencies
 
 - `pallet-zk-verifier`: proof verification via `ZkVerifierPort`.
+- `pallet-relayer`: relay fee accounting via `RelayerInterface`.
 - `orbinum-zk-core`: Poseidon hash, commitment and nullifier types.
 - FRAME: `frame-support`, `frame-system`, `sp-runtime`.
 

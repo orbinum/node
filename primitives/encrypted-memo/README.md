@@ -9,7 +9,7 @@ Encrypted memo primitives for private transaction metadata in Orbinum Network.
 
 - **ChaCha20Poly1305 AEAD**: Authenticated encryption for memo data
 - **Viewing key encryption**: Only recipient can decrypt note details
-- **Selective disclosure**: ZK proof structures for partial data revelation
+- **Value proofs**: Public signal types for the `value_proof` circuit (CircuitId 6)
 - **Key derivation**: Deterministic keys from spending key via SHA-256
 - **no_std compatible**: WASM runtime support
 
@@ -82,26 +82,22 @@ for (commitment, encrypted_memo) in blockchain_notes {
 }
 ```
 
-### Selective Disclosure
+### Value Proof Types
 
 ```rust
-use orbinum_encrypted_memo::{DisclosureMask, DisclosureProof, PartialMemoData};
+use orbinum_encrypted_memo::{ValueProofPublicSignals, ValueProof};
 
-// Build mask (reveal only value; blinding is always hidden)
-let mask = DisclosureMask::only_value();
+// Build public signals from on-chain bytes (76 bytes, CircuitId 6)
+let signals = ValueProofPublicSignals::from_bytes(&raw_76_bytes)?;
+assert_eq!(signals.commitment, expected_commitment);
 
-// PartialMemoData shows only disclosed fields
-let partial = PartialMemoData::from_disclosure(&memo, &mask);
-assert_eq!(partial.value, Some(1000));
-assert!(partial.owner_pk.is_none());
+// Bundle proof + signals for on-chain submission
+let vp = ValueProof::new(groth16_128_bytes, signals);
+vp.validate()?;
+let serialized = vp.to_bytes();
 
-// Serialize proof bundle for on-chain submission
-let proof = DisclosureProof::new(groth16_proof_bytes, public_signals, mask);
-proof.validate()?;
-let bytes = proof.to_bytes();
-
-// Deserialize on the other side
-let proof = DisclosureProof::from_bytes(&bytes)?;
+// Deserialize on the verifier side
+let vp = ValueProof::from_bytes(&serialized)?;
 ```
 
 ## Encryption Scheme
@@ -177,29 +173,19 @@ This ensures change note commitments are **unlinkable** — they cannot be assoc
 
 Use `MemoData::new_without_counterparty(value, owner_pk, blinding, asset_id)` for shield, unshield, and change notes.
 
-## Selective Disclosure Masks
+## Value Proof Public Signals
 
-| Constructor | Reveals | Use Case |
-|---|---|---|
-| `DisclosureMask::all()` | value, owner, asset_id | Full compliance disclosure |
-| `DisclosureMask::only_value()` | value | Prove amount without revealing identity |
-| `DisclosureMask::value_and_asset()` | value + asset_id | Asset-specific compliance |
-| `DisclosureMask::none()` | nothing | Custom mask starting point |
+The `value_proof` circuit (CircuitId 6) always reveals exactly 4 signals (76 bytes):
 
-`disclose_blinding` is always rejected by `validate()` — exposing the blinding factor breaks commitment privacy.
+| Field | Size | Description |
+|-------|------|-------------|
+| `commitment` | 32 bytes | On-chain note commitment |
+| `value` | 8 bytes | Token amount (LE u64) |
+| `asset_id` | 4 bytes | Asset identifier (LE u32) |
+| `owner_hash` | 32 bytes | Poseidon hash of owner public key |
 
-## Circuit Artifacts
-
-This crate provides **data types only** — it does not generate ZK proofs. Proof generation
-is done client-side using the Circom disclosure circuit. Artifacts are bundled in the
-node repository under `/artifacts/`:
-
-```
-artifacts/
-  disclosure.wasm           # Witness generator (client)
-  disclosure.zkey            # Proving key (client)
-  verification_key_disclosure.json  # Verification key (runtime)
-```
+Used by `pallet-shielded-pool::claim_shielded_fees` to prove that a note commitment
+encodes the exact amount and asset being claimed.
 
 ## Security Properties
 
@@ -207,7 +193,7 @@ artifacts/
 - **Authenticity**: AEAD MAC prevents tampering
 - **Unlinkability**: Unique encryption key per note (commitment-bound)
 - **Forward Secrecy**: Subkey compromise does not expose spending key
-- **Zero-Knowledge**: Selective disclosure without revealing hidden fields
+- **Zero-Knowledge**: Value proof reveals only commitment/value/asset_id/owner_hash
 
 ## License
 

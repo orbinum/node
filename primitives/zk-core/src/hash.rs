@@ -125,11 +125,11 @@ fn bytes_to_field(bytes: &[u8]) -> FieldElement {
 
 /// Poseidon hash of a single field element.
 ///
-/// Used in the disclosure circuit to derive a viewing key:
-/// `viewing_key = Poseidon(owner_pubkey)`.
+/// Used in the `value_proof` circuit to derive the owner key hash:
+/// `owner_hash = Poseidon(owner_pubkey)`.
 ///
 /// Single-input Poseidon is intentionally not part of [`PoseidonHasher`] because
-/// it is only needed for the disclosure circuit.
+/// it is only needed for the value_proof circuit.
 pub fn poseidon_hash_1(input: FieldElement) -> FieldElement {
 	let result = Poseidon::<Fr>::new_circom(1)
 		.expect("Poseidon init (1 input) failed")

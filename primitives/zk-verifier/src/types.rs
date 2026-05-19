@@ -18,8 +18,8 @@ use scale_info::TypeInfo;
 pub const CIRCUIT_ID_TRANSFER: u8 = 1;
 /// Circuit identifier for unshield (withdraw) operations.
 pub const CIRCUIT_ID_UNSHIELD: u8 = 2;
-/// Circuit identifier for disclosure (selective disclosure) operations.
-pub const CIRCUIT_ID_DISCLOSURE: u8 = 4;
+/// Circuit identifier for value proof operations (proves note commitment encodes declared value).
+pub const CIRCUIT_ID_VALUE_PROOF: u8 = 6;
 /// Circuit identifier for private link dispatch operations.
 pub const CIRCUIT_ID_PRIVATE_LINK: u8 = 5;
 
@@ -29,9 +29,9 @@ pub const TRANSFER_PUBLIC_INPUTS: usize = 5;
 /// Number of public inputs for the unshield circuit.
 /// Public inputs: [merkle_root, nullifier, amount, recipient, asset_id, fee, change_commitment]
 pub const UNSHIELD_PUBLIC_INPUTS: usize = 7;
-/// Number of public inputs for the disclosure circuit.
-/// Public inputs: [commitment, revealed_value, revealed_asset_id, revealed_owner_hash]
-pub const DISCLOSURE_PUBLIC_INPUTS: usize = 4;
+/// Number of public signals for the value proof circuit.
+/// Signals: [commitment(32B), value(8B), asset_id(4B), owner_hash(32B)] = 4 field elements.
+pub const VALUE_PROOF_PUBLIC_INPUTS: usize = 4;
 /// Number of public inputs for the private link circuit.
 /// Public inputs: [commitment(32B LE field element), call_hash_fe(32B LE field element)]
 pub const PRIVATE_LINK_PUBLIC_INPUTS: usize = 2;
@@ -277,7 +277,7 @@ mod tests {
 	fn test_circuit_ids_are_stable() {
 		assert_eq!(CIRCUIT_ID_TRANSFER, 1);
 		assert_eq!(CIRCUIT_ID_UNSHIELD, 2);
-		assert_eq!(CIRCUIT_ID_DISCLOSURE, 4);
+		assert_eq!(CIRCUIT_ID_VALUE_PROOF, 6);
 		assert_eq!(CIRCUIT_ID_PRIVATE_LINK, 5);
 	}
 
@@ -285,7 +285,7 @@ mod tests {
 	fn test_public_input_counts_are_expected() {
 		assert_eq!(TRANSFER_PUBLIC_INPUTS, 5);
 		assert_eq!(UNSHIELD_PUBLIC_INPUTS, 7);
-		assert_eq!(DISCLOSURE_PUBLIC_INPUTS, 4);
+		assert_eq!(VALUE_PROOF_PUBLIC_INPUTS, 4);
 		assert_eq!(PRIVATE_LINK_PUBLIC_INPUTS, 2);
 	}
 

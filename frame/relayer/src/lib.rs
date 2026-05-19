@@ -269,33 +269,6 @@ pub mod pallet {
 			});
 			Ok(())
 		}
-
-		/// Standalone claim for accrued relay fees (planck accounting only).
-		///
-		/// Decrements `PendingRelayerFees` without performing the actual token
-		/// transfer.  Validators should prefer
-		/// `pallet-shielded-pool::claim_shielded_fees`, which inserts a private
-		/// note into the Merkle tree.
-		#[pallet::call_index(4)]
-		#[pallet::weight(T::WeightInfo::claim_relay_fees())]
-		pub fn claim_relay_fees(
-			origin: OriginFor<T>,
-			asset_id: u32,
-			amount: u128,
-		) -> DispatchResult {
-			let who = ensure_signed(origin)?;
-			let pending = PendingRelayerFees::<T>::get(&who, asset_id);
-			ensure!(pending >= amount, Error::<T>::InsufficientPendingFees);
-			PendingRelayerFees::<T>::mutate(&who, asset_id, |b| {
-				*b = b.saturating_sub(amount);
-			});
-			Self::deposit_event(Event::RelayFeesConsumed {
-				relayer: who,
-				asset_id,
-				amount,
-			});
-			Ok(())
-		}
 	}
 
 	// ── RelayerInterface implementation ───────────────────────────────────────

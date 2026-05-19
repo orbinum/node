@@ -22,8 +22,10 @@
 // Orbinum Privacy RPC
 // ============================================================================
 
+pub mod chain;
 pub mod privacy;
 
+pub use chain::{ChainApiServer, ChainRpc};
 pub use privacy::{
 	AssetBalanceResponse, MerkleProofResponse, NullifierStatusResponse, PoolStatsResponse,
 	PrivacyApiServer, PrivacyRpc,

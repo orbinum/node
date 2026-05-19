@@ -71,7 +71,7 @@ let inputs = parse_public_inputs_from_snarkjs(&["12345", "67890"])?;
 |---|---|---|
 | 1 | `transfer` | 7 |
 | 2 | `unshield` | 6 |
-| 4 | `disclosure` | 4 |
+| 6 | `value_proof` | 4 |
 | 5 | `private_link` | 2 |
 
 ## Weight estimation

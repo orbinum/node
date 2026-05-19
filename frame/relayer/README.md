@@ -80,7 +80,7 @@ Decrements `amount` from the caller's pending fee balance (accounting only — n
 Emits: `RelayFeesConsumed { relayer, asset_id, amount }`.
 
 > **Note:** This extrinsic only updates the `PendingRelayerFees` counter. To receive real tokens, the validator must call one of the two claim paths in `pallet-shielded-pool`:
-> - `claim_shielded_fees` — receives the fee as a private ZK note (requires a disclosure proof)
+> - `claim_shielded_fees` — receives the fee as a private ZK note (requires a value_proof ZK proof)
 > - `claim_relay_fees_to_evm` — transfers public ORB directly to the H160 mirror AccountId (no proof required; ideal for refilling the relayer's EVM gas wallet)
 
 ---
@@ -109,7 +109,7 @@ Both are linked at startup via `register_relayer(evm_address)`, which writes bot
          └─ PendingRelayerFees[AccountId][0] += 100
 
 3a. claim_shielded_fees(commitment, amount=100, ...)   [pallet-shielded-pool, call_index 16]
-    ├─ Verifies ZK disclosure proof
+    ├─ Verifies ZK value proof
     ├─ consume_relay_fee(validator, 0, 100)
     │     └─ PendingRelayerFees[validator][0] -= 100
     └─ MerkleTree ← commitment(100)
@@ -131,7 +131,7 @@ Both are linked at startup via `register_relayer(evm_address)`, which writes bot
 |---|---|---|
 | Result | Private note in Merkle tree | Public ORB on H160 EVM |
 | Privacy | Full (ZK UTXO) | Public (visible transfer) |
-| ZK proof required | Yes (disclosure circuit) | No |
+| ZK proof required | Yes (value_proof circuit) | No |
 | Typical use | Accumulate private funds | Refill relayer gas wallet |
 
 ---

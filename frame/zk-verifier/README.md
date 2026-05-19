@@ -21,8 +21,8 @@ MVP in active development. Production runtime verifies Groth16 proofs on BN254. 
 | `1` | transfer (2-in / 2-out UTXO) |
 | `2` | unshield (pool withdrawal) |
 | `3` | shield (reserved) |
-| `4` | disclosure (selective disclosure) |
 | `5` | private_link |
+| `6` | value_proof (relay fee claiming) |
 
 ## Storage
 
@@ -70,16 +70,11 @@ pub trait ZkVerifierPort {
         version: Option<u32>,
     ) -> Result<bool, DispatchError>;
 
-    fn verify_disclosure_proof(
+    fn verify_value_proof(
         proof: &[u8],
-        public_signals: &[u8],  // exactly 76 bytes
+        public_signals: &[u8],  // exactly 76 bytes: commitment[0..32] | value[32..40] | asset_id[40..44] | owner_hash[44..76]
         version: Option<u32>,
     ) -> Result<bool, DispatchError>;
-
-    fn batch_verify_disclosure_proofs(
-        proofs_and_signals: &[(&[u8], &[u8])],  // max 10, signals = 76 bytes each
-        version: Option<u32>,
-    ) -> Result<Vec<bool>, DispatchError>;
 
     fn verify_private_link_proof(
         proof: &[u8],
@@ -137,8 +132,7 @@ The `recipient` is passed **without byte-reversal**. `PublicInputs::to_field_ele
 ## Notes and limitations
 
 - Verification behavior differs between `runtime-benchmarks`/test builds (mock VK) and production (real Groth16).
-- Batch disclosure verification is limited to 10 proofs per call.
-- `public_signals` for disclosure must be exactly 76 bytes: `commitment[0..32] | value[32..40] | asset_id[40..44] | owner_hash[44..76]`.
+- `public_signals` for `verify_value_proof` must be exactly 76 bytes: `commitment[0..32] | value[32..40] | asset_id[40..44] | owner_hash[44..76]`.
 
 ## License
 

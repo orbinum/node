@@ -99,25 +99,6 @@ mod benchmarks {
 		assert!(!RelayerByAccount::<T>::contains_key(&caller));
 	}
 
-	// ── claim_relay_fees ─────────────────────────────────────────────────────
-
-	/// Worst case: one double-map read + mutate + event.
-	/// Pre-condition: caller has sufficient pending fees.
-	#[benchmark]
-	fn claim_relay_fees() {
-		let caller: T::AccountId = whitelisted_caller();
-		let asset_id = 0u32;
-		let balance = 1_000_000_000_000_000u128;
-
-		// Seed pending fees directly into storage.
-		PendingRelayerFees::<T>::insert(&caller, asset_id, balance);
-
-		#[extrinsic_call]
-		claim_relay_fees(RawOrigin::Signed(caller.clone()), asset_id, balance / 2);
-
-		assert_eq!(PendingRelayerFees::<T>::get(&caller, asset_id), balance / 2);
-	}
-
 	// ── Benchmark test suite ─────────────────────────────────────────────────
 
 	impl_benchmark_test_suite!(Pallet, crate::mock::new_test_ext(), crate::mock::Test,);

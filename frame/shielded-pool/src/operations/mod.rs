@@ -5,7 +5,6 @@
 //! and infrastructure services.
 
 pub mod assets;
-pub mod disclosure;
 pub mod fees;
 pub mod private_transfer;
 pub mod shield;

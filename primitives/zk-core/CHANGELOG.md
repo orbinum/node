@@ -4,6 +4,15 @@ All notable changes to this crate are documented here.
 
 ---
 
+## [1.0.1] — 2026-05-14
+
+### Changed
+- `poseidon_hash_1` doc comment updated: use case renamed from *disclosure circuit / viewing key*
+  to *value_proof circuit / owner hash* (`owner_hash = Poseidon(owner_pubkey)`).
+  README example variable renamed from `viewing_key` to `owner_hash` accordingly.
+
+---
+
 ## [1.0.0] — 2026-04-14
 
 - `PoseidonHasher` trait with `hash_2`, `hash_4`, `hash_5` arities

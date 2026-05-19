@@ -53,6 +53,41 @@ where
 	dispatch(runtime_call, origin)
 }
 
+/// Dispatches `call` with the **EVM caller** as signed origin.
+///
+/// Used for `claim_shielded_fees`: the validator calls the precompile from their
+/// EVM address; their `H160` is mapped to an `AccountId` via `AddressMapping` and
+/// used as the signed origin so `ensure_signed` succeeds in the pallet.
+pub fn from_caller<T>(
+	handle: &mut impl PrecompileHandle,
+	call: pallet_shielded_pool::Call<T>,
+) -> PrecompileResult
+where
+	T: pallet_evm::Config + pallet_shielded_pool::Config,
+	<T as frame_system::Config>::RuntimeCall: Dispatchable<PostInfo = frame_support::dispatch::PostDispatchInfo>
+		+ GetDispatchInfo
+		+ From<pallet_shielded_pool::Call<T>>,
+	<<T as frame_system::Config>::RuntimeCall as Dispatchable>::RuntimeOrigin:
+		From<Option<<T as frame_system::Config>::AccountId>>,
+	<<T as frame_system::Config>::RuntimeCall as Dispatchable>::PostInfo: core::fmt::Debug,
+	pallet_evm::AccountIdOf<T>: Into<<T as frame_system::Config>::AccountId>,
+{
+	let runtime_call = <<T as frame_system::Config>::RuntimeCall as From<
+		pallet_shielded_pool::Call<T>,
+	>>::from(call);
+	let gas_cost =
+		T::GasWeightMapping::weight_to_gas(runtime_call.get_dispatch_info().total_weight());
+	handle.record_cost(gas_cost)?;
+
+	let caller_account: <T as frame_system::Config>::AccountId =
+		T::AddressMapping::into_account_id(handle.context().caller).into();
+	let origin = <<T as frame_system::Config>::RuntimeCall as Dispatchable>::RuntimeOrigin::from(
+		Some(caller_account),
+	);
+
+	dispatch(runtime_call, origin)
+}
+
 /// Dispatches `call` with `None` origin (`ensure_none`).
 ///
 /// Gas cost is derived from the call's dispatch weight via [`GasWeightMapping`].

@@ -2,6 +2,26 @@
 
 All notable changes to `orbinum-encrypted-memo` will be documented in this file.
 
+## [0.6.0] - 2026-05-14
+
+### Added
+- **`ValueProofPublicSignals`** — public signals for the `value_proof` circuit (CircuitId 6).
+  Fixed 76-byte layout: `commitment(32) | value(8) | asset_id(4) | owner_hash(32)`.
+  Proves `commitment = Poseidon(value, asset_id, owner_pubkey, blinding)` without
+  revealing the blinding factor or raw owner key.
+- **`ValueProof`** — Groth16 proof bundle (proof 128B + public signals 76B) with
+  `to_bytes` / `from_bytes` / `validate()` helpers.
+
+### Removed
+- **`DisclosureMask`**, **`DisclosurePublicSignals`**, **`DisclosureProof`**, **`PartialMemoData`** —
+  selective disclosure circuit has been removed from Orbinum. All disclosure types deleted.
+- **`MemoError::InvalidDisclosureMask`** and **`MemoError::InvalidDisclosureData`** variants removed.
+- `disclosure.rs` module emptied; `mod disclosure` removed from public API.
+
+### Changed
+- `MemoError::InvalidProof` display message updated from "Invalid disclosure proof" to "Invalid value proof".
+- README rewritten: removed selective disclosure sections; added value proof usage example and public signals table.
+
 ## [0.5.0] - 2026-05-08
 
 ### Added
