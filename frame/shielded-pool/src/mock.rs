@@ -171,14 +171,6 @@ pub fn mock_evm_address_get(who: u64) -> Option<sp_core::H160> {
 		.map(sp_core::H160::from)
 }
 
-/// Write the registered EVM address for an account to raw test storage.
-pub fn mock_evm_address_set(who: u64, addr: sp_core::H160) {
-	use parity_scale_codec::Encode;
-	let key = [b"mock:evm:".as_ref(), who.encode().as_slice()].concat();
-	// Encode as fixed [u8; 20] — no compact length prefix — so decode matches.
-	sp_io::storage::set(&key, &addr.as_fixed_bytes().encode());
-}
-
 /// Write a minimum relay fee to raw test storage.
 /// By default `MockRelayer::min_relay_fee()` returns 0; call this to raise the floor.
 pub fn mock_set_min_relay_fee(fee: u128) {
