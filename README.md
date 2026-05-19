@@ -1,10 +1,10 @@
 # Orbinum Network
 
-Orbinum is a privacy-focused blockchain network built on Substrate that enables confidential transactions with selective disclosure capabilities.
+Orbinum is a privacy-focused blockchain network built on Substrate that enables confidential transactions with cryptographic value proofs.
 
 ## Overview
 
-Orbinum combines the transparency benefits of blockchain technology with advanced cryptographic privacy features, allowing users to control what information they reveal while maintaining verifiable trust.
+Orbinum combines the transparency benefits of blockchain technology with advanced cryptographic privacy features, allowing users to transact privately and prove specific note properties without revealing underlying data.
 
 ## Key Features
 
@@ -13,10 +13,10 @@ Orbinum combines the transparency benefits of blockchain technology with advance
 - **Private Transfers**: Send and receive assets without revealing amounts, sender, or recipient
 - **Shield/Unshield**: Move assets between transparent and private domains seamlessly
 
-### Selective Disclosure
-- **Proof Generation**: Create cryptographic proofs that reveal specific transaction properties without exposing underlying data
-- **Compliance Tools**: Selectively disclose transaction details to authorized parties
-- **Audit Trail**: Maintain verifiable records while preserving user privacy
+### Value Proofs
+- **Value Proof Circuit**: Cryptographic proof that a note commitment encodes the declared value and asset, used for relay fee claiming (`claim_shielded_fees`)
+- **Proof of Note Ownership**: Any note owner can generate a value proof to demonstrate knowledge of a commitment's preimage without revealing the blinding factor
+- **Audit Trail**: Maintain verifiable records for compliance while preserving user privacy
 
 ### EVM Compatibility
 - **Frontier Integration**: Full Ethereum Virtual Machine compatibility layer
@@ -33,10 +33,10 @@ Orbinum combines the transparency benefits of blockchain technology with advance
 
 Orbinum is built using Substrate's FRAME framework and implements Clean Architecture principles across all components:
 
-- **Pallets**: Modular runtime components (`pallet-shielded-pool`, `pallet-zk-verifier`)
+- **Pallets**: Modular runtime components (`pallet-shielded-pool`, `pallet-zk-verifier`, `pallet-relayer`)
 - **Primitives**: Core cryptographic libraries (`zk-core`, `zk-verifier`, `zk-circuits`)
 - **Client**: RPC layer and blockchain infrastructure
-- **Circuits**: TypeScript/Circom zero-knowledge circuits
+- **Circuits**: Circom zero-knowledge circuits (`value_proof`, `transfer`, `unshield`, `private_link`)
 
 ## License
 
