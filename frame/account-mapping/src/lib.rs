@@ -1040,7 +1040,7 @@ pub mod pallet {
 		///
 		/// **This operation is irreversible.** Once revealed, the link is public.
 		///
-		/// Use case: selective disclosure — proving wallet ownership to an auditor,
+		/// Use case: controlled revelation — proving wallet ownership to an auditor,
 		/// regulator, DAO, or grant committee without having been public from the start.
 		#[pallet::call_index(16)]
 		#[pallet::weight(T::WeightInfo::reveal_private_link())]

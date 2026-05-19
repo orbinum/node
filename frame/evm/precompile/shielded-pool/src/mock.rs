@@ -121,7 +121,6 @@ parameter_types! {
 	pub const MaxTreeDepth: u32 = 32;
 	pub const MaxHistoricRoots: u32 = 100;
 	pub const MinShieldAmount: u128 = 100;
-	pub const RequestExpiration: u64 = 1000;
 }
 
 pub struct MockZkVerifier;
@@ -159,7 +158,7 @@ impl ZkVerifierPort for MockZkVerifier {
 		Ok(true)
 	}
 
-	fn verify_disclosure_proof(
+	fn verify_value_proof(
 		proof: &[u8],
 		public_signals: &[u8],
 		_version: Option<u32>,
@@ -171,17 +170,6 @@ impl ZkVerifierPort for MockZkVerifier {
 			return Err(sp_runtime::DispatchError::Other(
 				"Invalid public signals length",
 			));
-		}
-		Ok(true)
-	}
-
-	fn batch_verify_disclosure_proofs(
-		proofs: &[sp_std::vec::Vec<u8>],
-		public_signals: &[sp_std::vec::Vec<u8>],
-		_version: Option<u32>,
-	) -> Result<bool, sp_runtime::DispatchError> {
-		if proofs.len() != public_signals.len() {
-			return Err(sp_runtime::DispatchError::Other("Mismatched array lengths"));
 		}
 		Ok(true)
 	}
@@ -207,6 +195,19 @@ impl frame_support::traits::Get<Option<AccountId32>> for MockBlockAuthor {
 }
 
 pub struct MockRelayer;
+
+std::thread_local! {
+	/// Controls the value returned by `MockRelayer::pending_relay_fees` during tests.
+	/// Default is 0 (no pending fees).  Set with `set_pending_relay_fees` before the
+	/// test that exercises a happy-path `claim_shielded_fees` dispatch.
+	static PENDING_RELAY_FEES: std::cell::Cell<u128> = const { std::cell::Cell::new(0) };
+}
+
+/// Override the mock's pending relay-fee balance for the current test.
+pub fn set_pending_relay_fees(amount: u128) {
+	PENDING_RELAY_FEES.with(|c| c.set(amount));
+}
+
 impl pallet_relayer::RelayerInterface for MockRelayer {
 	type AccountId = AccountId32;
 
@@ -229,7 +230,7 @@ impl pallet_relayer::RelayerInterface for MockRelayer {
 	fn accumulate_relay_fee(_author: &AccountId32, _asset_id: u32, _amount: u128) {}
 
 	fn pending_relay_fees(_who: &AccountId32, _asset_id: u32) -> u128 {
-		0
+		PENDING_RELAY_FEES.with(|c| c.get())
 	}
 
 	fn consume_relay_fee(
@@ -253,7 +254,6 @@ impl pallet_shielded_pool::Config for Test {
 	type MaxHistoricRoots = MaxHistoricRoots;
 	type MinShieldAmount = MinShieldAmount;
 	type WeightInfo = ();
-	type RequestExpiration = RequestExpiration;
 	type Relayer = MockRelayer;
 }
 
