@@ -129,6 +129,9 @@ impl From<sp_runtime::MultiSignature> for MockSignature {
 				panic!("Sr25519 not supported for MockSignature")
 			}
 			sp_runtime::MultiSignature::Ecdsa(sig) => Self(sig),
+			sp_runtime::MultiSignature::Eth(_) => {
+				panic!("Eth not supported for MockSignature")
+			}
 		}
 	}
 }
