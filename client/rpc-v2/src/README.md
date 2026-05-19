@@ -1,28 +1,26 @@
-# fc-rpc-v2 — Orbinum Privacy RPC
+# fc-rpc-v2 — Orbinum Custom RPC
 
-Read-only JSON-RPC layer for the Orbinum shielded pool. Exposes five endpoints that query `pallet-shielded-pool` storage directly, without going through the Runtime API.
+Read-only JSON-RPC layer for Orbinum-specific chain state. Endpoints query pallet storage directly, without going through the Runtime API — no runtime upgrade required to extend this layer.
 
 ## Crate layout
 
 ```
 src/
-├── lib.rs        — crate root, re-exports public types
-└── privacy.rs    — all five endpoints, response types, and tests
+├── lib.rs      — crate root, re-exports public types
+├── chain.rs    — general chain state endpoints (`chain_*`)
+└── privacy.rs  — shielded-pool endpoints (`privacy_*`)
 ```
 
 ## Public API
 
-### Server struct
+All server structs share the same generic signature:
 
 ```rust
-pub struct PrivacyRpc<C, B, BE> { ... }
-
-impl<C, B, BE> PrivacyRpc<C, B, BE> {
-    pub fn new(client: Arc<C>) -> Self
-}
+pub struct PrivacyRpc<C, B, BE> { pub fn new(client: Arc<C>) -> Self }
+pub struct ChainRpc<C, B, BE>   { pub fn new(client: Arc<C>) -> Self }
 ```
 
-Bounds required on the generic parameters:
+Required bounds on generic parameters:
 
 | Parameter | Required traits |
 |-----------|----------------|
@@ -33,14 +31,45 @@ Bounds required on the generic parameters:
 ### Registering with the node
 
 ```rust
-use fc_rpc_v2::{PrivacyApiServer, PrivacyRpc};
+use fc_rpc_v2::{ChainApiServer, ChainRpc, PrivacyApiServer, PrivacyRpc};
 
 io.merge(PrivacyRpc::new(client.clone()).into_rpc())?;
+io.merge(ChainRpc::new(client.clone()).into_rpc())?;
 ```
 
 ---
 
 ## Endpoints
+
+### `chain_isValidator`
+
+Returns `true` if the given SS58-encoded account is an active Aura block author.
+
+Reads `pallet_aura::Authorities` directly from storage — no runtime API call is made. Intended for UIs that need to gate actions (e.g. relayer registration) on validator eligibility without waiting for an extrinsic to fail.
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `account` | `String` | SS58-encoded account address |
+
+**Result:** `bool`
+
+```json
+// request
+{ "jsonrpc": "2.0", "method": "chain_isValidator", "params": ["5GrwvaEF..."], "id": 1 }
+
+// response
+{ "jsonrpc": "2.0", "result": true, "id": 1 }
+```
+
+**Storage read:** `Twox128("Aura") ++ Twox128("Authorities")` → SCALE `Vec<[u8; 32]>`
+
+**Errors**
+- `InvalidParams` — invalid SS58 address
+- `InternalError` — storage decode failure
+
+---
 
 ### `privacy_getMerkleRoot`
 
@@ -206,10 +235,18 @@ pub struct PoolStatsResponse {
 
 ## Storage access
 
-All endpoints query `pallet-shielded-pool` storage directly using `sc_client_api::StorageProvider`. No Runtime API call is made, which means:
+All endpoints query pallet storage directly using `sc_client_api::StorageProvider`. No Runtime API call is made, which means:
 
 - No runtime upgrade required to add or change these endpoints.
 - Keys are built with the standard Substrate hasher layout:
+
+### `chain.rs` — `pallet_aura`
+
+| Storage item | Key layout |
+|---|---|
+| `Authorities` | `Twox128("Aura") ++ Twox128("Authorities")` |
+
+### `privacy.rs` — `pallet_shielded_pool`
 
 | Storage item | Key layout | Hasher |
 |---|---|---|
