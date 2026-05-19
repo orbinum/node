@@ -357,7 +357,7 @@ mod tests {
 			ASSET_ID,
 			&valid_memo(),
 			PROOF,
-			&make_public_signals(commitment, AMOUNT as u64, ASSET_ID).to_vec(),
+			make_public_signals(commitment, AMOUNT as u64, ASSET_ID).as_ref(),
 		);
 		let h = MockHandle::new(input.clone());
 		match super::decode::<Test>(&h, &input).unwrap() {
@@ -378,7 +378,7 @@ mod tests {
 			ASSET_ID,
 			&valid_memo(),
 			PROOF,
-			&ps.to_vec(),
+			ps.as_ref(),
 		);
 		let h = MockHandle::new(input.clone());
 		match super::decode::<Test>(&h, &input).unwrap() {
@@ -398,7 +398,7 @@ mod tests {
 			0,
 			&valid_memo(),
 			PROOF,
-			&make_public_signals(COMMITMENT, AMOUNT as u64, 0).to_vec(),
+			make_public_signals(COMMITMENT, AMOUNT as u64, 0).as_ref(),
 		);
 		let h = MockHandle::new(input.clone());
 		match super::decode::<Test>(&h, &input).unwrap() {
@@ -504,7 +504,7 @@ mod tests {
 				ASSET_ID,
 				&valid_memo(),
 				PROOF,
-				&mismatched.to_vec(),
+				mismatched.as_ref(),
 			);
 			let mut h = MockHandle::new(input);
 			expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
@@ -523,7 +523,7 @@ mod tests {
 				ASSET_ID,
 				&valid_memo(),
 				PROOF,
-				&mismatched.to_vec(),
+				mismatched.as_ref(),
 			);
 			let mut h = MockHandle::new(input);
 			expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
@@ -542,7 +542,7 @@ mod tests {
 				ASSET_ID, // param asset_id 0 ≠ signals asset_id 99
 				&valid_memo(),
 				PROOF,
-				&mismatched.to_vec(),
+				mismatched.as_ref(),
 			);
 			let mut h = MockHandle::new(input);
 			expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
@@ -633,7 +633,7 @@ mod tests {
 				99, // unregistered
 				&valid_memo(),
 				PROOF,
-				&ps.to_vec(),
+				ps.as_ref(),
 			);
 			let mut h = MockHandle::new(input);
 			expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
