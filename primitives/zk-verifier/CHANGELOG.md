@@ -4,6 +4,20 @@ All notable changes to this crate are documented here.
 
 ---
 
+## [1.1.0] — 2026-05-14
+
+### Changed
+
+- Renamed `CIRCUIT_ID_DISCLOSURE` (4) to `CIRCUIT_ID_VALUE_PROOF` (6) — aligns with `CircuitId::VALUE_PROOF` in `pallet-zk-verifier`
+- Renamed `DISCLOSURE_PUBLIC_INPUTS` (8) to `VALUE_PROOF_PUBLIC_INPUTS` (4) — reflects the 4 public signals of the value proof circuit (commitment, value, asset_id, owner_hash)
+
+### Removed
+
+- `CIRCUIT_ID_DISCLOSURE` — use `CIRCUIT_ID_VALUE_PROOF` instead
+- `DISCLOSURE_PUBLIC_INPUTS` — use `VALUE_PROOF_PUBLIC_INPUTS` instead
+
+---
+
 ## [1.0.0] — 2026-04-14
 
 - `Groth16Verifier` — static `verify`, `verify_with_prepared_vk`, `batch_verify`
