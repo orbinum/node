@@ -87,8 +87,8 @@ where
 	use sc_consensus_manual_seal::rpc::{ManualSeal, ManualSealApiServer};
 	use substrate_frame_rpc_system::{System, SystemApiServer};
 
-	// Orbinum Privacy RPC
-	use fc_rpc_v2::{PrivacyApiServer, PrivacyRpc};
+	// Orbinum Privacy + Chain RPC
+	use fc_rpc_v2::{ChainApiServer, ChainRpc, PrivacyApiServer, PrivacyRpc};
 
 	let mut io = RpcModule::new(());
 	let FullDeps {
@@ -105,8 +105,9 @@ where
 	io.merge(ZkVerifier::new(client.clone()).into_rpc())?;
 	io.merge(Relayer::new(client.clone()).into_rpc())?;
 
-	// Orbinum Privacy RPC
+	// Orbinum Privacy + Chain RPC
 	io.merge(PrivacyRpc::new(client.clone()).into_rpc())?;
+	io.merge(ChainRpc::new(client.clone()).into_rpc())?;
 
 	if let Some(command_sink) = command_sink {
 		io.merge(

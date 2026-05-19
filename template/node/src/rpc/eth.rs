@@ -23,6 +23,7 @@ pub use fc_rpc::{EthBlockDataCacheTask, EthConfig};
 pub use fc_rpc_core::types::{FeeHistoryCache, FeeHistoryCacheLimit, FilterPool};
 use fc_storage::StorageOverride;
 use fp_rpc::{ConvertTransaction, ConvertTransactionRuntimeApi, EthereumRuntimeRPCApi};
+use pallet_relayer_runtime_api::RelayerRuntimeApi;
 use pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi;
 
 /// Extra dependencies for Ethereum compatibility.
@@ -84,6 +85,7 @@ where
 		+ BlockBuilderApi<B>
 		+ ConvertTransactionRuntimeApi<B>
 		+ EthereumRuntimeRPCApi<B>
+		+ RelayerRuntimeApi<B>
 		+ ShieldedPoolRuntimeApi<B>,
 	C: HeaderBackend<B> + HeaderMetadata<B, Error = BlockChainError>,
 	C: BlockchainEvents<B> + AuxStore + UsageProvider<B> + StorageProvider<B, BE> + 'static,
