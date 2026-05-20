@@ -20,15 +20,15 @@ scale-info = { version = "2.11", default-features = false, features = ["derive"]
 once_cell = { version = "1.19", default-features = false, features = ["alloc"] }
 
 # Substrate primitives
-sp-core = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
-sp-io = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
-sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
-sp-std = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+sp-core = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
+sp-io = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
+sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
+sp-std = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
 
 # FRAME dependencies
-frame-benchmarking = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false, optional = true }
-frame-support = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
-frame-system = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506", default-features = false }
+frame-benchmarking = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false, optional = true }
+frame-support = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
+frame-system = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
 
 # Local dependencies
 orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
@@ -44,10 +44,10 @@ ark-ff = { version = "0.5.0", default-features = false }
 ark-bn254 = { version = "0.5.0", default-features = false }
 ark-ff = { version = "0.5.0", default-features = false }
 orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
-pallet-balances = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
+pallet-balances = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512" }
 pallet-zk-verifier = { path = "../zk-verifier", default-features = false }
-sp-core = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
-sp-io = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
+sp-core = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512" }
+sp-io = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512" }
 
 [features]
 default = ["std", "poseidon-native"]

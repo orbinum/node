@@ -39,6 +39,12 @@ pub use evm::{
 	Config, ExitReason, Opcode,
 };
 
+/// Default EVM configuration.
+pub static EVM_CONFIG: Config = Config::osaka();
+
+/// EIP-7825: Maximum transaction gas limit (2^24).
+pub const MAX_TRANSACTION_GAS_LIMIT: U256 = U256([16_777_216, 0, 0, 0]);
+
 pub use self::{
 	account_provider::AccountProvider,
 	precompile::{
@@ -62,6 +68,18 @@ pub struct Vicinity {
 	/// Origin of the transaction.
 	pub origin: H160,
 }
+
+/// Per-account EVM storage override payload (Geth-style `state` override).
+///
+/// Each entry is `(address, slots)` where `slots` is `[(key, value), ...]`.
+/// When an address is present, its persisted storage is fully replaced: reads
+/// are served exclusively from the provided slot list and missing keys return
+/// zero. An empty `slots` vector represents a full storage wipe (the
+/// `"state": {}` case).
+///
+/// `None` means no state overrides at all. The encoding cost is bounded by the
+/// caller-supplied payload size (Geth parity); no on-chain storage is enumerated.
+pub type StateOverride = Option<Vec<(H160, Vec<(H256, H256)>)>>;
 
 /// `System::Account` 16(hash) + 20 (key) + 72 (AccountInfo::max_encoded_len)
 pub const ACCOUNT_BASIC_PROOF_SIZE: u64 = 108;

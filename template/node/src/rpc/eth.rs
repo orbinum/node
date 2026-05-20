@@ -19,7 +19,7 @@ use sp_core::H256;
 use sp_inherents::CreateInherentDataProviders;
 use sp_runtime::traits::Block as BlockT;
 // Frontier
-pub use fc_rpc::{EthBlockDataCacheTask, EthConfig};
+pub use fc_rpc::{EthBlockDataCacheTask, EthConfig, LogsJournalConfig};
 pub use fc_rpc_core::types::{FeeHistoryCache, FeeHistoryCacheLimit, FilterPool};
 use fc_storage::StorageOverride;
 use fp_rpc::{ConvertTransaction, ConvertTransactionRuntimeApi, EthereumRuntimeRPCApi};
@@ -54,6 +54,10 @@ pub struct EthDeps<B: BlockT, C, P, CT, CIDP> {
 	pub filter_pool: Option<FilterPool>,
 	/// Maximum number of logs in a query.
 	pub max_past_logs: u32,
+	/// Maximum block range for eth_getLogs.
+	pub max_block_range: u32,
+	/// Reorg journal limits for log filters and subscriptions.
+	pub logs_journal_config: LogsJournalConfig,
 	/// Fee history cache.
 	pub fee_history_cache: FeeHistoryCache,
 	/// Maximum fee history cache size.
@@ -61,6 +65,8 @@ pub struct EthDeps<B: BlockT, C, P, CT, CIDP> {
 	/// Maximum allowed gas limit will be ` block.gas_limit * execute_gas_limit_multiplier` when
 	/// using eth_call/eth_estimateGas.
 	pub execute_gas_limit_multiplier: u64,
+	/// Allow RPC submission of unprotected legacy transactions.
+	pub rpc_allow_unprotected_txs: bool,
 	/// Mandated parent hashes for a given block hash.
 	pub forced_parent_hashes: Option<BTreeMap<H256, H256>>,
 	/// Something that can create the inherent data providers for pending state
@@ -97,8 +103,8 @@ where
 {
 	use fc_rpc::{
 		pending::AuraConsensusDataProvider, Debug, DebugApiServer, Eth, EthApiServer, EthDevSigner,
-		EthFilter, EthFilterApiServer, EthPubSub, EthPubSubApiServer, EthSigner, Net, NetApiServer,
-		Web3, Web3ApiServer,
+		EthFilter, EthFilterApiServer, EthPubSub, EthPubSubApiServer, EthSigner, LogsJournal, Net,
+		NetApiServer, Web3, Web3ApiServer,
 	};
 	#[cfg(feature = "txpool")]
 	use fc_rpc::{TxPool, TxPoolApiServer};
@@ -117,9 +123,12 @@ where
 		block_data_cache,
 		filter_pool,
 		max_past_logs,
+		max_block_range,
+		logs_journal_config,
 		fee_history_cache,
 		fee_history_cache_limit,
 		execute_gas_limit_multiplier,
+		rpc_allow_unprotected_txs,
 		forced_parent_hashes,
 		pending_create_inherent_data_providers,
 	} = deps;
@@ -128,6 +137,13 @@ where
 	if enable_dev_signer {
 		signers.push(Box::new(EthDevSigner::new()) as Box<dyn EthSigner>);
 	}
+
+	let logs_journal = Arc::new(LogsJournal::with_config(
+		subscription_task_executor.clone(),
+		storage_override.clone(),
+		pubsub_notification_sinks.clone(),
+		logs_journal_config,
+	));
 
 	io.merge(
 		Eth::<B, C, P, CT, BE, CIDP, EC>::new(
@@ -143,6 +159,7 @@ where
 			fee_history_cache,
 			fee_history_cache_limit,
 			execute_gas_limit_multiplier,
+			rpc_allow_unprotected_txs,
 			forced_parent_hashes,
 			pending_create_inherent_data_providers,
 			Some(Box::new(AuraConsensusDataProvider::new(client.clone()))),
@@ -160,7 +177,9 @@ where
 				filter_pool,
 				500_usize, // max stored filters
 				max_past_logs,
+				max_block_range,
 				block_data_cache.clone(),
+				logs_journal.clone(),
 			)
 			.into_rpc(),
 		)?;
@@ -174,6 +193,7 @@ where
 			subscription_task_executor,
 			storage_override.clone(),
 			pubsub_notification_sinks,
+			logs_journal,
 		)
 		.into_rpc(),
 	)?;

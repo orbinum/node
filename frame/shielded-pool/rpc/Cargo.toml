@@ -12,7 +12,7 @@ pallet-shielded-pool = { path = ".." }
 pallet-shielded-pool-runtime-api = { path = "../runtime-api" }
 parity-scale-codec = { version = "3.6", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
-sp-api = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
-sp-blockchain = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
-sp-core = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
-sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2506" }
+sp-api = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512" }
+sp-blockchain = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512" }
+sp-core = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512" }
+sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512" }

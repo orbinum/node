@@ -30,6 +30,7 @@ mod cache;
 mod debug;
 mod eth;
 mod eth_pubsub;
+mod logs_journal;
 mod net;
 pub mod relay;
 mod signer;
@@ -44,6 +45,7 @@ pub use self::{
 	debug::Debug,
 	eth::{format, pending, EstimateGasAdapter, Eth, EthConfig, EthFilter},
 	eth_pubsub::{EthPubSub, EthereumSubIdProvider},
+	logs_journal::{LogsJournal, LogsJournalConfig, LogsJournalEntry, LogsJournalError},
 	net::Net,
 	relay::{OrbinumRelay, OrbinumRelayApiServer, RelayerStatus},
 	signer::{EthDevSigner, EthSigner, EthValidatorSigner},
@@ -436,7 +438,9 @@ mod tests {
 			ethereum_block_hash,
 			ethereum_transaction_hashes: vec![],
 		};
-		let _ = backend.mapping().write_hashes(commitment);
+		let _ = backend
+			.mapping()
+			.write_hashes(commitment, 2, fc_db::kv::NumberMappingWrite::Write);
 
 		// Expect B1 to be canon
 		assert_eq!(
@@ -468,7 +472,9 @@ mod tests {
 			ethereum_block_hash,
 			ethereum_transaction_hashes: vec![],
 		};
-		let _ = backend.mapping().write_hashes(commitment);
+		let _ = backend
+			.mapping()
+			.write_hashes(commitment, 2, fc_db::kv::NumberMappingWrite::Write);
 
 		// Still expect B1 to be canon
 		assert_eq!(

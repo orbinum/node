@@ -140,7 +140,7 @@ impl Filter {
 
 /// Helper for Filter matching.
 /// Supports conditional indexed parameters and wildcards.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct FilteredParams {
 	pub filter: Filter,
 }
@@ -318,6 +318,7 @@ pub struct FilterPoolItem {
 	pub filter_type: FilterType,
 	pub at_block: u64,
 	pub pending_transaction_hashes: HashSet<H256>,
+	pub last_log_journal_seq: Option<u64>,
 }
 
 /// On-memory stored filters created through the `eth_newFilter` RPC.

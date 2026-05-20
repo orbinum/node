@@ -46,6 +46,10 @@ pub struct EthConfiguration {
 	#[arg(long, default_value = "10000")]
 	pub max_past_logs: u32,
 
+	/// Maximum block range for eth_getLogs.
+	#[arg(long, default_value = "1024")]
+	pub max_block_range: u32,
+
 	/// Maximum fee history cache size.
 	#[arg(long, default_value = "2048")]
 	pub fee_history_limit: u64,
@@ -96,6 +100,18 @@ pub struct EthConfiguration {
 	/// Default value is 200MB.
 	#[arg(long, default_value = "209715200")]
 	pub frontier_sql_backend_cache_size: u64,
+
+	/// Allow RPC submission of unprotected legacy transactions (without EIP-155 chain id).
+	#[arg(long, default_value_t = false)]
+	pub rpc_allow_unprotected_txs: bool,
+
+	/// Maximum pending pubsub notifications per subscriber before it is dropped.
+	#[arg(long, default_value = "512")]
+	pub pubsub_max_pending_notifications: usize,
+
+	/// Maximum retained bytes across the reorg-aware log journal.
+	#[arg(long, default_value = "536870912")]
+	pub logs_journal_max_total_bytes: usize,
 }
 
 pub struct FrontierPartialComponents {
@@ -140,6 +156,7 @@ pub async fn spawn_frontier_tasks<B, RA, HF>(
 	storage_override: Arc<dyn StorageOverride<B>>,
 	fee_history_cache: FeeHistoryCache,
 	fee_history_cache_limit: FeeHistoryCacheLimit,
+	state_pruning_blocks: Option<u64>,
 	sync: Arc<SyncingService<B>>,
 	pubsub_notification_sinks: Arc<
 		fc_mapping_sync::EthereumBlockNotificationSinks<
@@ -168,6 +185,7 @@ pub async fn spawn_frontier_tasks<B, RA, HF>(
 					b.clone(),
 					3,
 					0u32.into(),
+					state_pruning_blocks,
 					fc_mapping_sync::SyncStrategy::Normal,
 					sync,
 					pubsub_notification_sinks,
