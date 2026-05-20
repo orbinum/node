@@ -38,7 +38,8 @@ const CURRENT_VERSION: u32 = 2;
 
 /// Number of columns in each version.
 const _V1_NUM_COLUMNS: u32 = 4;
-const V2_NUM_COLUMNS: u32 = 4;
+/// V2 added BLOCK_NUMBER_MAPPING as column 4 (stable2512), so NUM_COLUMNS = 5.
+const V2_NUM_COLUMNS: u32 = 5;
 
 /// Database upgrade errors.
 #[derive(Debug)]
