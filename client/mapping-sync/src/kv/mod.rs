@@ -947,6 +947,7 @@ mod tests {
 			Some(canonical_reconciler::ReconcileStats {
 				scanned: 1,
 				updated: 0,
+				digest_mismatch_fallbacks: 0,
 				first_unresolved: Some(1),
 				highest_reconciled: None,
 				next_cursor: 1,
@@ -1409,7 +1410,7 @@ mod tests {
 		);
 		let backend = builder.backend();
 		let (client, _) =
-			builder.build_with_native_executor::<frontier_template_runtime::RuntimeApi, _>(None);
+			builder.build_with_native_executor::<orbinum_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 
 		let frontier_backend = fc_db::kv::Backend::<OpaqueBlock, _>::new(
@@ -1472,7 +1473,7 @@ mod tests {
 
 		let did_sync = sync_one_block(
 			client.as_ref(),
-			&backend,
+			backend.as_ref(),
 			storage_override,
 			&frontier_backend,
 			0,
