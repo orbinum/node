@@ -28,6 +28,8 @@ ignore = [
     "RUSTSEC-2026-0094",  # wasmtime 8.0.1 - improperly masked return from table.grow with Winch (from Polkadot SDK)
     "RUSTSEC-2026-0095",  # wasmtime 8.0.1 - sandbox-escaping memory access with Winch (from Polkadot SDK)
     "RUSTSEC-2026-0096",  # wasmtime 8.0.1 - miscompiled heap access enables sandbox escape on aarch64 (from Polkadot SDK)
+    "RUSTSEC-2026-0006",  # wasmtime 35.0.0 - segfault with f64.copysign on x86-64 (from polkadot-sdk stable2512 sc-executor-wasmtime)
+    "RUSTSEC-2026-0114",  # wasmtime 35.0.0 - panic allocating table exceeding host address space (from polkadot-sdk stable2512 sc-executor-wasmtime)
 
     # Unsound (transitive, no upgrade path within current SDK pinning)
     "RUSTSEC-2026-0097",  # rand 0.8.5 / 0.9.2 - unsound with custom logger (from ark-std, fc-rpc, litep2p)
