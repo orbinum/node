@@ -1051,13 +1051,21 @@ mod test {
 		}
 
 		// Test all blocks are initially canon.
-		let mut res = sqlx::query("SELECT is_canon FROM blocks")
-			.fetch_all(&pool)
-			.await
-			.expect("test query result")
-			.iter()
-			.map(|row| row.get::<i32, _>(0))
-			.collect::<Vec<i32>>();
+		// Poll until the indexer has processed all 10 blocks (or timeout).
+		let timeout = std::time::Instant::now() + Duration::from_secs(10);
+		let mut res = loop {
+			let rows = sqlx::query("SELECT is_canon FROM blocks")
+				.fetch_all(&pool)
+				.await
+				.expect("test query result")
+				.iter()
+				.map(|row| row.get::<i32, _>(0))
+				.collect::<Vec<i32>>();
+			if rows.len() == 10 || std::time::Instant::now() >= timeout {
+				break rows;
+			}
+			futures_timer::Delay::new(Duration::from_millis(50)).await;
+		};
 
 		assert_eq!(res.len(), 10);
 		res.dedup();
