@@ -16,8 +16,6 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use std::sync::Arc;
-
 use ethereum_types::{H256, U256};
 use jsonrpsee::core::RpcResult;
 // Substrate
@@ -29,12 +27,41 @@ use sp_core::hashing::keccak_256;
 use sp_runtime::traits::Block as BlockT;
 // Frontier
 use fc_rpc_core::types::*;
-use fp_rpc::EthereumRuntimeRPCApi;
+use fp_rpc::{EthereumRuntimeRPCApi, TransactionStatus};
 
 use crate::{
 	eth::{rich_block_build, BlockInfo, Eth},
-	frontier_backend_client, internal_err,
+	internal_err,
 };
+
+fn status_slots_or_missing(
+	statuses: Option<Vec<TransactionStatus>>,
+	tx_count: usize,
+) -> Vec<Option<TransactionStatus>> {
+	statuses
+		.map(|statuses| statuses.into_iter().map(Option::Some).collect())
+		.unwrap_or_else(|| vec![None; tx_count])
+}
+
+fn rich_block_or_none(
+	block: Option<ethereum::BlockV3>,
+	statuses: Option<Vec<TransactionStatus>>,
+	block_hash: Option<H256>,
+	full: bool,
+	base_fee: U256,
+	is_pending: bool,
+) -> Option<RichBlock> {
+	let block = block?;
+	let statuses = status_slots_or_missing(statuses, block.transactions.len());
+	Some(rich_block_build(
+		block,
+		statuses,
+		block_hash,
+		full,
+		Some(base_fee),
+		is_pending,
+	))
+}
 
 impl<B, C, P, CT, BE, CIDP, EC> Eth<B, C, P, CT, BE, CIDP, EC>
 where
@@ -54,30 +81,22 @@ where
 			..
 		} = self.block_info_by_eth_block_hash(hash).await?;
 
-		match (block, statuses) {
-			(Some(block), Some(statuses)) => {
-				let mut rich_block = rich_block_build(
-					block,
-					statuses.into_iter().map(Option::Some).collect(),
-					Some(hash),
-					full,
-					Some(base_fee),
-					false,
-				);
+		let mut rich_block =
+			match rich_block_or_none(block, statuses, Some(hash), full, base_fee, false) {
+				Some(rich_block) => rich_block,
+				None => return Ok(None),
+			};
 
-				let substrate_hash = H256::from_slice(substrate_hash.as_ref());
-				if let Some(parent_hash) = self
-					.forced_parent_hashes
-					.as_ref()
-					.and_then(|parent_hashes| parent_hashes.get(&substrate_hash).cloned())
-				{
-					rich_block.inner.header.parent_hash = parent_hash
-				}
-
-				Ok(Some(rich_block))
-			}
-			_ => Ok(None),
+		let substrate_hash = H256::from_slice(substrate_hash.as_ref());
+		if let Some(parent_hash) = self
+			.forced_parent_hashes
+			.as_ref()
+			.and_then(|parent_hashes| parent_hashes.get(&substrate_hash).cloned())
+		{
+			rich_block.inner.header.parent_hash = parent_hash
 		}
+
+		Ok(Some(rich_block))
 	}
 
 	pub async fn block_by_number(
@@ -85,96 +104,80 @@ where
 		number_or_hash: BlockNumberOrHash,
 		full: bool,
 	) -> RpcResult<Option<RichBlock>> {
-		let client = Arc::clone(&self.client);
-		let block_data_cache = Arc::clone(&self.block_data_cache);
-		let backend = Arc::clone(&self.backend);
-		let pool = Arc::clone(&self.pool);
+		// Handle pending blocks specially - they're not in mapping-sync
+		if number_or_hash == BlockNumberOrHash::Pending {
+			return self.pending_block(full).await;
+		}
 
-		match frontier_backend_client::native_block_id::<B, C>(
-			client.as_ref(),
-			backend.as_ref(),
-			Some(number_or_hash),
-		)
-		.await?
+		// For all other block queries, use mapping-sync via block_info_by_number
+		let BlockInfo {
+			block,
+			statuses,
+			substrate_hash,
+			base_fee,
+			..
+		} = self.block_info_by_number(number_or_hash).await?;
+
+		let block_hash = block
+			.as_ref()
+			.map(|block| H256::from(keccak_256(&rlp::encode(&block.header))));
+		let mut rich_block =
+			match rich_block_or_none(block, statuses, block_hash, full, base_fee, false) {
+				Some(rich_block) => rich_block,
+				None => return Ok(None),
+			};
+
+		let substrate_hash = H256::from_slice(substrate_hash.as_ref());
+		if let Some(parent_hash) = self
+			.forced_parent_hashes
+			.as_ref()
+			.and_then(|parent_hashes| parent_hashes.get(&substrate_hash).cloned())
 		{
-			Some(id) => {
-				let substrate_hash = client
-					.expect_block_hash_from_id(&id)
-					.map_err(|_| internal_err(format!("Expect block number from id: {id}")))?;
+			rich_block.inner.header.parent_hash = parent_hash
+		}
 
-				let block = block_data_cache.current_block(substrate_hash).await;
-				let statuses = block_data_cache
-					.current_transaction_statuses(substrate_hash)
-					.await;
+		Ok(Some(rich_block))
+	}
 
-				let base_fee = client.runtime_api().gas_price(substrate_hash).ok();
+	async fn pending_block(&self, full: bool) -> RpcResult<Option<RichBlock>> {
+		let api = self.client.runtime_api();
+		let best_hash = self.client.info().best_hash;
 
-				match (block, statuses) {
-					(Some(block), Some(statuses)) => {
-						let hash = H256::from(keccak_256(&rlp::encode(&block.header)));
-						let mut rich_block = rich_block_build(
-							block,
-							statuses.into_iter().map(Option::Some).collect(),
-							Some(hash),
-							full,
-							base_fee,
-							false,
-						);
+		// Get current in-pool transactions
+		let mut xts: Vec<<B as BlockT>::Extrinsic> = Vec::new();
+		// ready validated pool
+		xts.extend(
+			self.pool
+				.ready()
+				.map(|in_pool_tx| in_pool_tx.data().as_ref().clone())
+				.collect::<Vec<<B as BlockT>::Extrinsic>>(),
+		);
 
-						let substrate_hash = H256::from_slice(substrate_hash.as_ref());
-						if let Some(parent_hash) = self
-							.forced_parent_hashes
-							.as_ref()
-							.and_then(|parent_hashes| parent_hashes.get(&substrate_hash).cloned())
-						{
-							rich_block.inner.header.parent_hash = parent_hash
-						}
+		// future validated pool
+		xts.extend(
+			self.pool
+				.futures()
+				.iter()
+				.map(|in_pool_tx| in_pool_tx.data().as_ref().clone())
+				.collect::<Vec<<B as BlockT>::Extrinsic>>(),
+		);
 
-						Ok(Some(rich_block))
-					}
-					_ => Ok(None),
-				}
-			}
-			None if number_or_hash == BlockNumberOrHash::Pending => {
-				let api = client.runtime_api();
-				let best_hash = client.info().best_hash;
+		let (block, statuses) = api
+			.pending_block(best_hash, xts)
+			.map_err(|_| internal_err(format!("Runtime access error at {best_hash}")))?;
 
-				// Get current in-pool transactions
-				let mut xts: Vec<<B as BlockT>::Extrinsic> = Vec::new();
-				// ready validated pool
-				xts.extend(
-					pool.ready()
-						.map(|in_pool_tx| in_pool_tx.data().as_ref().clone())
-						.collect::<Vec<<B as BlockT>::Extrinsic>>(),
-				);
+		let base_fee = api.gas_price(best_hash).ok();
 
-				// future validated pool
-				xts.extend(
-					pool.futures()
-						.iter()
-						.map(|in_pool_tx| in_pool_tx.data().as_ref().clone())
-						.collect::<Vec<<B as BlockT>::Extrinsic>>(),
-				);
-
-				let (block, statuses) = api
-					.pending_block(best_hash, xts)
-					.map_err(|_| internal_err(format!("Runtime access error at {best_hash}")))?;
-
-				let base_fee = api.gas_price(best_hash).ok();
-
-				match (block, statuses) {
-					(Some(block), Some(statuses)) => Ok(Some(rich_block_build(
-						block,
-						statuses.into_iter().map(Option::Some).collect(),
-						None,
-						full,
-						base_fee,
-						true,
-					))),
-					_ => Ok(None),
-				}
-			}
-			None => Ok(None),
+		match (block, statuses) {
+			(Some(block), Some(statuses)) => Ok(Some(rich_block_build(
+				block,
+				statuses.into_iter().map(Option::Some).collect(),
+				None,
+				full,
+				base_fee,
+				true,
+			))),
+			_ => Ok(None),
 		}
 	}
 
@@ -243,5 +246,88 @@ where
 		_: Index,
 	) -> RpcResult<Option<RichBlock>> {
 		Ok(None)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use ethereum::PartialHeader;
+	use ethereum_types::{Bloom, H160, H256, H64, U256};
+
+	use super::rich_block_or_none;
+
+	fn make_block(seed: u64) -> ethereum::BlockV3 {
+		let partial_header = PartialHeader {
+			parent_hash: H256::from_low_u64_be(seed),
+			beneficiary: H160::from_low_u64_be(seed),
+			state_root: H256::from_low_u64_be(seed.saturating_add(1)),
+			receipts_root: H256::from_low_u64_be(seed.saturating_add(2)),
+			logs_bloom: Bloom::default(),
+			difficulty: U256::from(seed),
+			number: U256::from(seed),
+			gas_limit: U256::from(seed.saturating_add(100)),
+			gas_used: U256::from(seed.saturating_add(50)),
+			timestamp: seed,
+			extra_data: Vec::new(),
+			mix_hash: H256::from_low_u64_be(seed.saturating_add(3)),
+			nonce: H64::from_low_u64_be(seed),
+		};
+		ethereum::Block::new(partial_header, vec![], vec![])
+	}
+
+	#[test]
+	fn block_by_hash_returns_block_when_statuses_missing_full_true() {
+		let block = make_block(1);
+		let rich = rich_block_or_none(
+			Some(block),
+			None,
+			Some(H256::repeat_byte(0x11)),
+			true,
+			U256::from(1),
+			false,
+		);
+		assert!(rich.is_some());
+	}
+
+	#[test]
+	fn block_by_hash_returns_block_when_statuses_missing_full_false() {
+		let block = make_block(2);
+		let rich = rich_block_or_none(
+			Some(block),
+			None,
+			Some(H256::repeat_byte(0x22)),
+			false,
+			U256::from(1),
+			false,
+		);
+		assert!(rich.is_some());
+	}
+
+	#[test]
+	fn block_by_number_explicit_returns_block_when_statuses_missing_full_true() {
+		let block = make_block(3);
+		let rich = rich_block_or_none(
+			Some(block),
+			None,
+			Some(H256::repeat_byte(0x33)),
+			true,
+			U256::from(1),
+			false,
+		);
+		assert!(rich.is_some());
+	}
+
+	#[test]
+	fn block_by_number_explicit_returns_block_when_statuses_missing_full_false() {
+		let block = make_block(4);
+		let rich = rich_block_or_none(
+			Some(block),
+			None,
+			Some(H256::repeat_byte(0x44)),
+			false,
+			U256::from(1),
+			false,
+		);
+		assert!(rich.is_some());
 	}
 }

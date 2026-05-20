@@ -48,6 +48,20 @@ pub trait Backend<Block: BlockT>: Send + Sync {
 	/// Returns reference to log indexer backend.
 	fn log_indexer(&self) -> &dyn LogIndexerBackend<Block>;
 
+	/// Get the ethereum block hash for a given block number.
+	async fn block_hash_by_number(&self, block_number: u64) -> Result<Option<H256>, String>;
+
+	/// Persist or repair the ethereum block hash for a given block number.
+	///
+	/// Backends that cannot mutate mappings can rely on the default no-op.
+	async fn set_block_hash_by_number(
+		&self,
+		_block_number: u64,
+		_ethereum_block_hash: H256,
+	) -> Result<(), String> {
+		Ok(())
+	}
+
 	/// Indicate whether the log indexing feature is supported.
 	fn is_indexed(&self) -> bool {
 		self.log_indexer().is_indexed()

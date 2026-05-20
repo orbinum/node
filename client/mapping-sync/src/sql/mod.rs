@@ -16,7 +16,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use std::{ops::DerefMut, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use futures::prelude::*;
 // Substrate
@@ -29,17 +29,27 @@ use sp_runtime::traits::{Block as BlockT, Header as HeaderT, UniqueSaturatedInto
 // Frontier
 use fp_rpc::EthereumRuntimeRPCApi;
 
-use crate::{EthereumBlockNotification, EthereumBlockNotificationSinks, SyncStrategy};
+use crate::{
+	emit_block_notification, BlockNotificationContext, EthereumBlockNotification,
+	EthereumBlockNotificationSinks, ReorgInfo, SyncStrategy,
+};
 
 /// Defines the commands for the sync worker.
 #[derive(Debug)]
-pub enum WorkerCommand {
+pub enum WorkerCommand<Block: BlockT<Hash = H256>> {
 	/// Resume indexing from the last indexed canon block.
 	ResumeSync,
 	/// Index leaves.
 	IndexLeaves(Vec<H256>),
 	/// Index the best block known so far via import notifications.
-	IndexBestBlock(H256),
+	/// Emits a pubsub notification after indexing with the provided `is_new_best` status.
+	/// When `reorg_info` is Some, the notification includes reorg information.
+	IndexBestBlock {
+		block_hash: H256,
+		/// Whether this block was the new best at import time.
+		is_new_best: bool,
+		reorg_info: Option<Arc<ReorgInfo<Block>>>,
+	},
 	/// Canonicalize the enacted and retracted blocks reported via import notifications.
 	Canonicalize {
 		common: H256,
@@ -78,9 +88,10 @@ where
 		substrate_backend: Arc<Backend>,
 		indexer_backend: Arc<fc_db::sql::Backend<Block>>,
 		pubsub_notification_sinks: Arc<
-			EthereumBlockNotificationSinks<EthereumBlockNotification<Block>>,
+			EthereumBlockNotificationSinks<crate::EthereumBlockNotification<Block>>,
 		>,
-	) -> tokio::sync::mpsc::Sender<WorkerCommand> {
+		sync_oracle: Arc<dyn SyncOracle + Send + Sync + 'static>,
+	) -> tokio::sync::mpsc::Sender<WorkerCommand<Block>> {
 		let (tx, mut rx) = tokio::sync::mpsc::channel(100);
 		tokio::task::spawn(async move {
 			while let Some(cmd) = rx.recv().await {
@@ -122,7 +133,11 @@ where
 							.await;
 						}
 					}
-					WorkerCommand::IndexBestBlock(block_hash) => {
+					WorkerCommand::IndexBestBlock {
+						block_hash,
+						is_new_best,
+						reorg_info,
+					} => {
 						index_canonical_block_and_ancestors(
 							client.clone(),
 							substrate_backend.clone(),
@@ -130,13 +145,18 @@ where
 							block_hash,
 						)
 						.await;
-						let sinks = &mut pubsub_notification_sinks.lock();
-						for sink in sinks.iter() {
-							let _ = sink.unbounded_send(EthereumBlockNotification {
-								is_new_best: true,
+						// Emit notification after indexing so blocks are queryable.
+						// Uses the unified notification mechanism for consistent behavior
+						// with the KV backend.
+						emit_block_notification(
+							pubsub_notification_sinks.as_ref(),
+							sync_oracle.as_ref(),
+							BlockNotificationContext {
 								hash: block_hash,
-							});
-						}
+								is_new_best,
+								reorg_info,
+							},
+						);
 					}
 					WorkerCommand::Canonicalize {
 						common,
@@ -145,6 +165,7 @@ where
 					} => {
 						canonicalize_blocks(indexer_backend.clone(), common, enacted, retracted)
 							.await;
+						// Notification is emitted by IndexBestBlock after indexing completes
 					}
 					WorkerCommand::CheckIndexedBlocks => {
 						// Fix any indexed blocks that did not have their logs indexed
@@ -188,6 +209,7 @@ where
 			substrate_backend.clone(),
 			indexer_backend.clone(),
 			pubsub_notification_sinks.clone(),
+			sync_oracle.clone(),
 		)
 		.await;
 
@@ -212,12 +234,6 @@ where
 					if let Ok(leaves) = substrate_backend.blockchain().leaves() {
 						tx.send(WorkerCommand::IndexLeaves(leaves)).await.ok();
 					}
-					if sync_oracle.is_major_syncing() {
-						let sinks = &mut pubsub_notification_sinks.lock();
-						if !sinks.is_empty() {
-							*sinks.deref_mut() = vec![];
-						}
-					}
 				}
 				notification = notifications.next() => if let Some(notification) = notification {
 					log::debug!(
@@ -229,32 +245,32 @@ where
 						notification.is_new_best,
 					);
 					if notification.is_new_best {
-						if let Some(tree_route) = notification.tree_route {
+						let reorg_info = if let Some(ref tree_route) = notification.tree_route {
 							log::debug!(
 								target: "frontier-sql",
 								"🔀  Re-org happened at new best {}, proceeding to canonicalize db",
 								notification.hash
 							);
-							let retracted = tree_route
-								.retracted()
-								.iter()
-								.map(|hash_and_number| hash_and_number.hash)
-								.collect::<Vec<_>>();
-							let enacted = tree_route
-								.enacted()
-								.iter()
-								.map(|hash_and_number| hash_and_number.hash)
-								.collect::<Vec<_>>();
-
-							let common = tree_route.common_block().hash;
+							let info = Arc::new(ReorgInfo::from_tree_route(tree_route, notification.hash));
+							// Note: new_best is handled separately by IndexBestBlock.
 							tx.send(WorkerCommand::Canonicalize {
-								common,
-								enacted,
-								retracted,
+								common: info.common_ancestor,
+								enacted: info.enacted.clone(),
+								retracted: info.retracted.clone(),
 							}).await.ok();
-						}
+							Some(info)
+						} else {
+							None
+						};
 
-						tx.send(WorkerCommand::IndexBestBlock(notification.hash)).await.ok();
+						// Index the best block and emit notification after indexing completes.
+						// This ensures blocks are available via storage_override when the
+						// notification is processed.
+						tx.send(WorkerCommand::IndexBestBlock {
+							block_hash: notification.hash,
+							is_new_best: notification.is_new_best,
+							reorg_info,
+						}).await.ok();
 					}
 				}
 			}
@@ -541,7 +557,7 @@ mod test {
 		let backend = builder.backend();
 		// Client
 		let (client, _) =
-			builder.build_with_native_executor::<orbinum_runtime::RuntimeApi, _>(None);
+			builder.build_with_native_executor::<frontier_template_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		// Overrides
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
@@ -744,7 +760,7 @@ mod test {
 		let backend = builder.backend();
 		// Client
 		let (client, _) =
-			builder.build_with_native_executor::<orbinum_runtime::RuntimeApi, _>(None);
+			builder.build_with_native_executor::<frontier_template_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		// Overrides
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
@@ -948,7 +964,7 @@ mod test {
 		let backend = builder.backend();
 		// Client
 		let (client, _) =
-			builder.build_with_native_executor::<orbinum_runtime::RuntimeApi, _>(None);
+			builder.build_with_native_executor::<frontier_template_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		// Overrides
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
@@ -1068,19 +1084,27 @@ mod test {
 			futures_timer::Delay::new(Duration::from_millis(100)).await;
 		}
 
-		// Test the reorged chain is correctly indexed.
-		let res = sqlx::query("SELECT substrate_block_hash, is_canon, block_number FROM blocks")
-			.fetch_all(&pool)
-			.await
-			.expect("test query result")
-			.iter()
-			.map(|row| {
-				let substrate_block_hash = H256::from_slice(&row.get::<Vec<u8>, _>(0)[..]);
-				let is_canon = row.get::<i32, _>(1);
-				let block_number = row.get::<i32, _>(2);
-				(substrate_block_hash, is_canon, block_number)
-			})
-			.collect::<Vec<(H256, i32, i32)>>();
+		// Wait for the indexer to process all 20 blocks (async worker may lag).
+		let timeout = std::time::Instant::now() + Duration::from_secs(5);
+		let res = loop {
+			let rows =
+				sqlx::query("SELECT substrate_block_hash, is_canon, block_number FROM blocks")
+					.fetch_all(&pool)
+					.await
+					.expect("test query result")
+					.iter()
+					.map(|row| {
+						let substrate_block_hash = H256::from_slice(&row.get::<Vec<u8>, _>(0)[..]);
+						let is_canon = row.get::<i32, _>(1);
+						let block_number = row.get::<i32, _>(2);
+						(substrate_block_hash, is_canon, block_number)
+					})
+					.collect::<Vec<(H256, i32, i32)>>();
+			if rows.len() == 20 || std::time::Instant::now() >= timeout {
+				break rows;
+			}
+			futures_timer::Delay::new(Duration::from_millis(50)).await;
+		};
 
 		// 20 blocks in total
 		assert_eq!(res.len(), 20);
@@ -1114,7 +1138,7 @@ mod test {
 		let backend = builder.backend();
 		// Client
 		let (client, _) =
-			builder.build_with_native_executor::<orbinum_runtime::RuntimeApi, _>(None);
+			builder.build_with_native_executor::<frontier_template_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		// Overrides
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
@@ -1260,7 +1284,7 @@ mod test {
 		);
 		let backend = builder.backend();
 		let (client, _) =
-			builder.build_with_native_executor::<orbinum_runtime::RuntimeApi, _>(None);
+			builder.build_with_native_executor::<frontier_template_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
 		let indexer_backend = fc_db::sql::Backend::new(
@@ -1361,7 +1385,7 @@ mod test {
 		);
 		let backend = builder.backend();
 		let (client, _) =
-			builder.build_with_native_executor::<orbinum_runtime::RuntimeApi, _>(None);
+			builder.build_with_native_executor::<frontier_template_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
 		let indexer_backend = fc_db::sql::Backend::new(
@@ -1476,7 +1500,7 @@ mod test {
 		);
 		let backend = builder.backend();
 		let (client, _) =
-			builder.build_with_native_executor::<orbinum_runtime::RuntimeApi, _>(None);
+			builder.build_with_native_executor::<frontier_template_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
 		let indexer_backend = fc_db::sql::Backend::new(
@@ -1577,7 +1601,7 @@ mod test {
 		);
 		let backend = builder.backend();
 		let (client, _) =
-			builder.build_with_native_executor::<orbinum_runtime::RuntimeApi, _>(None);
+			builder.build_with_native_executor::<frontier_template_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
 		let indexer_backend = fc_db::sql::Backend::new(
@@ -1692,7 +1716,7 @@ mod test {
 		);
 		let backend = builder.backend();
 		let (client, _) =
-			builder.build_with_native_executor::<orbinum_runtime::RuntimeApi, _>(None);
+			builder.build_with_native_executor::<frontier_template_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
 		let indexer_backend = fc_db::sql::Backend::new(
@@ -1793,7 +1817,7 @@ mod test {
 		);
 		let backend = builder.backend();
 		let (client, _) =
-			builder.build_with_native_executor::<orbinum_runtime::RuntimeApi, _>(None);
+			builder.build_with_native_executor::<frontier_template_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
 		let indexer_backend = fc_db::sql::Backend::new(

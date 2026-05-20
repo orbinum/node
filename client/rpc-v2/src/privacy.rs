@@ -17,7 +17,23 @@ use pallet_shielded_pool::{
 };
 use sc_client_api::StorageProvider as ScStorageProvider;
 use scale_codec::Decode;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+/// `u128` serde helper: serialises as a decimal string so JavaScript clients
+/// can parse values larger than `Number.MAX_SAFE_INTEGER` without precision loss.
+mod serde_u128_str {
+	use super::*;
+
+	pub fn serialize<S: Serializer>(v: &u128, s: S) -> Result<S::Ok, S::Error> {
+		s.serialize_str(&v.to_string())
+	}
+
+	pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<u128, D::Error> {
+		String::deserialize(d)?
+			.parse::<u128>()
+			.map_err(serde::de::Error::custom)
+	}
+}
 use sp_blockchain::HeaderBackend;
 use sp_core::{
 	hashing::{blake2_128, twox_128},
@@ -83,6 +99,9 @@ pub struct NullifierStatusResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AssetBalanceResponse {
 	pub asset_id: u32,
+	/// Serialised as a decimal string to preserve precision in JS (u128 can exceed
+	/// `Number.MAX_SAFE_INTEGER` for large balances with 18 decimals).
+	#[serde(with = "serde_u128_str")]
 	pub balance: u128,
 }
 
@@ -92,6 +111,8 @@ pub struct PoolStatsResponse {
 	pub merkle_root: String,
 	pub commitment_count: u32,
 	pub nullifier_count: u64,
+	/// Serialised as a decimal string to preserve precision in JS.
+	#[serde(with = "serde_u128_str")]
 	pub total_balance: u128,
 	pub asset_balances: Vec<AssetBalanceResponse>,
 	pub tree_depth: u32,
@@ -728,11 +749,12 @@ mod tests {
 			let json = serde_json::to_value(&resp).unwrap();
 			assert_eq!(json["commitment_count"], 5u64);
 			assert_eq!(json["nullifier_count"], 3u64);
-			assert_eq!(json["total_balance"].as_u64().unwrap(), 1_000u64);
+			// balance fields are serialised as decimal strings to preserve JS precision.
+			assert_eq!(json["total_balance"].as_str().unwrap(), "1000");
 			let ab = json["asset_balances"].as_array().unwrap();
 			assert_eq!(ab.len(), 2);
 			assert_eq!(ab[0]["asset_id"], 0u64);
-			assert_eq!(ab[0]["balance"].as_u64().unwrap(), 600u64);
+			assert_eq!(ab[0]["balance"].as_str().unwrap(), "600");
 		}
 
 		#[test]

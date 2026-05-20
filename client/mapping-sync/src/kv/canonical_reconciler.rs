@@ -1,0 +1,576 @@
+// This file is part of Frontier.
+
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+use sp_blockchain::HeaderBackend;
+use sp_runtime::traits::{Block as BlockT, Header as HeaderT, UniqueSaturatedInto};
+
+use crate::ReorgInfo;
+
+/// Extract the Ethereum block hash from a substrate block header's consensus digest.
+/// This is pruning-safe: digests are always available regardless of state pruning.
+fn eth_hash_from_digest<Block: BlockT>(header: &Block::Header) -> Option<ethereum_types::H256> {
+	match fp_consensus::find_post_log(header.digest()) {
+		Ok(fp_consensus::PostLog::Hashes(h)) => Some(h.block_hash),
+		Ok(fp_consensus::PostLog::Block(block)) => Some(block.header.hash()),
+		Ok(fp_consensus::PostLog::BlockHash(hash)) => Some(hash),
+		Err(_) => match fp_consensus::find_pre_log(header.digest()) {
+			Ok(fp_consensus::PreLog::Block(block)) => Some(block.header.hash()),
+			Err(_) => None,
+		},
+	}
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReconcileWindow {
+	pub start: u64,
+	pub end: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReconcileStats {
+	pub scanned: u64,
+	pub updated: u64,
+	pub digest_mismatch_fallbacks: u64,
+	pub first_unresolved: Option<u64>,
+	pub highest_reconciled: Option<u64>,
+	pub next_cursor: u64,
+	pub lag_blocks: u64,
+	pub window: ReconcileWindow,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CursorUpdateStrategy {
+	Replace,
+	KeepLower,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ScanDirection {
+	Ascending,
+	Descending,
+}
+
+pub fn build_reconcile_window<Block: BlockT, C: HeaderBackend<Block>>(
+	client: &C,
+	reorg_info: Option<&ReorgInfo<Block>>,
+	new_best_hash: Block::Hash,
+) -> Result<Option<ReconcileWindow>, String> {
+	let Some(new_best_header) = client.header(new_best_hash).map_err(|e| format!("{e:?}"))? else {
+		return Ok(None);
+	};
+	let end: u64 = (*new_best_header.number()).unique_saturated_into();
+	let mut start = end;
+
+	if let Some(info) = reorg_info {
+		if let Some(common_header) = client
+			.header(info.common_ancestor)
+			.map_err(|e| format!("{e:?}"))?
+		{
+			let common_number: u64 = (*common_header.number()).unique_saturated_into();
+			start = start.min(common_number.saturating_add(1));
+		}
+
+		for hash in info.enacted.iter().chain(info.retracted.iter()) {
+			if let Some(header) = client.header(*hash).map_err(|e| format!("{e:?}"))? {
+				let number: u64 = (*header.number()).unique_saturated_into();
+				start = start.min(number);
+			}
+		}
+	}
+
+	Ok(Some(ReconcileWindow {
+		start: start.min(end),
+		end,
+	}))
+}
+
+pub fn reconcile_reorg_window<Block: BlockT, C: HeaderBackend<Block>>(
+	client: &C,
+	storage_override: &dyn fc_storage::StorageOverride<Block>,
+	frontier_backend: &fc_db::kv::Backend<Block, C>,
+	reorg_info: Option<&ReorgInfo<Block>>,
+	new_best_hash: Block::Hash,
+	sync_from: <Block::Header as HeaderT>::Number,
+) -> Result<Option<ReconcileStats>, String> {
+	let Some(window) = build_reconcile_window(client, reorg_info, new_best_hash)? else {
+		return Ok(None);
+	};
+
+	let sync_from_number = UniqueSaturatedInto::<u64>::unique_saturated_into(sync_from);
+	let best_number: u64 = client.info().best_number.unique_saturated_into();
+	let start = window.start.max(sync_from_number);
+	let end = window.end.max(sync_from_number);
+	let stats = reconcile_range_internal(
+		client,
+		storage_override,
+		frontier_backend,
+		start,
+		end,
+		sync_from_number,
+		best_number,
+		ScanDirection::Ascending,
+		CursorUpdateStrategy::KeepLower,
+	)?;
+	Ok(Some(stats))
+}
+
+pub fn reconcile_from_cursor_batch<Block: BlockT, C: HeaderBackend<Block>>(
+	client: &C,
+	storage_override: &dyn fc_storage::StorageOverride<Block>,
+	frontier_backend: &fc_db::kv::Backend<Block, C>,
+	sync_from: <Block::Header as HeaderT>::Number,
+	max_blocks: u64,
+) -> Result<Option<ReconcileStats>, String> {
+	if max_blocks == 0 {
+		return Ok(None);
+	}
+
+	let finalized_number: u64 = client.info().finalized_number.unique_saturated_into();
+	let sync_from_number = UniqueSaturatedInto::<u64>::unique_saturated_into(sync_from);
+	let cursor = frontier_backend
+		.mapping()
+		.canonical_number_repair_cursor()?
+		.unwrap_or(finalized_number);
+
+	// When the cursor has completed its full descending sweep (reached sync_from),
+	// wrap back to finalized_number to start a fresh cycle.
+	let start = if cursor <= sync_from_number {
+		finalized_number
+	} else {
+		cursor.max(sync_from_number).min(finalized_number)
+	};
+	let end = start
+		.saturating_sub(max_blocks.saturating_sub(1))
+		.max(sync_from_number);
+
+	let stats = reconcile_range_internal(
+		client,
+		storage_override,
+		frontier_backend,
+		start,
+		end,
+		sync_from_number,
+		finalized_number,
+		ScanDirection::Descending,
+		CursorUpdateStrategy::Replace,
+	)?;
+	Ok(Some(stats))
+}
+
+pub fn reconcile_recent_window<Block: BlockT, C: HeaderBackend<Block>>(
+	client: &C,
+	storage_override: &dyn fc_storage::StorageOverride<Block>,
+	frontier_backend: &fc_db::kv::Backend<Block, C>,
+	sync_from: <Block::Header as HeaderT>::Number,
+	window_size: u64,
+) -> Result<Option<ReconcileStats>, String> {
+	if window_size == 0 {
+		return Ok(None);
+	}
+
+	let best_number: u64 = client.info().best_number.unique_saturated_into();
+	let sync_from_number = UniqueSaturatedInto::<u64>::unique_saturated_into(sync_from);
+
+	// Anchor at best_number, not finalized — finalized can be 0 on parachains
+	// during startup or sync gaps. best_number is always current.
+	let end = best_number;
+	let start = end
+		.saturating_sub(window_size.saturating_sub(1))
+		.max(sync_from_number);
+
+	if end < sync_from_number {
+		return Ok(None);
+	}
+
+	let stats = reconcile_range_internal(
+		client,
+		storage_override,
+		frontier_backend,
+		start,
+		end,
+		sync_from_number,
+		best_number,
+		ScanDirection::Ascending,
+		CursorUpdateStrategy::KeepLower,
+	)?;
+	Ok(Some(stats))
+}
+
+fn reconcile_range_internal<Block: BlockT, C: HeaderBackend<Block>>(
+	client: &C,
+	storage_override: &dyn fc_storage::StorageOverride<Block>,
+	frontier_backend: &fc_db::kv::Backend<Block, C>,
+	start: u64,
+	end: u64,
+	sync_from_number: u64,
+	upper_bound_number: u64,
+	direction: ScanDirection,
+	cursor_update: CursorUpdateStrategy,
+) -> Result<ReconcileStats, String> {
+	let no_range = match direction {
+		ScanDirection::Ascending => end < start,
+		ScanDirection::Descending => start < end,
+	};
+	if no_range {
+		let lag_blocks = compute_lag_blocks(client, frontier_backend)?;
+		return Ok(ReconcileStats {
+			scanned: 0,
+			updated: 0,
+			digest_mismatch_fallbacks: 0,
+			first_unresolved: None,
+			highest_reconciled: None,
+			next_cursor: sync_from_number,
+			lag_blocks,
+			window: ReconcileWindow { start, end },
+		});
+	}
+
+	let mut updated = 0u64;
+	let mut digest_mismatch_fallbacks = 0u64;
+	let mut first_unresolved = None;
+	let mut highest_reconciled: Option<u64> = None;
+	let mut scanned = 0u64;
+
+	let mut step = |number: u64| -> Result<(), String> {
+		scanned = scanned.saturating_add(1);
+		let Some(canonical_hash) = client
+			.hash(number.unique_saturated_into())
+			.map_err(|e| format!("{e:?}"))?
+		else {
+			first_unresolved.get_or_insert(number);
+			return Ok(());
+		};
+
+		match storage_override.current_block(canonical_hash) {
+			Some(ethereum_block) => {
+				let reconstructed_eth_hash = ethereum_block.header.hash();
+				let digest_eth_hash = client
+					.header(canonical_hash)
+					.map_err(|e| format!("{e:?}"))?
+					.and_then(|h| eth_hash_from_digest::<Block>(&h));
+				let (canonical_eth_hash, transaction_hashes) = match digest_eth_hash {
+					Some(digest_eth_hash) if digest_eth_hash != reconstructed_eth_hash => {
+						log::warn!(
+							target: "reconcile",
+							"Ethereum block hash mismatch while reconciling #{number}: \
+							frontier consensus digest ({digest_eth_hash:?}), \
+							db state ({reconstructed_eth_hash:?}); \
+							writing digest block mapping with db state tx hashes."
+						);
+						digest_mismatch_fallbacks = digest_mismatch_fallbacks.saturating_add(1);
+						(
+							digest_eth_hash,
+							ethereum_block
+								.transactions
+								.iter()
+								.map(|tx| tx.hash())
+								.collect::<Vec<_>>(),
+						)
+					}
+					_ => (
+						reconstructed_eth_hash,
+						ethereum_block
+							.transactions
+							.iter()
+							.map(|tx| tx.hash())
+							.collect::<Vec<_>>(),
+					),
+				};
+
+				let should_update = frontier_backend.mapping().block_hash_by_number(number)?
+					!= Some(canonical_eth_hash);
+				if should_update {
+					frontier_backend
+						.mapping()
+						.set_block_hash_by_number(number, canonical_eth_hash)?;
+					updated = updated.saturating_add(1);
+				}
+
+				let block_mapping_has_canonical = frontier_backend
+					.mapping()
+					.block_hash(&canonical_eth_hash)?
+					.map(|hashes| hashes.contains(&canonical_hash))
+					.unwrap_or(false);
+
+				if !block_mapping_has_canonical {
+					let commitment = fc_db::kv::MappingCommitment::<Block> {
+						block_hash: canonical_hash,
+						ethereum_block_hash: canonical_eth_hash,
+						ethereum_transaction_hashes: transaction_hashes.clone(),
+					};
+					frontier_backend.mapping().write_hashes(
+						commitment,
+						number,
+						fc_db::kv::NumberMappingWrite::Skip,
+					)?;
+				} else if !ethereum_block.transactions.is_empty() {
+					// BLOCK_MAPPING exists but TRANSACTION_MAPPING may be incomplete
+					// (block was initially synced with pruned state via write_hashes
+					// with vec![]). If state is now readable, repair tx mappings.
+					// Check every tx — a partial write (e.g. crash mid-batch) could
+					// leave some mappings present while others are missing.
+					let needs_tx_repair = {
+						let mut needs = false;
+						for tx in &ethereum_block.transactions {
+							let has_canonical = frontier_backend
+								.mapping()
+								.transaction_metadata(&tx.hash())?
+								.iter()
+								.any(|m| m.substrate_block_hash == canonical_hash);
+							if !has_canonical {
+								needs = true;
+								break;
+							}
+						}
+						needs
+					};
+					if needs_tx_repair {
+						let commitment = fc_db::kv::MappingCommitment::<Block> {
+							block_hash: canonical_hash,
+							ethereum_block_hash: canonical_eth_hash,
+							ethereum_transaction_hashes: transaction_hashes,
+						};
+						frontier_backend.mapping().write_hashes(
+							commitment,
+							number,
+							fc_db::kv::NumberMappingWrite::Skip,
+						)?;
+						updated = updated.saturating_add(1);
+					}
+				}
+
+				// Block fully verified — advance highest_reconciled.
+				highest_reconciled =
+					Some(highest_reconciled.map_or(number, |current| current.max(number)));
+			}
+			None => {
+				// State unavailable — re-derive the Ethereum block hash from the
+				// header digest (pruning-safe) instead of trusting BLOCK_NUMBER_MAPPING,
+				// which may be stale after a reorg.
+				let digest_eth_hash = client
+					.header(canonical_hash)
+					.map_err(|e| format!("{e:?}"))?
+					.and_then(|h| eth_hash_from_digest::<Block>(&h));
+
+				let Some(verified_eth_hash) = digest_eth_hash else {
+					first_unresolved.get_or_insert(number);
+					return Ok(());
+				};
+
+				// Correct BLOCK_NUMBER_MAPPING if it holds a stale value.
+				let stored_eth_hash = frontier_backend.mapping().block_hash_by_number(number)?;
+				if stored_eth_hash != Some(verified_eth_hash) {
+					frontier_backend
+						.mapping()
+						.set_block_hash_by_number(number, verified_eth_hash)?;
+					updated = updated.saturating_add(1);
+				}
+
+				let has_block_mapping = frontier_backend
+					.mapping()
+					.block_hash(&verified_eth_hash)?
+					.map(|hashes| hashes.contains(&canonical_hash))
+					.unwrap_or(false);
+
+				if !has_block_mapping {
+					let commitment = fc_db::kv::MappingCommitment::<Block> {
+						block_hash: canonical_hash,
+						ethereum_block_hash: verified_eth_hash,
+						ethereum_transaction_hashes: vec![],
+					};
+					frontier_backend.mapping().write_hashes(
+						commitment,
+						number,
+						fc_db::kv::NumberMappingWrite::Skip,
+					)?;
+					updated = updated.saturating_add(1);
+				}
+
+				highest_reconciled =
+					Some(highest_reconciled.map_or(number, |current| current.max(number)));
+			}
+		}
+
+		Ok(())
+	};
+
+	match direction {
+		ScanDirection::Ascending => {
+			for number in start..=end {
+				step(number)?;
+			}
+		}
+		ScanDirection::Descending => {
+			let mut number = start;
+			loop {
+				step(number)?;
+				if number == end {
+					break;
+				}
+				number = number.saturating_sub(1);
+			}
+		}
+	}
+
+	let next_cursor = match direction {
+		ScanDirection::Ascending => {
+			if let Some(unresolved) = first_unresolved {
+				unresolved
+			} else if end >= upper_bound_number {
+				upper_bound_number
+			} else {
+				end.saturating_add(1)
+			}
+		}
+		ScanDirection::Descending => {
+			if let Some(unresolved) = first_unresolved {
+				unresolved
+			} else if end <= sync_from_number {
+				sync_from_number
+			} else {
+				end.saturating_sub(1)
+			}
+		}
+	};
+	update_repair_cursor(
+		frontier_backend,
+		sync_from_number,
+		next_cursor,
+		cursor_update,
+	)?;
+
+	if let Some(number) = highest_reconciled {
+		advance_latest_pointer(frontier_backend, number)?;
+	}
+
+	validate_latest_pointer_invariant(client, storage_override, frontier_backend)?;
+
+	let lag_blocks = compute_lag_blocks(client, frontier_backend)?;
+	let stats = ReconcileStats {
+		scanned,
+		updated,
+		digest_mismatch_fallbacks,
+		first_unresolved,
+		highest_reconciled,
+		next_cursor,
+		lag_blocks,
+		window: ReconcileWindow { start, end },
+	};
+
+	log::debug!(
+		target: "reconcile",
+		"reconcile range #{}..#{}, scanned {}, updated {}, first_unresolved {:?}, highest_reconciled {:?}, next_cursor #{}, frontier_reconcile_lag_blocks {}",
+		stats.window.start,
+		stats.window.end,
+		stats.scanned,
+		stats.updated,
+		stats.first_unresolved,
+		stats.highest_reconciled,
+		stats.next_cursor,
+		stats.lag_blocks,
+	);
+
+	Ok(stats)
+}
+
+fn update_repair_cursor<Block: BlockT, C: HeaderBackend<Block>>(
+	frontier_backend: &fc_db::kv::Backend<Block, C>,
+	sync_from_number: u64,
+	candidate_next: u64,
+	strategy: CursorUpdateStrategy,
+) -> Result<(), String> {
+	let candidate_next = candidate_next.max(sync_from_number);
+	let current = frontier_backend
+		.mapping()
+		.canonical_number_repair_cursor()?;
+
+	let next = match (strategy, current) {
+		(CursorUpdateStrategy::Replace, _) => candidate_next,
+		(CursorUpdateStrategy::KeepLower, Some(current)) => current.min(candidate_next),
+		(CursorUpdateStrategy::KeepLower, None) => candidate_next,
+	};
+
+	frontier_backend
+		.mapping()
+		.set_canonical_number_repair_cursor(next)
+}
+
+pub fn advance_latest_pointer<Block: BlockT, C: HeaderBackend<Block>>(
+	frontier_backend: &fc_db::kv::Backend<Block, C>,
+	block_number: u64,
+) -> Result<(), String> {
+	let latest_indexed = frontier_backend
+		.mapping()
+		.latest_canonical_indexed_block_number()?;
+	if latest_indexed.is_none_or(|current| block_number > current) {
+		frontier_backend
+			.mapping()
+			.set_latest_canonical_indexed_block(block_number)?;
+	}
+	Ok(())
+}
+
+fn compute_lag_blocks<Block: BlockT, C: HeaderBackend<Block>>(
+	client: &C,
+	frontier_backend: &fc_db::kv::Backend<Block, C>,
+) -> Result<u64, String> {
+	let best_number: u64 = client.info().best_number.unique_saturated_into();
+	let latest_indexed = frontier_backend
+		.mapping()
+		.latest_canonical_indexed_block_number()?
+		.unwrap_or(0);
+	Ok(best_number.saturating_sub(latest_indexed))
+}
+
+fn validate_latest_pointer_invariant<Block: BlockT, C: HeaderBackend<Block>>(
+	client: &C,
+	storage_override: &dyn fc_storage::StorageOverride<Block>,
+	frontier_backend: &fc_db::kv::Backend<Block, C>,
+) -> Result<(), String> {
+	let Some(latest_indexed) = frontier_backend
+		.mapping()
+		.latest_canonical_indexed_block_number()?
+	else {
+		return Ok(());
+	};
+
+	let Some(canonical_hash) = client
+		.hash(latest_indexed.unique_saturated_into())
+		.map_err(|e| format!("{e:?}"))?
+	else {
+		return Ok(());
+	};
+	let Some(canonical_eth_hash) = storage_override
+		.current_block(canonical_hash)
+		.map(|block| block.header.hash())
+	else {
+		return Ok(());
+	};
+	if frontier_backend
+		.mapping()
+		.block_hash_by_number(latest_indexed)?
+		!= Some(canonical_eth_hash)
+	{
+		log::warn!(
+			target: "reconcile",
+			"invariant mismatch at latest pointer #{latest_indexed}: expected {canonical_eth_hash:?}",
+		);
+	}
+
+	Ok(())
+}
