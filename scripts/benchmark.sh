@@ -5,7 +5,7 @@
 # The frontier binary is required to be compiled with --features=runtime-benchmarks
 # in release mode.
 
-set -e
+set -euo pipefail
 
 BINARY="./target/release/orbinum-node"
 
@@ -34,7 +34,7 @@ function bench {
         --execution=wasm \
         --wasm-execution=compiled \
         --output=weights.rs \
-        --template=./benchmarking/frame-weight-template.hbs
+    --template=./scripts/frame-weight-template.hbs
 }
 
 if  [[ $# -eq 1 && "${1}" == "--help" ]]; then
