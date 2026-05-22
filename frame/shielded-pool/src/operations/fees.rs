@@ -6,6 +6,7 @@ use crate::{
 };
 use frame_support::{ensure, pallet_prelude::*};
 use pallet_relayer::RelayerInterface as _;
+#[cfg(not(feature = "runtime-benchmarks"))]
 use pallet_zk_verifier::ZkVerifierPort;
 use sp_runtime::SaturatedConversion;
 
@@ -50,9 +51,11 @@ impl FeeOperation {
 		ensure!(proof.len() == 128, Error::<T>::InvalidProof);
 		ensure!(public_signals.len() == 76, Error::<T>::InvalidPublicSignals);
 
-		let _is_valid = T::ZkVerifier::verify_value_proof(&proof, &public_signals, None)?;
 		#[cfg(not(feature = "runtime-benchmarks"))]
-		ensure!(_is_valid, Error::<T>::InvalidProof);
+		{
+			let is_valid = T::ZkVerifier::verify_value_proof(&proof, &public_signals, None)?;
+			ensure!(is_valid, Error::<T>::InvalidProof);
+		}
 
 		// signals[0..32]: commitment must match the extrinsic argument
 		ensure!(
