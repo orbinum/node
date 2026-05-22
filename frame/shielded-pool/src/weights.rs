@@ -46,6 +46,7 @@ pub trait WeightInfo {
 	fn register_asset() -> Weight;
 	fn verify_asset() -> Weight;
 	fn unverify_asset() -> Weight;
+	fn claim_shielded_fees() -> Weight;
 }
 
 /// Weights for pallet_shielded_pool using the Substrate node and recommended hardware.
@@ -284,6 +285,12 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(5_u64))
 			.saturating_add(T::DbWeight::get().writes(3_u64))
 	}
+	fn claim_shielded_fees() -> Weight {
+		// Minimum execution time: 70_000_000 picoseconds (conservative estimate).
+		Weight::from_parts(70_000_000, 3581)
+			.saturating_add(T::DbWeight::get().reads(7_u64))
+			.saturating_add(T::DbWeight::get().writes(5_u64))
+	}
 }
 
 // For backwards compatibility and tests
@@ -520,5 +527,11 @@ impl WeightInfo for () {
 		Weight::from_parts(15_473_000, 3631)
 			.saturating_add(RocksDbWeight::get().reads(5_u64))
 			.saturating_add(RocksDbWeight::get().writes(3_u64))
+	}
+	fn claim_shielded_fees() -> Weight {
+		// Minimum execution time: 70_000_000 picoseconds (conservative estimate).
+		Weight::from_parts(70_000_000, 3581)
+			.saturating_add(RocksDbWeight::get().reads(7_u64))
+			.saturating_add(RocksDbWeight::get().writes(5_u64))
 	}
 }

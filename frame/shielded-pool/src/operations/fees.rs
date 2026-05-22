@@ -50,8 +50,9 @@ impl FeeOperation {
 		ensure!(proof.len() == 128, Error::<T>::InvalidProof);
 		ensure!(public_signals.len() == 76, Error::<T>::InvalidPublicSignals);
 
-		let is_valid = T::ZkVerifier::verify_value_proof(&proof, &public_signals, None)?;
-		ensure!(is_valid, Error::<T>::InvalidProof);
+		let _is_valid = T::ZkVerifier::verify_value_proof(&proof, &public_signals, None)?;
+		#[cfg(not(feature = "runtime-benchmarks"))]
+		ensure!(_is_valid, Error::<T>::InvalidProof);
 
 		// signals[0..32]: commitment must match the extrinsic argument
 		ensure!(

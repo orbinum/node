@@ -201,5 +201,38 @@ mod benchmarks {
 		unverify_asset(RawOrigin::Root, asset_id);
 	}
 
+	#[benchmark]
+	fn claim_shielded_fees() {
+		let (caller, asset_id) = setup_benchmark_env::<T>();
+		let amount: BalanceOf<T> = T::MinShieldAmount::get() * 10u32.into();
+		let amount_u128: u128 = amount.saturated_into();
+
+		// Acumular relay fees para el validator
+		T::Relayer::accumulate_relay_fee(&caller, asset_id, amount_u128);
+
+		let commitment = Commitment([0x11u8; 32]);
+
+		// public_signals layout (76 bytes): commitment(32) | value_le(8) | asset_id_le(4) | owner_hash(32)
+		let mut public_signals = vec![0u8; 76];
+		public_signals[..32].copy_from_slice(&commitment.0);
+		public_signals[32..40].copy_from_slice(&(amount_u128 as u64).to_le_bytes());
+		public_signals[40..44].copy_from_slice(&asset_id.to_le_bytes());
+
+		let proof = vec![0x01u8; 128];
+		let memo_bytes = vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
+		let memo = FrameEncryptedMemo(memo_bytes.try_into().unwrap());
+
+		#[extrinsic_call]
+		claim_shielded_fees(
+			RawOrigin::Signed(caller),
+			commitment,
+			amount,
+			asset_id,
+			memo,
+			proof,
+			public_signals,
+		);
+	}
+
 	impl_benchmark_test_suite!(Pallet, crate::mock::new_test_ext(), crate::mock::Test,);
 }
