@@ -9,8 +9,8 @@ use frame_support::{
 	pallet_prelude::ConstU32,
 	traits::{Currency, Get},
 };
-use sp_runtime::traits::{AccountIdConversion, SaturatedConversion};
 use frame_system::RawOrigin;
+use sp_runtime::traits::{AccountIdConversion, SaturatedConversion};
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;
