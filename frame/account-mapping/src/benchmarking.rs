@@ -71,15 +71,32 @@ fn register_alias_for<T: Config>(who: &T::AccountId, alias: AliasOf<T>) {
 #[benchmarks(
     where
         <T as Config>::RuntimeCall: From<frame_system::Call<T>>,
+        T::AccountId: From<[u8; 32]>,
 )]
 mod benchmarks {
 	use super::*;
+
+	/// Returns an EVM-compatible `AccountId` for benchmarks.
+	///
+	/// The Orbinum account format stores the H160 EVM address in bytes[0..20]
+	/// and uses `[0u8; 12]` (EVM_ACCOUNT_MARKER) in bytes[20..32].
+	/// `whitelisted_caller()` does not satisfy this invariant — use this helper
+	/// whenever the extrinsic calls `T::AccountIdToEvmAddress::convert`.
+	fn evm_account<T: Config>() -> T::AccountId
+	where
+		T::AccountId: From<[u8; 32]>,
+	{
+		let mut bytes = [0u8; 32];
+		bytes[0] = 0x42; // deterministic non-zero; bytes[20..32] = [0u8; 12] ✓
+		T::AccountId::from(bytes)
+	}
 
 	// ─── map_account ────────────────────────────────────────────────────────
 
 	#[benchmark]
 	fn map_account() {
-		let caller: T::AccountId = whitelisted_caller();
+		// Needs an EVM-compatible AccountId (bytes[20..32] == [0u8; 12]).
+		let caller = evm_account::<T>();
 		fund_account::<T>(&caller);
 
 		#[extrinsic_call]
@@ -92,12 +109,13 @@ mod benchmarks {
 
 	#[benchmark]
 	fn unmap_account() {
-		let caller: T::AccountId = whitelisted_caller();
+		// Needs an EVM-compatible AccountId (bytes[20..32] == [0u8; 12]).
+		let caller = evm_account::<T>();
 		fund_account::<T>(&caller);
 
 		// Pre-state: account already mapped.
 		let address = T::AccountIdToEvmAddress::convert(caller.clone())
-			.expect("caller must have an EVM address in benchmark");
+			.expect("evm_account always has an EVM address");
 		OriginalAccounts::<T>::insert(&caller, address);
 		MappedAccounts::<T>::insert(address, &caller);
 

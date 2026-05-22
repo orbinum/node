@@ -408,11 +408,23 @@ pub struct PrivateLinkZkAdapter;
 
 impl pallet_account_mapping::PrivateLinkVerifierPort for PrivateLinkZkAdapter {
 	fn verify(commitment: &[u8; 32], call_hash: &[u8; 32], proof: &[u8]) -> bool {
-		use pallet_zk_verifier::ZkVerifierPort;
-		pallet_zk_verifier::Pallet::<Runtime>::verify_private_link_proof(
-			proof, commitment, call_hash, None,
-		)
-		.unwrap_or(false)
+		// In benchmark builds accept any non-empty proof so the extrinsic setup/dispatch
+		// overhead is measured without ZK cost. The pairing computation is captured
+		// separately by `pallet_zk_verifier::verify_proof`.
+		#[cfg(feature = "runtime-benchmarks")]
+		{
+			let _ = (commitment, call_hash);
+			return !proof.is_empty();
+		}
+
+		#[cfg(not(feature = "runtime-benchmarks"))]
+		{
+			use pallet_zk_verifier::ZkVerifierPort;
+			pallet_zk_verifier::Pallet::<Runtime>::verify_private_link_proof(
+				proof, commitment, call_hash, None,
+			)
+			.unwrap_or(false)
+		}
 	}
 }
 
