@@ -23,7 +23,7 @@ use crate::pallet::{
 use frame_benchmarking::v2::*;
 use frame_support::traits::{Currency, Get, ReservableCurrency};
 use frame_system::RawOrigin;
-use scale_codec::Encode;
+use scale_codec::{Decode, Encode};
 use sp_core::crypto::KeyTypeId;
 use sp_runtime::traits::Convert;
 
@@ -71,24 +71,23 @@ fn register_alias_for<T: Config>(who: &T::AccountId, alias: AliasOf<T>) {
 #[benchmarks(
     where
         <T as Config>::RuntimeCall: From<frame_system::Call<T>>,
-        T::AccountId: From<[u8; 32]>,
 )]
 mod benchmarks {
 	use super::*;
 
 	/// Returns an EVM-compatible `AccountId` for benchmarks.
 	///
-	/// The Orbinum account format stores the H160 EVM address in bytes[0..20]
-	/// and uses `[0u8; 12]` (EVM_ACCOUNT_MARKER) in bytes[20..32].
-	/// `whitelisted_caller()` does not satisfy this invariant — use this helper
-	/// whenever the extrinsic calls `T::AccountIdToEvmAddress::convert`.
-	fn evm_account<T: Config>() -> T::AccountId
-	where
-		T::AccountId: From<[u8; 32]>,
-	{
+	/// Uses SCALE `Decode` so no `From<[u8; 32]>` bound is required, keeping
+	/// compatibility with the test mock (`AccountId = u64`).
+	///
+	/// - Production (`AccountId32`): decodes 32 bytes → `[0x42, 0u8×31]`;
+	///   bytes[20..32] == `[0u8;12]` satisfies `AccountIdToEvmAddress`. ✓
+	/// - Test mock (`u64`): reads first 8 LE bytes → `66u64`;
+	///   `TestEvmAddress::convert(66)` = `Some(H160)`. ✓
+	fn evm_account<T: Config>() -> T::AccountId {
 		let mut bytes = [0u8; 32];
-		bytes[0] = 0x42; // deterministic non-zero; bytes[20..32] = [0u8; 12] ✓
-		T::AccountId::from(bytes)
+		bytes[0] = 0x42;
+		T::AccountId::decode(&mut &bytes[..]).unwrap_or_else(|_| whitelisted_caller())
 	}
 
 	// ─── map_account ────────────────────────────────────────────────────────
