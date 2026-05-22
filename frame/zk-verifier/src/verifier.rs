@@ -52,15 +52,17 @@ pub fn verify<T: Config>(
 
 /// Actual cryptographic verification.
 ///
-/// Always returns `true` in benchmarking and test builds (no real VK available).
+/// Returns `true` unconditionally in **test** builds (no real VK/proof available in unit tests).
+/// In **benchmarking** builds the full Groth16 pairing computation runs so that
+/// `verify_proof` weights reflect real on-chain cost.
 fn do_verify(vk_bytes: &[u8], proof_bytes: &[u8], raw_inputs: Vec<[u8; 32]>) -> bool {
-	#[cfg(any(feature = "runtime-benchmarks", test))]
+	#[cfg(test)]
 	{
 		let _ = (vk_bytes, proof_bytes, raw_inputs);
 		true
 	}
 
-	#[cfg(not(any(feature = "runtime-benchmarks", test)))]
+	#[cfg(not(test))]
 	{
 		use orbinum_zk_verifier::{Groth16Verifier, Proof, PublicInputs, VerifyingKey};
 

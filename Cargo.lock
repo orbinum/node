@@ -8323,7 +8323,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-zk-verifier"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
