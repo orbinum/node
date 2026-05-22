@@ -414,7 +414,7 @@ impl pallet_account_mapping::PrivateLinkVerifierPort for PrivateLinkZkAdapter {
 		#[cfg(feature = "runtime-benchmarks")]
 		{
 			let _ = (commitment, call_hash);
-			return !proof.is_empty();
+			!proof.is_empty()
 		}
 
 		#[cfg(not(feature = "runtime-benchmarks"))]
