@@ -9,8 +9,8 @@ use frame_support::{
 	pallet_prelude::ConstU32,
 	traits::{Currency, Get},
 };
+use sp_runtime::traits::{AccountIdConversion, SaturatedConversion};
 use frame_system::RawOrigin;
-use sp_runtime::traits::AccountIdConversion;
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;
@@ -24,6 +24,7 @@ mod benchmarks {
 	use super::*;
 	use crate::FrameEncryptedMemo;
 	use crate::pallet::{Assets, HistoricPoseidonRoots, NextAssetId, PoolBalancePerAsset};
+	use pallet_relayer::RelayerInterface;
 	use sp_std::vec::Vec;
 
 	fn setup_benchmark_env<T: Config>() -> (T::AccountId, u32) {
@@ -112,7 +113,8 @@ mod benchmarks {
 				.unwrap();
 
 		let asset_id = 0u32;
-		let fee: BalanceOf<T> = 0u32.into();
+		// Must be >= T::Relayer::min_relay_fee() to pass the FeeTooLow check.
+		let fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
 
 		#[extrinsic_call]
 		private_transfer(
@@ -147,7 +149,8 @@ mod benchmarks {
 		let proof: BoundedVec<u8, ConstU32<512>> = vec![0u8; 128].try_into().unwrap();
 		let nullifier = Nullifier([4u8; 32]);
 
-		let fee: BalanceOf<T> = 0u32.into();
+		// Must be >= T::Relayer::min_relay_fee() to pass the FeeTooLow check.
+		let fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
 
 		#[extrinsic_call]
 		unshield(
