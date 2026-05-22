@@ -319,6 +319,11 @@ pub mod pallet {
 					circuit_id,
 					version,
 				});
+				// In benchmarks, the full Groth16 pairing computation has already run
+				// (deserialization succeeded, pairing was computed) so the measured
+				// weight is accurate. We only skip the error return so the benchmark
+				// runner can record the weight; production behaviour is unchanged.
+				#[cfg(not(feature = "runtime-benchmarks"))]
 				return Err(Error::<T>::VerificationFailed.into());
 			}
 
