@@ -2,6 +2,16 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.8.1] - 2026-05-22
+
+### Changed
+
+- Updated FRAME benchmark weights measured on Hetzner CCX33 (AMD EPYC-Milan, 8 vCPU dedicated, 32 GB RAM). Steps: `50`, Repeat: `20`. Covers: `shield`, `shield_batch`, `private_transfer`, `unshield`, `register_asset`, `verify_asset`, `unverify_asset`.
+
+### Fixed
+
+- `benchmarking.rs`: `private_transfer` and `unshield` benchmarks now use `T::Relayer::min_relay_fee().saturated_into()` as fee instead of `0`, which caused `FeeTooLow` errors and prevented weight generation for those extrinsics.
+
 ## [0.8.0] - 2026-05-14
 
 ### Added
