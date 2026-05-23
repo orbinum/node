@@ -7416,7 +7416,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-account-mapping"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -8052,7 +8052,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-relayer"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -8115,7 +8115,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-shielded-pool"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.5.0",
@@ -8323,7 +8323,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-zk-verifier"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "frame-benchmarking",
  "frame-support",

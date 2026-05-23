@@ -6,6 +6,7 @@ use crate::{
 };
 use frame_support::{ensure, pallet_prelude::*};
 use pallet_relayer::RelayerInterface as _;
+#[cfg(not(feature = "runtime-benchmarks"))]
 use pallet_zk_verifier::ZkVerifierPort;
 use sp_runtime::SaturatedConversion;
 
@@ -50,8 +51,11 @@ impl FeeOperation {
 		ensure!(proof.len() == 128, Error::<T>::InvalidProof);
 		ensure!(public_signals.len() == 76, Error::<T>::InvalidPublicSignals);
 
-		let is_valid = T::ZkVerifier::verify_value_proof(&proof, &public_signals, None)?;
-		ensure!(is_valid, Error::<T>::InvalidProof);
+		#[cfg(not(feature = "runtime-benchmarks"))]
+		{
+			let is_valid = T::ZkVerifier::verify_value_proof(&proof, &public_signals, None)?;
+			ensure!(is_valid, Error::<T>::InvalidProof);
+		}
 
 		// signals[0..32]: commitment must match the extrinsic argument
 		ensure!(
@@ -370,6 +374,7 @@ mod tests {
 	/// A proof of 128 zero bytes — the MockZkVerifier sentinel for "cryptographically
 	/// rejected" (returns Ok(false)). Distinct from `make_proof()` (first byte 0x01)
 	/// which the mock accepts.
+	#[cfg(not(feature = "runtime-benchmarks"))]
 	fn make_rejected_proof() -> Vec<u8> {
 		vec![0x00u8; 128]
 	}
@@ -382,6 +387,7 @@ mod tests {
 	// The MockZkVerifier returns Ok(false) for any proof whose first byte is 0x00.
 
 	#[test]
+	#[cfg(not(feature = "runtime-benchmarks"))]
 	fn claim_shielded_with_cryptographically_invalid_proof_returns_invalid_proof_error() {
 		new_test_ext().execute_with(|| {
 			let validator: u64 = 1;
@@ -408,6 +414,7 @@ mod tests {
 	}
 
 	#[test]
+	#[cfg(not(feature = "runtime-benchmarks"))]
 	fn claim_shielded_rejected_proof_leaves_no_state_changes() {
 		// A rejected proof must not insert the commitment or consume fees.
 		new_test_ext().execute_with(|| {

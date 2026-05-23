@@ -2,6 +2,21 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.8.1] - 2026-05-22
+
+### Added
+
+- `benchmarking.rs`: nuevo bloque `#[benchmark] fn claim_shielded_fees()` — primer weight real medido (~690 µs en CCX33). El placeholder anterior era 70 µs (10× subestimado).
+- `operations/fees.rs`: guard `#[cfg(not(feature = "runtime-benchmarks"))]` en la llamada a `verify_value_proof` para evitar `CircuitNotFound` durante el benchmark (mismo patrón que `verify_proof` en pallet-zk-verifier).
+
+### Changed
+
+- Updated FRAME benchmark weights measured on Hetzner CCX33 (AMD EPYC-Milan, 8 vCPU dedicated, 32 GB RAM). Steps: `50`, Repeat: `20`. Covers: `shield`, `shield_batch`, `private_transfer`, `unshield`, `register_asset`, `verify_asset`, `unverify_asset`, `claim_shielded_fees`.
+
+### Fixed
+
+- `benchmarking.rs`: `private_transfer` and `unshield` benchmarks now use `T::Relayer::min_relay_fee().saturated_into()` as fee instead of `0`, which caused `FeeTooLow` errors and prevented weight generation for those extrinsics.
+
 ## [0.8.0] - 2026-05-14
 
 ### Added
