@@ -17,11 +17,12 @@ use sp_runtime::{
 	codec::{Decode, Encode},
 	generic::Era,
 	traits::{Block as BlockT, Zero},
-	MultiSignature,
 };
 
 use frame_system_rpc_runtime_api::AccountNonceApi;
-use orbinum_runtime::{AccountId, Nonce, SignedExtra, SignedPayload, UncheckedExtrinsic};
+use orbinum_runtime::{
+	AccountId, Nonce, OrbinumSignature, SignedExtra, SignedPayload, UncheckedExtrinsic,
+};
 
 use crate::client::FullBackend;
 
@@ -206,7 +207,7 @@ pub async fn auto_register<B, C, P>(
 	let extrinsic = UncheckedExtrinsic::new_signed(
 		call,
 		account_id.clone(),
-		MultiSignature::Sr25519(signature),
+		OrbinumSignature::Sr25519(signature),
 		extra,
 	);
 
