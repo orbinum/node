@@ -436,9 +436,16 @@ impl pallet_account_mapping::Config for Runtime {
 	type AccountIdToEvmAddress = AccountIdToEvmAddress;
 	type AliasDeposit = AliasDeposit;
 	type MaxAliasLength = MaxAliasLength;
+	type NativeEvmChainId = ConstU32<2700>;
 	type WeightInfo = pallet_account_mapping::weights::SubstrateWeight<Runtime>;
 	type RuntimeCall = RuntimeCall;
 	type PrivateLinkVerifier = PrivateLinkZkAdapter;
+
+	/// Secp256k1 accounts (OrbinumSignature Phase 3) have AccountId32 = [H160 | 0x00×12].
+	/// Their EVM mapping is always derivable — no storage entry needed in map_account.
+	fn is_implicit_evm_account(account: &AccountId) -> bool {
+		try_evm_h160_from_account_id(account).is_some()
+	}
 }
 
 impl pallet_evm::Config for Runtime {

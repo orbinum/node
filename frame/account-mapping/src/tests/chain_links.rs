@@ -1,4 +1,4 @@
-use crate::mock::{new_test_ext, AccountMapping, RuntimeOrigin, Test};
+use crate::mock::{new_test_ext, AccountMapping, RuntimeCall, RuntimeOrigin, Test};
 use crate::{Error, SignatureScheme};
 use frame_support::{assert_noop, assert_ok};
 
@@ -100,5 +100,56 @@ fn add_chain_link_works_after_governance_registration() {
 			addr.to_vec(),
 			sig
 		));
+	});
+}
+
+// ── Phase 2 alignment: dispatch_as_linked_account guard for native EVM ───────
+
+fn remark_call() -> alloc::boxed::Box<RuntimeCall> {
+	alloc::boxed::Box::new(RuntimeCall::System(frame_system::Call::remark {
+		remark: alloc::vec![],
+	}))
+}
+
+/// Calling dispatch_as_linked_account with the native EVM chain ID must fail
+/// immediately — no signature or storage check should be reached.
+#[test]
+fn dispatch_as_linked_account_rejects_native_evm_chain_id() {
+	new_test_ext().execute_with(|| {
+		// TestNativeEvmChainId = 9999 in mock.
+		// The guard fires before any storage lookup, so no setup is needed.
+		assert_noop!(
+			AccountMapping::dispatch_as_linked_account(
+				RuntimeOrigin::signed(99),
+				1u64, // owner (irrelevant — rejected before lookup)
+				9999, // chain_id == TestNativeEvmChainId
+				b"0xdeadbeef".to_vec(),
+				[0u8; 65].to_vec(),
+				remark_call(),
+			),
+			Error::<Test>::UseNativeSignatureForEvmAccounts
+		);
+	});
+}
+
+/// Calling dispatch_as_linked_account with a non-native chain ID must pass the
+/// NativeEvmChainId guard and proceed to the storage lookup phase.
+#[test]
+fn dispatch_as_linked_account_accepts_non_evm_chain_id() {
+	new_test_ext().execute_with(|| {
+		// chain_id = 1 (Ethereum mainnet, NOT the native EVM chain 9999).
+		// No link is registered, so NotOwnerOfLink is the expected error —
+		// not UseNativeSignatureForEvmAccounts.
+		assert_noop!(
+			AccountMapping::dispatch_as_linked_account(
+				RuntimeOrigin::signed(99),
+				1u64,
+				1, // non-native chain id — guard should pass
+				b"0xdeadbeef".to_vec(),
+				[0u8; 65].to_vec(),
+				remark_call(),
+			),
+			Error::<Test>::NotOwnerOfLink
+		);
 	});
 }

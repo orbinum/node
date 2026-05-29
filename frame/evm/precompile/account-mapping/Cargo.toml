@@ -1,6 +1,6 @@
 [package]
 name = "pallet-evm-precompile-account-mapping"
-version = "0.1.0"
+version = "0.2.0"
 authors = { workspace = true }
 edition = "2021"
 description = "EVM Precompile for Orbinum Account Mapping Pallet."
@@ -11,6 +11,9 @@ license = "Apache-2.0"
 sp-core = { workspace = true }
 sp-runtime = { workspace = true }
 sp-std = { workspace = true }
+
+# Codec
+scale-codec = { workspace = true }
 
 # Substrate FRAME
 frame-support = { workspace = true }
@@ -40,6 +43,7 @@ std = [
 	"sp-core/std",
 	"sp-std/std",
 	"sp-runtime/std",
+	"scale-codec/std",
 	"frame-support/std",
 	"frame-system/std",
 	"fp-evm/std",

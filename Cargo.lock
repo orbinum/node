@@ -7420,7 +7420,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-account-mapping"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -7755,7 +7755,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-evm-precompile-account-mapping"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fp-evm",
  "frame-support",

@@ -80,13 +80,16 @@ mod benchmarks {
 	/// Uses SCALE `Decode` so no `From<[u8; 32]>` bound is required, keeping
 	/// compatibility with the test mock (`AccountId = u64`).
 	///
-	/// - Production (`AccountId32`): decodes 32 bytes → `[0x42, 0u8×31]`;
-	///   bytes[20..32] == `[0u8;12]` satisfies `AccountIdToEvmAddress`. ✓
-	/// - Test mock (`u64`): reads first 8 LE bytes → `66u64`;
-	///   `TestEvmAddress::convert(66)` = `Some(H160)`. ✓
+	/// - Production (`AccountId32`): decodes 32 bytes → `[100, 0u8×31]`;
+	///   bytes[20..32] == `[0u8;12]` → `is_implicit_evm_account` = true. ✓
+	/// - Test mock (`u64`): reads first 8 LE bytes → `100u64`;
+	///   `is_implicit_evm_account(100)` = true (mock convention). ✓
+	///
+	/// Using 100 ensures consistent behavior between mock and production:
+	/// both treat this account as an implicit secp256k1 account (Fase 1).
 	fn evm_account<T: Config>() -> T::AccountId {
 		let mut bytes = [0u8; 32];
-		bytes[0] = 0x42;
+		bytes[0] = 100;
 		T::AccountId::decode(&mut &bytes[..]).unwrap_or_else(|_| whitelisted_caller())
 	}
 
@@ -94,14 +97,18 @@ mod benchmarks {
 
 	#[benchmark]
 	fn map_account() {
-		// Needs an EVM-compatible AccountId (bytes[20..32] == [0u8; 12]).
+		// Uses a secp256k1 implicit account (is_implicit_evm_account = true).
+		// Post-Fase-1: map_account emits AccountMapped but does NOT write
+		// OriginalAccounts — the mapping is derived deterministically from
+		// the AccountId32 itself and requires no storage.
 		let caller = evm_account::<T>();
 		fund_account::<T>(&caller);
 
 		#[extrinsic_call]
 		map_account(RawOrigin::Signed(caller.clone()));
 
-		assert!(OriginalAccounts::<T>::contains_key(&caller));
+		// Secp256k1 accounts bypass storage — only an event is emitted.
+		assert!(!OriginalAccounts::<T>::contains_key(&caller));
 	}
 
 	// ─── unmap_account ──────────────────────────────────────────────────────
