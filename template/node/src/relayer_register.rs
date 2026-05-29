@@ -159,11 +159,13 @@ pub async fn auto_register<B, C, P>(
 		frame_system::CheckNonce::from(nonce),
 		frame_system::CheckWeight::new(),
 		pallet_transaction_payment::ChargeTransactionPayment::from(0u128),
+		frame_metadata_hash_extension::CheckMetadataHash::new(false),
 	);
 
 	// additional_signed mirrors each extension's AdditionalSigned type:
-	//   ((), spec_version, tx_version, genesis_hash, genesis_hash, (), (), ())
+	//   ((), spec_version, tx_version, genesis_hash, genesis_hash, (), (), (), None)
 	// For immortal transactions CheckEra uses the genesis hash as the block checkpoint.
+	// CheckMetadataHash in disabled mode contributes None.
 	let additional_signed = (
 		(),
 		version.spec_version,
@@ -173,6 +175,7 @@ pub async fn auto_register<B, C, P>(
 		(),
 		(),
 		(),
+		None::<[u8; 32]>,
 	);
 
 	let payload = SignedPayload::from_raw(call.clone(), extra.clone(), additional_signed);

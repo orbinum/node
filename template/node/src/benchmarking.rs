@@ -133,6 +133,7 @@ pub fn create_benchmark_extrinsic(
 		frame_system::CheckNonce::<runtime::Runtime>::from(nonce),
 		frame_system::CheckWeight::<runtime::Runtime>::new(),
 		pallet_transaction_payment::ChargeTransactionPayment::<runtime::Runtime>::from(0),
+		frame_metadata_hash_extension::CheckMetadataHash::<runtime::Runtime>::new(false),
 	);
 
 	let raw_payload = runtime::SignedPayload::from_raw(
@@ -147,6 +148,7 @@ pub fn create_benchmark_extrinsic(
 			(),
 			(),
 			(),
+			None::<[u8; 32]>,
 		),
 	);
 	let signature = raw_payload.using_encoded(|e| sender.sign(e));
