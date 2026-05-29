@@ -1,12 +1,13 @@
-use crate::{account_mapping_runtime::EeSuffixAddressMapping, AccountId, Runtime, WeightPerGas};
+use crate::{
+	account_mapping_runtime::EeSuffixAddressMapping,
+	orbinum_signature::{OrbinumSignature, OrbinumSigner},
+	AccountId, Runtime, WeightPerGas,
+};
 use hex_literal::hex;
 use pallet_evm::AddressMapping;
 use sp_core::{ecdsa, sr25519, Pair, H160};
 use sp_io::TestExternalities;
-use sp_runtime::{
-	traits::{IdentifyAccount, Verify},
-	MultiSignature, MultiSigner,
-};
+use sp_runtime::traits::{IdentifyAccount, Verify};
 
 fn with_ext<R>(run: impl FnOnce() -> R) -> R {
 	TestExternalities::default().execute_with(run)
@@ -116,12 +117,12 @@ fn sr25519_valid_signature_verifies() {
 	let msg = b"test-multisignature-orbinum";
 
 	let sig = pair.sign(msg);
-	let multi_sig = MultiSignature::Sr25519(sig);
+	let orbinum_sig = OrbinumSignature::Sr25519(sig);
 
-	let signer_account: AccountId = MultiSigner::from(pair.public()).into_account();
+	let signer_account: AccountId = OrbinumSigner::from(pair.public()).into_account();
 
 	assert!(
-		multi_sig.verify(msg.as_ref(), &signer_account),
+		orbinum_sig.verify(msg.as_ref(), &signer_account),
 		"Sr25519 valid signature must verify against its own AccountId"
 	);
 }
@@ -133,12 +134,12 @@ fn sr25519_wrong_signer_rejected() {
 
 	let msg = b"test-wrong-signer";
 	let alice_sig = alice.sign(msg);
-	let multi_sig = MultiSignature::Sr25519(alice_sig);
+	let orbinum_sig = OrbinumSignature::Sr25519(alice_sig);
 
-	let bob_account: AccountId = MultiSigner::from(bob.public()).into_account();
+	let bob_account: AccountId = OrbinumSigner::from(bob.public()).into_account();
 
 	assert!(
-		!multi_sig.verify(msg.as_ref(), &bob_account),
+		!orbinum_sig.verify(msg.as_ref(), &bob_account),
 		"Sr25519 Alice's signature must NOT verify against Bob's account"
 	);
 }
@@ -151,12 +152,12 @@ fn sr25519_wrong_message_rejected() {
 	let different_msg = b"different-message";
 
 	let sig = pair.sign(original_msg);
-	let multi_sig = MultiSignature::Sr25519(sig);
+	let orbinum_sig = OrbinumSignature::Sr25519(sig);
 
-	let signer_account: AccountId = MultiSigner::from(pair.public()).into_account();
+	let signer_account: AccountId = OrbinumSigner::from(pair.public()).into_account();
 
 	assert!(
-		!multi_sig.verify(different_msg.as_ref(), &signer_account),
+		!orbinum_sig.verify(different_msg.as_ref(), &signer_account),
 		"Sr25519 signature over message A must NOT verify message B"
 	);
 }
@@ -167,12 +168,12 @@ fn sr25519_corrupted_signature_rejected() {
 	let msg = b"test-corrupted";
 
 	let corrupted = sr25519::Signature::default();
-	let multi_sig = MultiSignature::Sr25519(corrupted);
+	let orbinum_sig = OrbinumSignature::Sr25519(corrupted);
 
-	let signer_account: AccountId = MultiSigner::from(pair.public()).into_account();
+	let signer_account: AccountId = OrbinumSigner::from(pair.public()).into_account();
 
 	assert!(
-		!multi_sig.verify(msg.as_ref(), &signer_account),
+		!orbinum_sig.verify(msg.as_ref(), &signer_account),
 		"Sr25519 corrupted signature must be rejected"
 	);
 }
@@ -192,13 +193,13 @@ fn sr25519_each_account_verifies_only_own_signature() {
 		"Alice and Bob have distinct keys"
 	);
 
-	let alice_acc: AccountId = MultiSigner::from(alice.public()).into_account();
-	let bob_acc: AccountId = MultiSigner::from(bob.public()).into_account();
+	let alice_acc: AccountId = OrbinumSigner::from(alice.public()).into_account();
+	let bob_acc: AccountId = OrbinumSigner::from(bob.public()).into_account();
 
-	assert!(MultiSignature::Sr25519(alice_sig).verify(msg.as_ref(), &alice_acc));
-	assert!(MultiSignature::Sr25519(bob_sig).verify(msg.as_ref(), &bob_acc));
-	assert!(!MultiSignature::Sr25519(alice.sign(msg)).verify(msg.as_ref(), &bob_acc));
-	assert!(!MultiSignature::Sr25519(bob.sign(msg)).verify(msg.as_ref(), &alice_acc));
+	assert!(OrbinumSignature::Sr25519(alice_sig).verify(msg.as_ref(), &alice_acc));
+	assert!(OrbinumSignature::Sr25519(bob_sig).verify(msg.as_ref(), &bob_acc));
+	assert!(!OrbinumSignature::Sr25519(alice.sign(msg)).verify(msg.as_ref(), &bob_acc));
+	assert!(!OrbinumSignature::Sr25519(bob.sign(msg)).verify(msg.as_ref(), &alice_acc));
 }
 
 #[test]
@@ -207,12 +208,12 @@ fn ecdsa_valid_signature_verifies() {
 	let msg = b"test-ecdsa-multisignature";
 
 	let sig = pair.sign(msg);
-	let multi_sig = MultiSignature::Ecdsa(sig);
+	let orbinum_sig = OrbinumSignature::Ecdsa(sig);
 
-	let signer_account: AccountId = MultiSigner::from(pair.public()).into_account();
+	let signer_account: AccountId = OrbinumSigner::from(pair.public()).into_account();
 
 	assert!(
-		multi_sig.verify(msg.as_ref(), &signer_account),
+		orbinum_sig.verify(msg.as_ref(), &signer_account),
 		"ECDSA valid signature must verify against its AccountId"
 	);
 }
@@ -224,30 +225,41 @@ fn ecdsa_wrong_signer_rejected() {
 
 	let msg = b"test-ecdsa-wrong-signer";
 	let alice_sig = alice.sign(msg);
-	let multi_sig = MultiSignature::Ecdsa(alice_sig);
+	let orbinum_sig = OrbinumSignature::Ecdsa(alice_sig);
 
-	let bob_account: AccountId = MultiSigner::from(bob.public()).into_account();
+	let bob_account: AccountId = OrbinumSigner::from(bob.public()).into_account();
 
 	assert!(
-		!multi_sig.verify(msg.as_ref(), &bob_account),
+		!orbinum_sig.verify(msg.as_ref(), &bob_account),
 		"ECDSA Alice's signature must NOT verify against Bob's account"
 	);
 }
 
 #[test]
-fn ecdsa_substrate_and_evm_paths_are_independent() {
+fn ecdsa_evm_and_substrate_paths_are_unified() {
 	with_ext(|| {
-		let alith_eth_address = H160::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac"));
+		// Any ECDSA keypair: OrbinumSigner derives AccountId identically to EeSuffixAddressMapping.
+		let ecdsa_pair = ecdsa::Pair::from_string("//Alice", None).unwrap();
 
-		let evm_account = EeSuffixAddressMapping::<Runtime>::into_account_id(alith_eth_address);
+		// Substrate path: OrbinumSigner::Ecdsa → [eth_addr | 0x00×12]
+		let substrate_account: AccountId = OrbinumSigner::Ecdsa(ecdsa_pair.public()).into_account();
 
-		let ecdsa_pair = ecdsa::Pair::from_string("//AliceEcdsa", None).unwrap();
-		let substrate_ecdsa_account: AccountId =
-			MultiSigner::from(ecdsa_pair.public()).into_account();
+		// Verify layout: last 12 bytes must be zero (EVM-suffix format).
+		let bytes: &[u8; 32] = substrate_account.as_ref();
+		assert_eq!(
+			&bytes[20..],
+			&[0u8; 12],
+			"OrbinumSigner::Ecdsa must produce AccountId32 with 12-byte zero suffix"
+		);
 
-		assert_ne!(
-			evm_account, substrate_ecdsa_account,
-			"EeSuffixAddressMapping (EVM) and MultiSigner ECDSA are independent routes"
+		// EVM path: extract the H160 and feed it through EeSuffixAddressMapping.
+		let eth_addr = H160::from_slice(&bytes[..20]);
+		let evm_account = EeSuffixAddressMapping::<Runtime>::into_account_id(eth_addr);
+
+		assert_eq!(
+			substrate_account, evm_account,
+			"OrbinumSigner::Ecdsa and EeSuffixAddressMapping must produce identical AccountId32 \
+			 for the same secp256k1 keypair — Phase 3 unification confirmed"
 		);
 	});
 }
@@ -269,24 +281,113 @@ fn multisignature_variants_have_correct_byte_sizes() {
 
 	assert_eq!(ecdsa_sig.0.len(), 65, "ECDSA signature must be 65 bytes");
 
-	let _ms_sr = MultiSignature::Sr25519(sr25519_sig);
-	let _ms_ec = MultiSignature::Ecdsa(ecdsa_sig);
+	let _ms_sr = OrbinumSignature::Sr25519(sr25519_sig);
+	let _ms_ec = OrbinumSignature::Ecdsa(ecdsa_sig);
 }
 
-fn api_validate_signature(signature: MultiSignature, message: &[u8], signer: &AccountId) -> bool {
-	use sp_runtime::traits::Verify;
+/// `OrbinumSignature` must encode with the same SCALE discriminant bytes as
+/// `sp_runtime::MultiSignature` so existing block explorers and wallets see the
+/// same wire format.
+///
+/// MultiSignature layout (from sp-runtime):
+///   0x00 | 64 bytes  → Ed25519
+///   0x01 | 64 bytes  → Sr25519
+///   0x02 | 65 bytes  → Ecdsa
+#[test]
+fn orbinum_signature_scale_discriminants_match_multisignature() {
+	use scale_codec::Encode;
+	use sp_runtime::MultiSignature;
+
+	let sr25519_pair = sr25519::Pair::from_string("//Alice", None).unwrap();
+	let ecdsa_pair = ecdsa::Pair::from_string("//Alice", None).unwrap();
+	let msg = b"discriminant-test";
+
+	let sr_sig = sr25519_pair.sign(msg);
+	let ec_sig = ecdsa_pair.sign(msg);
+
+	let orbinum_sr = OrbinumSignature::Sr25519(sr_sig).encode();
+	let multi_sr = MultiSignature::Sr25519(sr_sig).encode();
+	assert_eq!(
+		orbinum_sr[0], multi_sr[0],
+		"Sr25519 discriminant must match MultiSignature"
+	);
+	assert_eq!(
+		orbinum_sr.len(),
+		multi_sr.len(),
+		"Sr25519 encoded length must match"
+	);
+
+	let orbinum_ec = OrbinumSignature::Ecdsa(ec_sig).encode();
+	let multi_ec = MultiSignature::Ecdsa(ec_sig).encode();
+	assert_eq!(
+		orbinum_ec[0], multi_ec[0],
+		"Ecdsa discriminant must match MultiSignature"
+	);
+	assert_eq!(
+		orbinum_ec.len(),
+		multi_ec.len(),
+		"Ecdsa encoded length must match"
+	);
+}
+
+/// Known-vector test: Alith's compressed public key is publicly documented.
+/// We verify that `OrbinumSigner::Ecdsa` produces exactly the expected AccountId32
+/// without relying on the runtime's own derivation path — an independent check.
+///
+/// Alith data (Moonbeam/Frontier dev accounts, well-known secp256k1 keypair):
+///   private key : 0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133
+///   H160        : 0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac
+///   compressed pk (33 bytes): 02509540919faacf9ab52146c9aa40db68172d83777250b28e4679176e49ccdd9f
+///
+/// Expected AccountId32 = [H160 | 0x00×12]
+#[test]
+fn ecdsa_known_vector_alith_derives_correct_account() {
+	with_ext(|| {
+		// Alith compressed public key (33 bytes).
+		let compressed_pk: [u8; 33] =
+			hex!("02509540919faacf9ab52146c9aa40db68172d83777250b28e4679176e49ccdd9f");
+		let alith_h160: [u8; 20] = hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac");
+
+		let pub_key = sp_core::ecdsa::Public::from_raw(compressed_pk);
+		let derived: AccountId = OrbinumSigner::Ecdsa(pub_key).into_account();
+		let derived_bytes: &[u8; 32] = derived.as_ref();
+
+		// First 20 bytes must equal Alith's H160.
+		assert_eq!(
+			&derived_bytes[..20],
+			&alith_h160,
+			"OrbinumSigner::Ecdsa must derive Alith's H160 as the first 20 bytes"
+		);
+		// Last 12 bytes must be zero (EVM-suffix layout).
+		assert_eq!(
+			&derived_bytes[20..],
+			&[0u8; 12],
+			"OrbinumSigner::Ecdsa must produce 12-byte zero suffix"
+		);
+
+		// Must also match EeSuffixAddressMapping for the same H160.
+		let evm_account =
+			EeSuffixAddressMapping::<Runtime>::into_account_id(H160::from(alith_h160));
+		assert_eq!(
+			derived, evm_account,
+			"OrbinumSigner::Ecdsa(Alith) must equal EeSuffixAddressMapping(Alith H160)"
+		);
+	});
+}
+
+fn api_validate_signature(signature: OrbinumSignature, message: &[u8], signer: &AccountId) -> bool {
 	signature.verify(message, signer)
 }
 
 fn sr25519_account(derivation: &str) -> (sr25519::Pair, AccountId) {
 	let pair = sr25519::Pair::from_string(derivation, None).unwrap();
-	let account: AccountId = MultiSigner::from(pair.public()).into_account();
+	let account: AccountId = OrbinumSigner::from(pair.public()).into_account();
 	(pair, account)
 }
 
 fn ecdsa_account(derivation: &str) -> (ecdsa::Pair, AccountId) {
 	let pair = ecdsa::Pair::from_string(derivation, None).unwrap();
-	let account: AccountId = MultiSigner::from(pair.public()).into_account();
+	let account: AccountId = OrbinumSigner::Ecdsa(pair.public()).into_account();
 	(pair, account)
 }
 
@@ -324,7 +425,7 @@ fn same_account_single_nonce_regardless_of_signature_type() {
 	let (alice_sr, alice_sr_account) = sr25519_account("//AliceNonce");
 	let msg = b"nonce-invariant-test";
 
-	let sig_sr = MultiSignature::Sr25519(alice_sr.sign(msg));
+	let sig_sr = OrbinumSignature::Sr25519(alice_sr.sign(msg));
 	assert!(
 		api_validate_signature(sig_sr, msg, &alice_sr_account),
 		"Sr25519 signature for the correct AccountId always verifies"

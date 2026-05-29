@@ -7300,6 +7300,7 @@ dependencies = [
  "frame-system-benchmarking",
  "frame-system-rpc-runtime-api",
  "hex-literal",
+ "libsecp256k1",
  "pallet-account-mapping",
  "pallet-account-mapping-runtime-api",
  "pallet-aura",

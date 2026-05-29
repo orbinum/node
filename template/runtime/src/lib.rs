@@ -13,6 +13,7 @@ use sp_io as _;
 
 mod account_mapping_runtime;
 mod genesis_config_preset;
+mod orbinum_signature;
 mod precompiles;
 mod weights;
 
@@ -34,7 +35,6 @@ use sp_core::{
 	crypto::{ByteArray, KeyTypeId},
 	ConstU128, OpaqueMetadata, H160, H256, U256,
 };
-use sp_runtime::MultiSignature;
 use sp_runtime::{
 	generic, impl_opaque_keys,
 	traits::{
@@ -85,8 +85,10 @@ use precompiles::FrontierPrecompiles;
 pub type BlockNumber = u32;
 
 /// Alias to 512-bit hash when used in the context of a transaction signature on the chain.
-/// MultiSignature supports both sr25519 (Substrate) and ECDSA (Ethereum) signatures
-pub type Signature = MultiSignature;
+/// OrbinumSignature unifies sr25519, ed25519, and ECDSA with EVM-compatible AccountId
+/// derivation for ECDSA keys: `[eth_addr | 0x00×12]` — same as `EeSuffixAddressMapping`.
+pub use orbinum_signature::OrbinumSignature;
+pub type Signature = OrbinumSignature;
 
 /// Account id is always 32 bytes (AccountId32 for Substrate-native accounts)
 /// EVM addresses (20 bytes) are mapped to AccountId32 for compatibility
