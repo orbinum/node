@@ -1,0 +1,45 @@
+[package]
+name = "pallet-evm-precompile-balances"
+version = "0.1.0"
+authors = { workspace = true }
+edition = "2021"
+description = "EVM Precompile for native Balances transfers to arbitrary AccountId32 destinations."
+license = "Apache-2.0"
+
+[dependencies]
+# Substrate CORE
+sp-core = { workspace = true }
+sp-runtime = { workspace = true }
+sp-std = { workspace = true }
+
+# Substrate FRAME
+frame-support = { workspace = true }
+frame-system = { workspace = true }
+pallet-balances = { workspace = true }
+
+# Frontier EVM
+fp-evm = { workspace = true }
+pallet-evm = { workspace = true }
+
+[dev-dependencies]
+frame-system = { workspace = true, features = ["default"] }
+pallet-balances = { workspace = true, features = ["default"] }
+pallet-timestamp = { workspace = true, features = ["default"] }
+scale-codec = { workspace = true, features = ["derive", "std"] }
+scale-info = { workspace = true, features = ["derive", "std"] }
+sp-core = { workspace = true, features = ["default"] }
+sp-io = { workspace = true, features = ["default"] }
+sp-runtime = { workspace = true, features = ["default"] }
+
+[features]
+default = ["std"]
+std = [
+	"sp-core/std",
+	"sp-std/std",
+	"sp-runtime/std",
+	"frame-support/std",
+	"frame-system/std",
+	"fp-evm/std",
+	"pallet-evm/std",
+	"pallet-balances/std",
+]

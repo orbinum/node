@@ -7311,6 +7311,7 @@ dependencies = [
  "pallet-evm",
  "pallet-evm-chain-id",
  "pallet-evm-precompile-account-mapping",
+ "pallet-evm-precompile-balances",
  "pallet-evm-precompile-curve25519",
  "pallet-evm-precompile-curve25519-benchmarking",
  "pallet-evm-precompile-modexp",
@@ -7764,6 +7765,24 @@ dependencies = [
  "pallet-timestamp",
  "parity-scale-codec",
  "precompile-utils",
+ "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+ "sp-std",
+]
+
+[[package]]
+name = "pallet-evm-precompile-balances"
+version = "0.1.0"
+dependencies = [
+ "fp-evm",
+ "frame-support",
+ "frame-system",
+ "pallet-balances",
+ "pallet-evm",
+ "pallet-timestamp",
+ "parity-scale-codec",
  "scale-info",
  "sp-core",
  "sp-io",

@@ -5,6 +5,7 @@ use pallet_evm::{
 use sp_core::H160;
 
 use pallet_evm_precompile_account_mapping::AccountMappingPrecompile;
+use pallet_evm_precompile_balances::BalancesPrecompile;
 use pallet_evm_precompile_curve25519 as curve25519_precompile;
 use pallet_evm_precompile_modexp::Modexp;
 use pallet_evm_precompile_sha3fips::Sha3FIPS256;
@@ -20,7 +21,7 @@ where
 	pub fn new() -> Self {
 		Self(Default::default())
 	}
-	pub fn used_addresses() -> [H160; 11] {
+	pub fn used_addresses() -> [H160; 12] {
 		[
 			hash(1),
 			hash(2),
@@ -33,6 +34,7 @@ where
 			hash(1027),
 			hash(2048),
 			hash(2049),
+			hash(2050),
 		]
 	}
 }
@@ -41,7 +43,8 @@ where
 	R: pallet_evm::Config
 		+ frame_system::Config
 		+ pallet_account_mapping::Config
-		+ pallet_shielded_pool::Config,
+		+ pallet_shielded_pool::Config
+		+ pallet_balances::Config,
 	<R as frame_system::Config>::RuntimeCall: sp_runtime::traits::Dispatchable<PostInfo = frame_support::dispatch::PostDispatchInfo>
 		+ frame_support::dispatch::GetDispatchInfo
 		+ From<pallet_account_mapping::Call<R>>
@@ -53,6 +56,11 @@ where
 	<R as frame_system::Config>::AccountId: From<[u8; 32]>,
 	pallet_evm::AccountIdOf<R>: Into<<R as frame_system::Config>::AccountId>,
 	pallet_shielded_pool::BalanceOf<R>: TryFrom<u128>,
+	<R as pallet_balances::Config>::Balance: TryFrom<u128>,
+	pallet_balances::Pallet<R>: frame_support::traits::fungible::Mutate<
+		<R as frame_system::Config>::AccountId,
+		Balance = <R as pallet_balances::Config>::Balance,
+	>,
 {
 	fn execute(&self, handle: &mut impl PrecompileHandle) -> Option<PrecompileResult> {
 		match handle.code_address() {
@@ -80,6 +88,7 @@ where
 			// Orbinum precompiles
 			a if a == hash(2048) => Some(AccountMappingPrecompile::<R>::execute(handle)),
 			a if a == hash(2049) => Some(ShieldedPoolPrecompile::<R>::execute(handle)),
+			a if a == hash(2050) => Some(BalancesPrecompile::<R>::execute(handle)),
 			_ => None,
 		}
 	}
