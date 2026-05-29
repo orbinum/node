@@ -70,7 +70,6 @@ pallet-evm-precompile-curve25519-benchmarking = { workspace = true }
 pallet-evm-precompile-modexp = { workspace = true }
 pallet-evm-precompile-sha3fips = { workspace = true }
 pallet-evm-precompile-sha3fips-benchmarking = { workspace = true }
-pallet-evm-precompile-balances = { workspace = true }
 pallet-evm-precompile-shielded-pool = { workspace = true }
 pallet-evm-precompile-simple = { workspace = true }
 
@@ -155,7 +154,6 @@ std = [
 	"pallet-evm-precompile-curve25519/std",
 	"pallet-evm-precompile-curve25519-benchmarking/std",
 	"pallet-evm-precompile-account-mapping/std",
-	"pallet-evm-precompile-balances/std",
 	"pallet-evm-precompile-shielded-pool/std",
 	# Orbinum Privacy
 	"pallet-zk-verifier/std",

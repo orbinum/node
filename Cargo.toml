@@ -245,7 +245,6 @@ pallet-evm-precompile-curve25519-benchmarking = { path = "frame/evm/precompile/c
 pallet-evm-precompile-modexp = { path = "frame/evm/precompile/modexp", default-features = false }
 pallet-evm-precompile-sha3fips = { path = "frame/evm/precompile/sha3fips", default-features = false }
 pallet-evm-precompile-sha3fips-benchmarking = { path = "frame/evm/precompile/sha3fips/benchmarking", default-features = false }
-pallet-evm-precompile-balances = { path = "frame/evm/precompile/balances", default-features = false }
 pallet-evm-precompile-shielded-pool = { path = "frame/evm/precompile/shielded-pool", default-features = false }
 pallet-evm-precompile-simple = { path = "frame/evm/precompile/simple", default-features = false }
 pallet-evm-test-vector-support = { path = "frame/evm/test-vector-support" }
