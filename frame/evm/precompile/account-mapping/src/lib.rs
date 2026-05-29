@@ -7,8 +7,10 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
-use alloc::{format, vec, vec::Vec};
+use alloc::{boxed::Box, format, vec, vec::Vec};
 use core::marker::PhantomData;
+
+use scale_codec::Decode;
 
 use fp_evm::{
 	ExitError, ExitSucceed, Precompile, PrecompileFailure, PrecompileHandle, PrecompileOutput,
@@ -17,7 +19,7 @@ use fp_evm::{
 use frame_support::{dispatch::GetDispatchInfo, traits::ConstU32, BoundedVec};
 use pallet_evm::{AddressMapping, GasWeightMapping};
 use sp_core::{H160, U256};
-use sp_runtime::traits::Dispatchable;
+use sp_runtime::traits::{Convert, Dispatchable};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ABI Function Selectors
@@ -64,6 +66,18 @@ const SEL_REMOVE_PRIVATE_LINK: [u8; 4] = [0xdf, 0xd8, 0xb5, 0x7e];
 const SEL_REVEAL_PRIVATE_LINK: [u8; 4] = [0x4d, 0xf1, 0xf3, 0x3d];
 // setAccountMetadata(bytes,bytes,bytes)         → 0x776cf9ff
 const SEL_SET_METADATA: [u8; 4] = [0x77, 0x6c, 0xf9, 0xff];
+//
+// ─── Phase 3 helpers — composability with BalancesPrecompile ─────────────────
+// isEvmSuffixAccount(bytes32)                   → 0x96e69f8a
+const SEL_IS_EVM_SUFFIX: [u8; 4] = [0x96, 0xe6, 0x9f, 0x8a];
+// toEvmAddress(bytes32)                         → 0x0f5b3052
+const SEL_TO_EVM_ADDRESS: [u8; 4] = [0x0f, 0x5b, 0x30, 0x52];
+// resolveAliasFull(string)                      → 0x2e40772b
+const SEL_RESOLVE_ALIAS_FULL: [u8; 4] = [0x2e, 0x40, 0x77, 0x2b];
+//
+// ─── Phase 4 (Unification Plan Fase 2) — relay via chain link ────────────────
+// dispatchAsLinkedAccount(bytes32,uint32,bytes,bytes,bytes) → 0x0630cef9
+const SEL_DISPATCH_AS_LINKED: [u8; 4] = [0x06, 0x30, 0xce, 0xf9];
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub struct AccountMappingPrecompile<T>(PhantomData<T>);
@@ -122,6 +136,14 @@ where
 			SEL_REMOVE_PRIVATE_LINK => Self::remove_private_link(handle, &input),
 			SEL_REVEAL_PRIVATE_LINK => Self::reveal_private_link(handle, &input),
 			SEL_SET_METADATA => Self::set_account_metadata(handle, &input),
+
+			// ─── Phase 3: composability helpers ─────────────────────────────
+			SEL_IS_EVM_SUFFIX => Self::is_evm_suffix_account(&input),
+			SEL_TO_EVM_ADDRESS => Self::to_evm_address(&input),
+			SEL_RESOLVE_ALIAS_FULL => Self::resolve_alias_full(&input),
+
+			// ─── Phase 4: relay via chain link ───────────────────────────────
+			SEL_DISPATCH_AS_LINKED => Self::dispatch_as_linked_account(handle, &input),
 
 			_ => Err(PrecompileFailure::Error {
 				exit_status: ExitError::Other("unknown selector".into()),
@@ -612,5 +634,189 @@ where
 	/// The offset pointer lives at slot 0 of `params` (i.e. input stripped of selector).
 	fn decode_abi_string(params: &[u8]) -> Result<Vec<u8>, PrecompileFailure> {
 		Self::decode_bytes_at_slot(params, 0)
+	}
+
+	// ─────────────────────────────────────────────────────────────────────────
+	// Phase 3: composability helpers
+	// ─────────────────────────────────────────────────────────────────────────
+
+	/// isEvmSuffixAccount(bytes32 accountId) → bool
+	///
+	/// Returns `true` if the 32-byte AccountId follows the `[H160 | 0x00×12]`
+	/// suffix pattern, indicating a secp256k1 account created with OrbinumSignature.
+	/// Pure computation — no storage lookup.
+	fn is_evm_suffix_account(input: &[u8]) -> PrecompileResult {
+		if input.len() < 36 {
+			return Err(PrecompileFailure::Error {
+				exit_status: ExitError::Other("isEvmSuffixAccount: input too short".into()),
+			});
+		}
+		let account_bytes = &input[4..36];
+		let is_suffix = account_bytes[20..].iter().all(|&b| b == 0);
+
+		let mut output = vec![0u8; 32];
+		output[31] = is_suffix as u8;
+		Ok(PrecompileOutput {
+			exit_status: ExitSucceed::Returned,
+			output,
+		})
+	}
+
+	/// toEvmAddress(bytes32 accountId) → address
+	///
+	/// For secp256k1 accounts (`[H160 | 0x00×12]` pattern): derives the H160
+	/// implicitly — pure O(1) computation, no storage lookup.
+	///
+	/// For Sr25519/Ed25519 accounts: returns `address(0)`. Their EVM address
+	/// is registered via `map_account` and is not derivable from the bytes32
+	/// alone. Use `getAliasOf` or native Substrate RPCs instead.
+	fn to_evm_address(input: &[u8]) -> PrecompileResult {
+		if input.len() < 36 {
+			return Err(PrecompileFailure::Error {
+				exit_status: ExitError::Other("toEvmAddress: input too short".into()),
+			});
+		}
+		let raw = &input[4..36];
+		let is_suffix = raw[20..].iter().all(|&b| b == 0);
+
+		let h160 = if is_suffix {
+			H160::from_slice(&raw[..20])
+		} else {
+			H160::zero()
+		};
+
+		let mut output = vec![0u8; 32];
+		output[12..32].copy_from_slice(h160.as_bytes());
+		Ok(PrecompileOutput {
+			exit_status: ExitSucceed::Returned,
+			output,
+		})
+	}
+
+	/// resolveAliasFull(string alias) → (bytes32 accountId32, address evmAddress, bool isEvmSuffix)
+	///
+	/// Extended version of `resolveAlias` that exposes the full `AccountId32` (bytes32)
+	/// required by `BalancesPrecompile.transfer(bytes32, uint256)`, plus a flag that
+	/// indicates whether the account is a secp256k1 implicit-mapping account.
+	///
+	/// ABI return layout (96 bytes):
+	///   [0..32]   bytes32  accountId32   — AccountId32 bytes (secp256k1 only; zeros for Sr25519)
+	///   [32..64]  address  evmAddress    — H160 (derived for secp256k1; from storage or zero for Sr25519)
+	///   [64..96]  bool     isEvmSuffix   — true for secp256k1 OrbinumSignature accounts
+	///
+	/// Returns 96 zero bytes if the alias does not exist.
+	///
+	/// Note: for Sr25519/Ed25519 accounts, `accountId32` is zero — the AccountId32 is
+	/// not derivable from the alias record without a native Substrate API call.
+	fn resolve_alias_full(input: &[u8]) -> PrecompileResult {
+		let alias_bytes = Self::decode_abi_string(&input[4..])?;
+
+		let Some(record) =
+			pallet_account_mapping::Pallet::<T>::runtime_api_resolve_alias(&alias_bytes)
+		else {
+			return Ok(PrecompileOutput {
+				exit_status: ExitSucceed::Returned,
+				output: vec![0u8; 96],
+			});
+		};
+
+		let is_suffix = T::is_implicit_evm_account(&record.owner);
+
+		// For secp256k1: derive H160 implicitly (always correct for suffix accounts).
+		// For Sr25519/Ed25519: use the mapped evm_address from storage, or zero.
+		let evm_h160 = if is_suffix {
+			T::AccountIdToEvmAddress::convert(record.owner).unwrap_or(H160::zero())
+		} else {
+			record.evm_address.unwrap_or(H160::zero())
+		};
+
+		let mut output = vec![0u8; 96];
+		// bytes32 accountId32 [0..32]: reconstructed from H160 for secp256k1 ([H160|0x00×12]).
+		// For Sr25519/Ed25519: left as zeros (not derivable without AsRef<[u8;32]>).
+		if is_suffix && evm_h160 != H160::zero() {
+			output[0..20].copy_from_slice(evm_h160.as_bytes()); // suffix [20..32] stays zero
+		}
+		output[44..64].copy_from_slice(evm_h160.as_bytes()); // address (slot [32..64])
+		output[95] = is_suffix as u8; // bool    (slot [64..96])
+
+		Ok(PrecompileOutput {
+			exit_status: ExitSucceed::Returned,
+			output,
+		})
+	}
+
+	// ─────────────────────────────────────────────────────────────────────────
+	// Phase 4: relay via chain link
+	// ─────────────────────────────────────────────────────────────────────────
+
+	/// dispatchAsLinkedAccount(bytes32 owner, uint32 chainId, bytes address, bytes signature, bytes call)
+	///
+	/// Relayer proxy: dispatches `call` as `owner`, verified by the external wallet
+	/// registered as chain link `(chainId, address)` for that owner. The EVM caller
+	/// (relayer) pays gas — only the external wallet's signature over the
+	/// SCALE-encoded `call` payload is verified.
+	///
+	/// `call` must be **SCALE-encoded** `RuntimeCall` bytes. Produce off-chain via
+	/// Polkadot.js (`api.createType('Call', ...).toHex()`) or `@polkadot/api`.
+	///
+	/// Note: chain_id == NativeEvmChainId (e.g. 2700 on testnet, 270 on mainnet)
+	/// is rejected by the pallet with `UseNativeSignatureForEvmAccounts`.
+	///
+	/// ABI params (input[4..]) — mixed static + dynamic:
+	///   [0..32]    bytes32 owner    (static — raw AccountId32, SCALE-encoded as 32 flat bytes)
+	///   [32..64]   uint32  chainId  (static — value in last 4 bytes of slot)
+	///   [64..96]   uint256 offset → bytes address   (dynamic — external chain address)
+	///   [96..128]  uint256 offset → bytes signature  (dynamic — external wallet sig over SCALE(call))
+	///   [128..160] uint256 offset → bytes call       (dynamic — SCALE-encoded RuntimeCall)
+	fn dispatch_as_linked_account(
+		handle: &mut impl PrecompileHandle,
+		input: &[u8],
+	) -> PrecompileResult {
+		let params = &input[4..];
+		// Minimum: 5 slots × 32 = 160 bytes
+		if params.len() < 160 {
+			return Err(PrecompileFailure::Error {
+				exit_status: ExitError::Other("dispatchAsLinkedAccount: input too short".into()),
+			});
+		}
+
+		// bytes32 owner → AccountId32
+		// AccountId32 SCALE-encodes as 32 flat bytes (no length prefix).
+		let owner =
+			<T as frame_system::Config>::AccountId::decode(&mut &params[0..32]).map_err(|_| {
+				PrecompileFailure::Error {
+					exit_status: ExitError::Other(
+						"dispatchAsLinkedAccount: invalid owner AccountId".into(),
+					),
+				}
+			})?;
+
+		// uint32 chainId (value in last 4 bytes of 32-byte ABI slot)
+		let chain_id = u32::from_be_bytes(params[60..64].try_into().unwrap());
+
+		// bytes address, signature, call — dynamic args with offset pointers at slots 2, 3, 4
+		let address = Self::decode_bytes_at_slot(params, 64)?;
+		let signature = Self::decode_bytes_at_slot(params, 96)?;
+		let call_bytes = Self::decode_bytes_at_slot(params, 128)?;
+
+		// SCALE-decode the inner RuntimeCall
+		let inner_call =
+			<T as pallet_account_mapping::Config>::RuntimeCall::decode(&mut &call_bytes[..])
+				.map_err(|_| PrecompileFailure::Error {
+					exit_status: ExitError::Other(
+						"dispatchAsLinkedAccount: invalid SCALE-encoded call".into(),
+					),
+				})?;
+
+		Self::dispatch_call(
+			handle,
+			pallet_account_mapping::Call::<T>::dispatch_as_linked_account {
+				owner,
+				chain_id,
+				address,
+				signature,
+				call: Box::new(inner_call),
+			},
+		)
 	}
 }

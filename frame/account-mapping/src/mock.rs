@@ -62,6 +62,8 @@ impl Convert<u64, Option<H160>> for TestEvmAddress {
 parameter_types! {
 	pub const TestAliasDeposit: u64 = 100;
 	pub const TestMaxAliasLength: u32 = 32;
+	/// Simulated native EVM chain ID for tests.
+	pub const TestNativeEvmChainId: u32 = 9999;
 }
 
 impl pallet_account_mapping::Config for Test {
@@ -70,8 +72,15 @@ impl pallet_account_mapping::Config for Test {
 	type AccountIdToEvmAddress = TestEvmAddress;
 	type AliasDeposit = TestAliasDeposit;
 	type MaxAliasLength = TestMaxAliasLength;
+	type NativeEvmChainId = TestNativeEvmChainId;
 	type WeightInfo = pallet_account_mapping::weights::SubstrateWeight<Test>;
 	type PrivateLinkVerifier = MockPrivateLinkVerifier;
+
+	/// Account 100 simulates a secp256k1 OrbinumSignature account in tests:
+	/// its H160 is always derivable implicitly — no storage entry needed.
+	fn is_implicit_evm_account(account: &u64) -> bool {
+		*account == 100
+	}
 }
 
 pub struct MockPrivateLinkVerifier;
@@ -86,7 +95,13 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 		.build_storage()
 		.unwrap();
 	pallet_balances::GenesisConfig::<Test> {
-		balances: vec![(1, 10_000), (2, 10_000), (3, 10_000), (42, 10_000)],
+		balances: vec![
+			(1, 10_000),
+			(2, 10_000),
+			(3, 10_000),
+			(42, 10_000),
+			(100, 10_000),
+		],
 		dev_accounts: None,
 	}
 	.assimilate_storage(&mut t)

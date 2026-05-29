@@ -169,6 +169,7 @@ impl pallet_account_mapping::Config for Test {
 	type MaxAliasLength = TestMaxAliasLength;
 	type WeightInfo = pallet_account_mapping::weights::SubstrateWeight<Test>;
 	type PrivateLinkVerifier = MockPrivateLinkVerifier;
+	type NativeEvmChainId = frame_support::traits::ConstU32<1>; // test chain id
 }
 
 /// Caller address used in tests: `0x0000…0001`.

@@ -124,6 +124,27 @@ pub mod pallet {
 		/// Use [`DisabledPrivateLinkVerifier`] until the circuit is deployed.
 		type PrivateLinkVerifier: crate::PrivateLinkVerifierPort;
 
+		/// Returns `true` if `account` is an implicit EVM-suffix account whose H160
+		/// address is always derivable from the `AccountId` without a storage lookup.
+		///
+		/// Override this in runtimes that use `OrbinumSignature` (Phase 3): secp256k1
+		/// accounts produce `AccountId32 = [H160 | 0x00×12]`, making `map_account`
+		/// storage writes redundant for them.
+		///
+		/// Default: `false` — conservative fallback that preserves existing behaviour
+		/// and keeps mock/test runtimes working without changes.
+		fn is_implicit_evm_account(_account: &Self::AccountId) -> bool {
+			false
+		}
+
+		/// EVM chain ID of this runtime's native EVM (e.g. 2700 for Orbinum testnet).
+		///
+		/// `dispatch_as_linked_account` rejects calls where `chain_id` equals this value:
+		/// secp256k1 accounts can sign Substrate extrinsics directly via `OrbinumSignature`,
+		/// so delegating through a chain link is redundant and confusing.
+		#[pallet::constant]
+		type NativeEvmChainId: Get<u32>;
+
 		/// Runtime call type (for `dispatch_as_linked_account` and `dispatch_as_private_link`).
 		type RuntimeCall: Parameter
 			+ Dispatchable<RuntimeOrigin = Self::RuntimeOrigin>
@@ -370,6 +391,9 @@ pub mod pallet {
 		/// Attempted to register a Substrate-native signature scheme as a chain link scheme.
 		/// Chain links are exclusively for external, non-Substrate ecosystems.
 		SubstrateNativeSchemeNotAllowed,
+		/// Attempting to use `dispatch_as_linked_account` with the native EVM chain ID.
+		/// Secp256k1 accounts can sign Substrate extrinsics directly via `OrbinumSignature`.
+		UseNativeSignatureForEvmAccounts,
 	}
 
 	// ──────────────────────────────────────────────
@@ -415,18 +439,35 @@ pub mod pallet {
 		}
 		/// Register a stateful EVM → Substrate mapping using the fallback H160.
 		/// This is the "lite" mapping for power users who don't need an alias.
+		///
+		/// For secp256k1 accounts in runtimes that use `OrbinumSignature` (Phase 3),
+		/// the H160 mapping is implicit and always derivable from the `AccountId`.
+		/// `map_account` is still callable by those accounts — it emits the
+		/// `AccountMapped` event (useful for indexers) without writing to storage.
 		#[pallet::call_index(0)]
 		#[pallet::weight(T::WeightInfo::map_account())]
 		pub fn map_account(origin: OriginFor<T>) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
+			let address = T::AccountIdToEvmAddress::convert(who.clone())
+				.ok_or(Error::<T>::NativeAccountCannotBeMapped)?;
+
+			// Secp256k1 post-OrbinumSignature: AccountId32 = [H160 | 0x00×12].
+			// The mapping is implicit and deterministic — no storage entry needed.
+			// Emit the event so indexers can record the association.
+			if T::is_implicit_evm_account(&who) {
+				Self::deposit_event(Event::AccountMapped {
+					account: who,
+					address,
+				});
+				return Ok(());
+			}
+
+			// Sr25519 / Ed25519: explicit storage entry required.
 			ensure!(
 				!OriginalAccounts::<T>::contains_key(&who),
 				Error::<T>::AlreadyMapped
 			);
-
-			let address = T::AccountIdToEvmAddress::convert(who.clone())
-				.ok_or(Error::<T>::NativeAccountCannotBeMapped)?;
 			ensure!(
 				!MappedAccounts::<T>::contains_key(address),
 				Error::<T>::AddressAlreadyMapped
@@ -444,10 +485,34 @@ pub mod pallet {
 		}
 
 		/// Remove a stateful EVM mapping.
+		///
+		/// For implicit secp256k1 accounts (`OrbinumSignature` runtimes), no storage
+		/// entry exists. `unmap_account` is still callable — it emits `AccountUnmapped`
+		/// (useful for indexers) without touching storage.
 		#[pallet::call_index(1)]
 		#[pallet::weight(T::WeightInfo::unmap_account())]
 		pub fn unmap_account(origin: OriginFor<T>) -> DispatchResult {
 			let who = ensure_signed(origin)?;
+
+			// Secp256k1 post-OrbinumSignature: no storage entry was written by map_account.
+			// Handle both the case where the account migrated from a pre-Phase-3 storage
+			// entry and the case where there is no entry at all.
+			if T::is_implicit_evm_account(&who) {
+				let address = if let Some(addr) = OriginalAccounts::<T>::take(&who) {
+					// Legacy entry from before OrbinumSignature — clean it up.
+					MappedAccounts::<T>::remove(addr);
+					addr
+				} else {
+					// No storage entry (expected post-Phase-3); derive address implicitly.
+					T::AccountIdToEvmAddress::convert(who.clone())
+						.ok_or(Error::<T>::NativeAccountCannotBeMapped)?
+				};
+				Self::deposit_event(Event::AccountUnmapped {
+					account: who,
+					address,
+				});
+				return Ok(());
+			}
 
 			let Some(address) = OriginalAccounts::<T>::take(&who) else {
 				return Err(Error::<T>::NotMapped.into());
@@ -896,6 +961,14 @@ pub mod pallet {
 			call: Box<<T as Config>::RuntimeCall>,
 		) -> DispatchResult {
 			let _relayer = ensure_signed(origin)?; // Anyone can pay gas to proxy the call
+
+			// Guard: reject calls targeting the native EVM chain.
+			// Secp256k1 accounts can sign Substrate extrinsics directly via
+			// OrbinumSignature — no delegated dispatch needed for native EVM links.
+			ensure!(
+				chain_id != T::NativeEvmChainId::get(),
+				Error::<T>::UseNativeSignatureForEvmAccounts
+			);
 
 			// 1. Verify that (chain_id, address) is linked to 'owner'.
 			let bounded_addr: ExternalAddr = address
