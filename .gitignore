@@ -19,6 +19,9 @@ polkadot.*
 /artifacts/
 tmp/
 
+# Testnet keys — generated secrets, never commit
+scripts/testnet-keys/keys/
+
 # Editors
 .vscode
 .idea/
@@ -33,3 +36,6 @@ tmp/
 
 # NixOS development environment
 .envrc
+
+# Node runtime data (chain DB, keystore, network keys)
+/data/
