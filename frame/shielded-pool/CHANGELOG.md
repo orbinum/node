@@ -2,6 +2,12 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.8.2] - 2026-06-01
+
+### Changed
+
+- Updated FRAME benchmark weights measured on Hetzner CCX33 (AMD EPYC-Milan, 8 vCPU dedicated, 32 GB RAM). Steps: `50`, Repeat: `20`. Covers: `shield`, `shield_batch`, `private_transfer`, `unshield`, `register_asset`, `verify_asset`, `unverify_asset`, `claim_shielded_fees`.
+
 ## [0.8.1] - 2026-05-22
 
 ### Added
