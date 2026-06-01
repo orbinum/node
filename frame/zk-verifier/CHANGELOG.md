@@ -4,6 +4,14 @@ All notable changes to this pallet are documented here.
 
 ---
 
+## [0.7.2] — 2026-06-01
+
+### Changed
+
+- Updated FRAME benchmark weights measured on Hetzner CCX33 (AMD EPYC-Milan, 8 vCPU dedicated, 32 GB RAM). Steps: `50`, Repeat: `20`. `verify_proof` refreshed with real Groth16 BN254 pairing cost.
+
+---
+
 ## [0.7.1] — 2026-05-22
 
 ### Changed

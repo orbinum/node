@@ -2,6 +2,12 @@
 
 All notable changes to `pallet-relayer` will be documented in this file.
 
+## [0.2.2] - 2026-06-01
+
+### Changed
+
+- Updated FRAME benchmark weights measured on Hetzner CCX33 (AMD EPYC-Milan, 8 vCPU dedicated, 32 GB RAM). Steps: `50`, Repeat: `20`. All extrinsics refreshed.
+
 ## [0.2.1] - 2026-05-22
 
 ### Changed

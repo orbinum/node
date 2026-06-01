@@ -1,6 +1,6 @@
 [package]
 name = "pallet-relayer"
-version = "0.2.1"
+version = "0.2.2"
 description = "On-chain relay configuration, relayer registry and fee accounting."
 authors = { workspace = true }
 license = "GPL-3.0-or-later"
