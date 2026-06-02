@@ -1,0 +1,42 @@
+# Build artifacts
+target/
+**/target/
+
+# Node modules
+node_modules/
+**/node_modules/
+
+# Documentation
+docs/build/
+docs/node_modules/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# CI/CD
+.github/
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Test files
+ts-tests/
+ts-tests-orbinum/
+
+# Temporary files
+*.tmp
+*.log

@@ -1,0 +1,37 @@
+services:
+  rpc-node:
+    image: orbinum-node:latest
+    build:
+      context: ../..
+      dockerfile: docker/testnet/Dockerfile
+    container_name: orbinum-rpc-node
+    command: >
+      --chain /chain-specs/testnet-spec.json
+      --name "Orbinum-RPC"
+      --base-path /data
+      --port 30333
+      --rpc-port 9944
+      --rpc-external
+      --rpc-cors all
+      --rpc-methods Safe
+      --no-mdns
+      --no-private-ipv4
+      --prometheus-external
+      --prometheus-port 9615
+      --log info
+    volumes:
+      - rpc-node-data:/data
+      - ./testnet-spec.json:/chain-specs/testnet-spec.json:ro
+    ports:
+      - "127.0.0.1:9944:9944"   # RPC — localhost only, proxied by Nginx
+      - "30333:30333"            # P2P — must be publicly reachable
+      - "9615:9615"              # Prometheus — optional
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+volumes:
+  rpc-node-data:

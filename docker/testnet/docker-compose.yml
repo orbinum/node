@@ -1,0 +1,29 @@
+services:
+  validator-1:
+    image: orbinum-node:latest
+    build:
+      context: ../..
+      dockerfile: docker/testnet/Dockerfile
+    container_name: orbinum-validator-1
+    command: >
+      --chain /chain-specs/testnet-spec.json
+      --name "Orbinum-Validator-1"
+      --base-path /data
+      --port 30333
+      --validator
+      --no-mdns
+      --no-private-ipv4
+      --prometheus-external
+      --prometheus-port 9615
+      --log info
+    ports:
+      - "30333:30333"   # P2P — must be publicly reachable
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+volumes:
+  validator-1-data:
