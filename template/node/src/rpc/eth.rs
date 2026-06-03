@@ -39,7 +39,7 @@ pub struct EthDeps<B: BlockT, C, P, CT, CIDP> {
 	/// Whether to enable dev signer
 	pub enable_dev_signer: bool,
 	/// Optional EVM private key (hex) for the node-native relay.
-	pub evm_relayer_key: Option<String>,
+	pub evm_key: Option<String>,
 	/// Network service
 	pub network: Arc<dyn NetworkService>,
 	/// Chain syncing service
@@ -115,7 +115,7 @@ where
 		converter,
 		is_authority,
 		enable_dev_signer,
-		evm_relayer_key,
+		evm_key,
 		network,
 		sync,
 		frontier_backend,
@@ -223,8 +223,8 @@ where
 	#[cfg(feature = "txpool")]
 	io.merge(TxPool::new(client.clone(), pool.clone()).into_rpc())?;
 
-	// Orbinum EVM relay RPC (requires --evm-relayer-key)
-	if let Some(ref key_hex) = evm_relayer_key {
+	// Orbinum EVM relay RPC — key is set automatically (Alice in dev, keystore in testnet)
+	if let Some(ref key_hex) = evm_key {
 		use fc_rpc::{EthValidatorSigner, OrbinumRelay, OrbinumRelayApiServer};
 		match EthValidatorSigner::from_hex(key_hex) {
 			Ok(signer) => {

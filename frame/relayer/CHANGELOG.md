@@ -2,6 +2,41 @@
 
 All notable changes to `pallet-relayer` will be documented in this file.
 
+## [0.3.0] - 2026-06-03
+
+### Changed
+
+- **`register_relayer` is now sudo/governance-only** (`ManageOrigin`). Previously it was
+  a self-service call restricted to validator nodes via `T::IsValidator`. The new signature
+  adds an explicit `who: T::AccountId` argument so the privileged origin can register any
+  account:
+  ```
+  // before: register_relayer(origin, evm_address)   — signed by validator
+  // after:  register_relayer(origin, who, evm_address) — ManageOrigin (sudo/gov)
+  ```
+- **Benchmark** for `register_relayer` updated to use `#[extrinsic_call]` with
+  `RawOrigin::Root` instead of the previous manual `#[block]` storage-insert approach.
+  Measured weights now reflect the real extrinsic dispatch path.
+- Event doc comments updated: `RelayerRegistered` and `RelayerUnregistered` now note
+  sudo/governance as the acting origin.
+- Module-level doc updated: registry is "managed exclusively by sudo/governance".
+
+### Removed
+
+- `T::IsValidator: Contains<AccountId>` — config trait no longer needed. Validator gating
+  is handled upstream by `pallet-validator-set`.
+- `Error::NotValidator` — removed alongside `IsValidator`.
+- `MockValidators` from `mock.rs` — no longer meaningful.
+
+### Migration
+
+Update runtime `Config` impl and any `register_relayer` call sites:
+- Remove `type IsValidator = ...` from the `pallet_relayer::Config` impl.
+- Change origin from a signed validator to `ManageOrigin` (e.g. `sudo`).
+- Add `who: AccountId` as the first call argument before `evm_address`.
+
+---
+
 ## [0.2.2] - 2026-06-01
 
 ### Changed

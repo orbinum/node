@@ -16,13 +16,17 @@ use sc_service::TransactionPool;
 use sp_api::{CallApiAt, ProvideRuntimeApi};
 use sp_blockchain::{Error as BlockChainError, HeaderBackend, HeaderMetadata};
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
+use sp_core::H256;
 use sp_inherents::CreateInherentDataProviders;
+use sp_keystore::Keystore;
 use sp_runtime::traits::Block as BlockT;
 // Runtime
 use orbinum_runtime::{AccountId, Balance, Hash, Nonce};
 
 mod eth;
+mod relayer_author;
 pub use self::eth::{create_eth, EthDeps, LogsJournalConfig};
+use self::relayer_author::{RelayerAuthor, RelayerAuthorApiServer};
 
 /// Full client dependencies.
 pub struct FullDeps<B: BlockT, C, P, CT, CIDP> {
@@ -32,6 +36,8 @@ pub struct FullDeps<B: BlockT, C, P, CT, CIDP> {
 	pub pool: Arc<P>,
 	/// Manual seal command sink
 	pub command_sink: Option<mpsc::Sender<EngineCommand<Hash>>>,
+	/// Keystore — used by `relayer_registerRelayer` to sign with the Aura key.
+	pub keystore: Arc<dyn Keystore>,
 	/// Ethereum-compatibility specific dependencies.
 	pub eth: EthDeps<B, C, P, CT, CIDP>,
 }
@@ -60,7 +66,7 @@ pub fn create_full<B, C, P, BE, CT, CIDP>(
 	>,
 ) -> Result<RpcModule<()>, Box<dyn std::error::Error + Send + Sync>>
 where
-	B: BlockT,
+	B: BlockT<Hash = H256>,
 	C: CallApiAt<B> + ProvideRuntimeApi<B>,
 	C::Api: sp_block_builder::BlockBuilder<B>,
 	C::Api: sp_consensus_aura::AuraApi<B, AuraId>,
@@ -72,6 +78,7 @@ where
 	C::Api: pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi<B>,
 	C::Api: pallet_zk_verifier_runtime_api::ZkVerifierRuntimeApi<B>,
 	C::Api: pallet_relayer_runtime_api::RelayerRuntimeApi<B>,
+	C::Api: sp_api::Core<B>,
 	C: HeaderBackend<B> + HeaderMetadata<B, Error = BlockChainError> + 'static,
 	C: BlockchainEvents<B> + AuxStore + UsageProvider<B> + StorageProvider<B, BE>,
 	BE: Backend<B> + 'static,
@@ -95,15 +102,17 @@ where
 		client,
 		pool,
 		command_sink,
+		keystore,
 		eth,
 	} = deps;
 
-	io.merge(System::new(client.clone(), pool).into_rpc())?;
+	io.merge(System::new(client.clone(), pool.clone()).into_rpc())?;
 	io.merge(TransactionPayment::new(client.clone()).into_rpc())?;
 	io.merge(AccountMapping::new(client.clone()).into_rpc())?;
 	io.merge(ShieldedPool::new(client.clone()).into_rpc())?;
 	io.merge(ZkVerifier::new(client.clone()).into_rpc())?;
 	io.merge(Relayer::new(client.clone()).into_rpc())?;
+	io.merge(RelayerAuthor::new(keystore).into_rpc())?;
 
 	// Orbinum Privacy + Chain RPC
 	io.merge(PrivacyRpc::new(client.clone()).into_rpc())?;

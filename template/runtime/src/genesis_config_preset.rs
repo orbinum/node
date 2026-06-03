@@ -4,8 +4,8 @@ mod mainnet;
 mod testnet;
 
 use crate::{
-	AccountId, BalancesConfig, BaseFeeConfig, EVMChainIdConfig, EVMConfig, EthereumConfig,
-	ManualSealConfig, RuntimeGenesisConfig, SudoConfig,
+	AccountId, AuraConfig, BalancesConfig, BaseFeeConfig, EVMChainIdConfig, EVMConfig,
+	EthereumConfig, GrandpaConfig, ManualSealConfig, RuntimeGenesisConfig, SudoConfig,
 };
 use hex_literal::hex;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
@@ -63,14 +63,49 @@ pub(super) fn build_genesis(
 		map
 	};
 
+	// Derive validator AccountIds from their Aura (sr25519) public key bytes.
+	// The validator's on-chain identity IS their sr25519 key — the same 32 bytes
+	// serve as both AccountId32 and AuraId.
+	let validator_accounts: Vec<AccountId> = initial_authorities
+		.iter()
+		.map(|(aura_id, _)| {
+			let raw: [u8; 32] = <[u8; 32]>::try_from(aura_id.as_ref()).expect("AuraId is 32 bytes");
+			AccountId::from(raw)
+		})
+		.collect();
+
+	// Session genesis: (stash_account, validator_id, session_keys).
+	// Both account and validator_id are the same AccountId for simplicity.
+	let session_keys: Vec<(AccountId, AccountId, crate::opaque::SessionKeys)> = validator_accounts
+		.iter()
+		.zip(initial_authorities.iter())
+		.map(|(account, (aura_id, grandpa_id))| {
+			(
+				account.clone(),
+				account.clone(),
+				crate::opaque::SessionKeys {
+					aura: aura_id.clone(),
+					grandpa: grandpa_id.clone(),
+				},
+			)
+		})
+		.collect();
+
 	let config = RuntimeGenesisConfig {
 		system: Default::default(),
-		aura: Default::default(),
+		// Aura and GRANDPA authorities are initialised by pallet-session via
+		// `on_genesis_session`. Setting empty vecs here is intentional.
+		aura: AuraConfig {
+			authorities: vec![],
+		},
 		base_fee: BaseFeeConfig {
 			base_fee_per_gas: U256::from(base_fee_per_gas),
 			..Default::default()
 		},
-		grandpa: Default::default(),
+		grandpa: GrandpaConfig {
+			authorities: vec![],
+			..Default::default()
+		},
 		balances: BalancesConfig {
 			balances: endowed_accounts.clone(),
 			..Default::default()

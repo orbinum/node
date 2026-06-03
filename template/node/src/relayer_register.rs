@@ -1,28 +1,25 @@
-//! Automatic registration of the EVM relay key with pallet-relayer at node startup.
+//! Derives the EVM relay address from the node's Aura keystore and logs it.
 //!
-//! When a validator starts with `--evm-relayer-key`, this module submits a
-//! `pallet_relayer::Call::register_relayer(evm_address)` extrinsic signed by the
-//! node's first Aura (sr25519) key. The registration is skipped if the account is
-//! already present in `pallet-relayer::RelayerByAccount` storage.
+//! When a validator starts with an Aura key in the keystore, this module
+//! derives the corresponding EVM address and logs it prominently so that
+//! sudo/governance can call `relayer.register_relayer(who, evm_address)`
+//! on-chain.
+//!
+//! The on-chain extrinsic is **not** submitted automatically — it requires
+//! `ManageOrigin` (sudo / governance).
 
 use std::sync::Arc;
 
 use sc_client_api::StorageProvider;
-use sc_transaction_pool_api::{TransactionPool, TransactionSource};
-use sp_api::{Core, ProvideRuntimeApi};
 use sp_blockchain::HeaderBackend;
 use sp_core::{crypto::KeyTypeId, storage::StorageKey, H256};
 use sp_keystore::Keystore;
 use sp_runtime::{
-	codec::{Decode, Encode},
-	generic::Era,
+	codec::Encode,
 	traits::{Block as BlockT, Zero},
 };
 
-use frame_system_rpc_runtime_api::AccountNonceApi;
-use orbinum_runtime::{
-	AccountId, Nonce, OrbinumSignature, SignedExtra, SignedPayload, UncheckedExtrinsic,
-};
+use orbinum_runtime::AccountId;
 
 use crate::client::FullBackend;
 
@@ -69,28 +66,21 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Auto-registration task
+// Detection task
 // ---------------------------------------------------------------------------
 
-/// Waits for at least block #1 to be imported, then submits a
-/// `register_relayer(evm_address)` extrinsic signed by the node's Aura key.
+/// Waits for at least block #1, then derives the EVM relay address from the
+/// node's Aura key and logs it with instructions for sudo registration.
 ///
-/// Idempotent: exits early (with an info log) if already registered.
-pub async fn auto_register<B, C, P>(
+/// Idempotent: if the account is already registered on-chain, logs a
+/// confirmation and exits without further action.
+pub async fn auto_register<B, C>(
 	client: Arc<C>,
-	pool: Arc<P>,
 	keystore: Arc<dyn Keystore>,
 	evm_address: sp_core::H160,
 ) where
 	B: BlockT<Hash = H256>,
-	C: ProvideRuntimeApi<B>
-		+ HeaderBackend<B>
-		+ StorageProvider<B, FullBackend<B>>
-		+ Send
-		+ Sync
-		+ 'static,
-	C::Api: frame_system_rpc_runtime_api::AccountNonceApi<B, AccountId, Nonce> + Core<B>,
-	P: TransactionPool<Block = B, Hash = B::Hash> + 'static,
+	C: HeaderBackend<B> + StorageProvider<B, FullBackend<B>> + Send + Sync + 'static,
 {
 	// Wait until block #1 is imported so state is ready (up to 30 s).
 	for _ in 0u32..60 {
@@ -107,7 +97,7 @@ pub async fn auto_register<B, C, P>(
 		None => {
 			log::warn!(
 				target: "orbinum-relay",
-				"auto-register: no Aura key in keystore — skipping relayer registration"
+				"auto-register: no Aura key in keystore — cannot derive EVM relay address"
 			);
 			return;
 		}
@@ -115,131 +105,25 @@ pub async fn auto_register<B, C, P>(
 
 	let account_id: AccountId = pub_key.0.into();
 	let best_hash = client.info().best_hash;
-	let genesis_hash = client.info().genesis_hash;
 
-	// Early-exit if already registered to avoid a wasted fee.
+	// If already registered, just confirm and exit.
 	if is_registered::<B, C>(&client, best_hash, &account_id) {
 		log::info!(
 			target: "orbinum-relay",
-			"🔑 Relayer already registered: EVM={evm_address:?} ↔ substrate={account_id:?}"
+			"🔑 EVM relay already registered on-chain: EVM={evm_address:?} ↔ substrate={account_id:?}"
 		);
 		return;
 	}
 
-	// ── Runtime state ─────────────────────────────────────────────────────
-	let api = client.runtime_api();
-
-	let nonce = match api.account_nonce(best_hash, account_id.clone()) {
-		Ok(n) => n,
-		Err(e) => {
-			log::error!(target: "orbinum-relay", "auto-register: account_nonce error: {e}");
-			return;
-		}
-	};
-
-	let version = match api.version(best_hash) {
-		Ok(v) => v,
-		Err(e) => {
-			log::error!(target: "orbinum-relay", "auto-register: runtime version error: {e}");
-			return;
-		}
-	};
-
-	// ── Build extrinsic ───────────────────────────────────────────────────
-	let call = orbinum_runtime::RuntimeCall::Relayer(pallet_relayer::Call::register_relayer {
-		evm_address,
-	});
-
-	// Type annotation drives generic inference for all CheckXxx<Runtime> parameters.
-	let extra: SignedExtra = (
-		frame_system::CheckNonZeroSender::new(),
-		frame_system::CheckSpecVersion::new(),
-		frame_system::CheckTxVersion::new(),
-		frame_system::CheckGenesis::new(),
-		frame_system::CheckEra::from(Era::Immortal),
-		frame_system::CheckNonce::from(nonce),
-		frame_system::CheckWeight::new(),
-		pallet_transaction_payment::ChargeTransactionPayment::from(0u128),
-		frame_metadata_hash_extension::CheckMetadataHash::new(false),
-	);
-
-	// additional_signed mirrors each extension's AdditionalSigned type:
-	//   ((), spec_version, tx_version, genesis_hash, genesis_hash, (), (), (), None)
-	// For immortal transactions CheckEra uses the genesis hash as the block checkpoint.
-	// CheckMetadataHash in disabled mode contributes None.
-	let additional_signed = (
-		(),
-		version.spec_version,
-		version.transaction_version,
-		genesis_hash,
-		genesis_hash,
-		(),
-		(),
-		(),
-		None::<[u8; 32]>,
-	);
-
-	let payload = SignedPayload::from_raw(call.clone(), extra.clone(), additional_signed);
-
-	let to_sign = payload.using_encoded(|bytes| {
-		if bytes.len() > 256 {
-			sp_io::hashing::blake2_256(bytes).to_vec()
-		} else {
-			bytes.to_vec()
-		}
-	});
-
-	let signature = match keystore.sr25519_sign(AURA_KEY_TYPE, &pub_key, &to_sign) {
-		Ok(Some(sig)) => sig,
-		Ok(None) => {
-			log::error!(
-				target: "orbinum-relay",
-				"auto-register: keystore has no key for {pub_key:?}"
-			);
-			return;
-		}
-		Err(e) => {
-			log::error!(target: "orbinum-relay", "auto-register: sign error: {e:?}");
-			return;
-		}
-	};
-
-	let extrinsic = UncheckedExtrinsic::new_signed(
-		call,
-		account_id.clone(),
-		OrbinumSignature::Sr25519(signature),
-		extra,
-	);
-
-	// Encode the typed extrinsic, then re-decode as the pool's opaque extrinsic type.
-	// OpaqueExtrinsic decodes from the SCALE length-prefixed bytes that UncheckedExtrinsic
-	// emits, so the round-trip is lossless.
-	let encoded = extrinsic.encode();
-	let pool_ext = match B::Extrinsic::decode(&mut encoded.as_slice()) {
-		Ok(e) => e,
-		Err(e) => {
-			log::error!(target: "orbinum-relay", "auto-register: extrinsic decode failed: {e}");
-			return;
-		}
-	};
-
-	match pool
-		.submit_one(best_hash, TransactionSource::Local, pool_ext)
-		.await
-	{
-		Ok(hash) => {
-			log::info!(
-				target: "orbinum-relay",
-				"🔑 Relayer auto-registration submitted: EVM={evm_address:?} ↔ substrate={account_id:?}, tx={hash:?}"
-			);
-		}
-		Err(e) => {
-			log::error!(
-				target: "orbinum-relay",
-				"auto-register: submit failed (already registered by another account?): {e}"
-			);
-		}
-	}
+	// Log the address with clear instructions for the operator.
+	log::info!(target: "orbinum-relay", "╔══════════════════════════════════════════════════╗");
+	log::info!(target: "orbinum-relay", "║   EVM relay key detected — register via sudo     ║");
+	log::info!(target: "orbinum-relay", "╠══════════════════════════════════════════════════╣");
+	log::info!(target: "orbinum-relay", "║  Substrate : {account_id:?}");
+	log::info!(target: "orbinum-relay", "║  EVM addr  : {evm_address:?}");
+	log::info!(target: "orbinum-relay", "╠══════════════════════════════════════════════════╣");
+	log::info!(target: "orbinum-relay", "║  relayer.registerRelayer(who, evmAddress)        ║");
+	log::info!(target: "orbinum-relay", "╚══════════════════════════════════════════════════╝");
 }
 
 // ---------------------------------------------------------------------------

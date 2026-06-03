@@ -74,7 +74,6 @@ frame-benchmarking = { workspace = true }
 frame-benchmarking-cli = { workspace = true }
 frame-metadata-hash-extension = { workspace = true }
 frame-system = { workspace = true }
-pallet-relayer = { workspace = true }
 pallet-transaction-payment = { workspace = true }
 sp-keystore = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
