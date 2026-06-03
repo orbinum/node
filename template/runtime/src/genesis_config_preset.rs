@@ -44,7 +44,7 @@ pub(super) const MAINNET_PRESET_ID: &str = "orbinum_mainnet_runtime_preset";
 pub(super) fn build_genesis(
 	sudo_key: AccountId,
 	endowed_accounts: Vec<(AccountId, u128)>,
-	_initial_authorities: Vec<(AuraId, GrandpaId)>,
+	initial_authorities: Vec<(AuraId, GrandpaId)>,
 	chain_id: u64,
 	enable_manual_seal: bool,
 	base_fee_per_gas: u64,
