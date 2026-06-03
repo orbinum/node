@@ -1,9 +1,9 @@
 services:
   validator-1:
-    image: ${ORBINUM_IMAGE:-ghcr.io/orbinum/node:testnet-latest}
+    image: ${ORBINUM_IMAGE:-ghcr.io/orbinum/node:latest}
     container_name: orbinum-validator-1
     command: >
-      --chain /chain-specs/testnet-spec.json
+      --chain /chain-specs/mainnet-spec.json
       --name "Orbinum-Validator-1"
       --base-path /data
       --port 30333
@@ -13,6 +13,9 @@ services:
       --prometheus-external
       --prometheus-port 9615
       --log info
+    volumes:
+      - validator-1-data:/data
+      - ./mainnet-spec.json:/chain-specs/mainnet-spec.json:ro
     ports:
       - "30333:30333" # P2P — must be publicly reachable
     restart: unless-stopped

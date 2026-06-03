@@ -6,6 +6,7 @@ FROM rust:1.88-bookworm as builder
 RUN apt-get update && apt-get install -y \
     build-essential \
     clang \
+    libclang-dev \
     cmake \
     protobuf-compiler \
     libssl-dev \
