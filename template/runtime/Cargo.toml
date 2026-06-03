@@ -50,10 +50,12 @@ pallet-aura = { workspace = true }
 pallet-authorship = { workspace = true }
 pallet-balances = { workspace = true, features = ["insecure_zero_ed"] }
 pallet-grandpa = { workspace = true }
+pallet-session = { workspace = true }
 pallet-sudo = { workspace = true }
 pallet-timestamp = { workspace = true }
 pallet-transaction-payment = { workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { workspace = true }
+pallet-validator-set = { workspace = true }
 
 # Frontier
 fp-evm = { workspace = true, features = ["serde"] }
@@ -135,7 +137,9 @@ std = [
 	"pallet-account-mapping-runtime-api/std",
 	"pallet-balances/std",
 	"pallet-grandpa/std",
+	"pallet-session/std",
 	"pallet-sudo/std",
+	"pallet-validator-set/std",
 	"pallet-timestamp/std",
 	"pallet-transaction-payment/std",
 	"pallet-transaction-payment-rpc-runtime-api/std",
@@ -188,5 +192,33 @@ runtime-benchmarks = [
 	"pallet-zk-verifier/runtime-benchmarks",
 	"pallet-shielded-pool/runtime-benchmarks",
 	"pallet-relayer/runtime-benchmarks",
+	"pallet-validator-set/runtime-benchmarks",
 	"polkadot-runtime-common/runtime-benchmarks",
+]
+
+try-runtime = [
+	"cumulus-pallet-weight-reclaim/try-runtime",
+	"fp-self-contained/try-runtime",
+	"frame-executive/try-runtime",
+	"frame-support/try-runtime",
+	"frame-system/try-runtime",
+	"pallet-aura/try-runtime",
+	"pallet-authorship/try-runtime",
+	"pallet-balances/try-runtime",
+	"pallet-base-fee/try-runtime",
+	"pallet-dynamic-fee/try-runtime",
+	"pallet-ethereum/try-runtime",
+	"pallet-evm/try-runtime",
+	"pallet-evm-chain-id/try-runtime",
+	"pallet-grandpa/try-runtime",
+	"pallet-relayer/try-runtime",
+	"pallet-session/try-runtime",
+	"pallet-shielded-pool/try-runtime",
+	"pallet-sudo/try-runtime",
+	"pallet-timestamp/try-runtime",
+	"pallet-transaction-payment/try-runtime",
+	"pallet-validator-set/try-runtime",
+	"pallet-zk-verifier/try-runtime",
+	"polkadot-runtime-common/try-runtime",
+	"sp-runtime/try-runtime",
 ]

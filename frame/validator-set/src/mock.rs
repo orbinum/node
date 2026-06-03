@@ -1,0 +1,132 @@
+use frame_support::{derive_impl, parameter_types, traits::ConstU64};
+use sp_runtime::{BuildStorage, traits::IdentityLookup};
+
+use crate as pallet_validator_set;
+
+pub type AccountId = u64;
+
+// ── Prerequisite mock controls ────────────────────────────────────────────────
+//
+// Tests can toggle these thread-locals to simulate missing session keys or
+// a missing EVM relayer without needing real pallet-session / pallet-relayer state.
+
+use std::cell::RefCell;
+
+thread_local! {
+	static MOCK_HAS_SESSION_KEYS: RefCell<bool> = const { RefCell::new(true) };
+	static MOCK_HAS_RELAYER: RefCell<bool> = const { RefCell::new(true) };
+}
+
+/// Set whether `MockPrerequisites::has_session_keys` returns `true` or `false`.
+pub fn set_mock_session_keys(val: bool) {
+	MOCK_HAS_SESSION_KEYS.with(|v| *v.borrow_mut() = val);
+}
+
+/// Set whether `MockPrerequisites::has_relayer` returns `true` or `false`.
+pub fn set_mock_relayer(val: bool) {
+	MOCK_HAS_RELAYER.with(|v| *v.borrow_mut() = val);
+}
+
+pub struct MockPrerequisites;
+impl pallet_validator_set::ValidatorPrerequisites<AccountId> for MockPrerequisites {
+	fn has_session_keys(_who: &AccountId) -> bool {
+		MOCK_HAS_SESSION_KEYS.with(|v| *v.borrow())
+	}
+	fn has_relayer(_who: &AccountId) -> bool {
+		MOCK_HAS_RELAYER.with(|v| *v.borrow())
+	}
+}
+
+frame_support::construct_runtime!(
+	pub enum Test {
+		System: frame_system,
+		Balances: pallet_balances,
+		ValidatorSet: pallet_validator_set,
+	}
+);
+
+#[derive_impl(frame_system::config_preludes::TestDefaultConfig as frame_system::DefaultConfig)]
+impl frame_system::Config for Test {
+	type RuntimeEvent = RuntimeEvent;
+	type AccountId = AccountId;
+	type Lookup = IdentityLookup<Self::AccountId>;
+	type Block = frame_system::mocking::MockBlock<Self>;
+	type AccountData = pallet_balances::AccountData<u64>;
+}
+
+#[derive_impl(pallet_balances::config_preludes::TestDefaultConfig)]
+impl pallet_balances::Config for Test {
+	type AccountStore = System;
+	type Balance = u64;
+	type ExistentialDeposit = ConstU64<1>;
+}
+
+parameter_types! {
+	pub const MaxValidators: u32 = 10;
+	pub const MaxPendingValidators: u32 = 10;
+	/// 1 000 test units — mirrors the 1 000 ORB requirement on mainnet.
+	pub const ValidatorBond: u64 = 1_000;
+}
+
+impl pallet_validator_set::Config for Test {
+	type AddRemoveOrigin = frame_system::EnsureRoot<AccountId>;
+	type Currency = Balances;
+	type MaxValidators = MaxValidators;
+	type MaxPendingValidators = MaxPendingValidators;
+	type ValidatorBond = ValidatorBond;
+	type Prerequisites = MockPrerequisites;
+	type WeightInfo = ();
+}
+
+// ── Test externalities builder ───────────────────────────────────────────────
+
+pub struct ExtBuilder {
+	initial_validators: Vec<AccountId>,
+}
+
+impl Default for ExtBuilder {
+	fn default() -> Self {
+		Self {
+			initial_validators: vec![1, 2, 3],
+		}
+	}
+}
+
+impl ExtBuilder {
+	pub fn validators(mut self, validators: Vec<AccountId>) -> Self {
+		self.initial_validators = validators;
+		self
+	}
+
+	pub fn build(self) -> sp_io::TestExternalities {
+		let mut storage = frame_system::GenesisConfig::<Test>::default()
+			.build_storage()
+			.unwrap();
+
+		pallet_validator_set::GenesisConfig::<Test> {
+			initial_validators: self.initial_validators,
+		}
+		.assimilate_storage(&mut storage)
+		.unwrap();
+
+		// Pre-fund well-known test accounts with enough balance to cover ValidatorBond.
+		pallet_balances::GenesisConfig::<Test> {
+			balances: vec![
+				(10u64, 10_000),
+				(20u64, 10_000),
+				(30u64, 10_000),
+				(42u64, 10_000),
+				(99u64, 10_000),
+				(100u64, 10_000),
+				(200u64, 10_000),
+			],
+			dev_accounts: None,
+		}
+		.assimilate_storage(&mut storage)
+		.unwrap();
+
+		let mut ext = sp_io::TestExternalities::new(storage);
+		ext.execute_with(|| System::set_block_number(1));
+		ext
+	}
+}

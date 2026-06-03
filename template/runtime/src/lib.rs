@@ -38,8 +38,8 @@ use sp_core::{
 use sp_runtime::{
 	generic, impl_opaque_keys,
 	traits::{
-		BlakeTwo256, Block as BlockT, DispatchInfoOf, Dispatchable, Get, IdentityLookup, NumberFor,
-		PostDispatchInfoOf, UniqueSaturatedInto,
+		BlakeTwo256, Block as BlockT, Convert, DispatchInfoOf, Dispatchable, Get, IdentityLookup,
+		NumberFor, OpaqueKeys, PostDispatchInfoOf, UniqueSaturatedInto,
 	},
 	transaction_validity::{TransactionSource, TransactionValidity, TransactionValidityError},
 	ApplyExtrinsicResult, ConsensusEngineId, ExtrinsicInclusionMode, Perbill, Permill,
@@ -272,9 +272,84 @@ impl frame_system::Config for Runtime {
 impl pallet_aura::Config for Runtime {
 	type AuthorityId = AuraId;
 	type MaxAuthorities = ConstU32<32>;
-	type DisabledValidators = ();
+	// Session manages disabled validators when pallet-session is active.
+	type DisabledValidators = Session;
 	type AllowMultipleBlocksPerSlot = ConstBool<false>;
 	type SlotDuration = pallet_aura::MinimumPeriodTimesTwo<Runtime>;
+}
+
+parameter_types! {
+	/// Session length: 600 blocks ≈ 1 hour at 6 s/block.
+	/// Validator set changes take effect at the next session boundary.
+	pub const Period: u32 = HOURS;
+	pub const Offset: u32 = 0;
+}
+
+/// Identity converter: `AccountId` → `Option<AccountId>` (always `Some`).
+///
+/// Used as `pallet_session::Config::ValidatorIdOf` when `ValidatorId = AccountId`.
+pub struct IdentityValidatorId;
+impl Convert<AccountId, Option<AccountId>> for IdentityValidatorId {
+	fn convert(a: AccountId) -> Option<AccountId> {
+		Some(a)
+	}
+}
+
+impl pallet_session::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	/// Validators are identified by their `AccountId`.
+	type ValidatorId = AccountId;
+	/// Identity mapping: stash AccountId → ValidatorId (same type).
+	type ValidatorIdOf = IdentityValidatorId;
+	/// Sessions rotate every `Period` blocks.
+	type ShouldEndSession = pallet_session::PeriodicSessions<Period, Offset>;
+	type NextSessionRotation = pallet_session::PeriodicSessions<Period, Offset>;
+	/// Validator set is managed by our custom `ValidatorSet` pallet (sudo-gated).
+	type SessionManager = ValidatorSet;
+	/// Session handlers: Aura + GRANDPA are notified on each session change.
+	type SessionHandler = <opaque::SessionKeys as OpaqueKeys>::KeyTypeIdProviders;
+	type Keys = opaque::SessionKeys;
+	/// No disabling strategy — validators are never automatically disabled.
+	type DisablingStrategy = ();
+	/// Balances pallet handles key-deposit holds.
+	type Currency = Balances;
+	/// No deposit required to set session keys (testnet).
+	type KeyDeposit = ConstU128<0>;
+	type WeightInfo = ();
+}
+
+/// Checks that a validator candidate has completed all prerequisites before bonding.
+///
+/// - [`has_session_keys`]: verifies `pallet_session::NextKeys` contains an entry for `who`
+///   (i.e. the node called `session.setKeys` with its Aura + GRANDPA keys).
+/// - [`has_relayer`]: verifies `pallet_relayer::RelayerByAccount` contains an entry for `who`
+///   (i.e. the node called `relayer.register_relayer` with its EVM address).
+pub struct ValidatorPrerequisiteChecker;
+
+impl pallet_validator_set::ValidatorPrerequisites<AccountId> for ValidatorPrerequisiteChecker {
+	fn has_session_keys(who: &AccountId) -> bool {
+		pallet_session::NextKeys::<Runtime>::contains_key(who)
+	}
+	fn has_relayer(who: &AccountId) -> bool {
+		pallet_relayer::RelayerByAccount::<Runtime>::contains_key(who)
+	}
+}
+
+impl pallet_validator_set::Config for Runtime {
+	/// Only sudo (EnsureRoot) can add/remove/approve/reject validators.
+	type AddRemoveOrigin = frame_system::EnsureRoot<AccountId>;
+	/// Native currency (ORB) used to lock the validator bond.
+	type Currency = Balances;
+	/// Maximum 32 validators in the approved (active) set.
+	type MaxValidators = ConstU32<32>;
+	/// Maximum 32 registrations awaiting governance approval.
+	type MaxPendingValidators = ConstU32<32>;
+	/// Validator bond: 1 000 ORB (18 decimals) locked on self-registration.
+	/// Returned in full on deregistration, rejection, or force-removal.
+	type ValidatorBond = ConstU128<1_000_000_000_000_000_000_000>;
+	/// Prerequisite gate: verifies session keys and EVM relayer before accepting registration.
+	type Prerequisites = ValidatorPrerequisiteChecker;
+	type WeightInfo = pallet_validator_set::weights::SubstrateWeight<Runtime>;
 }
 
 impl pallet_authorship::Config for Runtime {
@@ -570,29 +645,12 @@ impl frame_support::traits::Get<Option<AccountId>> for RelayerBlockAuthor {
 	}
 }
 
-/// Identifies validator nodes by checking if their AccountId corresponds
-/// to a current Aura authority.
-///
-/// In Substrate, a validator's AccountId IS their sr25519 public key (32 bytes),
-/// which is the same byte representation as AuraId. We compare raw bytes.
-pub struct AuraValidatorSet;
-impl frame_support::traits::Contains<AccountId> for AuraValidatorSet {
-	fn contains(who: &AccountId) -> bool {
-		let who_bytes: &[u8; 32] = who.as_ref();
-		pallet_aura::Authorities::<Runtime>::get()
-			.iter()
-			.any(|auth| <_ as AsRef<[u8]>>::as_ref(auth) == who_bytes)
-	}
-}
-
 impl pallet_relayer::Config for Runtime {
 	/// Block author for relay fee attribution.
 	type BlockAuthor = RelayerBlockAuthor;
 	/// Default minimum relay fee: 0.001 ORB = 1e15 planck (anti-spam).
 	/// Overridable at runtime via `set_min_relay_fee` (governance/sudo).
 	type DefaultMinRelayFee = ConstU128<1_000_000_000_000_000>;
-	/// Only validator nodes (Aura authorities) may register as relayers.
-	type IsValidator = AuraValidatorSet;
 	/// Only sudo/governance can update relay configuration.
 	type ManageOrigin = frame_system::EnsureRoot<AccountId>;
 	/// Allow up to 16 ABI selectors in the whitelist.
@@ -690,6 +748,12 @@ mod runtime {
 
 	#[runtime::pallet_index(16)]
 	pub type Relayer = pallet_relayer;
+
+	#[runtime::pallet_index(17)]
+	pub type ValidatorSet = pallet_validator_set;
+
+	#[runtime::pallet_index(18)]
+	pub type Session = pallet_session;
 }
 
 #[derive(Clone)]
@@ -788,6 +852,7 @@ mod benches {
 		[pallet_shielded_pool, ShieldedPool]
 		[pallet_account_mapping, AccountMapping]
 		[pallet_relayer, Relayer]
+		[pallet_validator_set, ValidatorSet]
 	);
 }
 

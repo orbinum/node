@@ -9,7 +9,7 @@
 //!   `ShieldedPoolRuntimeApi::relay_config()`.
 //! - **Registry**: EVM address → AccountId binding so fee attribution is
 //!   unambiguous even when the EVM and substrate keys differ.
-//!   Only validator nodes (as determined by `T::IsValidator`) may register.
+//!   Managed exclusively by sudo/governance via `register_relayer`.
 //! - **Fee accounting**: `PendingRelayerFees` tracks accrued relay fees per
 //!   (AccountId, asset_id).  Other pallets (pallet-shielded-pool) call
 //!   `T::Relayer::accumulate_relay_fee()` and `T::Relayer::consume_relay_fee()`
@@ -57,7 +57,7 @@ mod tests;
 #[frame_support::pallet]
 pub mod pallet {
 	use super::{RelayerInterface, WeightInfo};
-	use frame_support::{dispatch::DispatchResult, pallet_prelude::*, traits::Contains};
+	use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
 	use frame_system::pallet_prelude::*;
 	use sp_core::H160;
 	use sp_std::vec::Vec;
@@ -73,12 +73,6 @@ pub mod pallet {
 		/// Overridable at runtime by `set_min_relay_fee` (governance/sudo).
 		#[pallet::constant]
 		type DefaultMinRelayFee: Get<u128>;
-
-		/// Returns whether an account is currently a validator node.
-		///
-		/// Only accounts recognised as validators may call `register_relayer`.
-		/// Wire this to a session-validator or Aura-authority check in the runtime.
-		type IsValidator: frame_support::traits::Contains<Self::AccountId>;
 
 		/// Origin allowed to update relay configuration (fee, selectors).
 		/// Use `EnsureRoot` for testnets; a governance pallet for mainnet.
@@ -112,7 +106,6 @@ pub mod pallet {
 		StorageValue<_, BoundedVec<[u8; 4], T::MaxAllowedSelectors>, ValueQuery>;
 
 	/// On-chain registry: EVM address → substrate AccountId.
-	/// Only validator nodes may have entries here.
 	#[pallet::storage]
 	pub type RelayerRegistry<T: Config> =
 		StorageMap<_, Blake2_128Concat, H160, T::AccountId, OptionQuery>;
@@ -143,12 +136,12 @@ pub mod pallet {
 		MinRelayFeeUpdated { new_fee: u128 },
 		/// `ManageOrigin` updated the allowed selector whitelist.
 		AllowedSelectorsUpdated { count: u32 },
-		/// A validator node registered an EVM address.
+		/// sudo/governance registered a relayer mapping.
 		RelayerRegistered {
 			evm_address: H160,
 			account: T::AccountId,
 		},
-		/// A validator node unregistered its EVM address.
+		/// sudo/governance removed a relayer mapping.
 		RelayerUnregistered {
 			evm_address: H160,
 			account: T::AccountId,
@@ -171,8 +164,6 @@ pub mod pallet {
 
 	#[pallet::error]
 	pub enum Error<T> {
-		/// Caller is not a validator node. Only validators may register as relayers.
-		NotValidator,
 		/// No EVM address registered for this account.
 		NotRegistered,
 		/// The EVM address already has a registered AccountId.
@@ -227,15 +218,23 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Register a substrate account as the owner of an EVM relay address.
+		/// Register an EVM address for a substrate account.
 		///
-		/// Only validator nodes (as determined by `T::IsValidator`) may call this.
-		/// Non-validator accounts are rejected with `NotValidator`.
+		/// Requires `ManageOrigin` (sudo / governance). The `who` account is
+		/// registered as the owner of `evm_address`. One registration per account
+		/// (`AccountAlreadyRegistered`) and one per EVM address (`AlreadyRegistered`)
+		/// are enforced.
+		///
+		/// Intended to be called after a validator inserts their Aura key and the
+		/// node derives and logs the corresponding EVM relay address.
 		#[pallet::call_index(2)]
 		#[pallet::weight(T::WeightInfo::register_relayer())]
-		pub fn register_relayer(origin: OriginFor<T>, evm_address: H160) -> DispatchResult {
-			let who = ensure_signed(origin)?;
-			ensure!(T::IsValidator::contains(&who), Error::<T>::NotValidator);
+		pub fn register_relayer(
+			origin: OriginFor<T>,
+			who: T::AccountId,
+			evm_address: H160,
+		) -> DispatchResult {
+			T::ManageOrigin::ensure_origin(origin)?;
 			ensure!(
 				!RelayerRegistry::<T>::contains_key(evm_address),
 				Error::<T>::AlreadyRegistered
@@ -253,9 +252,9 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Remove the caller's EVM address from the relay registry.
+		/// Remove an EVM relay address mapping.
 		///
-		/// The caller must be a registered validator node.
+		/// The caller (account owner) may remove their own registration.
 		#[pallet::call_index(3)]
 		#[pallet::weight(T::WeightInfo::unregister_relayer())]
 		pub fn unregister_relayer(origin: OriginFor<T>) -> DispatchResult {

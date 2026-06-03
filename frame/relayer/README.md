@@ -65,9 +65,9 @@ Emits: `MinRelayFeeUpdated { new_fee }`.
 Replaces the ABI selector whitelist. Pass `vec![]` to restore the Runtime API defaults.  
 Bounded by `T::MaxAllowedSelectors`. Emits: `AllowedSelectorsUpdated { count }`.
 
-### `register_relayer(evm_address: H160)` — origin: `Signed`
-Binds the caller's EVM address to their substrate AccountId.  
-Fails if the EVM address is already claimed by another account (`AlreadyRegistered`).  
+### `register_relayer(who: AccountId, evm_address: H160)` — origin: `ManageOrigin`
+Registers an EVM address for the given `who` account. Must be called by sudo or governance.  
+Fails if the EVM address is already claimed (`AlreadyRegistered`) or the account already has a binding (`AccountAlreadyRegistered`).  
 Emits: `RelayerRegistered { evm_address, account }`.
 
 ### `unregister_relayer()` — origin: `Signed`
@@ -75,12 +75,8 @@ Removes the caller's EVM binding. Clears both forward and reverse maps.
 Fails if the caller has no binding (`NotRegistered`).  
 Emits: `RelayerUnregistered { evm_address, account }`.
 
-### `claim_relay_fees(asset_id: u32, amount: u128)` — origin: `Signed`
-Decrements `amount` from the caller's pending fee balance (accounting only — no token transfer).  
-Emits: `RelayFeesConsumed { relayer, asset_id, amount }`.
-
-> **Note:** This extrinsic only updates the `PendingRelayerFees` counter. To receive real tokens, the validator must call one of the two claim paths in `pallet-shielded-pool`:
-> - `claim_shielded_fees` — receives the fee as a private ZK note (requires a value_proof ZK proof)
+> **Claiming fees:** To receive accumulated relay fees, the validator calls one of the two claim paths in `pallet-shielded-pool` (not in this pallet):
+> - `claim_shielded_fees` — receives fees as a private ZK note (requires a value_proof ZK proof)
 > - `claim_relay_fees_to_evm` — transfers public ORB directly to the H160 mirror AccountId (no proof required; ideal for refilling the relayer's EVM gas wallet)
 
 ---
@@ -94,7 +90,7 @@ Each node has **two separate identities**:
 | `AccountId` (sr25519/Aura) | Substrate | Aura key | Receives and accumulates fees in `PendingRelayerFees` |
 | `H160` (ECDSA) | EVM | `--evm-relayer-key` | Signs EVM transactions, pays gas |
 
-Both are linked at startup via `register_relayer(evm_address)`, which writes both indexes (`RelayerRegistry` and `RelayerByAccount`).
+Both are linked by sudo/governance via `register_relayer(who, evm_address)`, which writes both indexes (`RelayerRegistry` and `RelayerByAccount`). The node derives and logs the EVM address automatically at block #1 (see [Validator registration flow](#validator-registration-flow) below).
 
 ```
 1. shield(1000)
@@ -162,6 +158,37 @@ In `pallet-shielded-pool` unit tests: a lightweight mock struct in `mock.rs` bac
 
 ---
 
+## Validator registration flow
+
+A new validator node does not call `register_relayer` directly — it is a privileged call. The intended flow is:
+
+1. **Insert Aura key** into the node keystore:
+   ```bash
+   curl -s -X POST http://localhost:9944 -H 'Content-Type: application/json' \
+     -d '{"jsonrpc":"2.0","id":1,"method":"author_insertKey",
+          "params":["aura","<mnemonic>","<public_key_hex>"]}'
+   ```
+2. **Restart the node.** At block #1 `auto_register` (in `template/node/src/relayer_register.rs`) reads the Aura key from the keystore, derives the EVM address, checks `RelayerRegistry`, and if not registered **prints a log box**:
+   ```
+   ╔══════════════════════════════════════════════════╗
+   ║   EVM relay key detected — register via sudo     ║
+   ╠══════════════════════════════════════════════════╣
+   ║  Substrate : 5GrwvaEF5...
+   ║  EVM addr  : 0xd43593c7...
+   ╠══════════════════════════════════════════════════╣
+   ║  relayer.registerRelayer(who, evmAddress)        ║
+   ╚══════════════════════════════════════════════════╝
+   ```
+3. **Sudo** calls `relayer → registerRelayer(who, evmAddress)` on-chain with the values from the log.
+4. The validator can now complete the `pallet-validator-set` registration:
+   ```
+   session → setKeys(aura + grandpa keys, proof)
+   validatorSet → registerValidator()   // has_relayer check now passes
+   ```
+5. **Governance** approves: `validatorSet → approveValidator(who)`.
+
+---
+
 ## Runtime integration
 
 ```rust
@@ -170,9 +197,10 @@ In `pallet-shielded-pool` unit tests: a lightweight mock struct in `mock.rs` bac
 impl pallet_relayer::Config for Runtime {
     type BlockAuthor         = RelayerBlockAuthor;                  // wraps pallet_authorship
     type DefaultMinRelayFee  = ConstU128<1_000_000_000_000_000>;   // 1e15 planck = 0.001 ORB
-    type ManageOrigin        = EnsureRoot<AccountId>;
+    type ManageOrigin        = EnsureRoot<AccountId>;              // sudo/governance only
     type MaxAllowedSelectors = ConstU32<16>;
     type WeightInfo          = pallet_relayer::weights::SubstrateWeight<Runtime>;
+    // Note: IsValidator removed in v0.3.0 — validator gating is handled by pallet-validator-set
 }
 
 impl pallet_shielded_pool::Config for Runtime {
@@ -194,7 +222,6 @@ Weights in `src/weights.rs` were generated with Substrate Benchmark CLI v49.1.0
 | `set_allowed_selectors(n)` | linear in `n` | — |
 | `register_relayer` | ~10 ms | 2.5 KB |
 | `unregister_relayer` | ~10 ms | 2.5 KB |
-| `claim_relay_fees` | ~8 ms | 2.5 KB |
 
 To regenerate after modifying the pallet:
 
@@ -218,8 +245,9 @@ cargo build --release --features runtime-benchmarks
 ```
 src/tests/
 ├── config_tests.rs    — MinRelayFee and AllowedSelectors (governance gating, storage, events, capacity limits)
-├── registry_tests.rs  — register/unregister + registered_evm_address (duplicate guard, reverse index, signed-only, reverse lookup)
-└── fees_tests.rs      — accumulate, pending query, consume, claim (saturation, insufficient, events, per-account isolation)
+├── registry_tests.rs  — register/unregister + registered_evm_address (duplicate guard, reverse index, sudo-only, reverse lookup)
+└── dispatch_info_tests.rs — call dispatch info (Pays::Yes, DispatchClass::Normal for register_relayer)
+    fees_tests.rs      — accumulate, pending query, consume, claim (saturation, insufficient, events, per-account isolation)
 ```
 
 ```bash

@@ -55,28 +55,19 @@ mod benchmarks {
 
 	// ── register_relayer ─────────────────────────────────────────────────────
 
-	/// Benchmark the storage write path for relayer registration.
+	/// Worst case: two storage writes + event deposit.
 	///
-	/// `register_relayer` is gated by `T::IsValidator`, which is a runtime
-	/// trait that cannot be generically seeded in benchmarks. We measure the
-	/// two storage inserts + event deposit directly — the validator check is
-	/// a cheap in-memory read and does not contribute meaningful weight.
+	/// `register_relayer` is gated by `ManageOrigin` (sudo/governance).
+	/// We call it with `RawOrigin::Root` which always satisfies that bound.
 	#[benchmark]
 	fn register_relayer() {
-		let caller: T::AccountId = whitelisted_caller();
+		let who: T::AccountId = whitelisted_caller();
 		let evm = evm_address_for(0xA11CE);
 
-		#[block]
-		{
-			RelayerRegistry::<T>::insert(evm, caller.clone());
-			RelayerByAccount::<T>::insert(caller.clone(), evm);
-			Pallet::<T>::deposit_event(Event::RelayerRegistered {
-				evm_address: evm,
-				account: caller.clone(),
-			});
-		}
+		#[extrinsic_call]
+		register_relayer(RawOrigin::Root, who.clone(), evm);
 
-		assert_eq!(RelayerRegistry::<T>::get(evm), Some(caller));
+		assert_eq!(RelayerRegistry::<T>::get(evm), Some(who));
 	}
 
 	// ── unregister_relayer ───────────────────────────────────────────────────
