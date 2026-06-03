@@ -54,7 +54,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # necesario para git verify-tag
+          fetch-depth: 0 # necesario para git verify-tag
 
       - name: Verify GPG tag signature
         if: github.event_name == 'push'
@@ -62,7 +62,8 @@ jobs:
           RELEASE_GPG_PUBLIC_KEY: ${{ secrets.RELEASE_GPG_PUBLIC_KEY }}
         run: |
           echo "$RELEASE_GPG_PUBLIC_KEY" | gpg --import
-          git verify-tag "${{ github.ref_name }}"
+          git fetch origin "+refs/tags/${{ github.ref_name }}:refs/tags/${{ github.ref_name }}" --force
+          git verify-tag "refs/tags/${{ github.ref_name }}"
 
       - name: Compute metadata
         id: meta
