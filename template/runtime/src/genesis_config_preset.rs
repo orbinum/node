@@ -5,7 +5,8 @@ mod testnet;
 
 use crate::{
 	AccountId, AuraConfig, BalancesConfig, BaseFeeConfig, EVMChainIdConfig, EVMConfig,
-	EthereumConfig, GrandpaConfig, ManualSealConfig, RuntimeGenesisConfig, SudoConfig,
+	EthereumConfig, GrandpaConfig, ManualSealConfig, RuntimeGenesisConfig, SessionConfig,
+	SudoConfig, ValidatorSetConfig,
 };
 use hex_literal::hex;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
@@ -131,6 +132,15 @@ pub(super) fn build_genesis(
 		transaction_payment: Default::default(),
 		zk_verifier: Default::default(),
 		shielded_pool: Default::default(),
+		// pallet-session: initialise with the approved validator session keys.
+		session: SessionConfig {
+			keys: session_keys,
+			..Default::default()
+		},
+		// pallet-validator-set: track the approved AccountId set (sudo can add/remove).
+		validator_set: ValidatorSetConfig {
+			initial_validators: validator_accounts,
+		},
 	};
 
 	serde_json::to_value(&config).expect("Could not build genesis config.")
