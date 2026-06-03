@@ -31,6 +31,8 @@ pub(super) fn ethereum_to_account_id(eth_address: [u8; 20]) -> crate::AccountId 
 pub(super) const PLANCK: u128 = 1_000_000_000_000_000_000;
 /// Total project supply: 1,000,000,000 ORB
 pub(super) const TOTAL_SUPPLY: u128 = 1_000_000_000 * PLANCK;
+/// Faucet allocation at genesis: 100,000,000 ORB
+pub(super) const FAUCET_BALANCE: u128 = 100_000_000 * PLANCK;
 /// Development/test account allocation: 10,000 ORB
 pub(super) const DEV_BALANCE: u128 = 10_000 * PLANCK;
 // ──────────────────────────────────────────────────────────────────────────────
