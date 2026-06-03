@@ -73,6 +73,7 @@ fn main() {
 
 pub fn new_test_ext() -> BasicExternalities {
 	use sp_consensus_aura::sr25519::AuthorityId as AuraId;
+	use sp_consensus_grandpa::AuthorityId as GrandpaId;
 	use sp_runtime::{app_crypto::ByteArray, BuildStorage};
 	let accounts: Vec<fuzzed_runtime::AccountId> = (0..5).map(|i| [i; 32].into()).collect();
 	let t = fuzzed_runtime::RuntimeGenesisConfig {
@@ -85,7 +86,7 @@ pub fn new_test_ext() -> BasicExternalities {
 		base_fee: Default::default(),
 		evm_chain_id: Default::default(),
 		aura: fuzzed_runtime::AuraConfig {
-			authorities: vec![AuraId::from_slice(&[0; 32]).unwrap()],
+			authorities: vec![],
 		},
 		sudo: fuzzed_runtime::SudoConfig { key: None },
 		transaction_payment: Default::default(),
@@ -95,6 +96,20 @@ pub fn new_test_ext() -> BasicExternalities {
 		evm: Default::default(),
 		zk_verifier: Default::default(),
 		shielded_pool: Default::default(),
+		session: fuzzed_runtime::SessionConfig {
+			keys: vec![(
+				[0; 32].into(),
+				[0; 32].into(),
+				fuzzed_runtime::opaque::SessionKeys {
+					aura: AuraId::from_slice(&[0; 32]).unwrap(),
+					grandpa: GrandpaId::from_slice(&[0; 32]).unwrap(),
+				},
+			)],
+			..Default::default()
+		},
+		validator_set: fuzzed_runtime::ValidatorSetConfig {
+			initial_validators: vec![[0; 32].into()],
+		},
 	}
 	.build_storage()
 	.unwrap();
