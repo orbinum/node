@@ -1,0 +1,351 @@
+name: Release & Deploy
+
+# Triggers:
+#   - Tag push v*.*.* → full release: build binary + WASM + deploy to testnet
+#   - workflow_dispatch → manual deploy (elegir ambiente)
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "testnet"
+        type: choice
+        options:
+          - testnet
+          - mainnet
+      deploy_runtime:
+        description: "Deploy runtime upgrade on-chain"
+        required: true
+        default: true
+        type: boolean
+      rolling_update:
+        description: "Rolling update node binary"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false # nunca cancelar un deploy en progreso
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTC_WRAPPER: "sccache"
+  SCCACHE_GHA_ENABLED: "true"
+  BINARY_NAME: "orbinum-node"
+  RUNTIME_WASM: "target/release/wbuild/orbinum-runtime/orbinum_runtime.compact.compressed.wasm"
+
+# ──────────────────────────────────────────────────────────────────────────────
+jobs:
+  # ── 1. Extraer metadata del tag/versión ───────────────────────────────────
+  metadata:
+    name: Release Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      environment: ${{ steps.meta.outputs.environment }}
+      is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # necesario para git verify-tag
+
+      - name: Verify GPG tag signature
+        if: github.event_name == 'push'
+        env:
+          RELEASE_GPG_PUBLIC_KEY: ${{ secrets.RELEASE_GPG_PUBLIC_KEY }}
+        run: |
+          echo "$RELEASE_GPG_PUBLIC_KEY" | gpg --import
+          git verify-tag "${{ github.ref_name }}"
+
+      - name: Compute metadata
+        id: meta
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.sha }}"
+            ENV="${{ github.event.inputs.environment }}"
+            IS_PRE="true"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+            # rc / alpha / beta tags van a testnet
+            if [[ "$VERSION" =~ -(rc|alpha|beta|pre) ]]; then
+              IS_PRE="true"
+              ENV="testnet"
+            else
+              IS_PRE="false"
+              ENV="testnet"   # mainnet requiere aprobación manual — ver deployment protection
+            fi
+          fi
+          echo "version=$VERSION"        >> "$GITHUB_OUTPUT"
+          echo "environment=$ENV"        >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=$IS_PRE"   >> "$GITHUB_OUTPUT"
+
+  # ── 2. Build del binario y runtime WASM ──────────────────────────────────
+  build:
+    name: Build Release Artifacts
+    runs-on: ubuntu-latest
+    needs: metadata
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang libclang-dev protobuf-compiler
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-cargo-
+
+      - name: Run sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain
+        run: make setup
+
+      - name: Build release binary and WASM
+        run: make build-release
+
+      - name: Verify WASM size (< 1.5 MB)
+        run: |
+          SIZE=$(wc -c < "${{ env.RUNTIME_WASM }}")
+          SIZE_KB=$((SIZE / 1024))
+          echo "Runtime WASM size: ${SIZE_KB} KB"
+          if [ $SIZE -gt $((1536 * 1024)) ]; then
+            echo "ERROR: Runtime WASM ${SIZE_KB} KB supera el límite de 1.5 MB"
+            exit 1
+          fi
+
+      - name: Compute checksums
+        run: |
+          sha256sum target/release/${{ env.BINARY_NAME }} > target/release/${{ env.BINARY_NAME }}.sha256
+          sha256sum ${{ env.RUNTIME_WASM }} > ${{ env.RUNTIME_WASM }}.sha256
+          echo "Binary SHA256:"
+          cat target/release/${{ env.BINARY_NAME }}.sha256
+          echo "WASM SHA256:"
+          cat ${{ env.RUNTIME_WASM }}.sha256
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbinum-node-${{ needs.metadata.outputs.version }}
+          path: |
+            target/release/${{ env.BINARY_NAME }}
+            target/release/${{ env.BINARY_NAME }}.sha256
+          retention-days: 30
+
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbinum-runtime-wasm-${{ needs.metadata.outputs.version }}
+          path: |
+            ${{ env.RUNTIME_WASM }}
+            ${{ env.RUNTIME_WASM }}.sha256
+          retention-days: 30
+
+  # ── 3. Deploy runtime on-chain (sin reiniciar nodos) ─────────────────────
+  deploy-runtime:
+    name: Runtime Upgrade (on-chain)
+    runs-on: ubuntu-latest
+    needs: [metadata, build]
+    environment: ${{ needs.metadata.outputs.environment }}
+    # Solo ejecutar si está habilitado
+    if: |
+      github.event_name == 'push' ||
+      github.event.inputs.deploy_runtime == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download WASM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: orbinum-runtime-wasm-${{ needs.metadata.outputs.version }}
+          path: ./artifacts/
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deploy dependencies
+        run: npm install --prefix ./scripts @polkadot/api @polkadot/keyring
+
+      - name: Deploy runtime upgrade to ${{ needs.metadata.outputs.environment }}
+        env:
+          RPC_URL: ${{ secrets.TESTNET_RPC_WS }}
+          SUDO_SEED: ${{ secrets.TESTNET_SUDO_SEED }}
+        run: |
+          WASM_FILE=$(find ./artifacts -name "*.wasm" | head -1)
+          echo "Deploying WASM: $WASM_FILE"
+          bash scripts/deploy-runtime.sh "$WASM_FILE" "$RPC_URL" "$SUDO_SEED"
+
+      - name: Verify runtime upgrade
+        env:
+          RPC_URL: ${{ secrets.TESTNET_RPC_URL }}
+        run: bash scripts/healthcheck.sh --check-runtime "$RPC_URL"
+
+  # ── 4. Rolling update del binario en los nodos ───────────────────────────
+  rolling-update:
+    name: Rolling Node Binary Update
+    runs-on: ubuntu-latest
+    needs: [metadata, build, deploy-runtime]
+    environment: ${{ needs.metadata.outputs.environment }}
+    # Solo si explícitamente solicitado — los upgrades de runtime no lo necesitan
+    if: github.event.inputs.rolling_update == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: orbinum-node-${{ needs.metadata.outputs.version }}
+          path: ./artifacts/
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.VALIDATOR_IPS }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Rolling update validators
+        env:
+          VALIDATOR_IPS: ${{ secrets.VALIDATOR_IPS }}
+          RPC_NODE_IP: ${{ secrets.RPC_NODE_IP }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          chmod +x artifacts/orbinum-node
+          bash scripts/rolling-update.sh \
+            --binary artifacts/orbinum-node \
+            --user "$DEPLOY_USER" \
+            --validators "$VALIDATOR_IPS" \
+            --rpc-node "$RPC_NODE_IP"
+
+  # ── 5. Publicar imagen Docker en GHCR ────────────────────────────────────
+  docker-publish:
+    name: Publish Docker Image
+    runs-on: ubuntu-latest
+    needs: [metadata, build]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: docker_meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/node
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ needs.metadata.outputs.is_prerelease == 'false' }}
+            type=raw,value=testnet-latest,enable=${{ needs.metadata.outputs.is_prerelease == 'true' }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/testnet/Dockerfile
+          push: true
+          tags: ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+  # ── 6. Crear GitHub Release ───────────────────────────────────────────────
+  github-release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: [metadata, build]
+    # Solo en tags reales (no workflow_dispatch)
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./release-artifacts/
+
+      - name: Package artifacts
+        run: |
+          VERSION="${{ needs.metadata.outputs.version }}"
+          find release-artifacts/ -name "orbinum-node" -not -name "*.sha256" \
+            | xargs -I{} cp {} orbinum-node-linux-x86_64-${VERSION}
+          find release-artifacts/ -name "*.wasm" \
+            | xargs -I{} cp {} orbinum-runtime-${VERSION}.wasm
+          sha256sum orbinum-node-linux-x86_64-${VERSION} >> checksums.txt
+          sha256sum orbinum-runtime-${VERSION}.wasm >> checksums.txt
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          VERSION="${{ needs.metadata.outputs.version }}"
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          echo "## Orbinum Node ${VERSION}" > release_notes.md
+          echo "" >> release_notes.md
+          if [[ -n "$PREV_TAG" ]]; then
+            echo "### Changes since ${PREV_TAG}" >> release_notes.md
+            git log --oneline "${PREV_TAG}..HEAD" --no-merges >> release_notes.md
+          fi
+          echo "" >> release_notes.md
+          echo "### Checksums" >> release_notes.md
+          echo "\`\`\`" >> release_notes.md
+          cat checksums.txt >> release_notes.md
+          echo "\`\`\`" >> release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Orbinum ${{ needs.metadata.outputs.version }}"
+          body_path: release_notes.md
+          prerelease: ${{ needs.metadata.outputs.is_prerelease == 'true' }}
+          files: |
+            orbinum-node-linux-x86_64-${{ needs.metadata.outputs.version }}
+            orbinum-runtime-${{ needs.metadata.outputs.version }}.wasm
+            checksums.txt

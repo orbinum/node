@@ -1,9 +1,6 @@
 services:
   validator-1:
-    image: orbinum-node:latest
-    build:
-      context: ../..
-      dockerfile: docker/testnet/Dockerfile
+    image: ${ORBINUM_IMAGE:-ghcr.io/orbinum/node:latest}
     container_name: orbinum-validator-1
     command: >
       --chain /chain-specs/testnet-spec.json
