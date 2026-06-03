@@ -39,3 +39,6 @@ scripts/testnet-keys/keys/
 
 # Node runtime data (chain DB, keystore, network keys)
 /data/
+
+# Validator keys
+scripts/validator-keys/keys/ 
