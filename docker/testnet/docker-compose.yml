@@ -13,6 +13,9 @@ services:
       --prometheus-external
       --prometheus-port 9615
       --log info
+    volumes:
+      - ./testnet-spec.json:/chain-specs/testnet-spec.json:ro
+      - validator-1-data:/data
     ports:
       - "30333:30333" # P2P — must be publicly reachable
     restart: unless-stopped
