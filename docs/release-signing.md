@@ -9,7 +9,7 @@ All Orbinum Node releases are signed with GPG using an Ed25519 key. This guarant
 ```
 Maintainer signs tag locally (GPG Ed25519)
          ↓
-git push origin vX.Y.Z
+git push origin vX.Y.Z[-rc.N]
          ↓
 GitHub Actions: Verify GPG signature
          ↓  (fails → pipeline blocked)
@@ -17,6 +17,8 @@ Build binary + WASM
          ↓
 Publish Docker image (ghcr.io/orbinum/node)
 GitHub Release (binary + WASM + checksums)
+         ↓
+Runtime upgrade on-chain  ← manual via workflow_dispatch
 ```
 
 The CI pipeline **refuses to build or publish anything** if the tag signature is missing or invalid.
@@ -48,6 +50,8 @@ The **public key** is stored as a GitHub Actions secret (`RELEASE_GPG_PUBLIC_KEY
 
 Stable releases update `latest`. Pre-releases (suffix `-rc`, `-alpha`, `-beta`, `-pre`) only update `testnet-latest`.
 
+> **Current strategy**: Orbinum is in testnet phase. All releases use pre-release tags (`-rc.N`). Stable tags (`v1.0.0`) are reserved for mainnet launch.
+
 ---
 
 ## Creating a release (maintainers)
@@ -68,29 +72,41 @@ echo "pinentry-mode loopback" >> ~/.gnupg/gpg.conf
 echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
 ```
 
-### Publishing a release
+### Publishing a testnet release (pre-release)
 
 ```bash
 # 1. Ensure main is clean and up to date
 git checkout main && git pull
 
-# 2. Create signed tag
-git tag -s v1.0.0 -m "Release v1.0.0"
+# 2. Create signed pre-release tag
+git tag -s v1.0.0-rc.1 -m "Testnet release candidate 1"
 
 # 3. Verify the signature locally before pushing
-git verify-tag v1.0.0
-
-# 4. Push — this triggers the full CI/CD pipeline
-git push origin v1.0.0
-```
-
-### Publishing a pre-release (testnet)
-
-```bash
-git tag -s v1.0.0-rc.1 -m "Testnet release candidate 1"
 git verify-tag v1.0.0-rc.1
+
+# 4. Push — triggers CI: build + Docker testnet-latest + GitHub Release
 git push origin v1.0.0-rc.1
 ```
+
+### Publishing a mainnet release (stable — reserved for mainnet launch)
+
+```bash
+git tag -s v1.0.0 -m "Mainnet launch"
+git verify-tag v1.0.0
+git push origin v1.0.0
+# → publishes ghcr.io/orbinum/node:latest
+```
+
+### Triggering a runtime upgrade on-chain (manual)
+
+After a release is published, the on-chain runtime upgrade must be triggered manually:
+
+```
+GitHub → Actions → Release → Run workflow
+  deploy_runtime: true
+```
+
+This requires `TESTNET_RPC_WS` and `TESTNET_SUDO_SEED` secrets to be configured.
 
 ### Recreating a tag (if needed)
 
@@ -108,12 +124,8 @@ git push origin v1.0.0
 Anyone can verify that a tag was signed by the Orbinum release key:
 
 ```bash
-# 1. Import the Orbinum release public key
+# 1. Import the Orbinum release public key from the keyserver
 gpg --keyserver keys.openpgp.org --recv-keys B82CFAF08B9338D5
-
-# Or import manually from the repo
-curl -s https://raw.githubusercontent.com/orbinum/node/main/docs/release-signing.md \
-  | grep -A 1 "Public key" # (see below)
 
 # 2. Verify the tag
 git fetch --tags

@@ -1,6 +1,7 @@
 services:
   validator-1:
     image: ${ORBINUM_IMAGE:-ghcr.io/orbinum/node:testnet-latest}
+    platform: linux/amd64
     container_name: orbinum-validator-1
     command: >
       --chain /chain-specs/testnet-spec.json
@@ -8,19 +9,43 @@ services:
       --base-path /data
       --port 30333
       --validator
+      --node-key ${VALIDATOR_NODE_KEY}
       --no-mdns
       --no-private-ipv4
       --prometheus-external
       --prometheus-port 9615
       --log info
+    volumes:
+      - ./testnet-spec.json:/chain-specs/testnet-spec.json:ro
+      - validator-1-data:/data
     ports:
       - "30333:30333" # P2P — must be publicly reachable
     restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
     logging:
       driver: "json-file"
       options:
         max-size: "100m"
         max-file: "3"
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: orbinum-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Check GHCR every 5 minutes
+      WATCHTOWER_POLL_INTERVAL: "300"
+      # Only update containers managed by this compose (via label)
+      WATCHTOWER_LABEL_ENABLE: "true"
+      # Wait for the new container to be healthy before removing the old one
+      WATCHTOWER_ROLLING_RESTART: "true"
+      # Log level
+      WATCHTOWER_LOG_LEVEL: "info"
+    labels:
+      com.centurylinklabs.watchtower.enable: "false" # watchtower does not update itself
 
 volumes:
   validator-1-data:
