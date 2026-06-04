@@ -9,6 +9,7 @@ services:
       --base-path /data
       --port 30333
       --validator
+      --node-key ${VALIDATOR_NODE_KEY}
       --no-mdns
       --no-private-ipv4
       --prometheus-external
