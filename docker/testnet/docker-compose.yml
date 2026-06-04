@@ -1,6 +1,7 @@
 services:
   validator-1:
     image: ${ORBINUM_IMAGE:-ghcr.io/orbinum/node:testnet-latest}
+    platform: linux/amd64
     container_name: orbinum-validator-1
     command: >
       --chain /chain-specs/testnet-spec.json
