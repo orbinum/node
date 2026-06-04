@@ -2,7 +2,11 @@
   "name": "Orbinum Testnet",
   "id": "orbinum_testnet",
   "chainType": "Live",
-  "bootNodes": [],
+  "bootNodes": [
+    "/dns/testnet-bootnode-1.orbinum.io/tcp/30333/p2p/12D3KooWBzqb1AFLQJd4NooU7q6dSsYBFL85A8RPsJDLesfxHvbW",
+    "/dns/testnet-bootnode-2.orbinum.io/tcp/30333/p2p/12D3KooWKiLEh2Z8XZYGejL5ZMR6rwEdZHPTpVDW3nsXfSW8paLt",
+    "/dns/testnet-bootnode-3.orbinum.io/tcp/30333/p2p/12D3KooWDyUCkm5GoxeZ2pz582tUgQXv1QUcLL7KDzqYcgf4QezU"
+  ],
   "telemetryEndpoints": [
     [
       "/dns/telemetry.polkadot.io/tcp/443/x-parity-wss/%2Fsubmit%2F",
