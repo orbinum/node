@@ -50,6 +50,14 @@ This guide covers everything needed to join the Orbinum testnet as a validator: 
 
 ## Overview
 
+This guide is for **validators joining the Orbinum testnet**. Your node connects
+to the network by dialing the public RPC bootnodes listed in `testnet-spec.json`,
+so it needs a publicly reachable P2P port. You do **not** appear in `bootNodes`
+yourself.
+
+> **Running a public RPC node** (no consensus, serves wallets/dApps)? See
+> [rpc-node.md](rpc-node.md) instead.
+
 **Registration flow at a glance:**
 
 ```
@@ -171,7 +179,7 @@ echo "VALIDATOR_NODE_KEY=<paste_here>" > .env
 
 docker compose pull       # download pre-built image (~1-2 min)
 docker compose up -d      # start validator + watchtower
-docker compose logs -f validator-1
+docker compose logs -f validator
 ```
 
 Wait until you see `Idle` in the logs before proceeding:
@@ -183,7 +191,7 @@ Wait until you see `Idle` in the logs before proceeding:
 Get your **Peer ID** — you will need it when requesting approval:
 
 ```bash
-docker compose logs validator-1 | grep "Local node identity"
+docker compose logs validator | grep "Local node identity"
 # -> Local node identity is: 12D3KooWxxxxx...
 ```
 
@@ -198,7 +206,7 @@ ghcr.io/orbinum/node:testnet-latest is updated
          ↓
 Watchtower detects change (checks every 5 min)
          ↓
-docker pull + restart validator-1  (~5s downtime)
+docker pull + restart validator  (~5s downtime)
 ```
 
 Watchtower starts automatically with `docker compose up -d`. To check update history:
@@ -242,7 +250,7 @@ sudo chmod 600 /etc/orbinum/node-key
 sudo chown orbinum:orbinum /etc/orbinum/node-key
 ```
 
-> **Security:** Back up `/etc/orbinum/node-key` in a password manager. Never commit it or share it. If you lose it, your Peer ID changes and you must update the chain spec bootNodes entry.
+> **Security:** Back up `/etc/orbinum/node-key` in a password manager. Never commit it or share it. If you lose it, your Peer ID changes — your node simply re-announces the new identity to peers; no chain spec change is needed (the public `bootNodes` are the core RPC nodes, not your node).
 
 #### B.3 Create the systemd service
 
@@ -371,7 +379,7 @@ After inserting the Aura key, restart the node:
 
 ```bash
 # Docker
-docker compose restart validator-1
+docker compose restart validator
 
 # systemd
 systemctl restart orbinum-node
@@ -567,7 +575,7 @@ If you are still in the **pending** queue (not yet approved), you can also call 
 
 ```bash
 # View validator logs
-docker compose logs -f validator-1
+docker compose logs -f validator
 
 # View Watchtower logs (check when updates were applied)
 docker compose logs -f watchtower
@@ -576,7 +584,7 @@ docker compose logs -f watchtower
 docker compose down
 
 # Restart validator only
-docker compose restart validator-1
+docker compose restart validator
 
 # Force update now (without waiting for Watchtower)
 docker compose pull && docker compose up -d
@@ -585,7 +593,7 @@ docker compose pull && docker compose up -d
 docker compose down -v
 
 # Resource usage
-docker stats orbinum-validator-1
+docker stats orbinum-validator
 ```
 
 #### systemd

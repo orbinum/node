@@ -1,25 +1,31 @@
 services:
-  validator-1:
+  validator:
     image: ${ORBINUM_IMAGE:-ghcr.io/orbinum/node:testnet-latest}
     platform: linux/amd64
-    container_name: orbinum-validator-1
+    container_name: orbinum-validator
     command: >
       --chain /chain-specs/testnet-spec.json
-      --name "Orbinum-Validator-1"
+      --name "${VALIDATOR_NAME:-Orbinum-Validator}"
       --base-path /data
       --port 30333
       --validator
       --node-key ${VALIDATOR_NODE_KEY}
+      --public-addr /ip4/${PRIVATE_IP}/tcp/30333
+      --reserved-nodes ${RPC1_RESERVED}
+      --reserved-nodes ${RPC2_RESERVED}
+      --reserved-only
       --no-mdns
-      --no-private-ipv4
       --prometheus-external
       --prometheus-port 9615
       --log info
     volumes:
       - ./testnet-spec.json:/chain-specs/testnet-spec.json:ro
-      - validator-1-data:/data
+      - validator-data:/data
     ports:
-      - "30333:30333" # P2P — must be publicly reachable
+      # P2P bound to the Hetzner PRIVATE IP only — NOT the public interface.
+      # The validator is unreachable from the internet by design; only the two
+      # RPC sentries (same private subnet) can dial it.
+      - "${PRIVATE_IP}:30333:30333"
     restart: unless-stopped
     labels:
       com.centurylinklabs.watchtower.enable: "true"
@@ -36,16 +42,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      # Check GHCR every 5 minutes
       WATCHTOWER_POLL_INTERVAL: "300"
-      # Only update containers managed by this compose (via label)
       WATCHTOWER_LABEL_ENABLE: "true"
-      # Wait for the new container to be healthy before removing the old one
       WATCHTOWER_ROLLING_RESTART: "true"
-      # Log level
       WATCHTOWER_LOG_LEVEL: "info"
     labels:
-      com.centurylinklabs.watchtower.enable: "false" # watchtower does not update itself
+      com.centurylinklabs.watchtower.enable: "false"
 
 volumes:
-  validator-1-data:
+  validator-data:

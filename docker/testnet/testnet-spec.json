@@ -3,9 +3,8 @@
   "id": "orbinum_testnet",
   "chainType": "Live",
   "bootNodes": [
-    "/dns/bootnode-1.testnet.orbinum.io/tcp/30333/p2p/12D3KooWBzqb1AFLQJd4NooU7q6dSsYBFL85A8RPsJDLesfxHvbW",
-    "/dns/bootnode-2.testnet.orbinum.io/tcp/30333/p2p/12D3KooWKiLEh2Z8XZYGejL5ZMR6rwEdZHPTpVDW3nsXfSW8paLt",
-    "/dns/bootnode-3.testnet.orbinum.io/tcp/30333/p2p/12D3KooWDyUCkm5GoxeZ2pz582tUgQXv1QUcLL7KDzqYcgf4QezU"
+    "/dns/rpc-1.testnet.orbinum.io/tcp/30333/p2p/12D3KooWBzqb1AFLQJd4NooU7q6dSsYBFL85A8RPsJDLesfxHvbW",
+    "/dns/rpc-2.testnet.orbinum.io/tcp/30333/p2p/12D3KooWKiLEh2Z8XZYGejL5ZMR6rwEdZHPTpVDW3nsXfSW8paLt"
   ],
   "telemetryEndpoints": [
     [
