@@ -15,6 +15,7 @@ services:
       --reserved-nodes ${RPC2_RESERVED}
       --reserved-only
       --no-mdns
+      --no-telemetry
       --prometheus-external
       --prometheus-port 9615
       --log info
@@ -22,9 +23,6 @@ services:
       - ./testnet-spec.json:/chain-specs/testnet-spec.json:ro
       - validator-data:/data
     ports:
-      # P2P bound to the Hetzner PRIVATE IP only — NOT the public interface.
-      # The validator is unreachable from the internet by design; only the two
-      # RPC sentries (same private subnet) can dial it.
       - "${PRIVATE_IP}:30333:30333"
     restart: unless-stopped
     labels:
@@ -36,7 +34,7 @@ services:
         max-file: "3"
 
   watchtower:
-    image: containrrr/watchtower
+    image: ghcr.io/nicholas-fedor/watchtower:latest
     container_name: orbinum-watchtower
     restart: unless-stopped
     volumes:
