@@ -3,6 +3,16 @@ services:
     image: ${ORBINUM_IMAGE:-ghcr.io/orbinum/node:testnet-latest}
     platform: linux/amd64
     container_name: orbinum-rpc-node
+    # Host networking: the container shares the host's network stack, inheriting
+    # its routable IPv6. Required because telemetry.polkadot.io resolves to
+    # IPv6-only and Docker bridge networks have no IPv6 by default.
+    # With host networking the "ports:" mapping is ignored — the node binds
+    # directly to the host interfaces:
+    #   --rpc-port 9944  : NOT --rpc-external, so it binds 127.0.0.1 only
+    #                      (Nginx proxies it; firewall still blocks 9944 anyway)
+    #   --port 30333     : public P2P (this node is a bootnode)
+    #   9615 Prometheus  : restrict via firewall to your monitoring host
+    network_mode: host
     command: >
       --chain /chain-specs/testnet-spec.json
       --name "${RPC_NAME:-Orbinum-RPC}"
@@ -10,7 +20,6 @@ services:
       --port 30333
       --node-key ${RPC_NODE_KEY}
       --rpc-port 9944
-      --rpc-external
       --rpc-cors all
       --rpc-methods Safe
       --no-mdns
@@ -21,10 +30,6 @@ services:
     volumes:
       - rpc-node-data:/data
       - ./testnet-spec.json:/chain-specs/testnet-spec.json:ro
-    ports:
-      - "127.0.0.1:9944:9944" # RPC — localhost only, proxied by Nginx + TLS
-      - "30333:30333"         # P2P — PUBLIC. This node is a bootnode.
-      - "9615:9615"           # Prometheus — optional, firewall to monitoring only
     restart: unless-stopped
     labels:
       com.centurylinklabs.watchtower.enable: "true"
