@@ -97,7 +97,6 @@ yourself.
 
 ```bash
 sudo ufw allow 30333/tcp   # P2P — must be publicly reachable
-sudo ufw allow 9615/tcp    # Prometheus metrics (optional)
 sudo ufw allow 443/tcp     # HTTPS/WSS — Caddy reverse proxy (RPC nodes only)
 sudo ufw allow 80/tcp      # HTTP — Let's Encrypt ACME challenge (RPC nodes only)
 sudo ufw allow 22/tcp      # SSH — remote admin
