@@ -41,6 +41,7 @@ ignore = [
     "RUSTSEC-2022-0061",  # parity-wasm 0.45.0 (from sc-executor-common)
     "RUSTSEC-2024-0436",  # paste 1.0.15 (from wasmtime-runtime)
     "RUSTSEC-2024-0370",  # proc-macro-error 1.0.4 (from multihash)
+    "RUSTSEC-2026-0173",  # proc-macro-error2 2.0.1 (from subxt-macro → frame-benchmarking-cli)
 ]
 
 [licenses]
