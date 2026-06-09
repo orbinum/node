@@ -41,4 +41,5 @@ scripts/testnet-keys/keys/
 /data/
 
 # Validator keys
-scripts/validator-keys/keys/ 
+scripts/validator-keys/keys/
+docker/testnet/.env
