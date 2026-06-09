@@ -3,11 +3,14 @@ services:
     image: ${ORBINUM_IMAGE:-ghcr.io/orbinum/node:testnet-latest}
     platform: linux/amd64
     container_name: orbinum-validator
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     command: >
       --chain /chain-specs/testnet-spec.json
       --name "${VALIDATOR_NAME:-Orbinum-Validator}"
       --base-path /data
-      --port 30333
+      --listen-addr /ip4/0.0.0.0/tcp/30333
       --validator
       --node-key ${VALIDATOR_NODE_KEY}
       --public-addr /ip4/${PRIVATE_IP}/tcp/30333
@@ -15,7 +18,7 @@ services:
       --reserved-nodes ${RPC2_RESERVED}
       --reserved-only
       --no-mdns
-      --no-telemetry
+      --telemetry-url "wss://telemetry.polkadot.io/submit/ 0"
       --prometheus-external
       --prometheus-port 9615
       --log info
