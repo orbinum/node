@@ -15,6 +15,7 @@ services:
       --node-key ${RPC_NODE_KEY}
       --rpc-port 9944
       --rpc-cors all
+      --rpc-external
       --rpc-methods Safe
       --no-mdns
       --no-private-ipv4
@@ -34,6 +35,20 @@ services:
         max-size: "100m"
         max-file: "3"
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: orbinum-caddy
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      RPC_DOMAIN: ${RPC_DOMAIN:-rpc-1.testnet.orbinum.io}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
   watchtower:
     image: ghcr.io/nicholas-fedor/watchtower:latest
     container_name: orbinum-watchtower
@@ -50,3 +65,5 @@ services:
 
 volumes:
   rpc-node-data:
+  caddy-data:
+  caddy-config:
