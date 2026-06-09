@@ -16,7 +16,6 @@ services:
       --public-addr /ip4/${PRIVATE_IP}/tcp/30333
       --reserved-nodes ${RPC1_RESERVED}
       --reserved-nodes ${RPC2_RESERVED}
-      --reserved-only
       --no-mdns
       --telemetry-url "wss://telemetry.polkadot.io/submit/ 0"
       --prometheus-external
