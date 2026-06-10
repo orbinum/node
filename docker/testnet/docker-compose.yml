@@ -13,9 +13,10 @@ services:
       --listen-addr /ip4/0.0.0.0/tcp/30333
       --validator
       --node-key ${VALIDATOR_NODE_KEY}
-      --public-addr /ip4/${PRIVATE_IP}/tcp/30333
-      --reserved-nodes ${RPC1_RESERVED}
-      --reserved-nodes ${RPC2_RESERVED}
+      ${P2P_PUBLIC_ADDR}
+      ${RESERVED_NODES}
+      --rpc-port 9944
+      --rpc-methods Unsafe
       --no-mdns
       --telemetry-url "wss://telemetry.polkadot.io/submit/ 0"
       --prometheus-external
@@ -25,7 +26,7 @@ services:
       - ./testnet-spec.json:/chain-specs/testnet-spec.json:ro
       - validator-data:/data
     ports:
-      - "${PRIVATE_IP}:30333:30333"
+      - "${P2P_BIND:-0.0.0.0}:30333:30333"
     restart: unless-stopped
     labels:
       com.centurylinklabs.watchtower.enable: "true"

@@ -13,16 +13,11 @@ This guide covers everything needed to join the Orbinum testnet as a validator: 
     - [1. Hardware Requirements](#1-hardware-requirements)
     - [2. Firewall Ports](#2-firewall-ports)
   - [Part 2 — Run the Node](#part-2--run-the-node)
-    - [Option A: Docker (recommended)](#option-a-docker-recommended)
       - [A.1 Install Docker](#a1-install-docker)
       - [A.2 Authenticate with GHCR](#a2-authenticate-with-ghcr)
-      - [A.3 Configure the node key](#a3-configure-the-node-key)
+      - [A.3 Configure the `.env` file](#a3-configure-the-env-file)
       - [A.4 Start the node](#a4-start-the-node)
       - [A.5 Automatic updates (Watchtower)](#a5-automatic-updates-watchtower)
-    - [Option B: systemd (binary)](#option-b-systemd-binary)
-      - [B.1 Install the binary](#b1-install-the-binary)
-      - [B.2 Configure the node key](#b2-configure-the-node-key)
-      - [B.3 Create the systemd service](#b3-create-the-systemd-service)
   - [Part 3 — Key Setup](#part-3--key-setup)
     - [3. Generate Session Keys](#3-generate-session-keys)
       - [Option A — Automated (recommended)](#option-a--automated-recommended)
@@ -38,12 +33,8 @@ This guide covers everything needed to join the Orbinum testnet as a validator: 
   - [Part 5 — Operations](#part-5--operations)
     - [Keeping the Node Updated](#keeping-the-node-updated)
       - [Docker — automatic (Watchtower)](#docker--automatic-watchtower)
-      - [systemd — manual update](#systemd--manual-update)
-      - [systemd — automatic updates with cron](#systemd--automatic-updates-with-cron)
     - [Bond and Deregistration](#bond-and-deregistration)
     - [Useful Commands](#useful-commands)
-      - [Docker](#docker)
-      - [systemd](#systemd)
     - [Troubleshooting](#troubleshooting)
 
 ---
@@ -97,34 +88,25 @@ yourself.
 
 ```bash
 sudo ufw allow 30333/tcp   # P2P — must be publicly reachable
-sudo ufw allow 443/tcp     # HTTPS/WSS — Caddy reverse proxy (RPC nodes only)
-sudo ufw allow 80/tcp      # HTTP — Let's Encrypt ACME challenge (RPC nodes only)
 sudo ufw allow 22/tcp      # SSH — remote admin
 sudo ufw enable
 ```
 
-> Do **not** open port `9944` (RPC) on a validator. The RPC port is only used locally during key insertion.
+> Do **not** open port `9944` (RPC) on a validator. It is never exposed to the host or network — it only listens inside the container and is reached via `docker compose exec` during key insertion.
 
 ---
 
 ## Part 2 — Run the Node
 
-Choose one of the two options below. Docker is recommended for most validators.
-
----
-
-### Option A: Docker (recommended)
-
 The `docker-compose.yml` includes the node and **Watchtower**, which automatically updates your container whenever a new testnet release is published.
 
 #### A.1 Install Docker
 
-```bash
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER
-newgrp docker
+Install Docker Engine following the official guide for your distribution: https://docs.docker.com/engine/install/
 
-sudo apt-get install -y docker-compose-plugin
+Make sure the Compose plugin is available:
+
+```bash
 docker compose version   # should print v2.x
 ```
 
@@ -136,34 +118,49 @@ The Orbinum node image is hosted on GitHub Container Registry (private). You nee
 # Create a GitHub Personal Access Token with read:packages scope at:
 # https://github.com/settings/tokens/new?scopes=read:packages
 
-export GITHUB_TOKEN=<your_token>
-echo $GITHUB_TOKEN | docker login ghcr.io -u <your_github_username> --password-stdin
+docker login ghcr.io -u <your_github_username>
 ```
+
+After entering your username, Docker prompts for a password — paste the
+generated token (not your GitHub account password). The token is hidden
+as you type/paste it. On success you see `Login Succeeded`.
 
 > Credentials are saved to `~/.docker/config.json`. Watchtower uses them automatically for future pulls.
 
-#### A.3 Configure the node key
+#### A.3 Configure the `.env` file
 
-Each validator needs a stable **node key** — a 32-byte Ed25519 private key that determines the node's Peer ID on the libp2p network. Without it, the Peer ID changes on every restart and other nodes cannot reliably locate you.
+Clone the repository and create your `.env` from the template:
 
 ```bash
-# Generate a random node key
+git clone https://github.com/orbinum/node.git
+cd node/docker/testnet
+cp .env.example .env
+```
+
+Edit `.env` and set the validator block:
+
+| Variable             | What to set                                                        |
+| -------------------- | ------------------------------------------------------------------ |
+| `VALIDATOR_NAME`     | Any identifiable name shown in telemetry (e.g. `Alice-Validator`). |
+| `VALIDATOR_NODE_KEY` | Your node key — generate with `openssl rand -hex 32` (see below).  |
+| `P2P_PUBLIC_ADDR`    | **Leave empty** when joining the public testnet.                   |
+| `RESERVED_NODES`     | **Leave empty** when joining the public testnet.                   |
+| `P2P_BIND`           | Leave as `0.0.0.0` when joining the public testnet.                |
+
+**The node key** is a 32-byte key that fixes your node's Peer ID on the libp2p network. Without a stable key the Peer ID changes on every restart and peers cannot reliably locate you.
+
+```bash
 openssl rand -hex 32
-# Example output: 847eff06b1f1b8a10b1a8b3b03a0dc90fe4e4a7c86f5e6063a88382f545f7704
+# Example: 847eff06b1f1b8a10b1a8b3b03a0dc90fe4e4a7c86f5e6063a88382f545f7704
 ```
 
-Save it in a `.env` file in the same directory as `docker-compose.yml`:
+Paste the output into `VALIDATOR_NODE_KEY=` in your `.env`.
 
-```bash
-# node/docker/testnet/.env
-VALIDATOR_NODE_KEY=<your_generated_hex_key>
-```
+> **Security:** `.env` is in `.gitignore` — never commit it. Back up the node key in a password manager. Whoever holds this key can impersonate your node on the network.
 
-> **Security:** `.env` is in `.gitignore` — never commit it. Store the key in a password manager as a backup. Whoever holds this key can impersonate your node on the network.
+> **Joining the public testnet?** Leave `P2P_PUBLIC_ADDR`, `RESERVED_NODES` empty and `P2P_BIND=0.0.0.0`. The node auto-detects its public address, binds P2P on all interfaces, and finds the network through the public bootnodes in `testnet-spec.json` — you do **not** set any private IP. Just make sure TCP port `30333` is publicly reachable (see [Firewall Ports](#2-firewall-ports)). The `P2P_PUBLIC_ADDR` / `RESERVED_NODES` / private-IP settings exist only for Orbinum-operated sentry validators on a private network; external validators never touch them.
 
-Docker Compose reads `.env` automatically. The key is passed to the node via `--node-key ${VALIDATOR_NODE_KEY}`.
-
-Your **Peer ID** is derived from this key and printed in the logs on startup:
+Your **Peer ID** is derived from the node key and printed in the logs on startup:
 
 ```
 Local node identity is: 12D3KooWxxxxx...
@@ -171,14 +168,9 @@ Local node identity is: 12D3KooWxxxxx...
 
 #### A.4 Start the node
 
+With your `.env` file in place (see A.3), start the node from `node/docker/testnet`:
+
 ```bash
-git clone https://github.com/orbinum/node.git
-cd node/docker/testnet
-
-# Generate and save your node key (see A.3 above)
-openssl rand -hex 32   # copy the output
-echo "VALIDATOR_NODE_KEY=<paste_here>" > .env
-
 docker compose pull       # download pre-built image (~1-2 min)
 docker compose up -d      # start validator + watchtower
 docker compose logs -f validator
@@ -216,86 +208,6 @@ Watchtower starts automatically with `docker compose up -d`. To check update his
 ```bash
 docker compose logs watchtower
 ```
-
----
-
-### Option B: systemd (binary)
-
-Use this if you prefer to run the binary directly without Docker.
-
-#### B.1 Install the binary
-
-```bash
-# Replace with the current release version
-VERSION=v0.1.0-rc.1
-curl -L "https://github.com/orbinum/node/releases/download/${VERSION}/orbinum-node-linux-x86_64-${VERSION}" \
-  -o /usr/local/bin/orbinum-node
-chmod +x /usr/local/bin/orbinum-node
-
-# Create system user and data directory
-useradd -m -u 1001 -U -s /bin/sh orbinum
-mkdir -p /var/lib/orbinum /etc/orbinum
-chown orbinum:orbinum /var/lib/orbinum
-
-# Copy the chain spec
-cp /path/to/node/docker/testnet/testnet-spec.json /etc/orbinum/testnet-spec.json
-```
-
-#### B.2 Configure the node key
-
-Same reasoning as Docker (see [A.3](#a3-configure-the-node-key)). Generate a key and store it in a file readable only by the `orbinum` system user:
-
-```bash
-# Generate the key and save it
-openssl rand -hex 32 | sudo tee /etc/orbinum/node-key > /dev/null
-sudo chmod 600 /etc/orbinum/node-key
-sudo chown orbinum:orbinum /etc/orbinum/node-key
-```
-
-> **Security:** Back up `/etc/orbinum/node-key` in a password manager. Never commit it or share it. If you lose it, your Peer ID changes — your node simply re-announces the new identity to peers; no chain spec change is needed (the public `bootNodes` are the core RPC nodes, not your node).
-
-#### B.3 Create the systemd service
-
-Create `/etc/systemd/system/orbinum-node.service`:
-
-```ini
-[Unit]
-Description=Orbinum Node
-After=network.target
-Wants=network.target
-
-[Service]
-User=orbinum
-Group=orbinum
-ExecStart=/usr/local/bin/orbinum-node \
-  --chain /etc/orbinum/testnet-spec.json \
-  --name "Orbinum-Validator-1" \
-  --base-path /var/lib/orbinum \
-  --port 30333 \
-  --validator \
-  --node-key-file /etc/orbinum/node-key \
-  --no-mdns \
-  --no-private-ipv4 \
-  --prometheus-external \
-  --prometheus-port 9615 \
-  --log info
-Restart=always
-RestartSec=10
-KillSignal=SIGINT
-TimeoutStopSec=300
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-systemctl daemon-reload
-systemctl enable orbinum-node
-systemctl start orbinum-node
-journalctl -u orbinum-node -f
-```
-
-Wait until you see `Idle` in the logs before proceeding.
 
 ---
 
@@ -350,28 +262,28 @@ docker run --rm ghcr.io/orbinum/node:testnet-latest key inspect --scheme Ed25519
 
 This writes the keys into the **node's local keystore** via RPC. These are local calls — not blockchain transactions — and require no balance.
 
+The validator's RPC port (`9944`) is **not** published to the host or the
+network — it only listens on `127.0.0.1` *inside* the container. Run the calls
+with `docker compose exec`, which executes them from inside the container where
+`localhost:9944` is reachable (the image ships `curl` for this purpose).
+
 The node must be running before you proceed.
 
 ```bash
 # Replace <MNEMONIC>, <AURA_PUBKEY>, <GRANDPA_PUBKEY> with your values
 
 # Aura (Sr25519)
-curl -s -H "Content-Type: application/json" \
+docker compose exec validator curl -s -H "Content-Type: application/json" \
   -d '{"id":1,"jsonrpc":"2.0","method":"author_insertKey","params":["aura","<MNEMONIC>","<AURA_PUBKEY>"]}' \
   http://localhost:9944
 
 # GRANDPA (Ed25519)
-curl -s -H "Content-Type: application/json" \
+docker compose exec validator curl -s -H "Content-Type: application/json" \
   -d '{"id":1,"jsonrpc":"2.0","method":"author_insertKey","params":["gran","<MNEMONIC>","<GRANDPA_PUBKEY>"]}' \
   http://localhost:9944
 ```
 
-Each call returns `{"result":null}` on success. Or use the script:
-
-```bash
-cd scripts/validator-keys
-./insert-session-keys.sh --validator 1 --rpc http://localhost:9944
-```
+Each call returns `{"result":null}` on success.
 
 ---
 
@@ -380,11 +292,7 @@ cd scripts/validator-keys
 After inserting the Aura key, restart the node:
 
 ```bash
-# Docker
 docker compose restart validator
-
-# systemd
-systemctl restart orbinum-node
 ```
 
 The node reads the Aura key from the keystore, derives the EVM relay address, and prints it in the logs:
@@ -410,10 +318,11 @@ The Orbinum team registers the EVM address on your behalf via sudo — you do no
 
 ### 6. Register Session Keys On-Chain
 
-First, get the combined session key from the node:
+First, get the combined session key from the node (same `docker compose exec`
+pattern as Step 4 — the RPC is only reachable inside the container):
 
 ```bash
-curl -s -H "Content-Type: application/json" \
+docker compose exec validator curl -s -H "Content-Type: application/json" \
   -d '{"id":1,"jsonrpc":"2.0","method":"author_rotateKeys","params":[]}' \
   http://localhost:9944
 # Returns: {"result":"0x<combined_hex_session_key>"}
@@ -506,50 +415,6 @@ To force an immediate update without waiting:
 docker compose pull && docker compose up -d
 ```
 
-#### systemd — manual update
-
-```bash
-VERSION=v0.1.1-rc.1   # replace with the new version
-systemctl stop orbinum-node
-curl -L "https://github.com/orbinum/node/releases/download/${VERSION}/orbinum-node-linux-x86_64-${VERSION}" \
-  -o /usr/local/bin/orbinum-node
-chmod +x /usr/local/bin/orbinum-node
-systemctl start orbinum-node
-journalctl -u orbinum-node -f
-```
-
-Downtime is ~5-10 seconds. If you operate multiple validators, update **one at a time** — never take down more than 1/3 of the active set simultaneously.
-
-#### systemd — automatic updates with cron
-
-Save the following script as `/usr/local/bin/orbinum-update.sh`:
-
-```bash
-#!/usr/bin/env bash
-# Checks for new testnet releases and updates the node automatically
-LATEST=$(curl -s https://api.github.com/repos/orbinum/node/releases \
-  | grep '"tag_name"' | head -1 | cut -d'"' -f4)
-CURRENT=$(/usr/local/bin/orbinum-node --version 2>&1 | grep -oP '\d+\.\d+\.\d+.*' | head -1)
-
-if [[ -n "$LATEST" && "$LATEST" != *"$CURRENT"* ]]; then
-  echo "$(date): Updating to $LATEST..."
-  systemctl stop orbinum-node
-  curl -L "https://github.com/orbinum/node/releases/download/${LATEST}/orbinum-node-linux-x86_64-${LATEST}" \
-    -o /usr/local/bin/orbinum-node
-  chmod +x /usr/local/bin/orbinum-node
-  systemctl start orbinum-node
-  echo "$(date): Updated to $LATEST"
-fi
-```
-
-```bash
-chmod +x /usr/local/bin/orbinum-update.sh
-
-# Check every 10 minutes
-echo "*/10 * * * * root /usr/local/bin/orbinum-update.sh >> /var/log/orbinum-update.log 2>&1" \
-  > /etc/cron.d/orbinum-update
-```
-
 ---
 
 ### Bond and Deregistration
@@ -572,8 +437,6 @@ If you are still in the **pending** queue (not yet approved), you can also call 
 ---
 
 ### Useful Commands
-
-#### Docker
 
 ```bash
 # View validator logs
@@ -598,23 +461,6 @@ docker compose down -v
 docker stats orbinum-validator
 ```
 
-#### systemd
-
-```bash
-# View logs
-journalctl -u orbinum-node -f
-
-# Restart
-systemctl restart orbinum-node
-
-# Stop / Start
-systemctl stop orbinum-node
-systemctl start orbinum-node
-
-# Check update log
-tail -f /var/log/orbinum-update.log
-```
-
 ---
 
 ### Troubleshooting
@@ -625,7 +471,9 @@ tail -f /var/log/orbinum-update.log
 
 **`author_insertKey` returns an error**
 - Make sure the node is running before calling the RPC
-- Port `9944` is not exposed publicly; call from the same machine: `http://localhost:9944`
+- Port `9944` is not exposed to the host or network — it only listens on
+  `127.0.0.1` inside the container. Always call it via `docker compose exec
+  validator curl ... http://localhost:9944` (see Step 4), not from the host directly.
 
 **Node is not producing blocks after approval**
 - Verify all keys are inserted: restart and check logs for `Loaded session key`
