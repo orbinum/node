@@ -1,5 +1,5 @@
 services:
-  rpc-node:
+  orbinum-rpc-node:
     image: ${ORBINUM_IMAGE:-ghcr.io/orbinum/node:testnet-latest}
     platform: linux/amd64
     container_name: orbinum-rpc-node
