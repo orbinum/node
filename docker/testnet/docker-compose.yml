@@ -18,7 +18,6 @@ services:
       --rpc-port 9944
       --rpc-methods Unsafe
       --no-mdns
-      --telemetry-url "wss://telemetry.polkadot.io/submit/ 0"
       --prometheus-external
       --prometheus-port 9615
       --log info

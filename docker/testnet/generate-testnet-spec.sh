@@ -44,6 +44,9 @@ cat "$DEPLOY_DIR/testnet-spec-plain.json" | jq '
   .bootNodes = [
     "/dns/rpc-1.testnet.orbinum.io/tcp/30333/p2p/12D3KooWBzqb1AFLQJd4NooU7q6dSsYBFL85A8RPsJDLesfxHvbW",
     "/dns/rpc-2.testnet.orbinum.io/tcp/30333/p2p/12D3KooWKiLEh2Z8XZYGejL5ZMR6rwEdZHPTpVDW3nsXfSW8paLt"
+  ] |
+  .telemetryEndpoints = [
+    ["/dns/telemetry.polkadot.io/tcp/443/x-parity-wss/%2Fsubmit%2F", 0]
   ]
 ' > "$DEPLOY_DIR/testnet-spec-customized.json"
 echo -e "${GREEN}✓ Chain spec customized${NC}\n"

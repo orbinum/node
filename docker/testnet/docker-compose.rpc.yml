@@ -19,7 +19,6 @@ services:
       --rpc-methods Safe
       --no-mdns
       --no-private-ipv4
-      --telemetry-url "wss://telemetry.polkadot.io/submit/ 0"
       --prometheus-external
       --prometheus-port 9615
       --log info
