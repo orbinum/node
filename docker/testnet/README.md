@@ -285,6 +285,33 @@ docker exec orbinum-validator curl -s -H "Content-Type: application/json" \
 
 Each call returns `{"result":null}` on success.
 
+**Verify the keys were inserted.** Two files must exist in the keystore — one for
+aura, one for grandpa:
+
+```bash
+docker exec orbinum-validator ls /data/chains/orbinum_testnet/keystore/
+# expect 2 files (the 8-hex prefix is the key type: 61757261=aura, 6772616e=gran)
+```
+
+You can also ask the node directly whether it holds each public key:
+
+```bash
+# Aura — replace <AURA_PUBKEY>
+docker exec orbinum-validator curl -s -H "Content-Type: application/json" \
+  -d '{"id":1,"jsonrpc":"2.0","method":"author_hasKey","params":["<AURA_PUBKEY>","aura"]}' \
+  http://localhost:9944
+
+# GRANDPA — replace <GRANDPA_PUBKEY>
+docker exec orbinum-validator curl -s -H "Content-Type: application/json" \
+  -d '{"id":1,"jsonrpc":"2.0","method":"author_hasKey","params":["<GRANDPA_PUBKEY>","gran"]}' \
+  http://localhost:9944
+```
+
+Both must return `{"result":true}`. If either is `false`, the seed and the public
+key don't match — re-check them before continuing (GRANDPA finalization needs ≥2 of
+3 validators holding their `gran` key, or the chain produces blocks but never
+finalizes).
+
 ---
 
 ### 5. Get Your EVM Relay Address
