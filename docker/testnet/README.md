@@ -173,7 +173,7 @@ With your `.env` file in place (see A.3), start the node from `node/docker/testn
 ```bash
 docker compose pull       # download pre-built image (~1-2 min)
 docker compose up -d      # start validator + watchtower
-docker compose logs -f validator
+docker compose logs -f orbinum-validator
 ```
 
 Wait until you see `Idle` in the logs before proceeding:
@@ -185,7 +185,7 @@ Wait until you see `Idle` in the logs before proceeding:
 Get your **Peer ID** — you will need it when requesting approval:
 
 ```bash
-docker compose logs validator | grep "Local node identity"
+docker compose logs orbinum-validator | grep "Local node identity"
 # -> Local node identity is: 12D3KooWxxxxx...
 ```
 
@@ -264,8 +264,8 @@ This writes the keys into the **node's local keystore** via RPC. These are local
 
 The validator's RPC port (`9944`) is **not** published to the host or the
 network — it only listens on `127.0.0.1` *inside* the container. Run the calls
-with `docker compose exec`, which executes them from inside the container where
-`localhost:9944` is reachable (the image ships `curl` for this purpose).
+with `docker exec orbinum-validator`, which executes them from inside the container
+where `localhost:9944` is reachable (the image ships `curl` for this purpose).
 
 The node must be running before you proceed.
 
@@ -273,12 +273,12 @@ The node must be running before you proceed.
 # Replace <MNEMONIC>, <AURA_PUBKEY>, <GRANDPA_PUBKEY> with your values
 
 # Aura (Sr25519)
-docker compose exec validator curl -s -H "Content-Type: application/json" \
+docker exec orbinum-validator curl -s -H "Content-Type: application/json" \
   -d '{"id":1,"jsonrpc":"2.0","method":"author_insertKey","params":["aura","<MNEMONIC>","<AURA_PUBKEY>"]}' \
   http://localhost:9944
 
 # GRANDPA (Ed25519)
-docker compose exec validator curl -s -H "Content-Type: application/json" \
+docker exec orbinum-validator curl -s -H "Content-Type: application/json" \
   -d '{"id":1,"jsonrpc":"2.0","method":"author_insertKey","params":["gran","<MNEMONIC>","<GRANDPA_PUBKEY>"]}' \
   http://localhost:9944
 ```
@@ -292,7 +292,7 @@ Each call returns `{"result":null}` on success.
 After inserting the Aura key, restart the node:
 
 ```bash
-docker compose restart validator
+docker compose restart orbinum-validator
 ```
 
 The node reads the Aura key from the keystore, derives the EVM relay address, and prints it in the logs:
@@ -322,7 +322,7 @@ First, get the combined session key from the node (same `docker compose exec`
 pattern as Step 4 — the RPC is only reachable inside the container):
 
 ```bash
-docker compose exec validator curl -s -H "Content-Type: application/json" \
+docker exec orbinum-validator curl -s -H "Content-Type: application/json" \
   -d '{"id":1,"jsonrpc":"2.0","method":"author_rotateKeys","params":[]}' \
   http://localhost:9944
 # Returns: {"result":"0x<combined_hex_session_key>"}
@@ -440,7 +440,7 @@ If you are still in the **pending** queue (not yet approved), you can also call 
 
 ```bash
 # View validator logs
-docker compose logs -f validator
+docker compose logs -f orbinum-validator
 
 # View Watchtower logs (check when updates were applied)
 docker compose logs -f watchtower
@@ -449,7 +449,7 @@ docker compose logs -f watchtower
 docker compose down
 
 # Restart validator only
-docker compose restart validator
+docker compose restart orbinum-validator
 
 # Force update now (without waiting for Watchtower)
 docker compose pull && docker compose up -d
@@ -472,8 +472,8 @@ docker stats orbinum-validator
 **`author_insertKey` returns an error**
 - Make sure the node is running before calling the RPC
 - Port `9944` is not exposed to the host or network — it only listens on
-  `127.0.0.1` inside the container. Always call it via `docker compose exec
-  validator curl ... http://localhost:9944` (see Step 4), not from the host directly.
+  `127.0.0.1` inside the container. Always call it via `docker exec
+  orbinum-validator curl ... http://localhost:9944` (see Step 4), not from the host directly.
 
 **Node is not producing blocks after approval**
 - Verify all keys are inserted: restart and check logs for `Loaded session key`
