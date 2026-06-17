@@ -3,12 +3,12 @@
 	# CADDY_ALLOWED_ORIGINS is a REGEX matched against the Origin header. Anchor it
 	# with ^...$ and escape dots with \.
 	#   single   : ^https://explorer\.testnet\.orbinum\.network$
-	#   multiple : ^https://(explorer\.testnet\.orbinum\.network|app\.orbinum\.io)$
+	#   multiple : ^https://(explorer\.testnet\.orbinum\.network|explorer-dev\.testnet\.orbinum\.network)$
 	#   all      : .*    (disables the restriction)
-	@blocked not header_regexp Origin {$CADDY_ALLOWED_ORIGINS:^https://explorer\.testnet\.orbinum\.network$}
+	@blocked not header_regexp Origin {$CADDY_ALLOWED_ORIGINS:^https://(explorer\.testnet\.orbinum\.network|explorer-dev\.testnet\.orbinum\.network)$}
 	respond @blocked "Forbidden" 403
 
-	# ── CORS (Caddy answers it, not substrate) ───────────────────────────────────
+	# ── CORS (Caddy owns it) ─────────────────────────────────────────────────────
 	# Reflect the (already-allowlisted) Origin and allow the JSON-RPC content-type.
 	header {
 		Access-Control-Allow-Origin "{header.Origin}"
@@ -20,9 +20,11 @@
 	@preflight method OPTIONS
 	respond @preflight 204
 
-	# Substrate whitelists the Host header (only localhost by default). Rewrite it
-	# so the proxied request passes the node's host filter.
+	# Substrate whitelists Host (localhost only) and also emits its own CORS header.
+	# Rewrite Host so the host filter passes, and strip the upstream CORS header so
+	# it doesn't duplicate the one Caddy sets above.
 	reverse_proxy localhost:9944 {
 		header_up Host localhost:9944
+		header_down -Access-Control-Allow-Origin
 	}
 }
