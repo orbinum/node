@@ -1,26 +1,17 @@
 {$RPC_DOMAIN:rpc-1.testnet.orbinum.io} {
-	# ── Origin allowlist (server-side, blocks curl/scripts and bad origins) ──────
-	# CADDY_ALLOWED_ORIGINS is a REGEX matched against the Origin header. Anchor it
-	# with ^...$ and escape dots with \.
-	#   single   : ^https://explorer\.testnet\.orbinum\.network$
-	#   multiple : ^https://(explorer\.testnet\.orbinum\.network|explorer-dev\.testnet\.orbinum\.network)$
-	#   all      : .*    (disables the restriction)
-	@blocked not header_regexp Origin {$CADDY_ALLOWED_ORIGINS:^https://(explorer\.testnet\.orbinum\.network|explorer-dev\.testnet\.orbinum\.network)$}
-	respond @blocked "Forbidden" 403
-
-	# ── CORS (Caddy owns it) ─────────────────────────────────────────────────────
-	# Reflect the (already-allowlisted) Origin and allow the JSON-RPC content-type.
+	# Public RPC: open CORS so MetaMask, wallets, dApps, indexers and 3rd-party
+	# explorers can all reach it. Access is restricted by --rpc-methods Safe on the
+	# node (no unsafe calls), not by Origin.
 	header {
-		Access-Control-Allow-Origin "{header.Origin}"
+		Access-Control-Allow-Origin "*"
 		Access-Control-Allow-Methods "POST, OPTIONS"
 		Access-Control-Allow-Headers "Content-Type"
-		Vary Origin
 	}
 	# Answer the preflight directly — never forward OPTIONS to the node.
 	@preflight method OPTIONS
 	respond @preflight 204
 
-	# Substrate whitelists Host (localhost only) and also emits its own CORS header.
+	# Substrate whitelists Host (localhost only) and emits its own CORS header.
 	# Rewrite Host so the host filter passes, and strip the upstream CORS header so
 	# it doesn't duplicate the one Caddy sets above.
 	reverse_proxy localhost:9944 {

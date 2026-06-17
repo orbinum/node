@@ -14,7 +14,7 @@ services:
       --listen-addr /ip4/0.0.0.0/tcp/30333
       --node-key ${RPC_NODE_KEY}
       --rpc-port 9944
-      --rpc-cors ${ALLOWED_ORIGINS:-https://explorer.testnet.orbinum.network}
+      --rpc-cors all
       --rpc-external
       --rpc-methods Safe
       --rpc-max-connections 1000
@@ -44,7 +44,6 @@ services:
     restart: unless-stopped
     environment:
       RPC_DOMAIN: ${RPC_DOMAIN:-rpc-1.testnet.orbinum.io}
-      CADDY_ALLOWED_ORIGINS: ${CADDY_ALLOWED_ORIGINS:-^https://explorer\.testnet\.orbinum\.network$}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
