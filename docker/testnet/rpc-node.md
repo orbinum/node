@@ -50,7 +50,7 @@ a Let's Encrypt certificate for `RPC_DOMAIN` automatically — no Nginx or Certb
 
 ```bash
 docker compose -f docker-compose.rpc.yml up -d
-docker compose -f docker-compose.rpc.yml logs -f rpc-node
+docker compose -f docker-compose.rpc.yml logs -f orbinum-rpc-node
 ```
 
 Wait until you see `Idle` or `Syncing` in the logs. On first start, check that Caddy
@@ -62,14 +62,26 @@ docker compose -f docker-compose.rpc.yml logs caddy | grep -i "certificate obtai
 
 ## Verify
 
-Use the domain you set in `RPC_DOMAIN` (replace below):
+The public endpoint is locked down by Caddy: requests must send an `Origin`
+header that matches `CADDY_ALLOWED_ORIGINS`, else 403. To test from anywhere,
+pass an allowed origin:
 
 ```bash
-curl -H "Content-Type: application/json" \
+curl -H "Origin: https://explorer.testnet.orbinum.network" \
+  -H "Content-Type: application/json" \
   -d '{"id":1,"jsonrpc":"2.0","method":"system_health","params":[]}' \
   https://rpc-1.testnet.orbinum.io
 
 # Expected: {"jsonrpc":"2.0","result":{"isSyncing":false,"peers":3,...},"id":1}
+```
+
+To bypass Caddy and hit the node's RPC directly (no Origin needed), run the
+curl **inside the container** against `localhost:9944`:
+
+```bash
+docker exec orbinum-rpc-node curl -s -H "Content-Type: application/json" \
+  -d '{"id":1,"jsonrpc":"2.0","method":"system_health","params":[]}' \
+  http://localhost:9944
 ```
 
 The endpoint is ready to use as:
@@ -85,8 +97,8 @@ docker compose -f docker-compose.rpc.yml down
 # Full reset
 docker compose -f docker-compose.rpc.yml down -v
 
-# Check sync status
-curl -s -H "Content-Type: application/json" \
+# Check sync status (inside the container — no Origin needed)
+docker exec orbinum-rpc-node curl -s -H "Content-Type: application/json" \
   -d '{"id":1,"jsonrpc":"2.0","method":"system_syncState","params":[]}' \
-  https://rpc-1.testnet.orbinum.io | jq
+  http://localhost:9944
 ```

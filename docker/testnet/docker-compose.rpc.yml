@@ -17,6 +17,9 @@ services:
       --rpc-cors all
       --rpc-external
       --rpc-methods Safe
+      --rpc-max-connections 1000
+      --state-pruning archive
+      --blocks-pruning archive
       --no-mdns
       --no-private-ipv4
       --prometheus-external

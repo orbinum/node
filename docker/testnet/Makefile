@@ -1,25 +1,28 @@
 # Orbinum Testnet — node operations
 #
-# Auto-detects the node role from which compose file exists on this server:
-#   - docker-compose.rpc.yml present  → RPC / bootnode
-#   - docker-compose.yml present      → validator
+# Picks the node role. Override with ROLE=rpc or ROLE=validator on any command:
+#   make down                 # auto-detect (rpc if its compose exists, else validator)
+#   make down ROLE=validator  # force validator (needed when BOTH compose files exist)
+#   make up   ROLE=rpc
 # Same Makefile on every server; each one operates on its own node.
 #
 # Usage:  make <target>     (run from this directory)
 #         make help         lists all targets
 
-# ── Role auto-detection ───────────────────────────────────────────────────────
-# Prefer the RPC compose if it exists, else fall back to the validator compose.
-COMPOSE := $(firstword $(wildcard docker-compose.rpc.yml docker-compose.yml))
-# The volume name is "<project>_<volume>"; project defaults to this dir's name.
+# ── Role selection ────────────────────────────────────────────────────────────
+# ROLE may be set on the command line. If unset, auto-detect: prefer the RPC
+# compose when present, else the validator compose. When BOTH files exist on the
+# same checkout (e.g. the dev repo), auto-detect always picks rpc — pass
+# ROLE=validator explicitly to operate on the validator stack.
+ROLE ?= $(if $(wildcard docker-compose.rpc.yml),rpc,validator)
 PROJECT := $(notdir $(CURDIR))
-ifeq ($(COMPOSE),docker-compose.rpc.yml)
+ifeq ($(ROLE),rpc)
+  COMPOSE   := docker-compose.rpc.yml
   CONTAINER := orbinum-rpc-node
-  ROLE      := RPC
   VOLUME    := $(PROJECT)_rpc-node-data
 else
+  COMPOSE   := docker-compose.yml
   CONTAINER := orbinum-validator
-  ROLE      := validator
   VOLUME    := $(PROJECT)_validator-data
 endif
 
@@ -93,6 +96,19 @@ reset-chain: ## Wipe chain DB + network cache for a re-genesis. KEEPS keystore. 
 	docker run --rm -v $(VOLUME):/data alpine \
 	  rm -rf /data/chains/orbinum_testnet/db /data/chains/orbinum_testnet/network
 	@echo "✅ Chain data wiped. Run 'make up' to start from the new genesis."
+
+# ── Full cleanup (DESTRUCTIVE — wipes EVERYTHING) ─────────────────────────────
+.PHONY: clean
+clean: ## Wipe ALL: containers, volumes (chain DB + keystore), networks, images. Asks first.
+	@echo "⚠️  This permanently DESTROYS everything for $(ROLE) ($(CONTAINER)):"
+	@echo "    - containers (stopped + removed)"
+	@echo "    - volumes    → chain database AND keystore (session keys LOST)"
+	@echo "    - networks   (project networks removed)"
+	@echo "    - images     (compose images removed)"
+	@echo "    This is NOT recoverable. Back up the keystore first if you need it."
+	@printf "    Type 'yes' to continue: " && read ans && [ "$$ans" = "yes" ] || (echo "aborted" && exit 1)
+	$(DC) down --volumes --remove-orphans --rmi all
+	@echo "✅ Full cleanup done. Run 'make up' to start fresh."
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 .PHONY: help
