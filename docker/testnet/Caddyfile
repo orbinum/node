@@ -1,21 +1,3 @@
 {$RPC_DOMAIN:rpc-1.testnet.orbinum.io} {
-	# Public RPC: open CORS so MetaMask, wallets, dApps, indexers and 3rd-party
-	# explorers can all reach it. Access is restricted by --rpc-methods Safe on the
-	# node, not by Origin.
-
-	# Answer the CORS preflight directly; never forward OPTIONS to the node.
-	@options method OPTIONS
-	respond @options 204
-
-	# CORS for the actual POST responses. WS upgrade (101) ignores these.
-	header Access-Control-Allow-Origin "*"
-	header Access-Control-Allow-Methods "POST, OPTIONS"
-	header Access-Control-Allow-Headers "Content-Type"
-
-	# Proxy HTTP POST and the WebSocket upgrade to the node. header_up Host fixes the
-	# node's Host whitelist; strip its CORS header so it doesn't duplicate ours.
-	reverse_proxy localhost:9944 {
-		header_up Host localhost:9944
-		header_down -Access-Control-Allow-Origin
-	}
+	reverse_proxy localhost:9944
 }
