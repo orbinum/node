@@ -94,6 +94,19 @@ reset-chain: ## Wipe chain DB + network cache for a re-genesis. KEEPS keystore. 
 	  rm -rf /data/chains/orbinum_testnet/db /data/chains/orbinum_testnet/network
 	@echo "✅ Chain data wiped. Run 'make up' to start from the new genesis."
 
+# ── Full cleanup (DESTRUCTIVE — wipes EVERYTHING) ─────────────────────────────
+.PHONY: clean
+clean: ## Wipe ALL: containers, volumes (chain DB + keystore), networks, images. Asks first.
+	@echo "⚠️  This permanently DESTROYS everything for $(ROLE) ($(CONTAINER)):"
+	@echo "    - containers (stopped + removed)"
+	@echo "    - volumes    → chain database AND keystore (session keys LOST)"
+	@echo "    - networks   (project networks removed)"
+	@echo "    - images     (compose images removed)"
+	@echo "    This is NOT recoverable. Back up the keystore first if you need it."
+	@printf "    Type 'yes' to continue: " && read ans && [ "$$ans" = "yes" ] || (echo "aborted" && exit 1)
+	$(DC) down --volumes --remove-orphans --rmi all
+	@echo "✅ Full cleanup done. Run 'make up' to start fresh."
+
 # ── Help ──────────────────────────────────────────────────────────────────────
 .PHONY: help
 help: ## Show this help
