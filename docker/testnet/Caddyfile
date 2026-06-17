@@ -2,20 +2,24 @@
 	# Public RPC: open CORS so MetaMask, wallets, dApps, indexers and 3rd-party
 	# explorers can all reach it. Access is restricted by --rpc-methods Safe on the
 	# node (no unsafe calls), not by Origin.
-	header {
-		Access-Control-Allow-Origin "*"
-		Access-Control-Allow-Methods "POST, OPTIONS"
-		Access-Control-Allow-Headers "Content-Type"
-	}
-	# Answer the preflight directly — never forward OPTIONS to the node.
-	@preflight method OPTIONS
-	respond @preflight 204
 
-	# Substrate whitelists Host (localhost only) and emits its own CORS header.
-	# Rewrite Host so the host filter passes, and strip the upstream CORS header so
-	# it doesn't duplicate the one Caddy sets above.
-	reverse_proxy localhost:9944 {
-		header_up Host localhost:9944
-		header_down -Access-Control-Allow-Origin
+	# Preflight: answer OPTIONS directly with CORS headers, never hit the node.
+	@preflight method OPTIONS
+	handle @preflight {
+		header Access-Control-Allow-Origin "*"
+		header Access-Control-Allow-Methods "POST, OPTIONS"
+		header Access-Control-Allow-Headers "Content-Type"
+		respond 204
+	}
+
+	# Everything else (HTTP POST + WebSocket upgrade) goes to the node.
+	# CORS header added here applies to POST responses; the WS upgrade (101) passes
+	# through untouched so the handshake isn't broken.
+	handle {
+		header Access-Control-Allow-Origin "*"
+		reverse_proxy localhost:9944 {
+			header_up Host localhost:9944
+			header_down -Access-Control-Allow-Origin
+		}
 	}
 }
