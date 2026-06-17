@@ -1,3 +1,13 @@
 {$RPC_DOMAIN:rpc-1.testnet.orbinum.io} {
+	# Server-side Origin blocking (actual enforcement — also blocks curl/scripts
+	# that send a non-allowed Origin, and requests without an Origin header).
+	# CADDY_ALLOWED_ORIGINS is a REGEX that matches the Origin header. Anchor it with ^...$
+	# and escape dots with \.
+	#   single origin : ^https://explorer\.testnet\.orbinum\.network$
+	#   multiple      : ^https://(explorer\.testnet\.orbinum\.network|app\.orbinum\.io)$
+	#   all origins   : .*    (disables the restriction)
+	@blocked not header_regexp Origin {$CADDY_ALLOWED_ORIGINS:^https://explorer\.testnet\.orbinum\.network$}
+	respond @blocked "Forbidden" 403
+
 	reverse_proxy localhost:9944
 }
