@@ -9,5 +9,9 @@
 	@blocked not header_regexp Origin {$CADDY_ALLOWED_ORIGINS:^https://explorer\.testnet\.orbinum\.network$}
 	respond @blocked "Forbidden" 403
 
-	reverse_proxy localhost:9944
+	# Substrate whitelists the Host header (only localhost by default). Rewrite it
+	# so the proxied request passes the node's host filter.
+	reverse_proxy localhost:9944 {
+		header_up Host localhost:9944
+	}
 }
