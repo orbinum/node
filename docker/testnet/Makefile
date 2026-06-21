@@ -1,25 +1,28 @@
 # Orbinum Testnet — node operations
 #
-# Auto-detects the node role from which compose file exists on this server:
-#   - docker-compose.rpc.yml present  → RPC / bootnode
-#   - docker-compose.yml present      → validator
+# Picks the node role. Override with ROLE=rpc or ROLE=validator on any command:
+#   make down                 # auto-detect (rpc if its compose exists, else validator)
+#   make down ROLE=validator  # force validator (needed when BOTH compose files exist)
+#   make up   ROLE=rpc
 # Same Makefile on every server; each one operates on its own node.
 #
 # Usage:  make <target>     (run from this directory)
 #         make help         lists all targets
 
-# ── Role auto-detection ───────────────────────────────────────────────────────
-# Prefer the RPC compose if it exists, else fall back to the validator compose.
-COMPOSE := $(firstword $(wildcard docker-compose.rpc.yml docker-compose.yml))
-# The volume name is "<project>_<volume>"; project defaults to this dir's name.
+# ── Role selection ────────────────────────────────────────────────────────────
+# ROLE may be set on the command line. If unset, auto-detect: prefer the RPC
+# compose when present, else the validator compose. When BOTH files exist on the
+# same checkout (e.g. the dev repo), auto-detect always picks rpc — pass
+# ROLE=validator explicitly to operate on the validator stack.
+ROLE ?= $(if $(wildcard docker-compose.rpc.yml),rpc,validator)
 PROJECT := $(notdir $(CURDIR))
-ifeq ($(COMPOSE),docker-compose.rpc.yml)
+ifeq ($(ROLE),rpc)
+  COMPOSE   := docker-compose.rpc.yml
   CONTAINER := orbinum-rpc-node
-  ROLE      := RPC
   VOLUME    := $(PROJECT)_rpc-node-data
 else
+  COMPOSE   := docker-compose.yml
   CONTAINER := orbinum-validator
-  ROLE      := validator
   VOLUME    := $(PROJECT)_validator-data
 endif
 
