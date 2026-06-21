@@ -46,6 +46,8 @@ services:
       RPC_DOMAIN: ${RPC_DOMAIN:-rpc-1.testnet.orbinum.io}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./origin.pem:/etc/caddy/origin.pem:ro
+      - ./origin.key:/etc/caddy/origin.key:ro
       - caddy-data:/data
       - caddy-config:/config
     labels:
