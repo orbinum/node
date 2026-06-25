@@ -38,7 +38,10 @@ fi
 # index from the bottom up (indices shift as you delete).
 mapfile -t stale < <(ufw status numbered | grep "# ${TAG}" | grep -oE '^\[[ 0-9]+\]' | tr -d '[] ' | sort -rn)
 for idx in "${stale[@]}"; do
-  yes | ufw delete "$idx" >/dev/null
+  # --force skips the y/n prompt. Do NOT pipe `yes` here: when ufw exits, yes
+  # keeps writing to a closed pipe, gets SIGPIPE, and under `set -o pipefail`
+  # that aborts the whole script mid-delete (leaving the allow-list incomplete).
+  ufw --force delete "$idx" >/dev/null
 done
 
 # Re-add the current ranges for each port. ponytail: empty ips-v6 just means
