@@ -15,6 +15,7 @@ services:
       --node-key ${VALIDATOR_NODE_KEY}
       ${P2P_PUBLIC_ADDR}
       ${RESERVED_NODES}
+      --reserved-only
       --rpc-port 9944
       --rpc-methods Unsafe
       --no-mdns
