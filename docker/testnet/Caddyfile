@@ -1,4 +1,18 @@
+# caddy-ratelimit is not a standard directive, so it must be ordered explicitly.
+{
+	order rate_limit before basic_auth
+}
+
 {$RPC_DOMAIN:rpc-1.testnet.orbinum.io} {
 	tls /etc/caddy/origin.pem /etc/caddy/origin.key
+
+	rate_limit {
+		zone rpc {
+			key {http.request.header.CF-Connecting-IP}
+			events 100
+			window 10s
+		}
+	}
+
 	reverse_proxy localhost:9944
 }
