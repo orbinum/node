@@ -33,6 +33,16 @@ Dockerfile
 .dockerignore
 docker-compose*.yml
 
+# Secrets — never send to the build context (keep the .example templates)
+.env
+.env.*
+!.env.example
+!.env.rpc.example
+origin.pem
+origin.key
+*.pem
+*.key
+
 # Test files
 ts-tests/
 ts-tests-orbinum/
