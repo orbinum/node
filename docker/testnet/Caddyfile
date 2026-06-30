@@ -22,10 +22,14 @@
 	@options method OPTIONS
 	respond @options 204
 
+	# Per-IP rate limit (keyed on the real client IP from Cloudflare). Sized for a
+	# public testnet RPC: explorers, wallets and light bots issue bursts, so 10/s
+	# (the old 100/10s) throttled legitimate use and took down the explorer. 50/s
+	# gives headroom while still capping a single abusive IP.
 	rate_limit {
 		zone rpc {
 			key {http.request.header.CF-Connecting-IP}
-			events 100
+			events 500
 			window 10s
 		}
 	}
