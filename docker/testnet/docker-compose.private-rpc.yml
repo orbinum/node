@@ -1,27 +1,32 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Orbinum Testnet — PRIVATE RPC node (run your own).
+# Orbinum Testnet — PRIVATE RPC node (internal use).
 #
-# A full node that syncs the testnet and serves RPC for YOUR OWN use: an app,
-# an indexer, a script, local development. Unlike docker-compose.rpc.yml (the
-# official public rpc-1/rpc-2 with Caddy + TLS + a domain), this one:
+# A full node that syncs the testnet and serves RPC on localhost for a consumer
+# co-located with it (an indexer, an app, a script). Unlike docker-compose.rpc.yml
+# (a public endpoint with Caddy + TLS + a domain), this one:
 #   - serves RPC on localhost ONLY by default (no --rpc-external) — nothing
 #     reachable from the internet, no firewall mistake possible out of the box,
 #   - has no Caddy / TLS / public domain,
 #   - is NOT a bootnode (its PeerId isn't in the spec), so RPC_NODE_KEY can be
 #     any value and may change freely.
 #
-# It still discovers the network from the spec's bootNodes (rpc-1 / rpc-2), so
-# you get a fully synced node feeding only you.
+# ── Peering: reach the existing RPC nodes by their PRIVATE IP via RESERVED_NODES
+#    in .env (the same mechanism the validators use):
+#      RESERVED_NODES=--reserved-nodes /ip4/<rpc-ip>/tcp/30333/p2p/<rpc PeerId> ...
+#    This is required when the spec's bootNodes are public DNS names behind a
+#    proxy/CDN that does not route P2P (port 30333): dialing them by domain fails
+#    and the node stays at 0 peers, so peer by IP instead. Do NOT add
+#    --reserved-only — that would isolate the node and block other gossip.
 #
 # Setup:
-#   cp .env.rpc.example .env     # fill RPC_NODE_KEY (openssl rand -hex 32)
+#   cp .env.rpc.example .env     # fill RPC_NODE_KEY and RESERVED_NODES
 #   docker compose -f docker-compose.private-rpc.yml up -d
 #
 # Consume it from the same machine:
 #   ws://127.0.0.1:9944   (Substrate)   http://127.0.0.1:9944   (EVM/JSON-RPC)
 #
 # Need it reachable from another machine? See the TWO commented lines in the
-# command below, and FIREWALL the box — an open RPC is a public resource.
+# command below, and FIREWALL the box.
 services:
   orbinum-private-rpc:
     image: ${ORBINUM_IMAGE:-ghcr.io/orbinum/node:testnet-latest}
@@ -41,7 +46,7 @@ services:
       --rpc-methods Safe
       --rpc-max-connections 100
       --no-mdns
-      --no-private-ipv4
+      ${RESERVED_NODES}
       --log info
     # ── To reach RPC from OTHER machines, uncomment BOTH lines below AND set up a
     #    firewall (e.g. ufw allow from <your-subnet> to any port 9944). Without a
@@ -59,10 +64,10 @@ services:
     mem_limit: ${RPC_MEM_LIMIT:-3g}
     cpus: ${RPC_CPUS:-1.5}
     logging:
-      driver: 'json-file'
+      driver: "json-file"
       options:
-        max-size: '100m'
-        max-file: '3'
+        max-size: "100m"
+        max-file: "3"
 
 volumes:
   private-rpc-data:
