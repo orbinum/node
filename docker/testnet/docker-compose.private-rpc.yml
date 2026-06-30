@@ -36,26 +36,18 @@ services:
     dns:
       - 8.8.8.8
       - 1.1.1.1
-    # sh -c so the shell word-splits ${RESERVED_NODES} (multiple space-separated
-    # --reserved-nodes flags). A YAML folded scalar can't interpolate a
-    # multi-token var into the arg list — it fails with "invalid command line
-    # string". --entrypoint sh runs the node binary as the first arg ($0 → sh,
-    # so the binary is invoked as the command, args follow).
-    entrypoint: ['/bin/sh', '-c']
-    command:
-      - >
-        exec orbinum-node
-        --chain /chain-specs/testnet-spec.json
-        --name "${RPC_NAME:-Orbinum-Private-RPC}"
-        --base-path /data
-        --listen-addr /ip4/0.0.0.0/tcp/30333
-        --node-key ${RPC_NODE_KEY}
-        --rpc-port 9944
-        --rpc-methods Safe
-        --rpc-max-connections 100
-        --no-mdns
-        ${RESERVED_NODES}
-        --log info
+    command: >
+      --chain /chain-specs/testnet-spec.json
+      --name "${RPC_NAME:-Orbinum-Private-RPC}"
+      --base-path /data
+      --listen-addr /ip4/0.0.0.0/tcp/30333
+      --node-key ${RPC_NODE_KEY}
+      ${RESERVED_NODES}
+      --rpc-port 9944
+      --rpc-methods Safe
+      --rpc-max-connections 100
+      --no-mdns
+      --log info
     # ── To reach RPC from OTHER machines, uncomment BOTH lines below AND set up a
     #    firewall (e.g. ufw allow from <your-subnet> to any port 9944). Without a
     #    firewall this opens your node's RPC to the whole internet.
