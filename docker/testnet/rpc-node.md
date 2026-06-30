@@ -197,6 +197,32 @@ The endpoint is ready to use as:
 - `https://rpc-1.testnet.orbinum.io` — HTTP RPC
 - `wss://rpc-1.testnet.orbinum.io` — WebSocket (Polkadot.js, Talisman)
 
+## Private RPC (run your own, for your own use)
+
+The guide above sets up a **public** endpoint (Cloudflare + Caddy + a domain).
+If you just want a synced node for **your own** app, indexer, script, or local
+development — not a public service — use `docker-compose.private-rpc.yml` instead.
+
+It serves RPC on **localhost only** by default: nothing is reachable from the
+internet, so there's no firewall mistake to make and no Cloudflare/Caddy/TLS to
+set up. It still syncs from the public bootnodes in the spec, so you get a fully
+synced node feeding only you. It is **not** a bootnode, so `RPC_NODE_KEY` can be
+any value.
+
+```bash
+cp .env.rpc.example .env          # fill RPC_NODE_KEY (openssl rand -hex 32)
+docker compose -f docker-compose.private-rpc.yml up -d
+```
+
+Consume it from the same machine:
+
+- `ws://127.0.0.1:9944` — WebSocket (Substrate)
+- `http://127.0.0.1:9944` — HTTP (EVM / JSON-RPC)
+
+To reach it from another machine, uncomment `--rpc-external` (and `--rpc-cors all`
+for browsers) in the compose file **and firewall the box** — an externally bound
+RPC is an open resource. See the comments in `docker-compose.private-rpc.yml`.
+
 ## Useful Commands
 
 ```bash

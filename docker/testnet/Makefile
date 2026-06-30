@@ -1,9 +1,11 @@
 # Orbinum Testnet — node operations
 #
-# Picks the node role. Override with ROLE=rpc or ROLE=validator on any command:
-#   make down                 # auto-detect (rpc if its compose exists, else validator)
-#   make down ROLE=validator  # force validator (needed when BOTH compose files exist)
+# Picks the node role. Override with ROLE=rpc, ROLE=validator, or
+# ROLE=private-rpc on any command:
+#   make down                    # auto-detect (rpc if its compose exists, else validator)
+#   make down ROLE=validator     # force validator (needed when multiple compose files exist)
 #   make up   ROLE=rpc
+#   make up   ROLE=private-rpc    # localhost-only RPC for your own use
 # Same Makefile on every server; each one operates on its own node.
 #
 # Usage:  make <target>     (run from this directory)
@@ -20,6 +22,10 @@ ifeq ($(ROLE),rpc)
   COMPOSE   := docker-compose.rpc.yml
   CONTAINER := orbinum-rpc-node
   VOLUME    := $(PROJECT)_rpc-node-data
+else ifeq ($(ROLE),private-rpc)
+  COMPOSE   := docker-compose.private-rpc.yml
+  CONTAINER := orbinum-private-rpc
+  VOLUME    := $(PROJECT)_private-rpc-data
 else
   COMPOSE   := docker-compose.yml
   CONTAINER := orbinum-validator
