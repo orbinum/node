@@ -6,13 +6,14 @@
 {$RPC_DOMAIN:rpc-1.testnet.orbinum.io} {
 	tls /etc/caddy/origin.pem /etc/caddy/origin.key
 
-	# ── CORS on every response, including the rate-limit 429 ────────────────────
-	# The node already sets CORS via --rpc-cors, but Caddy rejects rate-limited
-	# requests with its own 429 that never reaches the node — so that 429 would
-	# carry no Access-Control-Allow-Origin. A browser then reports an opaque
-	# "CORS error" instead of a retryable 429, which is what broke the explorer
-	# during a load spike. Setting the headers at the Caddy layer makes them apply
-	# to Caddy-generated responses (429, 5xx) too, not just proxied ones.
+	# ── CORS — Caddy is the single source ───────────────────────────────────────
+	# The node also emits CORS (--rpc-cors all), so on proxied responses BOTH Caddy
+	# and the node would add Access-Control-Allow-Origin → the browser rejects the
+	# duplicate ("multiple values '*, *'"). Each reverse_proxy below strips the
+	# node's CORS headers (header_down -...) so only Caddy's remain. Setting them
+	# at the Caddy layer (not just the proxy) also covers Caddy-generated responses
+	# — the rate-limit 429 — which never reach the node; a 429 without CORS is what
+	# the browser turned into an opaque "CORS error" and broke the explorer.
 	header {
 		Access-Control-Allow-Origin "*"
 		Access-Control-Allow-Methods "GET, POST, OPTIONS"
@@ -21,28 +22,33 @@
 	}
 
 	# CORS preflight: answer 204 here so the browser's OPTIONS probe never reaches
-	# the node or the rate limiter (a preflight must not be throttled or it blocks
-	# the real request that follows).
+	# the node or the rate limiter (a throttled preflight blocks the real request).
 	@options method OPTIONS
 	respond @options 204
 
-	# WebSocket subscriptions (live blocks, mempool) go through a single long-lived
-	# upgrade request. The rate limiter counts requests, so without this split each
-	# reconnect would burn a rate event and, under load, clients could not
-	# re-establish their subscription — the WSS-failed errors. Route upgrades
-	# straight to the node, unthrottled; the total connection count is still capped
-	# by the node's --rpc-max-connections (1000).
+	# WebSocket subscriptions (live blocks, mempool) are a single long-lived upgrade
+	# request. The limiter counts requests, so without this split each reconnect
+	# would burn a rate event and, under load, clients could not re-establish their
+	# subscription (the WSS-failed errors). Route upgrades straight to the node,
+	# unthrottled; total connections stay capped by --rpc-max-connections (1000).
 	@websocket header Connection *Upgrade*
 	handle @websocket {
-		reverse_proxy localhost:9944
+		reverse_proxy localhost:9944 {
+			# Strip the node's CORS so only Caddy's single copy survives.
+			header_down -Access-Control-Allow-Origin
+			header_down -Access-Control-Allow-Methods
+			header_down -Access-Control-Allow-Headers
+			header_down -Access-Control-Expose-Headers
+			header_down -Vary
+		}
 	}
 
-	# HTTP JSON-RPC (the POST calls): per-IP rate limit, keyed on the real client
-	# IP that Cloudflare forwards (the direct peer is always Cloudflare, so
-	# {remote_host} would limit everyone as one). 500 events / 10s = 50 req/s per
-	# IP — enough headroom for explorers/wallets/light bots that burst, while still
-	# capping a single abusive IP. The previous 100/10s (10 req/s) was low enough
-	# that one indexer load test 429'd real users.
+	# HTTP JSON-RPC (POST): per-IP rate limit, keyed on the real client IP that
+	# Cloudflare forwards (the direct peer is always Cloudflare, so {remote_host}
+	# would limit everyone as one). 500 events / 10s = 50 req/s per IP — headroom
+	# for explorers/wallets/light bots that burst, while still capping an abusive
+	# IP. The previous 100/10s (10 req/s) was low enough that one indexer load test
+	# 429'd real users.
 	handle {
 		rate_limit {
 			zone rpc {
@@ -51,6 +57,13 @@
 				window 10s
 			}
 		}
-		reverse_proxy localhost:9944
+		reverse_proxy localhost:9944 {
+			# Strip the node's CORS so only Caddy's single copy survives.
+			header_down -Access-Control-Allow-Origin
+			header_down -Access-Control-Allow-Methods
+			header_down -Access-Control-Allow-Headers
+			header_down -Access-Control-Expose-Headers
+			header_down -Vary
+		}
 	}
 }
