@@ -6,6 +6,22 @@
 {$RPC_DOMAIN:rpc-1.testnet.orbinum.io} {
 	tls /etc/caddy/origin.pem /etc/caddy/origin.key
 
+	# ── CORS on EVERY response, including 429/5xx ───────────────────────────────
+	# The node sets CORS via --rpc-cors, but the rate-limit 429 below is produced
+	# by Caddy and never reaches the node — so it would ship WITHOUT CORS headers,
+	# and the browser turns it into an opaque "CORS error" instead of a 429 the
+	# client could retry. Adding the headers here applies them to all responses.
+	header {
+		Access-Control-Allow-Origin "*"
+		Access-Control-Allow-Methods "GET, POST, OPTIONS"
+		Access-Control-Allow-Headers "Content-Type"
+		Access-Control-Max-Age "86400"
+	}
+
+	# Preflight: answer 204 directly, never hitting the backend or the limiter.
+	@options method OPTIONS
+	respond @options 204
+
 	rate_limit {
 		zone rpc {
 			key {http.request.header.CF-Connecting-IP}
