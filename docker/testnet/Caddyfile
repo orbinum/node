@@ -6,13 +6,64 @@
 {$RPC_DOMAIN:rpc-1.testnet.orbinum.io} {
 	tls /etc/caddy/origin.pem /etc/caddy/origin.key
 
-	rate_limit {
-		zone rpc {
-			key {http.request.header.CF-Connecting-IP}
-			events 100
-			window 10s
+	# ── CORS — Caddy is the single source ───────────────────────────────────────
+	# The node also emits CORS (--rpc-cors all), so on proxied responses BOTH Caddy
+	# and the node would add Access-Control-Allow-Origin → the browser rejects the
+	# duplicate ("multiple values '*, *'"). Each reverse_proxy below strips the
+	# node's CORS headers (header_down -...) so only Caddy's remain. Setting them
+	# at the Caddy layer (not just the proxy) also covers Caddy-generated responses
+	# — the rate-limit 429 — which never reach the node; a 429 without CORS is what
+	# the browser turned into an opaque "CORS error" and broke the explorer.
+	header {
+		Access-Control-Allow-Origin "*"
+		Access-Control-Allow-Methods "GET, POST, OPTIONS"
+		Access-Control-Allow-Headers "Content-Type"
+		Access-Control-Max-Age "86400"
+	}
+
+	# CORS preflight: answer 204 here so the browser's OPTIONS probe never reaches
+	# the node or the rate limiter (a throttled preflight blocks the real request).
+	@options method OPTIONS
+	respond @options 204
+
+	# WebSocket subscriptions (live blocks, mempool) are a single long-lived upgrade
+	# request. The limiter counts requests, so without this split each reconnect
+	# would burn a rate event and, under load, clients could not re-establish their
+	# subscription (the WSS-failed errors). Route upgrades straight to the node,
+	# unthrottled; total connections stay capped by --rpc-max-connections (1000).
+	@websocket header Connection *Upgrade*
+	handle @websocket {
+		reverse_proxy localhost:9944 {
+			# Strip the node's CORS so only Caddy's single copy survives.
+			header_down -Access-Control-Allow-Origin
+			header_down -Access-Control-Allow-Methods
+			header_down -Access-Control-Allow-Headers
+			header_down -Access-Control-Expose-Headers
+			header_down -Vary
 		}
 	}
 
-	reverse_proxy localhost:9944
+	# HTTP JSON-RPC (POST): per-IP rate limit, keyed on the real client IP that
+	# Cloudflare forwards (the direct peer is always Cloudflare, so {remote_host}
+	# would limit everyone as one). 500 events / 10s = 50 req/s per IP — headroom
+	# for explorers/wallets/light bots that burst, while still capping an abusive
+	# IP. The previous 100/10s (10 req/s) was low enough that one indexer load test
+	# 429'd real users.
+	handle {
+		rate_limit {
+			zone rpc {
+				key {http.request.header.CF-Connecting-IP}
+				events 500
+				window 10s
+			}
+		}
+		reverse_proxy localhost:9944 {
+			# Strip the node's CORS so only Caddy's single copy survives.
+			header_down -Access-Control-Allow-Origin
+			header_down -Access-Control-Allow-Methods
+			header_down -Access-Control-Allow-Headers
+			header_down -Access-Control-Expose-Headers
+			header_down -Vary
+		}
+	}
 }
