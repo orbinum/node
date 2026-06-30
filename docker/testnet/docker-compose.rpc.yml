@@ -29,6 +29,8 @@ services:
       - rpc-node-data:/data
       - ./testnet-spec.json:/chain-specs/testnet-spec.json:ro
     restart: unless-stopped
+    mem_limit: ${RPC_MEM_LIMIT:-6g}
+    cpus: ${RPC_CPUS:-1.5}
     labels:
       com.centurylinklabs.watchtower.enable: "true"
     logging:
@@ -38,7 +40,10 @@ services:
         max-file: "3"
 
   caddy:
-    image: caddy:2-alpine
+    build:
+      context: .
+      dockerfile: Caddy.Dockerfile
+    image: orbinum-caddy-ratelimit:2
     container_name: orbinum-caddy
     network_mode: host
     restart: unless-stopped
