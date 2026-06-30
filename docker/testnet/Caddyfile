@@ -6,11 +6,13 @@
 {$RPC_DOMAIN:rpc-1.testnet.orbinum.io} {
 	tls /etc/caddy/origin.pem /etc/caddy/origin.key
 
-	# ── CORS on EVERY response, including 429/5xx ───────────────────────────────
-	# The node sets CORS via --rpc-cors, but the rate-limit 429 below is produced
-	# by Caddy and never reaches the node — so it would ship WITHOUT CORS headers,
-	# and the browser turns it into an opaque "CORS error" instead of a 429 the
-	# client could retry. Adding the headers here applies them to all responses.
+	# ── CORS on every response, including the rate-limit 429 ────────────────────
+	# The node already sets CORS via --rpc-cors, but Caddy rejects rate-limited
+	# requests with its own 429 that never reaches the node — so that 429 would
+	# carry no Access-Control-Allow-Origin. A browser then reports an opaque
+	# "CORS error" instead of a retryable 429, which is what broke the explorer
+	# during a load spike. Setting the headers at the Caddy layer makes them apply
+	# to Caddy-generated responses (429, 5xx) too, not just proxied ones.
 	header {
 		Access-Control-Allow-Origin "*"
 		Access-Control-Allow-Methods "GET, POST, OPTIONS"
@@ -18,21 +20,37 @@
 		Access-Control-Max-Age "86400"
 	}
 
-	# Preflight: answer 204 directly, never hitting the backend or the limiter.
+	# CORS preflight: answer 204 here so the browser's OPTIONS probe never reaches
+	# the node or the rate limiter (a preflight must not be throttled or it blocks
+	# the real request that follows).
 	@options method OPTIONS
 	respond @options 204
 
-	# Per-IP rate limit (keyed on the real client IP from Cloudflare). Sized for a
-	# public testnet RPC: explorers, wallets and light bots issue bursts, so 10/s
-	# (the old 100/10s) throttled legitimate use and took down the explorer. 50/s
-	# gives headroom while still capping a single abusive IP.
-	rate_limit {
-		zone rpc {
-			key {http.request.header.CF-Connecting-IP}
-			events 500
-			window 10s
-		}
+	# WebSocket subscriptions (live blocks, mempool) go through a single long-lived
+	# upgrade request. The rate limiter counts requests, so without this split each
+	# reconnect would burn a rate event and, under load, clients could not
+	# re-establish their subscription — the WSS-failed errors. Route upgrades
+	# straight to the node, unthrottled; the total connection count is still capped
+	# by the node's --rpc-max-connections (1000).
+	@websocket header Connection *Upgrade*
+	handle @websocket {
+		reverse_proxy localhost:9944
 	}
 
-	reverse_proxy localhost:9944
+	# HTTP JSON-RPC (the POST calls): per-IP rate limit, keyed on the real client
+	# IP that Cloudflare forwards (the direct peer is always Cloudflare, so
+	# {remote_host} would limit everyone as one). 500 events / 10s = 50 req/s per
+	# IP — enough headroom for explorers/wallets/light bots that burst, while still
+	# capping a single abusive IP. The previous 100/10s (10 req/s) was low enough
+	# that one indexer load test 429'd real users.
+	handle {
+		rate_limit {
+			zone rpc {
+				key {http.request.header.CF-Connecting-IP}
+				events 500
+				window 10s
+			}
+		}
+		reverse_proxy localhost:9944
+	}
 }
