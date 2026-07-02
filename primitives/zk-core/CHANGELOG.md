@@ -20,6 +20,11 @@ All notable changes to this crate are documented here.
   truncates to 32 bytes deterministically and never panics.
 
 ### Added
+- `FieldElement::is_canonical_le` and `FieldElement::from_canonical_le` — reject
+  non-canonical little-endian byte encodings (values `>= p`). Trust boundaries that
+  ingest raw bytes (nullifiers, commitments, external addresses) should use these so
+  that `x` and `x + p` cannot masquerade as distinct values while hashing/proving
+  identically.
 - Documented the consensus invariant `Native(x) == Wasm(x) == Circuit(x)` in the
   crate docs.
 
@@ -34,6 +39,7 @@ All notable changes to this crate are documented here.
   circomlib BN254 Poseidon outputs (arities 1/2/4/5) and native≡WASM equivalence
   checks. The vectors catch any parameter drift between `light-poseidon-nostd` and
   the compiled circuit.
+- Added canonical-encoding tests including the `n` vs `n+p` collision vector.
 
 ---
 

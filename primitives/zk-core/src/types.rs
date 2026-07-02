@@ -43,6 +43,38 @@ impl FieldElement {
 	pub fn is_zero(&self) -> bool {
 		self.0 == Fr::from(0u64)
 	}
+
+	/// Returns `true` if `bytes` is the canonical little-endian encoding of a
+	/// field element — i.e. it represents a value strictly less than the field
+	/// modulus `p`.
+	///
+	/// # Why this matters
+	///
+	/// `Fr::from_le_bytes_mod_order` reduces its input modulo `p`, so `x` and
+	/// `x + p` (both fitting in 32 bytes) map to the SAME field element while
+	/// being DIFFERENT byte strings. Any layer that stores or compares the raw
+	/// bytes (e.g. a nullifier set) would treat them as distinct, yet a proof
+	/// over the reduced element accepts both — a double-spend / collision vector.
+	///
+	/// Callers that ingest attacker-controlled bytes at a trust boundary MUST
+	/// reject non-canonical encodings with this check before using them.
+	pub fn is_canonical_le(bytes: &[u8; 32]) -> bool {
+		use ark_ff::{BigInteger, PrimeField};
+		let fe = Fr::from_le_bytes_mod_order(bytes);
+		// Round-trip: canonical iff re-encoding the reduced element is byte-identical.
+		fe.into_bigint().to_bytes_le().as_slice() == &bytes[..]
+	}
+
+	/// Build a field element from its canonical little-endian encoding, rejecting
+	/// non-canonical byte strings (values `>= p`). See [`Self::is_canonical_le`].
+	pub fn from_canonical_le(bytes: &[u8; 32]) -> Option<Self> {
+		use ark_ff::PrimeField;
+		if Self::is_canonical_le(bytes) {
+			Some(Self(Fr::from_le_bytes_mod_order(bytes)))
+		} else {
+			None
+		}
+	}
 }
 
 impl From<Fr> for FieldElement {
@@ -222,6 +254,80 @@ mod tests {
 	fn field_element_zero_is_zero() {
 		assert!(FieldElement::zero().is_zero());
 		assert!(!FieldElement::from_u64(1).is_zero());
+	}
+
+	// --- canonical encoding (ZKC-4) ---
+
+	/// Little-endian 32-byte encoding of the field modulus `p`.
+	fn modulus_le() -> [u8; 32] {
+		use ark_ff::{BigInteger, PrimeField};
+		// p as bytes: encode -1 (= p-1) then add 1 with carry.
+		let p_minus_1 = (-Fr::from(1u64)).into_bigint().to_bytes_le();
+		let mut p = [0u8; 32];
+		p[..p_minus_1.len()].copy_from_slice(&p_minus_1);
+		let mut carry = 1u16;
+		for b in p.iter_mut() {
+			let v = *b as u16 + carry;
+			*b = (v & 0xff) as u8;
+			carry = v >> 8;
+		}
+		p
+	}
+
+	#[test]
+	fn canonical_accepts_small_values() {
+		let mut b = [0u8; 32];
+		b[0] = 5; // little-endian 5
+		assert!(FieldElement::is_canonical_le(&b));
+		assert!(FieldElement::from_canonical_le(&b).is_some());
+	}
+
+	#[test]
+	fn canonical_accepts_zero() {
+		assert!(FieldElement::is_canonical_le(&[0u8; 32]));
+	}
+
+	#[test]
+	fn canonical_rejects_modulus_and_above() {
+		let p = modulus_le();
+		// p itself is non-canonical (reduces to 0).
+		assert!(!FieldElement::is_canonical_le(&p));
+		assert!(FieldElement::from_canonical_le(&p).is_none());
+		// All-ones (0xff..ff) is way above p → non-canonical.
+		assert!(!FieldElement::is_canonical_le(&[0xff; 32]));
+		assert!(FieldElement::from_canonical_le(&[0xff; 32]).is_none());
+	}
+
+	#[test]
+	fn canonical_n_and_n_plus_p_differ() {
+		// The double-spend vector: n and n+p are different bytes, same field element.
+		use ark_ff::{BigInteger, PrimeField};
+		let n = 7u64;
+		let n_bytes = {
+			let mut b = [0u8; 32];
+			let le = Fr::from(n).into_bigint().to_bytes_le();
+			b[..le.len()].copy_from_slice(&le);
+			b
+		};
+		// n+p as bytes = modulus + n (may overflow 32 bytes; if so, skip — but for
+		// small n it fits since p < 2^254).
+		let p = modulus_le();
+		let mut n_plus_p = [0u8; 32];
+		let mut carry = 0u16;
+		for i in 0..32 {
+			let v = p[i] as u16 + n_bytes[i] as u16 + carry;
+			n_plus_p[i] = (v & 0xff) as u8;
+			carry = v >> 8;
+		}
+		assert_eq!(carry, 0, "n+p must fit in 32 bytes for this test");
+		// Same reduced field element...
+		assert_eq!(
+			Fr::from_le_bytes_mod_order(&n_bytes),
+			Fr::from_le_bytes_mod_order(&n_plus_p)
+		);
+		// ...but n is canonical and n+p is NOT.
+		assert!(FieldElement::is_canonical_le(&n_bytes));
+		assert!(!FieldElement::is_canonical_le(&n_plus_p));
 	}
 
 	#[test]
