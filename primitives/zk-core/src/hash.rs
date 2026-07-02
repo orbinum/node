@@ -151,7 +151,8 @@ fn field_to_bytes(field: Fr) -> [u8; 32] {
 	use ark_ff::{BigInteger, PrimeField};
 	let bytes = field.into_bigint().to_bytes_le();
 	let mut result = [0u8; 32];
-	result.copy_from_slice(&bytes[..32]);
+	let n = bytes.len().min(32);
+	result[..n].copy_from_slice(&bytes[..n]);
 	result
 }
 
@@ -159,7 +160,8 @@ fn field_to_bytes(field: Fr) -> [u8; 32] {
 fn bytes_to_field(bytes: &[u8]) -> FieldElement {
 	use ark_ff::PrimeField;
 	let mut arr = [0u8; 32];
-	arr.copy_from_slice(&bytes[..32]);
+	let n = bytes.len().min(32);
+	arr[..n].copy_from_slice(&bytes[..n]);
 	FieldElement::new(Fr::from_le_bytes_mod_order(&arr))
 }
 
@@ -298,5 +300,29 @@ mod tests {
 		let via_trait = LightPoseidonHasher.hash_2([a, b]);
 		let via_core = FieldElement::new(poseidon_circom(2, &[a.inner(), b.inner()]));
 		assert_eq!(via_trait, via_core);
+	}
+
+	// ─── Defensive 32-byte conversion (no panic on short/long) ─────────────────
+
+	#[cfg(feature = "poseidon-native")]
+	#[test]
+	fn field_to_bytes_roundtrips_boundary_values() {
+		use ark_ff::Field;
+		// 0, 1, and p-1 must all round-trip through the 32-byte conversion.
+		for f in [Fr::from(0u64), Fr::from(1u64), -Fr::ONE] {
+			let bytes = field_to_bytes(f);
+			assert_eq!(bytes.len(), 32);
+			let back = bytes_to_field(&bytes);
+			assert_eq!(back, FieldElement::new(f));
+		}
+	}
+
+	#[cfg(feature = "poseidon-native")]
+	#[test]
+	fn bytes_to_field_no_panic_on_short_or_long() {
+		// Shorter and longer inputs must not panic (previously copy_from_slice would).
+		let _ = bytes_to_field(&[1u8, 2, 3]);
+		let _ = bytes_to_field(&[]);
+		let _ = bytes_to_field(&[0xABu8; 40]);
 	}
 }

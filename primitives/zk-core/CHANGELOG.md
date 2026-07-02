@@ -18,6 +18,9 @@ All notable changes to this crate are documented here.
   `assert_eq!` input length. A failed assert in a native host function aborts the
   node process. Inputs are now read through a `read_32_le` helper that zero-pads or
   truncates to 32 bytes deterministically and never panics.
+- The 32-byte field↔bytes conversions (`field_to_bytes`, `bytes_to_field`, host
+  output) now copy by length instead of slicing `[..32]`, removing a latent panic
+  if a bigint ever serialized to fewer than 32 bytes.
 
 ### Documentation
 - Documented in `Cargo.toml` that runtime/WASM consumers must depend on this crate

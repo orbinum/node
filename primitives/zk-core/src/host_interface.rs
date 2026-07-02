@@ -50,7 +50,7 @@ pub trait PoseidonHostInterface {
 		let result = hasher.hash_2([FieldElement::new(left_fr), FieldElement::new(right_fr)]);
 
 		let bytes = result.inner().into_bigint().to_bytes_le();
-		bytes[..32].to_vec()
+		super::read_32_le(&bytes).to_vec()
 	}
 
 	/// Hash four 32-byte inputs (note commitment).
@@ -88,7 +88,7 @@ pub trait PoseidonHostInterface {
 		]);
 
 		let bytes = result.inner().into_bigint().to_bytes_le();
-		bytes[..32].to_vec()
+		super::read_32_le(&bytes).to_vec()
 	}
 }
 
