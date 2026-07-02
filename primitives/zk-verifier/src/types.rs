@@ -184,10 +184,16 @@ impl PublicInputs {
 	}
 
 	pub fn to_field_elements(&self) -> Result<Vec<Bn254Fr>, VerifierError> {
-		use ark_ff::PrimeField;
+		use ark_ff::{BigInteger, PrimeField};
 		self.inputs
 			.iter()
-			.map(|bytes| Ok(Bn254Fr::from_le_bytes_mod_order(bytes)))
+			.map(|bytes| {
+				let fe = Bn254Fr::from_le_bytes_mod_order(bytes);
+				if fe.into_bigint().to_bytes_le().as_slice() != &bytes[..] {
+					return Err(VerifierError::InvalidPublicInput);
+				}
+				Ok(fe)
+			})
 			.collect()
 	}
 
@@ -391,6 +397,53 @@ mod tests {
 	}
 
 	#[test]
+	fn to_field_elements_rejects_non_canonical() {
+		use ark_ff::{BigInteger, PrimeField};
+		// `[0xff; 32]` is >= p, so it is a non-canonical encoding and must be rejected.
+		let result = PublicInputs::new(vec![[0xffu8; 32]]).to_field_elements();
+		assert_eq!(result, Err(VerifierError::InvalidPublicInput));
+
+		// The reduced form (n) and its non-canonical twin (n + p) reduce to the same
+		// field element, but only the canonical one is accepted.
+		let n = Bn254Fr::from(7u64);
+		let n_bytes: [u8; 32] = {
+			let mut b = [0u8; 32];
+			let le = n.into_bigint().to_bytes_le();
+			b[..le.len()].copy_from_slice(&le);
+			b
+		};
+		// n is canonical → accepted.
+		let ok = PublicInputs::new(vec![n_bytes]).to_field_elements();
+		assert_eq!(ok.unwrap(), vec![n]);
+
+		// n + p, if it fits in 32 bytes, is non-canonical → rejected.
+		let p_bytes: [u8; 32] = {
+			let mut p = [0u8; 32];
+			let pm1 = (-Bn254Fr::from(1u64)).into_bigint().to_bytes_le();
+			p[..pm1.len()].copy_from_slice(&pm1);
+			let mut carry = 1u16;
+			for b in p.iter_mut() {
+				let v = *b as u16 + carry;
+				*b = (v & 0xff) as u8;
+				carry = v >> 8;
+			}
+			p
+		};
+		let mut n_plus_p = [0u8; 32];
+		let mut carry = 0u16;
+		for i in 0..32 {
+			let v = p_bytes[i] as u16 + n_bytes[i] as u16 + carry;
+			n_plus_p[i] = (v & 0xff) as u8;
+			carry = v >> 8;
+		}
+		assert_eq!(carry, 0, "n+p must fit in 32 bytes for this test");
+		// Same reduced element as n, but non-canonical bytes → rejected.
+		assert_eq!(Bn254Fr::from_le_bytes_mod_order(&n_plus_p), n);
+		let rejected = PublicInputs::new(vec![n_plus_p]).to_field_elements();
+		assert_eq!(rejected, Err(VerifierError::InvalidPublicInput));
+	}
+
+	#[test]
 	fn test_public_inputs_from_field_elements() {
 		let elements = vec![Bn254Fr::from(123u64), Bn254Fr::from(456u64)];
 		assert_eq!(PublicInputs::from_field_elements(&elements).len(), 2);
@@ -424,6 +477,8 @@ mod tests {
 
 	#[test]
 	fn test_public_inputs_large_values() {
+		// `max` is a reduced field element; `from_field_elements` re-encodes it
+		// canonically, so the round-trip stays canonical and is accepted.
 		let max = Bn254Fr::from_le_bytes_mod_order(&[0xff; 32]);
 		let elements = vec![max, Bn254Fr::from(0u64), max];
 		let converted = PublicInputs::from_field_elements(&elements)

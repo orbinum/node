@@ -4,6 +4,23 @@ All notable changes to this crate are documented here.
 
 ---
 
+## [Unreleased]
+
+### Security
+- `PublicInputs::to_field_elements` now rejects non-canonical little-endian
+  encodings (byte strings that represent a value `>= p`) with
+  `VerifierError::InvalidPublicInput`. Previously it reduced modulo `p`, so `n` and
+  `n + p` produced the same field element while being different byte strings: a
+  proof over the reduced element verified for both, but a layer comparing raw bytes
+  (e.g. a nullifier set) treated them as distinct — a double-spend vector. Only
+  canonical inputs verify now.
+
+### Tests
+- Added `to_field_elements_rejects_non_canonical` covering the `n` vs `n + p`
+  collision and `0xff..ff` (`>= p`) rejection.
+
+---
+
 ## [1.1.0] — 2026-05-14
 
 ### Changed
