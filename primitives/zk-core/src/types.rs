@@ -252,7 +252,7 @@ mod tests {
 		assert!(!FieldElement::from_u64(1).is_zero());
 	}
 
-	// --- canonical encoding (ZKC-4) ---
+	// --- canonical encoding ---
 
 	/// Little-endian 32-byte encoding of the field modulus `p`.
 	fn modulus_le() -> [u8; 32] {
