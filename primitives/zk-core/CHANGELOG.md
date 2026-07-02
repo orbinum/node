@@ -19,6 +19,11 @@ All notable changes to this crate are documented here.
   node process. Inputs are now read through a `read_32_le` helper that zero-pads or
   truncates to 32 bytes deterministically and never panics.
 
+### Documentation
+- Documented in `Cargo.toml` that runtime/WASM consumers must depend on this crate
+  with `default-features = false` (else `std` leaks into the `no_std` build), and
+  added a CI feature-matrix check to enforce it.
+
 ### Added
 - `FieldElement::is_canonical_le` and `FieldElement::from_canonical_le` — reject
   non-canonical little-endian byte encodings (values `>= p`). Trust boundaries that
