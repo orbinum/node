@@ -13,7 +13,9 @@ All notable changes to this crate are documented here.
   panicking. This closes a consensus-divergence risk: a native panic aborts the
   node process while a WASM panic is a recoverable trap, so the same malformed
   input could split the network. The failure path is provably unreachable (constant
-  arity, reduced `Fr` inputs) and is now documented as an invariant.
+  arity, reduced `Fr` inputs) and is now documented as an invariant. The fallback
+  value is a fixed non-zero marker, never zero, so it cannot be mistaken for the
+  all-zero dummy sentinel (a zero nullifier is skipped rather than marked spent).
 - Poseidon host functions (`poseidon_hash_2`, `poseidon_hash_4`) no longer
   `assert_eq!` input length. A failed assert in a native host function aborts the
   node process. Inputs are now read through a `read_32_le` helper that zero-pads or

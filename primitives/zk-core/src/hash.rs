@@ -35,10 +35,17 @@ use light_poseidon_nostd::{Poseidon, PoseidonHasher as LightHasher};
 /// # Failure behavior (unreachable)
 ///
 /// If the invariant were ever violated (a programming bug), we return a
-/// **deterministic** value (`FieldElement::zero()`) instead of `panic!`. This
-/// guarantees native and WASM never diverge in behavior: a native `panic!` aborts
-/// the node process while in WASM it is a recoverable trap — a divergence that
-/// would break consensus. Never introduce `.expect()`/`panic!` in this path.
+/// **deterministic** value instead of `panic!`. This guarantees native and WASM
+/// never diverge in behavior: a native `panic!` aborts the node process while in
+/// WASM it is a recoverable trap — a divergence that would break consensus. Never
+/// introduce `.expect()`/`panic!` in this path.
+///
+/// The fallback is deliberately NOT zero: a zero commitment/nullifier is the dummy
+/// sentinel elsewhere in the system, so a zero fallback could be silently skipped
+/// (e.g. an unspent nullifier). We return a fixed non-zero domain-separated marker
+/// so any downstream use of a fallback value stands out rather than masquerading as
+/// a dummy. This value is never produced by a real Poseidon hash of valid inputs in
+/// practice, and the branch is unreachable regardless.
 #[inline]
 fn poseidon_circom(nr_inputs: usize, inputs: &[Fr]) -> Fr {
 	debug_assert_eq!(
@@ -49,10 +56,15 @@ fn poseidon_circom(nr_inputs: usize, inputs: &[Fr]) -> Fr {
 	match Poseidon::<Fr>::new_circom(nr_inputs).and_then(|mut p| p.hash(inputs)) {
 		Ok(result) => result,
 		// Unreachable with constant arity and `Fr` inputs (see invariant above).
-		// Deterministic fallback: identical on native and WASM, never panics.
-		Err(_) => Fr::from(0u64),
+		// Non-zero deterministic marker: identical on native and WASM, never panics,
+		// and never collides with the all-zero dummy sentinel.
+		Err(_) => Fr::from(POSEIDON_FALLBACK_MARKER_U64),
 	}
 }
+
+/// Non-zero, deterministic fallback for the unreachable Poseidon failure branch.
+/// Chosen so it cannot be confused with the all-zero dummy sentinel.
+const POSEIDON_FALLBACK_MARKER_U64: u64 = 0xDEAD_BEEF_DEAD_BEEF;
 
 // ─── Trait ────────────────────────────────────────────────────────────────────
 
@@ -324,5 +336,12 @@ mod tests {
 		let _ = bytes_to_field(&[1u8, 2, 3]);
 		let _ = bytes_to_field(&[]);
 		let _ = bytes_to_field(&[0xABu8; 40]);
+	}
+
+	#[test]
+	fn fallback_marker_is_non_zero() {
+		// The unreachable failure branch must never yield the all-zero dummy sentinel.
+		assert_ne!(super::POSEIDON_FALLBACK_MARKER_U64, 0);
+		assert!(!FieldElement::new(Fr::from(super::POSEIDON_FALLBACK_MARKER_U64)).is_zero());
 	}
 }
