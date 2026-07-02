@@ -22,6 +22,12 @@ All notable changes to this crate are documented here.
   output) now copy by length instead of slicing `[..32]`, removing a latent panic
   if a bigint ever serialized to fewer than 32 bytes.
 
+### Changed
+- `Note::is_zero` now matches the system-wide dummy definition (`value == 0`)
+  instead of also requiring `asset_id`/`owner_pubkey`/`blinding` to be zero. The
+  circuit and shielded-pool treat any value-zero input as dummy; the previous
+  stricter check could disagree. Documented on both `is_zero` and `zero`.
+
 ### Documentation
 - Documented in `Cargo.toml` that runtime/WASM consumers must depend on this crate
   with `default-features = false` (else `std` leaks into the `no_std` build), and

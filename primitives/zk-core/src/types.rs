@@ -45,28 +45,20 @@ impl FieldElement {
 	}
 
 	/// Returns `true` if `bytes` is the canonical little-endian encoding of a
-	/// field element — i.e. it represents a value strictly less than the field
-	/// modulus `p`.
+	/// field element, i.e. it represents a value strictly less than the modulus `p`.
 	///
-	/// # Why this matters
-	///
-	/// `Fr::from_le_bytes_mod_order` reduces its input modulo `p`, so `x` and
-	/// `x + p` (both fitting in 32 bytes) map to the SAME field element while
-	/// being DIFFERENT byte strings. Any layer that stores or compares the raw
-	/// bytes (e.g. a nullifier set) would treat them as distinct, yet a proof
-	/// over the reduced element accepts both — a double-spend / collision vector.
-	///
-	/// Callers that ingest attacker-controlled bytes at a trust boundary MUST
-	/// reject non-canonical encodings with this check before using them.
+	/// Because byte-to-field conversion reduces modulo `p`, non-canonical encodings
+	/// (`>= p`) map to the same element as their reduced form. Callers that store or
+	/// compare raw bytes should reject non-canonical inputs at the trust boundary.
 	pub fn is_canonical_le(bytes: &[u8; 32]) -> bool {
 		use ark_ff::{BigInteger, PrimeField};
 		let fe = Fr::from_le_bytes_mod_order(bytes);
-		// Round-trip: canonical iff re-encoding the reduced element is byte-identical.
+		// Canonical iff re-encoding the reduced element is byte-identical.
 		fe.into_bigint().to_bytes_le().as_slice() == &bytes[..]
 	}
 
-	/// Build a field element from its canonical little-endian encoding, rejecting
-	/// non-canonical byte strings (values `>= p`). See [`Self::is_canonical_le`].
+	/// Builds a field element from its canonical little-endian encoding, returning
+	/// `None` for non-canonical byte strings (`>= p`). See [`Self::is_canonical_le`].
 	pub fn from_canonical_le(bytes: &[u8; 32]) -> Option<Self> {
 		use ark_ff::PrimeField;
 		if Self::is_canonical_le(bytes) {
@@ -185,7 +177,9 @@ impl Note {
 		}
 	}
 
-	/// A zero / dummy note used to pad circuit inputs.
+	/// A canonical dummy note used to pad circuit inputs: every field is zero.
+	///
+	/// Use this to construct dummies so their commitment/nullifier are stable.
 	pub fn zero() -> Self {
 		Self {
 			value: 0,
@@ -195,11 +189,13 @@ impl Note {
 		}
 	}
 
+	/// Returns `true` if this is a dummy (padding) note.
+	///
+	/// A note is dummy iff `value == 0`, matching the circuit and shielded-pool.
+	/// `asset_id`, `owner_pubkey`, and `blinding` are not part of the predicate.
+	/// Use [`Self::zero`] to build the canonical dummy.
 	pub fn is_zero(&self) -> bool {
 		self.value == 0
-			&& self.asset_id == 0
-			&& self.owner_pubkey.inner().is_zero()
-			&& self.blinding.inner().is_zero()
 	}
 
 	/// Compute the Merkle commitment for this note.
@@ -300,7 +296,7 @@ mod tests {
 
 	#[test]
 	fn canonical_n_and_n_plus_p_differ() {
-		// The double-spend vector: n and n+p are different bytes, same field element.
+		// n and n+p are different byte strings but reduce to the same field element.
 		use ark_ff::{BigInteger, PrimeField};
 		let n = 7u64;
 		let n_bytes = {
@@ -365,6 +361,26 @@ mod tests {
 	#[test]
 	fn note_zero_is_zero() {
 		assert!(Note::zero().is_zero());
+	}
+
+	#[test]
+	fn note_is_dummy_by_value_only() {
+		// A value-zero note is dummy even with non-zero asset/pubkey/blinding.
+		let dummy = Note::new(
+			0,
+			7,
+			OwnerPubkey::from(Fr::from(123u64)),
+			Blinding::from(Fr::from(456u64)),
+		);
+		assert!(dummy.is_zero());
+		// A non-zero value is never dummy, regardless of the other fields.
+		let real = Note::new(
+			1,
+			0,
+			OwnerPubkey::from(Fr::from(0u64)),
+			Blinding::from(Fr::from(0u64)),
+		);
+		assert!(!real.is_zero());
 	}
 
 	#[test]
