@@ -17,6 +17,14 @@
 //! ## No-std
 //!
 //! The crate is `no_std` compatible by default; enable `std` for standard library support.
+//!
+//! ## Consensus invariant
+//!
+//! `NativePoseidonHasher(x) == LightPoseidonHasher(x)` for all `x`, and both must
+//! equal the Poseidon of the compiled Circom circuit. The native and WASM paths
+//! must never diverge (a divergence forks the chain). This is enforced by the
+//! known-answer vectors and native≡WASM tests in `tests/poseidon_vectors.rs`; the
+//! circuit remains the source of truth for the parameters.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 

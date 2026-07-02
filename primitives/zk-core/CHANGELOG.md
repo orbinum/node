@@ -19,6 +19,10 @@ All notable changes to this crate are documented here.
   node process. Inputs are now read through a `read_32_le` helper that zero-pads or
   truncates to 32 bytes deterministically and never panics.
 
+### Added
+- Documented the consensus invariant `Native(x) == Wasm(x) == Circuit(x)` in the
+  crate docs.
+
 ### Tests
 - Added `hash_no_panic_on_boundary_inputs`, `hash_boundary_inputs_are_deterministic`,
   and `poseidon_circom_core_matches_trait` covering boundary field elements
@@ -26,6 +30,10 @@ All notable changes to this crate are documented here.
 - Added `read_32_le_pads_and_truncates`, `hash_2_no_panic_on_short_input`,
   `hash_4_no_panic_on_short_input`, and `hash_2_still_correct_for_32_bytes`
   covering non-32-byte host-function inputs.
+- Added `tests/poseidon_vectors.rs`: known-answer vectors against canonical
+  circomlib BN254 Poseidon outputs (arities 1/2/4/5) and native≡WASM equivalence
+  checks. The vectors catch any parameter drift between `light-poseidon-nostd` and
+  the compiled circuit.
 
 ---
 
