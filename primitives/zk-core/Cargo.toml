@@ -1,6 +1,6 @@
 [package]
 name = "orbinum-zk-core"
-version = "1.0.1"
+version = "1.1.0"
 authors = ["Orbinum Network <contact@orbinum.net>"]
 edition = "2021"
 license = "Apache-2.0 OR GPL-3.0-or-later"
@@ -40,6 +40,14 @@ ark-std = { version = "0.5.0", default-features = false, features = ["std"] }
 serde_json = "1.0"
 
 [features]
+# `default` enables `std` + native host functions for host tooling and tests.
+#
+# IMPORTANT: runtime/WASM consumers MUST depend on this crate with
+# `default-features = false` and opt into `poseidon-native` explicitly, otherwise
+# they pull in `std` (breaks the `no_std` WASM build). All in-tree consumers do
+# this correctly; verify with:
+#   cargo build -p orbinum-zk-core --no-default-features
+#   cargo build -p orbinum-zk-core --no-default-features --features poseidon-native
 default = ["std", "poseidon-native"]
 std = [
 	"ark-bn254/std",
@@ -50,5 +58,6 @@ std = [
 	"sp-runtime-interface/std",
 ]
 
-# Native Poseidon hashing - enabled by default for optimal performance
+# Native Poseidon host functions. `no_std`-compatible: generates the WASM-side
+# import plus the native implementation. Enable explicitly in runtime consumers.
 poseidon-native = ["sp-runtime-interface"]

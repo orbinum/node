@@ -75,6 +75,13 @@ jobs:
       - name: Check workspace
         run: cargo check --release --workspace
 
+      # zk-core must build in a no_std/WASM context. Guard against a consumer or
+      # feature change that leaks `std` into the runtime build.
+      - name: Check zk-core no_std feature matrix
+        run: |
+          cargo check -p orbinum-zk-core --no-default-features
+          cargo check -p orbinum-zk-core --no-default-features --features poseidon-native
+
   # Step 3: Build workspace - compiles once for all subsequent jobs to reuse
   build:
     name: Build

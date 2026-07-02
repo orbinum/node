@@ -10,6 +10,21 @@ use sp_runtime_interface::{
 	runtime_interface,
 };
 
+/// Read an input slice into a fixed 32-byte little-endian array.
+///
+/// Copies at most 32 bytes; a shorter input is zero-padded, a longer one is
+/// truncated. This NEVER panics — critical because these functions run as native
+/// host functions, where a panic aborts the node process (whereas in WASM it is a
+/// recoverable trap), which would break consensus. Callers already pass exactly
+/// 32 bytes, so this is purely defensive and deterministic across native/WASM.
+#[inline]
+fn read_32_le(bytes: &[u8]) -> [u8; 32] {
+	let mut arr = [0u8; 32];
+	let n = bytes.len().min(32);
+	arr[..n].copy_from_slice(&bytes[..n]);
+	arr
+}
+
 /// Native runtime interface for Poseidon hash operations.
 #[runtime_interface]
 pub trait PoseidonHostInterface {
@@ -25,13 +40,8 @@ pub trait PoseidonHostInterface {
 		use ark_bn254::Fr;
 		use ark_ff::{BigInteger, PrimeField};
 
-		assert_eq!((*left).len(), 32, "Left input must be 32 bytes");
-		assert_eq!((*right).len(), 32, "Right input must be 32 bytes");
-
-		let mut left_arr = [0u8; 32];
-		let mut right_arr = [0u8; 32];
-		left_arr.copy_from_slice(left);
-		right_arr.copy_from_slice(right);
+		let left_arr = super::read_32_le(left);
+		let right_arr = super::read_32_le(right);
 
 		let left_fr = Fr::from_le_bytes_mod_order(&left_arr);
 		let right_fr = Fr::from_le_bytes_mod_order(&right_arr);
@@ -40,7 +50,7 @@ pub trait PoseidonHostInterface {
 		let result = hasher.hash_2([FieldElement::new(left_fr), FieldElement::new(right_fr)]);
 
 		let bytes = result.inner().into_bigint().to_bytes_le();
-		bytes[..32].to_vec()
+		super::read_32_le(&bytes).to_vec()
 	}
 
 	/// Hash four 32-byte inputs (note commitment).
@@ -57,19 +67,10 @@ pub trait PoseidonHostInterface {
 		use ark_bn254::Fr;
 		use ark_ff::{BigInteger, PrimeField};
 
-		assert_eq!((*input1).len(), 32, "Input1 must be 32 bytes");
-		assert_eq!((*input2).len(), 32, "Input2 must be 32 bytes");
-		assert_eq!((*input3).len(), 32, "Input3 must be 32 bytes");
-		assert_eq!((*input4).len(), 32, "Input4 must be 32 bytes");
-
-		let mut arr1 = [0u8; 32];
-		let mut arr2 = [0u8; 32];
-		let mut arr3 = [0u8; 32];
-		let mut arr4 = [0u8; 32];
-		arr1.copy_from_slice(input1);
-		arr2.copy_from_slice(input2);
-		arr3.copy_from_slice(input3);
-		arr4.copy_from_slice(input4);
+		let arr1 = super::read_32_le(input1);
+		let arr2 = super::read_32_le(input2);
+		let arr3 = super::read_32_le(input3);
+		let arr4 = super::read_32_le(input4);
 
 		let frs = [
 			Fr::from_le_bytes_mod_order(&arr1),
@@ -87,7 +88,7 @@ pub trait PoseidonHostInterface {
 		]);
 
 		let bytes = result.inner().into_bigint().to_bytes_le();
-		bytes[..32].to_vec()
+		super::read_32_le(&bytes).to_vec()
 	}
 }
 
@@ -185,5 +186,54 @@ mod tests {
 		arr.copy_from_slice(&from_host[..32]);
 		let from_host_fe = FieldElement::new(Fr::from_le_bytes_mod_order(&arr));
 		assert_eq!(from_trait, from_host_fe);
+	}
+
+	// ─── No panic on non-32-byte inputs (host functions must never panic) ──────
+
+	#[test]
+	fn read_32_le_pads_and_truncates() {
+		// Shorter input is zero-padded on the right.
+		assert_eq!(super::read_32_le(&[1, 2, 3]), {
+			let mut e = [0u8; 32];
+			e[..3].copy_from_slice(&[1, 2, 3]);
+			e
+		});
+		// Exact length is copied verbatim.
+		assert_eq!(super::read_32_le(&[0xAB; 32]), [0xAB; 32]);
+		// Longer input is truncated to the first 32 bytes.
+		assert_eq!(super::read_32_le(&[0xCD; 40]), [0xCD; 32]);
+		// Empty input yields all zeros.
+		assert_eq!(super::read_32_le(&[]), [0u8; 32]);
+	}
+
+	#[test]
+	fn hash_2_no_panic_on_short_input() {
+		// Previously asserted len == 32 and would panic (aborting a native node).
+		let short = alloc::vec![7u8; 10];
+		let long = alloc::vec![9u8; 40];
+		let _ = poseidon_host_interface::poseidon_hash_2(&short, &u64_to_bytes(1));
+		let _ = poseidon_host_interface::poseidon_hash_2(&u64_to_bytes(1), &long);
+		let _ = poseidon_host_interface::poseidon_hash_2(&[], &[]);
+	}
+
+	#[test]
+	fn hash_4_no_panic_on_short_input() {
+		let short = alloc::vec![7u8; 5];
+		let _ = poseidon_host_interface::poseidon_hash_4(
+			&short,
+			&u64_to_bytes(2),
+			&u64_to_bytes(3),
+			&alloc::vec![9u8; 33],
+		);
+	}
+
+	#[test]
+	fn hash_2_still_correct_for_32_bytes() {
+		// The 32-byte path must be unchanged (no regression).
+		let a = poseidon_host_interface::poseidon_hash_2(&u64_to_bytes(42), &u64_to_bytes(100));
+		let b = poseidon_host_interface::poseidon_hash_2(&u64_to_bytes(42), &u64_to_bytes(100));
+		assert_eq!(a, b);
+		assert_eq!(a.len(), 32);
+		assert!(!bytes_to_fr(&a).is_zero());
 	}
 }

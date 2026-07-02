@@ -9,6 +9,63 @@ use crate::types::FieldElement;
 use ark_bn254::Fr;
 use light_poseidon_nostd::{Poseidon, PoseidonHasher as LightHasher};
 
+// ─── Circom Poseidon core ───────────────────────────────────────────────────────
+
+/// Compute the circomlib Poseidon hash for a fixed arity.
+///
+/// # Consensus determinism
+///
+/// This is the ONLY place that invokes `light-poseidon-nostd`. Both the WASM path
+/// ([`LightPoseidonHasher`]) and the native path ([`NativePoseidonHasher`], via the
+/// host function that internally calls `LightPoseidonHasher`) go through here, so
+/// their behavior is identical by construction.
+///
+/// # Invariant (why it cannot fail)
+///
+/// - `new_circom(nr_inputs)` only fails with `InvalidWidthCircom` when
+///   `nr_inputs + 1 > MAX_X5_LEN (= 13)`. The arities in use (1, 2, 4, 5) yield
+///   width 2/3/5/6, always valid.
+/// - `hash(&inputs)` only fails with `InvalidNumberOfInputs` when
+///   `inputs.len() != nr_inputs`. Callers pass fixed-length arrays matching the
+///   arity.
+///
+/// Inputs are already-reduced `Fr` (not raw bytes), so no parsing/range error
+/// variant applies.
+///
+/// # Failure behavior (unreachable)
+///
+/// If the invariant were ever violated (a programming bug), we return a
+/// **deterministic** value instead of `panic!`. This guarantees native and WASM
+/// never diverge in behavior: a native `panic!` aborts the node process while in
+/// WASM it is a recoverable trap — a divergence that would break consensus. Never
+/// introduce `.expect()`/`panic!` in this path.
+///
+/// The fallback is deliberately NOT zero: a zero commitment/nullifier is the dummy
+/// sentinel elsewhere in the system, so a zero fallback could be silently skipped
+/// (e.g. an unspent nullifier). We return a fixed non-zero domain-separated marker
+/// so any downstream use of a fallback value stands out rather than masquerading as
+/// a dummy. This value is never produced by a real Poseidon hash of valid inputs in
+/// practice, and the branch is unreachable regardless.
+#[inline]
+fn poseidon_circom(nr_inputs: usize, inputs: &[Fr]) -> Fr {
+	debug_assert_eq!(
+		inputs.len(),
+		nr_inputs,
+		"poseidon_circom: arity mismatch (broken invariant)"
+	);
+	match Poseidon::<Fr>::new_circom(nr_inputs).and_then(|mut p| p.hash(inputs)) {
+		Ok(result) => result,
+		// Unreachable with constant arity and `Fr` inputs (see invariant above).
+		// Non-zero deterministic marker: identical on native and WASM, never panics,
+		// and never collides with the all-zero dummy sentinel.
+		Err(_) => Fr::from(POSEIDON_FALLBACK_MARKER_U64),
+	}
+}
+
+/// Non-zero, deterministic fallback for the unreachable Poseidon failure branch.
+/// Chosen so it cannot be confused with the all-zero dummy sentinel.
+const POSEIDON_FALLBACK_MARKER_U64: u64 = 0xDEAD_BEEF_DEAD_BEEF;
+
 // ─── Trait ────────────────────────────────────────────────────────────────────
 
 /// Abstraction over Poseidon hash implementations.
@@ -33,37 +90,34 @@ pub struct LightPoseidonHasher;
 
 impl PoseidonHasher for LightPoseidonHasher {
 	fn hash_2(&self, inputs: [FieldElement; 2]) -> FieldElement {
-		let result = Poseidon::<Fr>::new_circom(2)
-			.expect("Poseidon init (2 inputs) failed")
-			.hash(&[inputs[0].inner(), inputs[1].inner()])
-			.expect("Poseidon hash_2 failed");
+		let result = poseidon_circom(2, &[inputs[0].inner(), inputs[1].inner()]);
 		FieldElement::new(result)
 	}
 
 	fn hash_4(&self, inputs: [FieldElement; 4]) -> FieldElement {
-		let result = Poseidon::<Fr>::new_circom(4)
-			.expect("Poseidon init (4 inputs) failed")
-			.hash(&[
+		let result = poseidon_circom(
+			4,
+			&[
 				inputs[0].inner(),
 				inputs[1].inner(),
 				inputs[2].inner(),
 				inputs[3].inner(),
-			])
-			.expect("Poseidon hash_4 failed");
+			],
+		);
 		FieldElement::new(result)
 	}
 
 	fn hash_5(&self, inputs: [FieldElement; 5]) -> FieldElement {
-		let result = Poseidon::<Fr>::new_circom(5)
-			.expect("Poseidon init (5 inputs) failed")
-			.hash(&[
+		let result = poseidon_circom(
+			5,
+			&[
 				inputs[0].inner(),
 				inputs[1].inner(),
 				inputs[2].inner(),
 				inputs[3].inner(),
 				inputs[4].inner(),
-			])
-			.expect("Poseidon hash_5 failed");
+			],
+		);
 		FieldElement::new(result)
 	}
 }
@@ -109,7 +163,8 @@ fn field_to_bytes(field: Fr) -> [u8; 32] {
 	use ark_ff::{BigInteger, PrimeField};
 	let bytes = field.into_bigint().to_bytes_le();
 	let mut result = [0u8; 32];
-	result.copy_from_slice(&bytes[..32]);
+	let n = bytes.len().min(32);
+	result[..n].copy_from_slice(&bytes[..n]);
 	result
 }
 
@@ -117,7 +172,8 @@ fn field_to_bytes(field: Fr) -> [u8; 32] {
 fn bytes_to_field(bytes: &[u8]) -> FieldElement {
 	use ark_ff::PrimeField;
 	let mut arr = [0u8; 32];
-	arr.copy_from_slice(&bytes[..32]);
+	let n = bytes.len().min(32);
+	arr[..n].copy_from_slice(&bytes[..n]);
 	FieldElement::new(Fr::from_le_bytes_mod_order(&arr))
 }
 
@@ -131,10 +187,7 @@ fn bytes_to_field(bytes: &[u8]) -> FieldElement {
 /// Single-input Poseidon is intentionally not part of [`PoseidonHasher`] because
 /// it is only needed for the value_proof circuit.
 pub fn poseidon_hash_1(input: FieldElement) -> FieldElement {
-	let result = Poseidon::<Fr>::new_circom(1)
-		.expect("Poseidon init (1 input) failed")
-		.hash(&[input.inner()])
-		.expect("Poseidon hash_1 failed");
+	let result = poseidon_circom(1, &[input.inner()]);
 	FieldElement::new(result)
 }
 
@@ -215,5 +268,80 @@ mod tests {
 		let h1 = poseidon_hash_1(input);
 		let h2 = LightPoseidonHasher.hash_2([input, FieldElement::from_u64(0)]);
 		assert_ne!(h1, h2);
+	}
+
+	// ─── No panic on boundary inputs, deterministic behavior ───────────────────
+
+	/// `Fr = p - 1`, the largest canonical field element. Must not panic or diverge.
+	fn field_max() -> FieldElement {
+		use ark_ff::Field;
+		// -1 in the field == p - 1.
+		FieldElement::new(-Fr::ONE)
+	}
+
+	#[test]
+	fn hash_no_panic_on_boundary_inputs() {
+		let h = LightPoseidonHasher;
+		let zero = FieldElement::zero();
+		let max = field_max();
+		// None of these calls must panic (they previously used `.expect()`).
+		let _ = h.hash_2([zero, max]);
+		let _ = h.hash_2([max, max]);
+		let _ = h.hash_4([zero, max, zero, max]);
+		let _ = h.hash_5([max, max, max, max, max]);
+		let _ = poseidon_hash_1(max);
+	}
+
+	#[test]
+	fn hash_boundary_inputs_are_deterministic() {
+		let h = LightPoseidonHasher;
+		let max = field_max();
+		assert_eq!(h.hash_2([max, max]), h.hash_2([max, max]));
+		assert_eq!(
+			h.hash_4([max, max, max, max]),
+			h.hash_4([max, max, max, max])
+		);
+		assert_eq!(poseidon_hash_1(max), poseidon_hash_1(max));
+	}
+
+	#[test]
+	fn poseidon_circom_core_matches_trait() {
+		// The internal core and the trait produce the same result (shared path).
+		let a = FieldElement::from_u64(7);
+		let b = FieldElement::from_u64(11);
+		let via_trait = LightPoseidonHasher.hash_2([a, b]);
+		let via_core = FieldElement::new(poseidon_circom(2, &[a.inner(), b.inner()]));
+		assert_eq!(via_trait, via_core);
+	}
+
+	// ─── Defensive 32-byte conversion (no panic on short/long) ─────────────────
+
+	#[cfg(feature = "poseidon-native")]
+	#[test]
+	fn field_to_bytes_roundtrips_boundary_values() {
+		use ark_ff::Field;
+		// 0, 1, and p-1 must all round-trip through the 32-byte conversion.
+		for f in [Fr::from(0u64), Fr::from(1u64), -Fr::ONE] {
+			let bytes = field_to_bytes(f);
+			assert_eq!(bytes.len(), 32);
+			let back = bytes_to_field(&bytes);
+			assert_eq!(back, FieldElement::new(f));
+		}
+	}
+
+	#[cfg(feature = "poseidon-native")]
+	#[test]
+	fn bytes_to_field_no_panic_on_short_or_long() {
+		// Shorter and longer inputs must not panic (previously copy_from_slice would).
+		let _ = bytes_to_field(&[1u8, 2, 3]);
+		let _ = bytes_to_field(&[]);
+		let _ = bytes_to_field(&[0xABu8; 40]);
+	}
+
+	#[test]
+	fn fallback_marker_is_non_zero() {
+		// The unreachable failure branch must never yield the all-zero dummy sentinel.
+		assert_ne!(super::POSEIDON_FALLBACK_MARKER_U64, 0);
+		assert!(!FieldElement::new(Fr::from(super::POSEIDON_FALLBACK_MARKER_U64)).is_zero());
 	}
 }
