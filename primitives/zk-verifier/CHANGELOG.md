@@ -6,6 +6,14 @@ All notable changes to this crate are documented here.
 
 ## [Unreleased]
 
+### Removed
+- `Groth16Verifier::batch_verify`. It was unsound: the random linear-combination
+  scalars were derived from a hash of prover-controlled data (the proof and public
+  inputs), letting a prover craft a batch of individually-invalid proofs that
+  satisfies the combined pairing check. It had no callers. Verify proofs one at a
+  time with `verify` / `verify_with_prepared_vk`, which are sound. This also drops
+  the `sha2` dependency.
+
 ### Security
 - `PublicInputs::to_field_elements` now rejects non-canonical little-endian
   encodings (byte strings that represent a value `>= p`) with
