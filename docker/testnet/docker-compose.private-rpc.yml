@@ -46,6 +46,8 @@ services:
       --rpc-port 9944
       --rpc-methods Safe
       --rpc-max-connections 100
+      --db-cache ${RPC_DB_CACHE:-512}
+      --state-cache-size ${RPC_STATE_CACHE:-67108864}
       --no-mdns
       --log info
     # ── To reach RPC from OTHER machines, uncomment BOTH lines below AND set up a
