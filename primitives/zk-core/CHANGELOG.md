@@ -7,18 +7,25 @@ All notable changes to this crate are documented here.
 ## [Unreleased]
 
 ### Security
-- **ZKC-1** — Poseidon hashing no longer uses `.expect()` / `panic!`. All arities
+- Poseidon hashing no longer uses `.expect()` / `panic!`. All arities
   (`hash_2`, `hash_4`, `hash_5`, `poseidon_hash_1`) now route through a single
   internal `poseidon_circom` helper that returns a deterministic value instead of
   panicking. This closes a consensus-divergence risk: a native panic aborts the
   node process while a WASM panic is a recoverable trap, so the same malformed
   input could split the network. The failure path is provably unreachable (constant
   arity, reduced `Fr` inputs) and is now documented as an invariant.
+- Poseidon host functions (`poseidon_hash_2`, `poseidon_hash_4`) no longer
+  `assert_eq!` input length. A failed assert in a native host function aborts the
+  node process. Inputs are now read through a `read_32_le` helper that zero-pads or
+  truncates to 32 bytes deterministically and never panics.
 
 ### Tests
 - Added `hash_no_panic_on_boundary_inputs`, `hash_boundary_inputs_are_deterministic`,
   and `poseidon_circom_core_matches_trait` covering boundary field elements
   (`0` and `p-1`) and native/WASM path equivalence.
+- Added `read_32_le_pads_and_truncates`, `hash_2_no_panic_on_short_input`,
+  `hash_4_no_panic_on_short_input`, and `hash_2_still_correct_for_32_bytes`
+  covering non-32-byte host-function inputs.
 
 ---
 
