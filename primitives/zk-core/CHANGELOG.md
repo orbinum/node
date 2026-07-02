@@ -4,7 +4,7 @@ All notable changes to this crate are documented here.
 
 ---
 
-## [Unreleased]
+## [1.1.0] — 2026-07-02
 
 ### Security
 - Poseidon hashing no longer uses `.expect()` / `panic!`. All arities
