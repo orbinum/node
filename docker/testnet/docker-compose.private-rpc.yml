@@ -67,6 +67,7 @@ services:
     cpus: ${RPC_CPUS:-1.5}
     labels:
       com.centurylinklabs.watchtower.enable: "true"
+      com.centurylinklabs.watchtower.scope: "node-private-rpc"
     logging:
       driver: "json-file"
       options:
@@ -84,8 +85,10 @@ services:
       WATCHTOWER_LABEL_ENABLE: "true"
       WATCHTOWER_ROLLING_RESTART: "true"
       WATCHTOWER_LOG_LEVEL: "info"
+      WATCHTOWER_SCOPE: "node-private-rpc"
     labels:
       com.centurylinklabs.watchtower.enable: "false"
+      com.centurylinklabs.watchtower.scope: "node-private-rpc"
 
 volumes:
   private-rpc-data:
