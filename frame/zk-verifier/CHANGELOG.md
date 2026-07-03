@@ -7,6 +7,9 @@ All notable changes to this pallet are documented here.
 ## [Unreleased]
 
 ### Changed
+- `verify_proof` now requires each public input to be exactly 32 bytes and rejects
+  shorter inputs with `InvalidPublicInputs`, instead of silently zero-padding them
+  into a different field element.
 - `verify_proof` weight now scales with the number of public inputs
   (`WeightInfo::verify_proof(n)`) instead of a flat cost, since verification does
   one G1 scalar-mul per input. Prevents underpricing a many-input proof. The

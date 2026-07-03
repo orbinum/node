@@ -302,12 +302,9 @@ pub mod pallet {
 			let raw_inputs: Vec<[u8; 32]> = public_inputs
 				.into_iter()
 				.map(|i| {
-					let mut arr = [0u8; 32];
-					let len = i.len().min(32);
-					arr[..len].copy_from_slice(&i[..len]);
-					arr
+					<[u8; 32]>::try_from(i.as_slice()).map_err(|_| Error::<T>::InvalidPublicInputs)
 				})
-				.collect();
+				.collect::<Result<_, _>>()?;
 
 			let (result, version) = verifier::verify::<T>(circuit_id, None, &proof, raw_inputs)?;
 
@@ -980,20 +977,22 @@ mod tests {
 	}
 
 	#[test]
-	fn verify_proof_truncates_short_public_input_to_32_bytes() {
-		// A short (<32 B) input is padded with trailing zeros and accepted.
+	fn verify_proof_rejects_short_public_input() {
 		new_test_ext().execute_with(|| {
 			insert_vk(CircuitId::UNSHIELD, 1);
 			activate(CircuitId::UNSHIELD, 1);
 			let short: BoundedVec<u8, frame_support::traits::ConstU32<32>> =
 				vec![0xFFu8; 4].try_into().unwrap();
 			let inputs: PublicInputs = vec![short].try_into().unwrap();
-			assert_ok!(ZkVerifier::verify_proof(
-				signed().into(),
-				CircuitId::UNSHIELD,
-				proof_bytes(),
-				inputs
-			));
+			assert_noop!(
+				ZkVerifier::verify_proof(
+					signed().into(),
+					CircuitId::UNSHIELD,
+					proof_bytes(),
+					inputs
+				),
+				Error::<Test>::InvalidPublicInputs
+			);
 		});
 	}
 
