@@ -4,6 +4,19 @@ All notable changes to this pallet are documented here.
 
 ---
 
+## [Unreleased]
+
+### Security
+- `register_verification_key` and `batch_register_verification_keys` now validate
+  that the verifying key deserializes as a BN254 Groth16 key and that its arity
+  (`gamma_abc_g1.len() - 1`) matches the circuit's expected public-input count.
+  A wrong-arity or malformed key is rejected with `InvalidVerificationKey` at
+  registration instead of being accepted silently (and failing, or verifying over
+  the wrong public inputs, at proof time). Genesis is unaffected — the chain-spec
+  registers keys post-genesis via the extrinsic.
+
+---
+
 ## [0.7.2] — 2026-06-01
 
 ### Changed

@@ -40,6 +40,10 @@ orbinum-zk-verifier = { path = "../../primitives/zk-verifier", default-features 
 [dev-dependencies]
 orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
 orbinum-zk-verifier = { path = "../../primitives/zk-verifier", default-features = false }
+# Build real Groth16 VKs of a given arity in tests (arity is now validated on register).
+ark-bn254 = { version = "0.5.0", default-features = false, features = ["curve"] }
+ark-ec = { version = "0.5.0", default-features = false }
+ark-groth16 = { version = "0.5.0", default-features = false }
 
 [features]
 default = ["std"]

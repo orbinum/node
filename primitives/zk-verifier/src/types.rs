@@ -43,6 +43,18 @@ pub const PER_INPUT_COST: u64 = 10_000;
 /// Maximum number of public inputs supported.
 pub const MAX_PUBLIC_INPUTS: usize = 32;
 
+/// Expected public-input count for a known circuit id, or `None` if unknown.
+/// A VK for the circuit must have `gamma_abc_g1.len() == expected + 1`.
+pub const fn expected_public_inputs(circuit_id: u8) -> Option<usize> {
+	match circuit_id {
+		CIRCUIT_ID_TRANSFER => Some(TRANSFER_PUBLIC_INPUTS),
+		CIRCUIT_ID_UNSHIELD => Some(UNSHIELD_PUBLIC_INPUTS),
+		CIRCUIT_ID_PRIVATE_LINK => Some(PRIVATE_LINK_PUBLIC_INPUTS),
+		CIRCUIT_ID_VALUE_PROOF => Some(VALUE_PROOF_PUBLIC_INPUTS),
+		_ => None,
+	}
+}
+
 // ─── VerifierError ────────────────────────────────────────────────────────────
 
 /// Errors that can occur during proof verification.
@@ -158,6 +170,14 @@ impl VerifyingKey {
 	pub fn prepare(&self) -> Result<PreparedVerifyingKey<Bn254>, VerifierError> {
 		let vk = self.to_ark_vk()?;
 		Ok(PreparedVerifyingKey::from(vk))
+	}
+
+	pub fn num_public_inputs(&self) -> Result<usize, VerifierError> {
+		let vk = self.to_ark_vk()?;
+		vk.gamma_abc_g1
+			.len()
+			.checked_sub(1)
+			.ok_or(VerifierError::InvalidVerifyingKey)
 	}
 }
 
@@ -295,6 +315,18 @@ mod tests {
 		assert_eq!(PRIVATE_LINK_PUBLIC_INPUTS, 2);
 	}
 
+	#[test]
+	fn expected_public_inputs_maps_known_circuits() {
+		assert_eq!(expected_public_inputs(CIRCUIT_ID_TRANSFER), Some(5));
+		assert_eq!(expected_public_inputs(CIRCUIT_ID_UNSHIELD), Some(7));
+		assert_eq!(expected_public_inputs(CIRCUIT_ID_PRIVATE_LINK), Some(2));
+		assert_eq!(expected_public_inputs(CIRCUIT_ID_VALUE_PROOF), Some(4));
+		// Unknown / unmapped circuit ids (e.g. shield=3) return None.
+		assert_eq!(expected_public_inputs(3), None);
+		assert_eq!(expected_public_inputs(0), None);
+		assert_eq!(expected_public_inputs(99), None);
+	}
+
 	// ─── Proof ──────────────────────────────────────────────────────────
 
 	#[test]
@@ -399,12 +431,10 @@ mod tests {
 	#[test]
 	fn to_field_elements_rejects_non_canonical() {
 		use ark_ff::{BigInteger, PrimeField};
-		// `[0xff; 32]` is >= p, so it is a non-canonical encoding and must be rejected.
+		// 0xff..ff is >= p → rejected.
 		let result = PublicInputs::new(vec![[0xffu8; 32]]).to_field_elements();
 		assert_eq!(result, Err(VerifierError::InvalidPublicInput));
 
-		// The reduced form (n) and its non-canonical twin (n + p) reduce to the same
-		// field element, but only the canonical one is accepted.
 		let n = Bn254Fr::from(7u64);
 		let n_bytes: [u8; 32] = {
 			let mut b = [0u8; 32];
@@ -412,11 +442,11 @@ mod tests {
 			b[..le.len()].copy_from_slice(&le);
 			b
 		};
-		// n is canonical → accepted.
+		// Canonical n is accepted.
 		let ok = PublicInputs::new(vec![n_bytes]).to_field_elements();
 		assert_eq!(ok.unwrap(), vec![n]);
 
-		// n + p, if it fits in 32 bytes, is non-canonical → rejected.
+		// n + p: same field element, non-canonical bytes.
 		let p_bytes: [u8; 32] = {
 			let mut p = [0u8; 32];
 			let pm1 = (-Bn254Fr::from(1u64)).into_bigint().to_bytes_le();
@@ -437,7 +467,6 @@ mod tests {
 			carry = v >> 8;
 		}
 		assert_eq!(carry, 0, "n+p must fit in 32 bytes for this test");
-		// Same reduced element as n, but non-canonical bytes → rejected.
 		assert_eq!(Bn254Fr::from_le_bytes_mod_order(&n_plus_p), n);
 		let rejected = PublicInputs::new(vec![n_plus_p]).to_field_elements();
 		assert_eq!(rejected, Err(VerifierError::InvalidPublicInput));
@@ -477,8 +506,7 @@ mod tests {
 
 	#[test]
 	fn test_public_inputs_large_values() {
-		// `max` is a reduced field element; `from_field_elements` re-encodes it
-		// canonically, so the round-trip stays canonical and is accepted.
+		// from_field_elements re-encodes canonically, so the round-trip is accepted.
 		let max = Bn254Fr::from_le_bytes_mod_order(&[0xff; 32]);
 		let elements = vec![max, Bn254Fr::from(0u64), max];
 		let converted = PublicInputs::from_field_elements(&elements)

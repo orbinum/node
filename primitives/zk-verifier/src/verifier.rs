@@ -222,6 +222,25 @@ mod tests {
 		.is_err());
 	}
 
+	// ─── num_public_inputs ───────────────────────────────────────────────
+
+	#[test]
+	fn num_public_inputs_matches_vk_arity() {
+		for count in [0usize, 1, 2, 4, 5, 7] {
+			let vk = VerifyingKey::from_ark_vk(&create_mock_ark_vk(count)).unwrap();
+			assert_eq!(vk.num_public_inputs().unwrap(), count);
+		}
+	}
+
+	#[test]
+	fn num_public_inputs_errors_on_malformed_vk() {
+		let vk = VerifyingKey::new(alloc::vec![0u8; 10]);
+		assert!(matches!(
+			vk.num_public_inputs(),
+			Err(VerifierError::InvalidVerifyingKey)
+		));
+	}
+
 	// ─── integration ─────────────────────────────────────────────────────
 
 	#[test]

@@ -205,6 +205,8 @@ pub mod pallet {
 				verification_key.len() >= 256,
 				Error::<T>::InvalidVerificationKey
 			);
+			// Reject a malformed or wrong-arity VK at registration, not at proof time.
+			Self::ensure_vk_arity(circuit_id, &verification_key)?;
 			// Prevent silent overwrite of an existing VK. Replacing a key that is
 			// already referenced by recorded stats would desync the stats from the
 			// actual key in use. Use set_active_version to switch active versions.
@@ -349,6 +351,7 @@ pub mod pallet {
 					entry.verification_key.len() >= 256,
 					Error::<T>::InvalidVerificationKey
 				);
+				Self::ensure_vk_arity(entry.circuit_id, &entry.verification_key)?;
 				// Same silent-overwrite protection as single register.
 				ensure!(
 					!VerificationKeys::<T>::contains_key(entry.circuit_id, entry.version),
@@ -386,6 +389,25 @@ pub mod pallet {
 			Ok(())
 		}
 	}
+
+	impl<T: Config> Pallet<T> {
+		/// Verify the VK deserializes as a BN254 Groth16 key and, for known circuits,
+		/// that its arity matches. Unknown circuits are only checked to deserialize.
+		fn ensure_vk_arity(circuit_id: CircuitId, key_data: &[u8]) -> DispatchResult {
+			use orbinum_zk_verifier::{VerifyingKey, expected_public_inputs};
+
+			let vk = VerifyingKey::new(key_data.to_vec());
+			let arity = vk
+				.num_public_inputs()
+				.map_err(|_| Error::<T>::InvalidVerificationKey)?;
+
+			// circuit ids fit in u8 for the known set.
+			if let Some(expected) = expected_public_inputs(circuit_id.0 as u8) {
+				ensure!(arity == expected, Error::<T>::InvalidVerificationKey);
+			}
+			Ok(())
+		}
+	}
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -399,6 +421,7 @@ mod tests {
 		types::{ProofSystem, VkEntry},
 	};
 	use frame_support::{BoundedVec, assert_err, assert_noop, assert_ok};
+	use orbinum_zk_verifier::{TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS};
 	use sp_io::TestExternalities;
 	use sp_runtime::BuildStorage;
 
@@ -415,8 +438,31 @@ mod tests {
 	}
 
 	/// Minimum valid VK: 300 bytes is well above the 256-byte floor.
+	/// A serialized BN254 Groth16 VK with `arity` public inputs. Registration now
+	/// validates arity, so tests need a key that deserializes and matches.
+	fn real_vk(arity: usize) -> BoundedVec<u8, frame_support::traits::ConstU32<8192>> {
+		use ark_bn254::{Bn254, G1Affine, G2Affine};
+		use ark_ec::AffineRepr;
+		use ark_groth16::VerifyingKey as ArkVk;
+		use orbinum_zk_verifier::VerifyingKey;
+
+		let vk = ArkVk::<Bn254> {
+			alpha_g1: G1Affine::generator(),
+			beta_g2: G2Affine::generator(),
+			gamma_g2: G2Affine::generator(),
+			delta_g2: G2Affine::generator(),
+			gamma_abc_g1: (0..=arity).map(|_| G1Affine::generator()).collect(),
+		};
+		VerifyingKey::from_ark_vk(&vk)
+			.unwrap()
+			.bytes
+			.try_into()
+			.expect("serialized VK fits in 8192 bytes")
+	}
+
+	/// VK for the TRANSFER circuit (arity 5) — the default used by most tests.
 	fn vk_bytes() -> BoundedVec<u8, frame_support::traits::ConstU32<8192>> {
-		vec![0xABu8; 300].try_into().unwrap()
+		real_vk(TRANSFER_PUBLIC_INPUTS)
 	}
 
 	fn vk_too_short() -> BoundedVec<u8, frame_support::traits::ConstU32<8192>> {
@@ -474,10 +520,13 @@ mod tests {
 	}
 
 	fn make_vk_entry(circuit_id: CircuitId, version: u32, set_active: bool) -> VkEntry {
+		// Use a VK whose arity matches the circuit (validated on register).
+		let arity = orbinum_zk_verifier::expected_public_inputs(circuit_id.0 as u8)
+			.unwrap_or(TRANSFER_PUBLIC_INPUTS);
 		VkEntry {
 			circuit_id,
 			version,
-			verification_key: vk_bytes(),
+			verification_key: real_vk(arity),
 			set_active,
 		}
 	}
@@ -526,6 +575,29 @@ mod tests {
 				),
 				Error::<Test>::InvalidVerificationKey
 			);
+		});
+	}
+
+	#[test]
+	fn register_vk_rejects_wrong_arity() {
+		new_test_ext().execute_with(|| {
+			// TRANSFER expects 5 public inputs; a VK built for 7 must be rejected.
+			assert_noop!(
+				ZkVerifier::register_verification_key(
+					root().into(),
+					CircuitId::TRANSFER,
+					1,
+					real_vk(UNSHIELD_PUBLIC_INPUTS)
+				),
+				Error::<Test>::InvalidVerificationKey
+			);
+			// The matching arity is accepted.
+			assert_ok!(ZkVerifier::register_verification_key(
+				root().into(),
+				CircuitId::TRANSFER,
+				1,
+				real_vk(TRANSFER_PUBLIC_INPUTS)
+			));
 		});
 	}
 
@@ -606,7 +678,7 @@ mod tests {
 				root().into(),
 				CircuitId::UNSHIELD,
 				1,
-				vk_bytes()
+				real_vk(UNSHIELD_PUBLIC_INPUTS)
 			));
 			assert!(VerificationKeys::<Test>::contains_key(
 				CircuitId::TRANSFER,
@@ -1165,7 +1237,7 @@ mod tests {
 			activate(CircuitId::TRANSFER, 1);
 			let info = Pallet::<Test>::runtime_api_get_circuit_version_info(CircuitId::TRANSFER.0)
 				.unwrap();
-			let expected_hash = sp_io::hashing::blake2_256(&vec![0xABu8; 300]);
+			let expected_hash = sp_io::hashing::blake2_256(&vk_bytes());
 			assert_eq!(info.vk_hashes[0].vk_hash, expected_hash);
 			assert_eq!(info.vk_hashes[0].version, 1u32);
 		});

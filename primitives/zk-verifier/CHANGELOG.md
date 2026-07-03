@@ -6,6 +6,14 @@ All notable changes to this crate are documented here.
 
 ## [Unreleased]
 
+### Added
+- `expected_public_inputs(circuit_id: u8) -> Option<usize>` and
+  `VerifyingKey::num_public_inputs() -> Result<usize, VerifierError>`, so a
+  registrar can check that a verifying key's arity (`gamma_abc_g1.len() - 1`)
+  matches the circuit it is registered for. A wrong-arity or non-deserializable
+  key can now be rejected instead of failing (or verifying over the wrong inputs)
+  at proof time.
+
 ### Removed
 - `Groth16Verifier::batch_verify`. It was unsound: the random linear-combination
   scalars were derived from a hash of prover-controlled data (the proof and public
