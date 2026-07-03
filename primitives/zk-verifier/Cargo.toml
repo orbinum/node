@@ -38,6 +38,8 @@ scale-info = { version = "2.11", default-features = false, features = ["derive"]
 num-bigint = { version = "0.4", default-features = false, optional = true }
 
 [dev-dependencies]
+# Groth16 prover (r1cs feature) to generate a real proof in tests.
+ark-groth16 = { version = "0.5.0", default-features = false, features = ["r1cs"] }
 ark-relations = { version = "0.5.0", default-features = false }
 ark-snark = { version = "0.5.0", default-features = false }
 ark-std = { version = "0.5.0", default-features = false, features = ["std"] }

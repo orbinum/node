@@ -42,6 +42,9 @@ All notable changes to this crate are documented here.
 ### Tests
 - Added `to_field_elements_rejects_non_canonical` covering the `n` vs `n + p`
   collision and `0xff..ff` (`>= p`) rejection.
+- Added `tests/real_proof.rs`: a real Groth16 setup + prove + verify over a small
+  circuit exercises the actual pairing, covering a valid proof, a wrong public
+  input, and non-canonical-input rejection against a genuine proof.
 
 ---
 
