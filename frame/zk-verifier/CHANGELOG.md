@@ -6,6 +6,12 @@ All notable changes to this pallet are documented here.
 
 ## [Unreleased]
 
+### Changed
+- `verify_proof` weight now scales with the number of public inputs
+  (`WeightInfo::verify_proof(n)`) instead of a flat cost, since verification does
+  one G1 scalar-mul per input. Prevents underpricing a many-input proof. The
+  per-input term is a conservative estimate pending a re-benchmark.
+
 ### Security
 - `register_verification_key` and `batch_register_verification_keys` now validate
   that the verifying key deserializes as a BN254 Groth16 key and that its arity

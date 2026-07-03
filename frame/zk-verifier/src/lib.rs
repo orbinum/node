@@ -290,7 +290,7 @@ pub mod pallet {
 
 		/// Verify a zero-knowledge proof (any signed origin).
 		#[pallet::call_index(3)]
-		#[pallet::weight(T::WeightInfo::verify_proof())]
+		#[pallet::weight(T::WeightInfo::verify_proof(public_inputs.len() as u32))]
 		pub fn verify_proof(
 			origin: OriginFor<T>,
 			circuit_id: CircuitId,
@@ -883,6 +883,14 @@ mod tests {
 				sp_runtime::DispatchError::BadOrigin
 			);
 		});
+	}
+
+	#[test]
+	fn verify_proof_weight_grows_with_inputs() {
+		use crate::weights::WeightInfo;
+		type W = crate::weights::SubstrateWeight<Test>;
+		assert!(W::verify_proof(8).ref_time() > W::verify_proof(1).ref_time());
+		assert!(W::verify_proof(32).ref_time() > W::verify_proof(8).ref_time());
 	}
 
 	#[test]

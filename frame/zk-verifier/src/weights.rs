@@ -39,7 +39,7 @@ use core::marker::PhantomData;
 
 /// Weight functions needed for pallet_zk_verifier.
 pub trait WeightInfo {
-	fn verify_proof() -> Weight;
+	fn verify_proof(n: u32) -> Weight;
 	fn register_verification_key() -> Weight;
 	fn set_active_version() -> Weight;
 	fn remove_verification_key() -> Weight;
@@ -63,12 +63,13 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	fn verify_proof() -> Weight {
+	fn verify_proof(n: u32) -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `669`
 		//  Estimated: `11704`
 		// Minimum execution time: 12_287_322_000 picoseconds.
 		Weight::from_parts(12_418_051_000, 11704)
+			.saturating_add(Weight::from_parts(200_000_000_u64.saturating_mul(n as u64), 0))
 			.saturating_add(T::DbWeight::get().reads(7_u64))
 			.saturating_add(T::DbWeight::get().writes(3_u64))
 	}
@@ -180,12 +181,13 @@ impl WeightInfo for () {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	fn verify_proof() -> Weight {
+	fn verify_proof(n: u32) -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `669`
 		//  Estimated: `11704`
 		// Minimum execution time: 12_287_322_000 picoseconds.
 		Weight::from_parts(12_418_051_000, 11704)
+			.saturating_add(Weight::from_parts(200_000_000_u64.saturating_mul(n as u64), 0))
 			.saturating_add(RocksDbWeight::get().reads(7_u64))
 			.saturating_add(RocksDbWeight::get().writes(3_u64))
 	}

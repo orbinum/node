@@ -626,9 +626,7 @@ pub mod pallet_manual_seal {
 impl pallet_manual_seal::Config for Runtime {}
 
 impl pallet_zk_verifier::Config for Runtime {
-	/// Max proof size: 1KB (Groth16 proofs ~256-512 bytes)
-	type MaxProofSize = ConstU32<1024>;
-	/// Max public inputs: 32 field elements per circuit
+	type MaxProofSize = ConstU32<128>;
 	type MaxPublicInputs = ConstU32<32>;
 	type WeightInfo = pallet_zk_verifier::weights::SubstrateWeight<Runtime>;
 }
