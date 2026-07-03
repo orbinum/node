@@ -28,6 +28,9 @@ All notable changes to this crate are documented here.
   malformed input. Curve points are built with `new_unchecked` and then validated
   on-curve and in-subgroup. These are `std`-only host helpers; an RPC/offchain
   worker feeding untrusted JSON can no longer panic the process.
+- The snarkjs parsers reject non-canonical field values (`>= modulus`) instead of
+  silently reducing them, so a coordinate/input string outside the field range is
+  an error rather than a different point/element than the caller wrote.
 - `PublicInputs::to_field_elements` now rejects non-canonical little-endian
   encodings (byte strings that represent a value `>= p`) with
   `VerifierError::InvalidPublicInput`. Previously it reduced modulo `p`, so `n` and

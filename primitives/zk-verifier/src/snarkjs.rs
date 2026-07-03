@@ -9,7 +9,6 @@ use crate::{Proof, PublicInputs, VerifierError};
 #[cfg(feature = "std")]
 use {
 	ark_bn254::{Fq, Fq2, G1Affine, G2Affine},
-	ark_ff::PrimeField,
 	ark_groth16::Proof as ArkProof,
 	num_bigint::BigUint,
 };
@@ -91,26 +90,28 @@ pub fn parse_public_inputs_from_snarkjs(
 	Ok(PublicInputs::new(inputs?))
 }
 
+/// Parse a decimal string into a field element, rejecting non-canonical values
+/// (`>= modulus`). Returns `err` for a non-decimal or out-of-range value, so a
+/// coordinate is never silently reduced. Reduction on a `< modulus` value is exact.
+#[cfg(feature = "std")]
+fn parse_canonical<F: ark_ff::PrimeField>(s: &str, err: VerifierError) -> Result<F, VerifierError> {
+	use ark_ff::BigInteger;
+	let value = BigUint::parse_bytes(s.as_bytes(), 10).ok_or_else(|| err.clone())?;
+	let modulus = BigUint::from_bytes_le(&F::MODULUS.to_bytes_le());
+	if value >= modulus {
+		return Err(err);
+	}
+	Ok(F::from_le_bytes_mod_order(&value.to_bytes_le()))
+}
+
 #[cfg(feature = "std")]
 fn parse_fq(s: &str) -> Result<Fq, VerifierError> {
-	let bigint = BigUint::parse_bytes(s.as_bytes(), 10).ok_or(VerifierError::InvalidProof)?;
-
-	let bytes = bigint.to_bytes_le();
-	let mut bytes_32 = [0u8; 32];
-	bytes_32[..bytes.len().min(32)].copy_from_slice(&bytes[..bytes.len().min(32)]);
-
-	Ok(Fq::from_le_bytes_mod_order(&bytes_32))
+	parse_canonical(s, VerifierError::InvalidProof)
 }
 
 #[cfg(feature = "std")]
 fn parse_fr(s: &str) -> Result<ark_bn254::Fr, VerifierError> {
-	let bigint = BigUint::parse_bytes(s.as_bytes(), 10).ok_or(VerifierError::InvalidPublicInput)?;
-
-	let bytes = bigint.to_bytes_le();
-	let mut bytes_32 = [0u8; 32];
-	bytes_32[..bytes.len().min(32)].copy_from_slice(&bytes[..bytes.len().min(32)]);
-
-	Ok(ark_bn254::Fr::from_le_bytes_mod_order(&bytes_32))
+	parse_canonical(s, VerifierError::InvalidPublicInput)
 }
 
 #[cfg(all(test, feature = "std"))]
@@ -152,15 +153,25 @@ mod tests {
 
 	#[test]
 	fn test_parse_public_inputs_large_values() {
+		// p - 1 is the largest canonical scalar; it must parse.
 		let input_strings = [
 			"1000000000000000000000",
-			"21888242871839275222246405745257275088548364400416034343698204186575808495617",
+			"21888242871839275222246405745257275088548364400416034343698204186575808495616",
 		];
 		let result = parse_public_inputs_from_snarkjs(&input_strings);
 		assert!(result.is_ok(), "Should parse large valid values");
 
 		let inputs = result.unwrap();
 		assert_eq!(inputs.len(), 2);
+	}
+
+	#[test]
+	fn test_parse_public_inputs_rejects_modulus() {
+		// p itself (== 0 mod p) is non-canonical → rejected, not reduced.
+		let result = parse_public_inputs_from_snarkjs(&[
+			"21888242871839275222246405745257275088548364400416034343698204186575808495617",
+		]);
+		assert_eq!(result, Err(VerifierError::InvalidPublicInput));
 	}
 
 	#[test]
@@ -296,6 +307,20 @@ mod tests {
 	#[test]
 	fn test_parse_fq_invalid() {
 		assert_eq!(parse_fq("not_a_number"), Err(VerifierError::InvalidProof));
+	}
+
+	#[test]
+	fn test_parse_fq_rejects_non_canonical() {
+		// q (the Fq modulus) and q+1 are >= modulus → rejected, not reduced.
+		let q = "21888242871839275222246405745257275088696311157297823662689037894645226208583";
+		let q_plus_1 =
+			"21888242871839275222246405745257275088696311157297823662689037894645226208584";
+		assert_eq!(parse_fq(q), Err(VerifierError::InvalidProof));
+		assert_eq!(parse_fq(q_plus_1), Err(VerifierError::InvalidProof));
+		// q - 1 is the largest canonical base-field value → accepted.
+		let q_minus_1 =
+			"21888242871839275222246405745257275088696311157297823662689037894645226208582";
+		assert!(parse_fq(q_minus_1).is_ok());
 	}
 
 	#[test]
