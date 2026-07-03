@@ -222,9 +222,10 @@ impl PublicInputs {
 		let inputs = elements
 			.iter()
 			.map(|elem| {
-				let mut bytes = [0u8; 32];
 				let elem_bytes = elem.into_bigint().to_bytes_le();
-				let len = core::cmp::min(elem_bytes.len(), 32);
+				debug_assert_eq!(elem_bytes.len(), 32, "BN254 Fr must be 32 LE bytes");
+				let mut bytes = [0u8; 32];
+				let len = elem_bytes.len().min(32);
 				bytes[..len].copy_from_slice(&elem_bytes[..len]);
 				bytes
 			})
@@ -476,6 +477,19 @@ mod tests {
 	fn test_public_inputs_from_field_elements() {
 		let elements = vec![Bn254Fr::from(123u64), Bn254Fr::from(456u64)];
 		assert_eq!(PublicInputs::from_field_elements(&elements).len(), 2);
+	}
+
+	#[test]
+	fn from_field_elements_encodes_full_32_bytes() {
+		// 0, 1, and p-1 (largest Fr) all encode without truncation.
+		let elements = vec![
+			Bn254Fr::from(0u64),
+			Bn254Fr::from(1u64),
+			-Bn254Fr::from(1u64),
+		];
+		let pi = PublicInputs::from_field_elements(&elements);
+		// Round-trip must recover the exact elements — a truncated high byte would not.
+		assert_eq!(pi.to_field_elements().unwrap(), elements);
 	}
 
 	#[test]

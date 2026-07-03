@@ -21,6 +21,18 @@ All notable changes to this crate are documented here.
   satisfies the combined pairing check. It had no callers. Verify proofs one at a
   time with `verify` / `verify_with_prepared_vk`, which are sound. This also drops
   the `sha2` dependency.
+- The `field_utils` module (`field_to_bytes`, `bytes_to_field`, `field_to_u64`,
+  `u64_to_field`). These big-endian helpers had no callers and conflicted with the
+  little-endian encoding used everywhere else.
+
+### Fixed
+- `parse_public_inputs_from_snarkjs` now encodes little-endian (via
+  `PublicInputs::from_field_elements`) instead of big-endian. It previously wrote
+  bytes in the opposite order to what `to_field_elements` reads, so a parsed input
+  round-tripped to a different field element.
+- `PublicInputs::from_field_elements` documents the 32-byte encoding invariant with
+  a `debug_assert`; the existing `.min(32)` is a defensive floor, not a truncation
+  of any valid BN254 element.
 
 ### Security
 - The snarkjs parsers (`parse_fq`, `parse_fr`, `parse_proof_from_snarkjs`,

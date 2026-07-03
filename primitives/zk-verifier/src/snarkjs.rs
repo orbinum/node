@@ -73,21 +73,8 @@ pub fn parse_proof_from_snarkjs(points: SnarkjsProofPoints) -> Result<Proof, Ver
 pub fn parse_public_inputs_from_snarkjs(
 	input_strings: &[&str],
 ) -> Result<PublicInputs, VerifierError> {
-	use ark_ff::{BigInteger, PrimeField};
-
-	let inputs: Result<Vec<_>, _> = input_strings
-		.iter()
-		.map(|s| {
-			let field = parse_fr(s)?;
-			let mut bytes = [0u8; 32];
-			let elem_bytes = field.into_bigint().to_bytes_be();
-			let start = 32 - elem_bytes.len();
-			bytes[start..].copy_from_slice(&elem_bytes);
-			Ok(bytes)
-		})
-		.collect();
-
-	Ok(PublicInputs::new(inputs?))
+	let fields: Result<Vec<_>, _> = input_strings.iter().map(|s| parse_fr(s)).collect();
+	Ok(PublicInputs::from_field_elements(&fields?))
 }
 
 /// Parse a decimal string into a field element, rejecting non-canonical values
@@ -132,12 +119,10 @@ mod tests {
 
 	#[test]
 	fn test_parse_public_inputs_single_value() {
-		let input_strings = ["42"];
-		let result = parse_public_inputs_from_snarkjs(&input_strings);
-		assert!(result.is_ok());
-
-		let inputs = result.unwrap();
+		let inputs = parse_public_inputs_from_snarkjs(&["42"]).unwrap();
 		assert_eq!(inputs.len(), 1);
+		let fields = inputs.to_field_elements().unwrap();
+		assert_eq!(fields[0], ark_bn254::Fr::from(42u64));
 	}
 
 	#[test]

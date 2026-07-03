@@ -14,7 +14,6 @@
 
 extern crate alloc;
 
-mod field_utils;
 mod snarkjs;
 mod types;
 mod verifier;
@@ -26,7 +25,6 @@ pub use ark_bn254::Bn254;
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-pub use field_utils::{bytes_to_field, field_to_bytes, field_to_u64, u64_to_field};
 pub use snarkjs::SnarkjsProofPoints;
 #[cfg(feature = "std")]
 pub use snarkjs::{parse_proof_from_snarkjs, parse_public_inputs_from_snarkjs};
