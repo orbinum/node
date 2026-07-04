@@ -136,6 +136,24 @@ pub mod pallet {
 		}
 	}
 
+	// ── Hooks ─────────────────────────────────────────────────────────────────
+
+	#[pallet::hooks]
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		/// Runs when the runtime is built. `skip-proof-verification` disables ZK
+		/// verification and is only legitimate together with `runtime-benchmarks`
+		/// (the benchmark runner). Enabling it alone means a release runtime with no
+		/// verification, so abort construction in that case.
+		fn integrity_test() {
+			assert!(
+				!cfg!(feature = "skip-proof-verification") || cfg!(feature = "runtime-benchmarks"),
+				"pallet-zk-verifier compiled with `skip-proof-verification` but without \
+				 `runtime-benchmarks`: ZK proof verification is disabled outside a \
+				 benchmark build. This must never run on a live chain."
+			);
+		}
+	}
+
 	// ── Events ────────────────────────────────────────────────────────────────
 
 	#[pallet::event]
@@ -318,11 +336,11 @@ pub mod pallet {
 					circuit_id,
 					version,
 				});
-				// In benchmarks, the full Groth16 pairing computation has already run
-				// (deserialization succeeded, pairing was computed) so the measured
-				// weight is accurate. We only skip the error return so the benchmark
-				// runner can record the weight; production behaviour is unchanged.
-				#[cfg(not(feature = "runtime-benchmarks"))]
+				// Benchmarks feed dummy proofs that never verify; skipping the error
+				// return lets the runner record the weight (the pairing already ran).
+				// Gated on `skip-proof-verification`, NOT `runtime-benchmarks`, so a
+				// release runtime never disables the error path. See integrity_test.
+				#[cfg(not(feature = "skip-proof-verification"))]
 				return Err(Error::<T>::VerificationFailed.into());
 			}
 
@@ -1342,5 +1360,19 @@ mod tests {
 				Some(1u32)
 			);
 		});
+	}
+
+	// The integrity_test must abort when verification is compiled out WITHOUT the
+	// benchmark feature — i.e. a would-be release runtime with no verification. Only
+	// compiles in that exact combination (skip on, benchmarks off).
+	#[cfg(all(
+		feature = "skip-proof-verification",
+		not(feature = "runtime-benchmarks")
+	))]
+	#[test]
+	#[should_panic(expected = "skip-proof-verification")]
+	fn integrity_test_panics_when_verification_disabled() {
+		use frame_support::traits::Hooks;
+		<ZkVerifier as Hooks<frame_system::pallet_prelude::BlockNumberFor<Test>>>::integrity_test();
 	}
 }

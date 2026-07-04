@@ -135,3 +135,4 @@ runtime-benchmarks = [
 	"sc-service/runtime-benchmarks",
 	"orbinum-runtime/runtime-benchmarks",
 ]
+skip-proof-verification = ["orbinum-runtime/skip-proof-verification"]

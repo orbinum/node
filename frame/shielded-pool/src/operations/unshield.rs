@@ -12,9 +12,9 @@ use frame_support::{
 	traits::{Currency, ExistenceRequirement},
 };
 use pallet_relayer::RelayerInterface as _;
-#[cfg(not(feature = "runtime-benchmarks"))]
+#[cfg(not(feature = "skip-proof-verification"))]
 use pallet_zk_verifier::ZkVerifierPort;
-#[cfg(not(feature = "runtime-benchmarks"))]
+#[cfg(not(feature = "skip-proof-verification"))]
 use parity_scale_codec::Encode;
 use sp_runtime::{SaturatedConversion, traits::Zero};
 
@@ -23,7 +23,7 @@ pub struct UnshieldOperation;
 impl UnshieldOperation {
 	#[allow(clippy::too_many_arguments)]
 	pub fn execute<T: Config>(
-		#[cfg_attr(feature = "runtime-benchmarks", allow(unused_variables))] proof: &[u8],
+		#[cfg_attr(feature = "skip-proof-verification", allow(unused_variables))] proof: &[u8],
 		merkle_root: [u8; 32],
 		nullifier: Nullifier,
 		asset_id: u32,
@@ -85,7 +85,7 @@ impl UnshieldOperation {
 		let fee_u128: u128 = fee.saturated_into();
 		let amount_u128: u128 = amount.saturated_into();
 
-		#[cfg(not(feature = "runtime-benchmarks"))]
+		#[cfg(not(feature = "skip-proof-verification"))]
 		{
 			let recipient_bytes: [u8; 32] = recipient.encode().try_into().unwrap_or([0u8; 32]);
 			let valid = T::ZkVerifier::verify_unshield_proof(
@@ -103,7 +103,7 @@ impl UnshieldOperation {
 			ensure!(valid, Error::<T>::ProofVerificationFailed);
 		}
 
-		#[cfg(feature = "runtime-benchmarks")]
+		#[cfg(feature = "skip-proof-verification")]
 		{
 			let _ = amount_u128;
 			let _ = fee_u128;

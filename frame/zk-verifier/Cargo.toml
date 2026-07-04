@@ -36,6 +36,9 @@ frame-system = { git = "https://github.com/paritytech/polkadot-sdk", branch = "s
 # Local dependencies
 orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
 orbinum-zk-verifier = { path = "../../primitives/zk-verifier", default-features = false }
+ark-bn254 = { version = "0.5.0", default-features = false, features = ["curve"], optional = true }
+ark-ec = { version = "0.5.0", default-features = false, optional = true }
+ark-groth16 = { version = "0.5.0", default-features = false, optional = true }
 
 [dev-dependencies]
 orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
@@ -66,7 +69,11 @@ runtime-benchmarks = [
 	"frame-benchmarking/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
+	"dep:ark-bn254",
+	"dep:ark-ec",
+	"dep:ark-groth16",
 ]
+skip-proof-verification = []
 try-runtime = [
 	"frame-support/try-runtime",
 	"frame-system/try-runtime",

@@ -6,6 +6,13 @@ All notable changes to this pallet are documented here.
 
 ## [Unreleased]
 
+### Security
+- Proof-verification bypass is no longer tied to `runtime-benchmarks`. It now lives
+  behind a dedicated `skip-proof-verification` feature that `runtime-benchmarks`
+  does NOT enable, so a release runtime that exposes benchmarks still verifies
+  proofs. An `integrity_test` panics at runtime construction if the bypass feature
+  is ever compiled into a live runtime.
+
 ### Changed
 - `verify_proof` now requires each public input to be exactly 32 bytes and rejects
   shorter inputs with `InvalidPublicInputs`, instead of silently zero-padding them

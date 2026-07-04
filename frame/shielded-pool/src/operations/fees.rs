@@ -6,7 +6,7 @@ use crate::{
 };
 use frame_support::{ensure, pallet_prelude::*};
 use pallet_relayer::RelayerInterface as _;
-#[cfg(not(feature = "runtime-benchmarks"))]
+#[cfg(not(feature = "skip-proof-verification"))]
 use pallet_zk_verifier::ZkVerifierPort;
 use sp_runtime::SaturatedConversion;
 
@@ -51,7 +51,7 @@ impl FeeOperation {
 		ensure!(proof.len() == 128, Error::<T>::InvalidProof);
 		ensure!(public_signals.len() == 76, Error::<T>::InvalidPublicSignals);
 
-		#[cfg(not(feature = "runtime-benchmarks"))]
+		#[cfg(not(feature = "skip-proof-verification"))]
 		{
 			let is_valid = T::ZkVerifier::verify_value_proof(&proof, &public_signals, None)?;
 			ensure!(is_valid, Error::<T>::InvalidProof);

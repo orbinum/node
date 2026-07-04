@@ -196,6 +196,11 @@ runtime-benchmarks = [
 	"polkadot-runtime-common/runtime-benchmarks",
 ]
 
+skip-proof-verification = [
+	"pallet-zk-verifier/skip-proof-verification",
+	"pallet-shielded-pool/skip-proof-verification",
+]
+
 try-runtime = [
 	"cumulus-pallet-weight-reclaim/try-runtime",
 	"fp-self-contained/try-runtime",

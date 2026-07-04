@@ -269,6 +269,22 @@ pub mod pallet {
 	}
 
 	// ========================================================================
+	// Hooks
+	// ========================================================================
+
+	#[pallet::hooks]
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		fn integrity_test() {
+			assert!(
+				!cfg!(feature = "skip-proof-verification") || cfg!(feature = "runtime-benchmarks"),
+				"pallet-shielded-pool compiled with `skip-proof-verification` but without \
+				 `runtime-benchmarks`: shield/unshield/transfer proofs are NOT verified \
+				 outside a benchmark build. This must never run on a live chain."
+			);
+		}
+	}
+
+	// ========================================================================
 	// Events
 	// ========================================================================
 
