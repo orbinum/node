@@ -4,7 +4,7 @@ All notable changes to this pallet are documented here.
 
 ---
 
-## [Unreleased]
+## [0.8.0] - 2026-07-04
 
 ### Security
 - Proof-verification bypass is no longer tied to `runtime-benchmarks`. It now lives
@@ -22,8 +22,8 @@ All notable changes to this pallet are documented here.
   one G1 scalar-mul per input. Prevents underpricing a many-input proof.
 - The `verify_proof` benchmark is now parametrized by `n` (`Linear<1, 32>`): it
   builds a synthetic VK of arity `n` so the runner measures the real per-input
-  slope. The generated weight now matches the `verify_proof(n)` trait signature.
-  Re-run on the reference VPS to refresh weights.rs.
+  slope. `weights.rs` regenerated on reference hardware — `verify_proof(n)` now
+  carries the measured per-input term over the Groth16 pairing base.
 - Stat recording moved into `verifier::record_stats` with a doc-comment on the
   call-path asymmetry: failed verifications persist via the Port path
   (`Ok((false, _))`) but are reverted on the `verify_proof` extrinsic (`Err`).
