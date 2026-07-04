@@ -21,6 +21,11 @@ All notable changes to this pallet are documented here.
   (`WeightInfo::verify_proof(n)`) instead of a flat cost, since verification does
   one G1 scalar-mul per input. Prevents underpricing a many-input proof. The
   per-input term is a conservative estimate pending a re-benchmark.
+- Stat recording moved into `verifier::record_stats` with a doc-comment on the
+  call-path asymmetry: failed verifications persist via the Port path
+  (`Ok((false, _))`) but are reverted on the `verify_proof` extrinsic (`Err`).
+  Persisting Port-side failures is deliberate — it surfaces invalid proofs
+  reaching the pool.
 
 ### Security
 - `register_verification_key` and `batch_register_verification_keys` now validate

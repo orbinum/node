@@ -37,8 +37,20 @@ pub fn verify<T: Config>(
 		.ok_or(Error::<T>::VerificationKeyNotFound)?;
 
 	let result = do_verify(vk_info.key_data.as_slice(), proof_bytes, raw_inputs);
+	record_stats::<T>(circuit_id, resolved, result);
 
-	VerificationStats::<T>::mutate(circuit_id, resolved, |s| {
+	Ok((result, resolved))
+}
+
+/// Record a verification outcome into `VerificationStats`.
+///
+/// Failed attempts are counted too. Note the asymmetry between call paths:
+/// the `verify_proof` extrinsic returns `Err` on failure, so the runtime
+/// reverts this write; the Port path returns `Ok((false, _))`, so the write
+/// **persists**. This is deliberate — persisting Port-side failures gives
+/// observability into invalid proofs reaching the pool (client bugs / attacks).
+fn record_stats<T: Config>(circuit_id: CircuitId, version: u32, result: bool) {
+	VerificationStats::<T>::mutate(circuit_id, version, |s| {
 		s.total_verifications = s.total_verifications.saturating_add(1);
 		if result {
 			s.successful_verifications = s.successful_verifications.saturating_add(1);
@@ -46,8 +58,6 @@ pub fn verify<T: Config>(
 			s.failed_verifications = s.failed_verifications.saturating_add(1);
 		}
 	});
-
-	Ok((result, resolved))
 }
 
 /// Actual cryptographic verification.
@@ -205,6 +215,20 @@ mod tests {
 			assert_eq!(stats.total_verifications, 2);
 			assert_eq!(stats.successful_verifications, 2);
 			assert_eq!(stats.failed_verifications, 0);
+		});
+	}
+
+	#[test]
+	fn record_stats_persists_failures() {
+		new_test_ext().execute_with(|| {
+			record_stats::<Test>(CircuitId::TRANSFER, 1, false);
+			record_stats::<Test>(CircuitId::TRANSFER, 1, false);
+			record_stats::<Test>(CircuitId::TRANSFER, 1, true);
+
+			let stats = VerificationStats::<Test>::get(CircuitId::TRANSFER, 1u32);
+			assert_eq!(stats.total_verifications, 3);
+			assert_eq!(stats.successful_verifications, 1);
+			assert_eq!(stats.failed_verifications, 2);
 		});
 	}
 
