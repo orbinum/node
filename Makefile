@@ -81,6 +81,14 @@ run-dev:
 		--max-runtime-instances=32 \
 		--runtime-cache-size=8
 
+.PHONY: run-dev-persistent
+run-dev-persistent:
+	./target/release/orbinum-node \
+		--dev \
+		--base-path ./data/dev \
+		--max-runtime-instances=32 \
+		--runtime-cache-size=8
+
 .PHONY: audit
 # Run security audit (ignoring known Polkadot SDK transitive dependencies via deny.toml)
 audit:
