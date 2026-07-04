@@ -27,6 +27,11 @@ All notable changes to this pallet are documented here.
   Persisting Port-side failures is deliberate — it surfaces invalid proofs
   reaching the pool.
 
+### Removed
+- `CircuitId::SHIELD` (3) — shield is a direct deposit with no proof, so the
+  constant was never used on-chain. IDs 3 and 4 are retired and must not be
+  reused.
+
 ### Security
 - `register_verification_key` and `batch_register_verification_keys` now validate
   that the verifying key deserializes as a BN254 Groth16 key and that its arity

@@ -238,8 +238,8 @@ mod tests {
 			for cid in [
 				CircuitId::TRANSFER,
 				CircuitId::UNSHIELD,
-				CircuitId::SHIELD,
 				CircuitId::PRIVATE_LINK,
+				CircuitId::VALUE_PROOF,
 			] {
 				insert_vk(cid, 1);
 				ActiveCircuitVersion::<Test>::insert(cid, 1u32);
