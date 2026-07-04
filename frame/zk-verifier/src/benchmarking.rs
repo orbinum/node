@@ -71,7 +71,7 @@ mod benchmarks {
 	/// `skip-proof-verification` (required for benchmarks) lets the extrinsic return
 	/// `Ok`, so the full verification cost is still recorded.
 	#[benchmark]
-	fn verify_proof(n: Linear<1, 32>) {
+	fn verify_proof(n: Linear<1, 16>) {
 		let circuit_id = CircuitId::TRANSFER;
 
 		// Seed storage with an arity-`n` VK so `do_verify` runs `n` scalar-muls + pairing.
