@@ -34,11 +34,11 @@ frame-support = { git = "https://github.com/paritytech/polkadot-sdk", branch = "
 frame-system = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
 
 # Local dependencies
-orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
-orbinum-zk-verifier = { path = "../../primitives/zk-verifier", default-features = false }
 ark-bn254 = { version = "0.5.0", default-features = false, features = ["curve"], optional = true }
 ark-ec = { version = "0.5.0", default-features = false, optional = true }
 ark-groth16 = { version = "0.5.0", default-features = false, optional = true }
+orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
+orbinum-zk-verifier = { path = "../../primitives/zk-verifier", default-features = false }
 
 [dev-dependencies]
 orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
