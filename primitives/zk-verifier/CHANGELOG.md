@@ -4,7 +4,7 @@ All notable changes to this crate are documented here.
 
 ---
 
-## [Unreleased]
+## [1.2.0] - 2026-07-04
 
 ### Added
 - `expected_public_inputs(circuit_id: u8) -> Option<usize>` and
