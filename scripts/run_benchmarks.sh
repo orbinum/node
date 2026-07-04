@@ -2,9 +2,9 @@
 
 # Orbinum Unified Benchmark Runner
 #
-# Ejecuta de forma unificada todos los pallets registrados en runtime para benchmarking.
+# Runs all runtime-registered pallets through a unified benchmarking workflow.
 #
-# Uso:
+# Usage:
 #   ./scripts/run_benchmarks.sh
 #   ./scripts/run_benchmarks.sh --steps 50 --repeat 20
 
