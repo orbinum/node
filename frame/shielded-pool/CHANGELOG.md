@@ -2,6 +2,21 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.8.3] - 2026-07-04
+
+### Security
+
+- Proof verification for `shield`/`unshield`/`private_transfer`/fee paths is no
+  longer bypassed by `runtime-benchmarks`. The bypass now lives behind a dedicated
+  `skip-proof-verification` feature that `runtime-benchmarks` does NOT enable, so a
+  release runtime exposing benchmarks still verifies proofs. An `integrity_test`
+  panics at runtime construction if the bypass feature is compiled into a live
+  runtime. Mirrors the same change in `pallet-zk-verifier`.
+
+### Changed
+
+- Regenerated FRAME benchmark weights on reference hardware.
+
 ## [0.8.2] - 2026-06-01
 
 ### Changed
