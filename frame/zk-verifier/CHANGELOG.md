@@ -4,6 +4,48 @@ All notable changes to this pallet are documented here.
 
 ---
 
+## [0.8.0] - 2026-07-04
+
+### Security
+- Proof-verification bypass is no longer tied to `runtime-benchmarks`. It now lives
+  behind a dedicated `skip-proof-verification` feature that `runtime-benchmarks`
+  does NOT enable, so a release runtime that exposes benchmarks still verifies
+  proofs. An `integrity_test` panics at runtime construction if the bypass feature
+  is ever compiled into a live runtime.
+
+### Changed
+- `verify_proof` now requires each public input to be exactly 32 bytes and rejects
+  shorter inputs with `InvalidPublicInputs`, instead of silently zero-padding them
+  into a different field element.
+- `verify_proof` weight now scales with the number of public inputs
+  (`WeightInfo::verify_proof(n)`) instead of a flat cost, since verification does
+  one G1 scalar-mul per input. Prevents underpricing a many-input proof.
+- The `verify_proof` benchmark is now parametrized by `n` (`Linear<1, 32>`): it
+  builds a synthetic VK of arity `n` so the runner measures the real per-input
+  slope. `weights.rs` regenerated on reference hardware — `verify_proof(n)` now
+  carries the measured per-input term over the Groth16 pairing base.
+- Stat recording moved into `verifier::record_stats` with a doc-comment on the
+  call-path asymmetry: failed verifications persist via the Port path
+  (`Ok((false, _))`) but are reverted on the `verify_proof` extrinsic (`Err`).
+  Persisting Port-side failures is deliberate — it surfaces invalid proofs
+  reaching the pool.
+
+### Removed
+- `CircuitId::SHIELD` (3) — shield is a direct deposit with no proof, so the
+  constant was never used on-chain. IDs 3 and 4 are retired and must not be
+  reused.
+
+### Security
+- `register_verification_key` and `batch_register_verification_keys` now validate
+  that the verifying key deserializes as a BN254 Groth16 key and that its arity
+  (`gamma_abc_g1.len() - 1`) matches the circuit's expected public-input count.
+  A wrong-arity or malformed key is rejected with `InvalidVerificationKey` at
+  registration instead of being accepted silently (and failing, or verifying over
+  the wrong public inputs, at proof time). Genesis is unaffected — the chain-spec
+  registers keys post-genesis via the extrinsic.
+
+---
+
 ## [0.7.2] — 2026-06-01
 
 ### Changed

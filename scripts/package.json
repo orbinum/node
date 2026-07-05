@@ -1,0 +1,16 @@
+{
+  "name": "orbinum-bench-fixtures",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Regenerates the Groth16 proof fixture for pallet-zk-verifier benchmarks.",
+  "scripts": {
+    "generate": "node generate-bench-fixtures.mjs"
+  },
+  "dependencies": {
+    "@orbinum/circuits": "^0.9.0",
+    "@orbinum/groth16-proofs": "^3.0.0",
+    "circomlibjs": "^0.1.7",
+    "snarkjs": "^0.7.6"
+  }
+}

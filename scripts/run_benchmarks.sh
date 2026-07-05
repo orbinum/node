@@ -2,9 +2,9 @@
 
 # Orbinum Unified Benchmark Runner
 #
-# Ejecuta de forma unificada todos los pallets registrados en runtime para benchmarking.
+# Runs all runtime-registered pallets through a unified benchmarking workflow.
 #
-# Uso:
+# Usage:
 #   ./scripts/run_benchmarks.sh
 #   ./scripts/run_benchmarks.sh --steps 50 --repeat 20
 
@@ -34,7 +34,9 @@ echo "------------------------------------------------------"
 echo "   Orbinum Network - Unified Benchmark Runner"
 echo "------------------------------------------------------"
 
-FEATURES="runtime-benchmarks,poseidon-native"
+# skip-proof-verification lets the runner measure weights with dummy proofs; it is
+# kept out of release builds (an integrity_test panics if it reaches a live chain).
+FEATURES="runtime-benchmarks,skip-proof-verification,poseidon-native"
 NODE="./target/release/orbinum-node"
 TEMPLATE="./scripts/frame-weight-template.hbs"
 SCRATCH_DIR="./target/benchmark-weights"

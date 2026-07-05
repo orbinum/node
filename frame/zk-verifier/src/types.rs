@@ -29,8 +29,6 @@ impl CircuitId {
 	pub const TRANSFER: Self = Self(1);
 	/// Unshield circuit ID
 	pub const UNSHIELD: Self = Self(2);
-	/// Shield circuit ID
-	pub const SHIELD: Self = Self(3);
 	/// Private link dispatch circuit ID
 	pub const PRIVATE_LINK: Self = Self(5);
 	/// Value proof circuit ID — proves commitment encodes (value, asset_id) before fee insertion

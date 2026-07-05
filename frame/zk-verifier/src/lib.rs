@@ -136,6 +136,24 @@ pub mod pallet {
 		}
 	}
 
+	// ── Hooks ─────────────────────────────────────────────────────────────────
+
+	#[pallet::hooks]
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		/// Runs when the runtime is built. `skip-proof-verification` disables ZK
+		/// verification and is only legitimate together with `runtime-benchmarks`
+		/// (the benchmark runner). Enabling it alone means a release runtime with no
+		/// verification, so abort construction in that case.
+		fn integrity_test() {
+			assert!(
+				!cfg!(feature = "skip-proof-verification") || cfg!(feature = "runtime-benchmarks"),
+				"pallet-zk-verifier compiled with `skip-proof-verification` but without \
+				 `runtime-benchmarks`: ZK proof verification is disabled outside a \
+				 benchmark build. This must never run on a live chain."
+			);
+		}
+	}
+
 	// ── Events ────────────────────────────────────────────────────────────────
 
 	#[pallet::event]
@@ -205,6 +223,8 @@ pub mod pallet {
 				verification_key.len() >= 256,
 				Error::<T>::InvalidVerificationKey
 			);
+			// Reject a malformed or wrong-arity VK at registration, not at proof time.
+			Self::ensure_vk_arity(circuit_id, &verification_key)?;
 			// Prevent silent overwrite of an existing VK. Replacing a key that is
 			// already referenced by recorded stats would desync the stats from the
 			// actual key in use. Use set_active_version to switch active versions.
@@ -288,7 +308,7 @@ pub mod pallet {
 
 		/// Verify a zero-knowledge proof (any signed origin).
 		#[pallet::call_index(3)]
-		#[pallet::weight(T::WeightInfo::verify_proof())]
+		#[pallet::weight(T::WeightInfo::verify_proof(public_inputs.len() as u32))]
 		pub fn verify_proof(
 			origin: OriginFor<T>,
 			circuit_id: CircuitId,
@@ -300,12 +320,9 @@ pub mod pallet {
 			let raw_inputs: Vec<[u8; 32]> = public_inputs
 				.into_iter()
 				.map(|i| {
-					let mut arr = [0u8; 32];
-					let len = i.len().min(32);
-					arr[..len].copy_from_slice(&i[..len]);
-					arr
+					<[u8; 32]>::try_from(i.as_slice()).map_err(|_| Error::<T>::InvalidPublicInputs)
 				})
-				.collect();
+				.collect::<Result<_, _>>()?;
 
 			let (result, version) = verifier::verify::<T>(circuit_id, None, &proof, raw_inputs)?;
 
@@ -319,11 +336,11 @@ pub mod pallet {
 					circuit_id,
 					version,
 				});
-				// In benchmarks, the full Groth16 pairing computation has already run
-				// (deserialization succeeded, pairing was computed) so the measured
-				// weight is accurate. We only skip the error return so the benchmark
-				// runner can record the weight; production behaviour is unchanged.
-				#[cfg(not(feature = "runtime-benchmarks"))]
+				// Benchmarks feed dummy proofs that never verify; skipping the error
+				// return lets the runner record the weight (the pairing already ran).
+				// Gated on `skip-proof-verification`, NOT `runtime-benchmarks`, so a
+				// release runtime never disables the error path. See integrity_test.
+				#[cfg(not(feature = "skip-proof-verification"))]
 				return Err(Error::<T>::VerificationFailed.into());
 			}
 
@@ -349,6 +366,7 @@ pub mod pallet {
 					entry.verification_key.len() >= 256,
 					Error::<T>::InvalidVerificationKey
 				);
+				Self::ensure_vk_arity(entry.circuit_id, &entry.verification_key)?;
 				// Same silent-overwrite protection as single register.
 				ensure!(
 					!VerificationKeys::<T>::contains_key(entry.circuit_id, entry.version),
@@ -386,6 +404,25 @@ pub mod pallet {
 			Ok(())
 		}
 	}
+
+	impl<T: Config> Pallet<T> {
+		/// Verify the VK deserializes as a BN254 Groth16 key and, for known circuits,
+		/// that its arity matches. Unknown circuits are only checked to deserialize.
+		fn ensure_vk_arity(circuit_id: CircuitId, key_data: &[u8]) -> DispatchResult {
+			use orbinum_zk_verifier::{VerifyingKey, expected_public_inputs};
+
+			let vk = VerifyingKey::new(key_data.to_vec());
+			let arity = vk
+				.num_public_inputs()
+				.map_err(|_| Error::<T>::InvalidVerificationKey)?;
+
+			// circuit ids fit in u8 for the known set.
+			if let Some(expected) = expected_public_inputs(circuit_id.0 as u8) {
+				ensure!(arity == expected, Error::<T>::InvalidVerificationKey);
+			}
+			Ok(())
+		}
+	}
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -399,6 +436,7 @@ mod tests {
 		types::{ProofSystem, VkEntry},
 	};
 	use frame_support::{BoundedVec, assert_err, assert_noop, assert_ok};
+	use orbinum_zk_verifier::{TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS};
 	use sp_io::TestExternalities;
 	use sp_runtime::BuildStorage;
 
@@ -415,8 +453,31 @@ mod tests {
 	}
 
 	/// Minimum valid VK: 300 bytes is well above the 256-byte floor.
+	/// A serialized BN254 Groth16 VK with `arity` public inputs. Registration now
+	/// validates arity, so tests need a key that deserializes and matches.
+	fn real_vk(arity: usize) -> BoundedVec<u8, frame_support::traits::ConstU32<8192>> {
+		use ark_bn254::{Bn254, G1Affine, G2Affine};
+		use ark_ec::AffineRepr;
+		use ark_groth16::VerifyingKey as ArkVk;
+		use orbinum_zk_verifier::VerifyingKey;
+
+		let vk = ArkVk::<Bn254> {
+			alpha_g1: G1Affine::generator(),
+			beta_g2: G2Affine::generator(),
+			gamma_g2: G2Affine::generator(),
+			delta_g2: G2Affine::generator(),
+			gamma_abc_g1: (0..=arity).map(|_| G1Affine::generator()).collect(),
+		};
+		VerifyingKey::from_ark_vk(&vk)
+			.unwrap()
+			.bytes
+			.try_into()
+			.expect("serialized VK fits in 8192 bytes")
+	}
+
+	/// VK for the TRANSFER circuit (arity 5) — the default used by most tests.
 	fn vk_bytes() -> BoundedVec<u8, frame_support::traits::ConstU32<8192>> {
-		vec![0xABu8; 300].try_into().unwrap()
+		real_vk(TRANSFER_PUBLIC_INPUTS)
 	}
 
 	fn vk_too_short() -> BoundedVec<u8, frame_support::traits::ConstU32<8192>> {
@@ -474,10 +535,13 @@ mod tests {
 	}
 
 	fn make_vk_entry(circuit_id: CircuitId, version: u32, set_active: bool) -> VkEntry {
+		// Use a VK whose arity matches the circuit (validated on register).
+		let arity = orbinum_zk_verifier::expected_public_inputs(circuit_id.0 as u8)
+			.unwrap_or(TRANSFER_PUBLIC_INPUTS);
 		VkEntry {
 			circuit_id,
 			version,
-			verification_key: vk_bytes(),
+			verification_key: real_vk(arity),
 			set_active,
 		}
 	}
@@ -526,6 +590,29 @@ mod tests {
 				),
 				Error::<Test>::InvalidVerificationKey
 			);
+		});
+	}
+
+	#[test]
+	fn register_vk_rejects_wrong_arity() {
+		new_test_ext().execute_with(|| {
+			// TRANSFER expects 5 public inputs; a VK built for 7 must be rejected.
+			assert_noop!(
+				ZkVerifier::register_verification_key(
+					root().into(),
+					CircuitId::TRANSFER,
+					1,
+					real_vk(UNSHIELD_PUBLIC_INPUTS)
+				),
+				Error::<Test>::InvalidVerificationKey
+			);
+			// The matching arity is accepted.
+			assert_ok!(ZkVerifier::register_verification_key(
+				root().into(),
+				CircuitId::TRANSFER,
+				1,
+				real_vk(TRANSFER_PUBLIC_INPUTS)
+			));
 		});
 	}
 
@@ -606,7 +693,7 @@ mod tests {
 				root().into(),
 				CircuitId::UNSHIELD,
 				1,
-				vk_bytes()
+				real_vk(UNSHIELD_PUBLIC_INPUTS)
 			));
 			assert!(VerificationKeys::<Test>::contains_key(
 				CircuitId::TRANSFER,
@@ -814,6 +901,14 @@ mod tests {
 	}
 
 	#[test]
+	fn verify_proof_weight_grows_with_inputs() {
+		use crate::weights::WeightInfo;
+		type W = crate::weights::SubstrateWeight<Test>;
+		assert!(W::verify_proof(8).ref_time() > W::verify_proof(1).ref_time());
+		assert!(W::verify_proof(32).ref_time() > W::verify_proof(8).ref_time());
+	}
+
+	#[test]
 	fn verify_proof_no_active_version_returns_circuit_not_found() {
 		new_test_ext().execute_with(|| {
 			assert_noop!(
@@ -900,20 +995,22 @@ mod tests {
 	}
 
 	#[test]
-	fn verify_proof_truncates_short_public_input_to_32_bytes() {
-		// A short (<32 B) input is padded with trailing zeros and accepted.
+	fn verify_proof_rejects_short_public_input() {
 		new_test_ext().execute_with(|| {
 			insert_vk(CircuitId::UNSHIELD, 1);
 			activate(CircuitId::UNSHIELD, 1);
 			let short: BoundedVec<u8, frame_support::traits::ConstU32<32>> =
 				vec![0xFFu8; 4].try_into().unwrap();
 			let inputs: PublicInputs = vec![short].try_into().unwrap();
-			assert_ok!(ZkVerifier::verify_proof(
-				signed().into(),
-				CircuitId::UNSHIELD,
-				proof_bytes(),
-				inputs
-			));
+			assert_noop!(
+				ZkVerifier::verify_proof(
+					signed().into(),
+					CircuitId::UNSHIELD,
+					proof_bytes(),
+					inputs
+				),
+				Error::<Test>::InvalidPublicInputs
+			);
 		});
 	}
 
@@ -1165,7 +1262,7 @@ mod tests {
 			activate(CircuitId::TRANSFER, 1);
 			let info = Pallet::<Test>::runtime_api_get_circuit_version_info(CircuitId::TRANSFER.0)
 				.unwrap();
-			let expected_hash = sp_io::hashing::blake2_256(&vec![0xABu8; 300]);
+			let expected_hash = sp_io::hashing::blake2_256(&vk_bytes());
 			assert_eq!(info.vk_hashes[0].vk_hash, expected_hash);
 			assert_eq!(info.vk_hashes[0].version, 1u32);
 		});
@@ -1263,5 +1360,19 @@ mod tests {
 				Some(1u32)
 			);
 		});
+	}
+
+	// The integrity_test must abort when verification is compiled out WITHOUT the
+	// benchmark feature — i.e. a would-be release runtime with no verification. Only
+	// compiles in that exact combination (skip on, benchmarks off).
+	#[cfg(all(
+		feature = "skip-proof-verification",
+		not(feature = "runtime-benchmarks")
+	))]
+	#[test]
+	#[should_panic(expected = "skip-proof-verification")]
+	fn integrity_test_panics_when_verification_disabled() {
+		use frame_support::traits::Hooks;
+		<ZkVerifier as Hooks<frame_system::pallet_prelude::BlockNumberFor<Test>>>::integrity_test();
 	}
 }

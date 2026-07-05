@@ -2,6 +2,21 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.8.3] - 2026-07-04
+
+### Security
+
+- Proof verification for `shield`/`unshield`/`private_transfer`/fee paths is no
+  longer bypassed by `runtime-benchmarks`. The bypass now lives behind a dedicated
+  `skip-proof-verification` feature that `runtime-benchmarks` does NOT enable, so a
+  release runtime exposing benchmarks still verifies proofs. An `integrity_test`
+  panics at runtime construction if the bypass feature is compiled into a live
+  runtime. Mirrors the same change in `pallet-zk-verifier`.
+
+### Changed
+
+- Regenerated FRAME benchmark weights on reference hardware.
+
 ## [0.8.2] - 2026-06-01
 
 ### Changed
@@ -12,8 +27,8 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 
 ### Added
 
-- `benchmarking.rs`: nuevo bloque `#[benchmark] fn claim_shielded_fees()` — primer weight real medido (~690 µs en CCX33). El placeholder anterior era 70 µs (10× subestimado).
-- `operations/fees.rs`: guard `#[cfg(not(feature = "runtime-benchmarks"))]` en la llamada a `verify_value_proof` para evitar `CircuitNotFound` durante el benchmark (mismo patrón que `verify_proof` en pallet-zk-verifier).
+- `benchmarking.rs`: added a new `#[benchmark] fn claim_shielded_fees()` benchmark. This is the first real measured weight (~690 µs on a CCX33). The previous placeholder was 70 µs, underestimating the actual execution time by nearly 10×.
+- `operations/fees.rs`: added a `#[cfg(not(feature = "runtime-benchmarks"))]` guard around the `verify_value_proof` call to prevent `CircuitNotFound` during benchmarking, following the same pattern used for `verify_proof` in `pallet-zk-verifier`.
 
 ### Changed
 

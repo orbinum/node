@@ -6,7 +6,7 @@ use crate::{
 };
 use frame_support::{BoundedVec, pallet_prelude::*, traits::Currency};
 use pallet_relayer::RelayerInterface as _;
-#[cfg(not(feature = "runtime-benchmarks"))]
+#[cfg(not(feature = "skip-proof-verification"))]
 use pallet_zk_verifier::ZkVerifierPort;
 use sp_runtime::{SaturatedConversion, traits::Zero};
 
@@ -70,7 +70,7 @@ impl PrivateTransferOperation {
 		ensure!(fee >= min_fee, Error::<T>::FeeTooLow);
 		let fee_u128: u128 = fee.saturated_into();
 
-		#[cfg(not(feature = "runtime-benchmarks"))]
+		#[cfg(not(feature = "skip-proof-verification"))]
 		{
 			let valid = T::ZkVerifier::verify_transfer_proof(
 				&proof,
@@ -85,7 +85,7 @@ impl PrivateTransferOperation {
 			ensure!(valid, Error::<T>::ProofVerificationFailed);
 		}
 
-		#[cfg(feature = "runtime-benchmarks")]
+		#[cfg(feature = "skip-proof-verification")]
 		{
 			let _ = nullifier_arrays;
 			let _ = commitment_arrays;

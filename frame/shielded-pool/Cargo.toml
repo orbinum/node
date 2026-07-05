@@ -1,6 +1,6 @@
 [package]
 name = "pallet-shielded-pool"
-version = "0.8.2"
+version = "0.8.3"
 description = "Shielded pool pallet for private transactions using ZK proofs"
 authors = ["Orbinum Team"]
 license = "GPL-3.0-or-later"
@@ -75,7 +75,9 @@ runtime-benchmarks = [
 	"frame-benchmarking/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
+	"pallet-zk-verifier/runtime-benchmarks",
 ]
+skip-proof-verification = ["pallet-zk-verifier/skip-proof-verification"]
 try-runtime = [
 	"frame-support/try-runtime",
 	"frame-system/try-runtime",

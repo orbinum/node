@@ -1,7 +1,5 @@
 //! Groth16 proof verifier — stateless, all methods are static.
 
-use alloc::vec::Vec;
-
 use ark_bn254::Bn254;
 use ark_groth16::{Groth16, PreparedVerifyingKey};
 
@@ -53,93 +51,6 @@ impl Groth16Verifier {
 	/// Estimate the weight cost for verifying a proof with `num_public_inputs` inputs.
 	pub fn estimate_verification_cost(num_public_inputs: usize) -> u64 {
 		BASE_VERIFICATION_COST + (num_public_inputs as u64 * PER_INPUT_COST)
-	}
-
-	/// Batch-verify multiple proofs against the same circuit VK.
-	///
-	/// Significantly more efficient than individual calls due to pairing batching.
-	/// Returns `Ok(true)` if all proofs are valid, `Ok(false)` if any fail,
-	/// `Err` if inputs are malformed.
-	pub fn batch_verify(
-		vk: &VerifyingKey,
-		public_inputs: &[PublicInputs],
-		proofs: &[Proof],
-	) -> Result<bool, VerifierError> {
-		use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup, PrimeGroup};
-		use ark_ff::{Field, PrimeField};
-		use ark_std::Zero;
-		use sha2::{Digest, Sha256};
-
-		if public_inputs.len() != proofs.len() {
-			return Err(VerifierError::VerificationFailed);
-		}
-
-		if proofs.is_empty() {
-			return Ok(true);
-		}
-
-		let pvk = vk.prepare()?;
-
-		let mut ark_proofs = Vec::with_capacity(proofs.len());
-		for proof in proofs {
-			ark_proofs.push(proof.to_ark_proof()?);
-		}
-
-		let mut all_inputs = Vec::with_capacity(public_inputs.len());
-		for inputs in public_inputs {
-			all_inputs.push(inputs.to_field_elements()?);
-		}
-
-		let mut total_r = <Bn254 as Pairing>::ScalarField::zero();
-		let mut combined_inputs = <Bn254 as Pairing>::G1::zero();
-		let mut combined_c = <Bn254 as Pairing>::G1::zero();
-
-		let mut g1_prepared = Vec::with_capacity(proofs.len() + 2);
-		let mut g2_prepared = Vec::with_capacity(proofs.len() + 2);
-
-		for (index, (inputs, proof)) in all_inputs.iter().zip(ark_proofs.iter()).enumerate() {
-			let mut hasher = Sha256::new();
-			hasher.update(b"orbinum-zk-verifier-batch-v1");
-			hasher.update(vk.as_bytes());
-			hasher.update((index as u64).to_le_bytes());
-			hasher.update(proofs[index].as_bytes());
-			for input in &public_inputs[index].inputs {
-				hasher.update(input);
-			}
-			let digest = hasher.finalize();
-			let mut r = <Bn254 as Pairing>::ScalarField::from_le_bytes_mod_order(&digest);
-			if r.is_zero() {
-				r = <Bn254 as Pairing>::ScalarField::from(1u64);
-			}
-			let r_bigint = r.into_bigint();
-			total_r += r;
-
-			let r_a = proof.a.mul_bigint(r_bigint);
-			g1_prepared.push(<Bn254 as Pairing>::G1Prepared::from(r_a.into_affine()));
-			g2_prepared.push(<Bn254 as Pairing>::G2Prepared::from(proof.b));
-
-			let prepared_inputs = Groth16::<Bn254>::prepare_inputs(&pvk, inputs)
-				.map_err(|_| VerifierError::VerificationFailed)?;
-			combined_inputs += prepared_inputs.mul_bigint(r_bigint);
-			combined_c += proof.c.mul_bigint(r_bigint);
-		}
-
-		g1_prepared.push(<Bn254 as Pairing>::G1Prepared::from(
-			combined_inputs.into_affine(),
-		));
-		g2_prepared.push(pvk.gamma_g2_neg_pc.clone());
-
-		g1_prepared.push(<Bn254 as Pairing>::G1Prepared::from(
-			combined_c.into_affine(),
-		));
-		g2_prepared.push(pvk.delta_g2_neg_pc.clone());
-
-		let qap = <Bn254 as Pairing>::multi_miller_loop(g1_prepared, g2_prepared);
-		let test = <Bn254 as Pairing>::final_exponentiation(qap)
-			.ok_or(VerifierError::VerificationFailed)?;
-
-		let target = pvk.alpha_g1_beta_g2.pow(total_r.into_bigint());
-		Ok(test.0 == target)
 	}
 }
 
@@ -311,77 +222,23 @@ mod tests {
 		.is_err());
 	}
 
-	// ─── batch_verify ────────────────────────────────────────────────────
+	// ─── num_public_inputs ───────────────────────────────────────────────
 
 	#[test]
-	fn test_batch_verify_empty_arrays() {
-		let vk_wrapper = VerifyingKey::from_ark_vk(&create_mock_ark_vk(5)).unwrap();
-		assert!(Groth16Verifier::batch_verify(&vk_wrapper, &[], &[]).unwrap());
+	fn num_public_inputs_matches_vk_arity() {
+		for count in [0usize, 1, 2, 4, 5, 7] {
+			let vk = VerifyingKey::from_ark_vk(&create_mock_ark_vk(count)).unwrap();
+			assert_eq!(vk.num_public_inputs().unwrap(), count);
+		}
 	}
 
 	#[test]
-	fn test_batch_verify_mismatched_lengths() {
-		let vk_wrapper = VerifyingKey::from_ark_vk(&create_mock_ark_vk(5)).unwrap();
-		let result = Groth16Verifier::batch_verify(
-			&vk_wrapper,
-			&alloc::vec![create_mock_inputs(5)],
-			&alloc::vec![create_mock_proof(), create_mock_proof()],
-		);
-		assert!(matches!(result, Err(VerifierError::VerificationFailed)));
-	}
-
-	#[test]
-	fn test_batch_verify_single_proof() {
-		let vk_wrapper = VerifyingKey::from_ark_vk(&create_mock_ark_vk(5)).unwrap();
-		let result = Groth16Verifier::batch_verify(
-			&vk_wrapper,
-			&alloc::vec![create_mock_inputs(5)],
-			&alloc::vec![create_mock_proof()],
-		);
-		assert!(result.is_ok());
-		assert!(!result.unwrap());
-	}
-
-	#[test]
-	fn test_batch_verify_multiple_proofs() {
-		let vk_wrapper = VerifyingKey::from_ark_vk(&create_mock_ark_vk(5)).unwrap();
-		let result = Groth16Verifier::batch_verify(
-			&vk_wrapper,
-			&alloc::vec![
-				create_mock_inputs(5),
-				create_mock_inputs(5),
-				create_mock_inputs(5)
-			],
-			&alloc::vec![
-				create_mock_proof(),
-				create_mock_proof(),
-				create_mock_proof()
-			],
-		);
-		assert!(result.is_ok());
-		assert!(!result.unwrap());
-	}
-
-	#[test]
-	fn test_batch_verify_with_invalid_proof() {
-		let vk_wrapper = VerifyingKey::from_ark_vk(&create_mock_ark_vk(5)).unwrap();
-		let result = Groth16Verifier::batch_verify(
-			&vk_wrapper,
-			&alloc::vec![create_mock_inputs(5), create_mock_inputs(5)],
-			&alloc::vec![create_mock_proof(), Proof::new(alloc::vec![0u8; 3])],
-		);
-		assert!(result.is_err());
-	}
-
-	#[test]
-	fn test_batch_verify_input_count_mismatch() {
-		let vk_wrapper = VerifyingKey::from_ark_vk(&create_mock_ark_vk(5)).unwrap();
-		let result = Groth16Verifier::batch_verify(
-			&vk_wrapper,
-			&alloc::vec![create_mock_inputs(3), create_mock_inputs(3)],
-			&alloc::vec![create_mock_proof(), create_mock_proof()],
-		);
-		assert!(result.is_err());
+	fn num_public_inputs_errors_on_malformed_vk() {
+		let vk = VerifyingKey::new(alloc::vec![0u8; 10]);
+		assert!(matches!(
+			vk.num_public_inputs(),
+			Err(VerifierError::InvalidVerifyingKey)
+		));
 	}
 
 	// ─── integration ─────────────────────────────────────────────────────
@@ -393,20 +250,5 @@ mod tests {
 			let wrapper = VerifyingKey::from_ark_vk(&vk).unwrap();
 			assert!(wrapper.prepare().is_ok());
 		}
-	}
-
-	#[test]
-	fn test_verify_and_batch_verify_consistency() {
-		let vk_wrapper = VerifyingKey::from_ark_vk(&create_mock_ark_vk(5)).unwrap();
-		let inputs = create_mock_inputs(5);
-		let proof = create_mock_proof();
-
-		let single_result = Groth16Verifier::verify(&vk_wrapper, &inputs, &proof);
-		let batch_result =
-			Groth16Verifier::batch_verify(&vk_wrapper, &alloc::vec![inputs], &alloc::vec![proof]);
-
-		assert!(single_result.is_err());
-		assert!(batch_result.is_ok());
-		assert!(!batch_result.unwrap());
 	}
 }

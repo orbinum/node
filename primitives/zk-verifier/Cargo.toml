@@ -1,6 +1,6 @@
 [package]
 name = "orbinum-zk-verifier"
-version = "1.1.0"
+version = "1.2.0"
 authors = ["Orbinum Network <contact@orbinum.net>"]
 edition = "2021"
 publish = false
@@ -36,9 +36,10 @@ scale-info = { version = "2.11", default-features = false, features = ["derive"]
 
 # For parsing verification key from JSON (std only)
 num-bigint = { version = "0.4", default-features = false, optional = true }
-sha2 = { version = "0.10", default-features = false }
 
 [dev-dependencies]
+# Groth16 prover (r1cs feature) to generate a real proof in tests.
+ark-groth16 = { version = "0.5.0", default-features = false, features = ["r1cs"] }
 ark-relations = { version = "0.5.0", default-features = false }
 ark-snark = { version = "0.5.0", default-features = false }
 ark-std = { version = "0.5.0", default-features = false, features = ["std"] }

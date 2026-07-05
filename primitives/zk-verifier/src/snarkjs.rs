@@ -9,7 +9,6 @@ use crate::{Proof, PublicInputs, VerifierError};
 #[cfg(feature = "std")]
 use {
 	ark_bn254::{Fq, Fq2, G1Affine, G2Affine},
-	ark_ff::PrimeField,
 	ark_groth16::Proof as ArkProof,
 	num_bigint::BigUint,
 };
@@ -40,25 +39,28 @@ pub struct SnarkjsProofPoints<'a> {
 pub fn parse_proof_from_snarkjs(points: SnarkjsProofPoints) -> Result<Proof, VerifierError> {
 	use ark_bn254::Bn254;
 
-	// Parse point A (G1)
-	let a = G1Affine::new(parse_fq(points.a_x), parse_fq(points.a_y));
-
-	// Parse point B (G2)
-	// snarkjs exports coordinates in [c0, c1] order and this adapter maps
-	// them directly to arkworks Fq2::new(c0, c1).
-	let b = G2Affine::new(
-		Fq2::new(parse_fq(points.b_x0), parse_fq(points.b_x1)),
-		Fq2::new(parse_fq(points.b_y0), parse_fq(points.b_y1)),
+	// Build points unchecked, then validate on-curve/subgroup — `new` would panic.
+	let a = G1Affine::new_unchecked(parse_fq(points.a_x)?, parse_fq(points.a_y)?);
+	// snarkjs exports G2 coordinates in [c0, c1] order → Fq2::new(c0, c1).
+	let b = G2Affine::new_unchecked(
+		Fq2::new(parse_fq(points.b_x0)?, parse_fq(points.b_x1)?),
+		Fq2::new(parse_fq(points.b_y0)?, parse_fq(points.b_y1)?),
 	);
+	let c = G1Affine::new_unchecked(parse_fq(points.c_x)?, parse_fq(points.c_y)?);
 
-	// Parse point C (G1)
-	let c = G1Affine::new(parse_fq(points.c_x), parse_fq(points.c_y));
+	for on_curve in [a.is_on_curve(), b.is_on_curve(), c.is_on_curve()] {
+		if !on_curve {
+			return Err(VerifierError::InvalidProof);
+		}
+	}
+	if !a.is_in_correct_subgroup_assuming_on_curve()
+		|| !b.is_in_correct_subgroup_assuming_on_curve()
+		|| !c.is_in_correct_subgroup_assuming_on_curve()
+	{
+		return Err(VerifierError::InvalidProof);
+	}
 
-	// Create arkworks proof
-	let ark_proof = ArkProof::<Bn254> { a, b, c };
-
-	// Convert to our Proof type
-	Proof::from_ark_proof(&ark_proof)
+	Proof::from_ark_proof(&ArkProof::<Bn254> { a, b, c })
 }
 
 /// Parse public inputs from snarkjs JSON format
@@ -71,46 +73,32 @@ pub fn parse_proof_from_snarkjs(points: SnarkjsProofPoints) -> Result<Proof, Ver
 pub fn parse_public_inputs_from_snarkjs(
 	input_strings: &[&str],
 ) -> Result<PublicInputs, VerifierError> {
-	use ark_ff::{BigInteger, PrimeField};
+	let fields: Result<Vec<_>, _> = input_strings.iter().map(|s| parse_fr(s)).collect();
+	Ok(PublicInputs::from_field_elements(&fields?))
+}
 
-	let inputs: Result<Vec<_>, _> = input_strings
-		.iter()
-		.map(|s| {
-			let field = parse_fr(s);
-
-			// Convert to bytes (big-endian)
-			let mut bytes = [0u8; 32];
-			let elem_bytes = field.into_bigint().to_bytes_be();
-			let start = 32 - elem_bytes.len();
-			bytes[start..].copy_from_slice(&elem_bytes);
-
-			Ok(bytes)
-		})
-		.collect();
-
-	Ok(PublicInputs::new(inputs?))
+/// Parse a decimal string into a field element, rejecting non-canonical values
+/// (`>= modulus`). Returns `err` for a non-decimal or out-of-range value, so a
+/// coordinate is never silently reduced. Reduction on a `< modulus` value is exact.
+#[cfg(feature = "std")]
+fn parse_canonical<F: ark_ff::PrimeField>(s: &str, err: VerifierError) -> Result<F, VerifierError> {
+	use ark_ff::BigInteger;
+	let value = BigUint::parse_bytes(s.as_bytes(), 10).ok_or_else(|| err.clone())?;
+	let modulus = BigUint::from_bytes_le(&F::MODULUS.to_bytes_le());
+	if value >= modulus {
+		return Err(err);
+	}
+	Ok(F::from_le_bytes_mod_order(&value.to_bytes_le()))
 }
 
 #[cfg(feature = "std")]
-fn parse_fq(s: &str) -> Fq {
-	let bigint = BigUint::parse_bytes(s.as_bytes(), 10).expect("Invalid field element string");
-
-	let bytes = bigint.to_bytes_le();
-	let mut bytes_32 = [0u8; 32];
-	bytes_32[..bytes.len().min(32)].copy_from_slice(&bytes[..bytes.len().min(32)]);
-
-	Fq::from_le_bytes_mod_order(&bytes_32)
+fn parse_fq(s: &str) -> Result<Fq, VerifierError> {
+	parse_canonical(s, VerifierError::InvalidProof)
 }
 
 #[cfg(feature = "std")]
-fn parse_fr(s: &str) -> ark_bn254::Fr {
-	let bigint = BigUint::parse_bytes(s.as_bytes(), 10).expect("Invalid field element string");
-
-	let bytes = bigint.to_bytes_le();
-	let mut bytes_32 = [0u8; 32];
-	bytes_32[..bytes.len().min(32)].copy_from_slice(&bytes[..bytes.len().min(32)]);
-
-	ark_bn254::Fr::from_le_bytes_mod_order(&bytes_32)
+fn parse_fr(s: &str) -> Result<ark_bn254::Fr, VerifierError> {
+	parse_canonical(s, VerifierError::InvalidPublicInput)
 }
 
 #[cfg(all(test, feature = "std"))]
@@ -131,12 +119,10 @@ mod tests {
 
 	#[test]
 	fn test_parse_public_inputs_single_value() {
-		let input_strings = ["42"];
-		let result = parse_public_inputs_from_snarkjs(&input_strings);
-		assert!(result.is_ok());
-
-		let inputs = result.unwrap();
+		let inputs = parse_public_inputs_from_snarkjs(&["42"]).unwrap();
 		assert_eq!(inputs.len(), 1);
+		let fields = inputs.to_field_elements().unwrap();
+		assert_eq!(fields[0], ark_bn254::Fr::from(42u64));
 	}
 
 	#[test]
@@ -152,15 +138,25 @@ mod tests {
 
 	#[test]
 	fn test_parse_public_inputs_large_values() {
+		// p - 1 is the largest canonical scalar; it must parse.
 		let input_strings = [
 			"1000000000000000000000",
-			"21888242871839275222246405745257275088548364400416034343698204186575808495617",
+			"21888242871839275222246405745257275088548364400416034343698204186575808495616",
 		];
 		let result = parse_public_inputs_from_snarkjs(&input_strings);
 		assert!(result.is_ok(), "Should parse large valid values");
 
 		let inputs = result.unwrap();
 		assert_eq!(inputs.len(), 2);
+	}
+
+	#[test]
+	fn test_parse_public_inputs_rejects_modulus() {
+		// p itself (== 0 mod p) is non-canonical → rejected, not reduced.
+		let result = parse_public_inputs_from_snarkjs(&[
+			"21888242871839275222246405745257275088548364400416034343698204186575808495617",
+		]);
+		assert_eq!(result, Err(VerifierError::InvalidPublicInput));
 	}
 
 	#[test]
@@ -184,24 +180,21 @@ mod tests {
 	}
 
 	#[test]
-	#[should_panic(expected = "Invalid field element string")]
 	fn test_parse_public_inputs_invalid_string() {
-		let input_strings = ["not_a_number", "123"];
-		let _ = parse_public_inputs_from_snarkjs(&input_strings);
+		let result = parse_public_inputs_from_snarkjs(&["not_a_number", "123"]);
+		assert_eq!(result, Err(VerifierError::InvalidPublicInput));
 	}
 
 	#[test]
-	#[should_panic(expected = "Invalid field element string")]
 	fn test_parse_public_inputs_negative_number() {
-		let input_strings = ["-123"];
-		let _ = parse_public_inputs_from_snarkjs(&input_strings);
+		let result = parse_public_inputs_from_snarkjs(&["-123"]);
+		assert_eq!(result, Err(VerifierError::InvalidPublicInput));
 	}
 
 	#[test]
-	#[should_panic(expected = "Invalid field element string")]
 	fn test_parse_public_inputs_hex_without_prefix() {
-		let input_strings = ["0xabc123"];
-		let _ = parse_public_inputs_from_snarkjs(&input_strings);
+		let result = parse_public_inputs_from_snarkjs(&["0xabc123"]);
+		assert_eq!(result, Err(VerifierError::InvalidPublicInput));
 	}
 
 	// === parse_proof_from_snarkjs Tests ===
@@ -228,7 +221,6 @@ mod tests {
 	}
 
 	#[test]
-	#[should_panic(expected = "Invalid field element string")]
 	fn test_parse_proof_invalid_a_x() {
 		let proof_points = SnarkjsProofPoints {
 			a_x: "invalid",
@@ -241,11 +233,13 @@ mod tests {
 			c_y: "17070758087329749108157075328504249625824445825715061802638610182418487497999",
 		};
 
-		let _ = parse_proof_from_snarkjs(proof_points);
+		assert_eq!(
+			parse_proof_from_snarkjs(proof_points),
+			Err(VerifierError::InvalidProof)
+		);
 	}
 
 	#[test]
-	#[should_panic(expected = "Invalid field element string")]
 	fn test_parse_proof_invalid_b_coordinate() {
 		let proof_points = SnarkjsProofPoints {
 			a_x: "19310665078306784406662215815651232366118953555532993625404293661707393313612",
@@ -258,11 +252,13 @@ mod tests {
 			c_y: "17070758087329749108157075328504249625824445825715061802638610182418487497999",
 		};
 
-		let _ = parse_proof_from_snarkjs(proof_points);
+		assert_eq!(
+			parse_proof_from_snarkjs(proof_points),
+			Err(VerifierError::InvalidProof)
+		);
 	}
 
 	#[test]
-	#[should_panic(expected = "Invalid field element string")]
 	fn test_parse_proof_invalid_c_y() {
 		let proof_points = SnarkjsProofPoints {
 			a_x: "19310665078306784406662215815651232366118953555532993625404293661707393313612",
@@ -275,58 +271,55 @@ mod tests {
 			c_y: "",
 		};
 
-		let _ = parse_proof_from_snarkjs(proof_points);
+		assert_eq!(
+			parse_proof_from_snarkjs(proof_points),
+			Err(VerifierError::InvalidProof)
+		);
 	}
 
 	// === Helper Function Tests ===
 
 	#[test]
 	fn test_parse_fq_valid() {
-		let result = parse_fq("123");
-		// Should not panic
-		let _ = result;
+		assert!(parse_fq("123").is_ok());
+		assert!(parse_fq("0").is_ok());
+		assert!(parse_fq(
+			"21888242871839275222246405745257275088548364400416034343698204186575808495616"
+		)
+		.is_ok());
 	}
 
 	#[test]
-	fn test_parse_fq_zero() {
-		let result = parse_fq("0");
-		// Should successfully parse zero
-		let _ = result;
-	}
-
-	#[test]
-	fn test_parse_fq_large_value() {
-		let result = parse_fq(
-			"21888242871839275222246405745257275088548364400416034343698204186575808495616",
-		);
-		// Should handle large field values
-		let _ = result;
-	}
-
-	#[test]
-	#[should_panic(expected = "Invalid field element string")]
 	fn test_parse_fq_invalid() {
-		let _ = parse_fq("not_a_number");
+		assert_eq!(parse_fq("not_a_number"), Err(VerifierError::InvalidProof));
+	}
+
+	#[test]
+	fn test_parse_fq_rejects_non_canonical() {
+		// q (the Fq modulus) and q+1 are >= modulus → rejected, not reduced.
+		let q = "21888242871839275222246405745257275088696311157297823662689037894645226208583";
+		let q_plus_1 =
+			"21888242871839275222246405745257275088696311157297823662689037894645226208584";
+		assert_eq!(parse_fq(q), Err(VerifierError::InvalidProof));
+		assert_eq!(parse_fq(q_plus_1), Err(VerifierError::InvalidProof));
+		// q - 1 is the largest canonical base-field value → accepted.
+		let q_minus_1 =
+			"21888242871839275222246405745257275088696311157297823662689037894645226208582";
+		assert!(parse_fq(q_minus_1).is_ok());
 	}
 
 	#[test]
 	fn test_parse_fr_valid() {
-		let result = parse_fr("456");
-		// Should not panic
-		let _ = result;
+		assert!(parse_fr("456").is_ok());
+		assert!(parse_fr("0").is_ok());
 	}
 
 	#[test]
-	fn test_parse_fr_zero() {
-		let result = parse_fr("0");
-		// Should successfully parse zero
-		let _ = result;
-	}
-
-	#[test]
-	#[should_panic(expected = "Invalid field element string")]
 	fn test_parse_fr_invalid() {
-		let _ = parse_fr("invalid_input");
+		assert_eq!(
+			parse_fr("invalid_input"),
+			Err(VerifierError::InvalidPublicInput)
+		);
 	}
 
 	// === SnarkjsProofPoints Structure Test ===

@@ -14,7 +14,6 @@
 
 extern crate alloc;
 
-mod field_utils;
 mod snarkjs;
 mod types;
 mod verifier;
@@ -26,14 +25,13 @@ pub use ark_bn254::Bn254;
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-pub use field_utils::{bytes_to_field, field_to_bytes, field_to_u64, u64_to_field};
 pub use snarkjs::SnarkjsProofPoints;
 #[cfg(feature = "std")]
 pub use snarkjs::{parse_proof_from_snarkjs, parse_public_inputs_from_snarkjs};
 pub use types::{
-	Proof, PublicInputs, VerifierError, VerifyingKey, BASE_VERIFICATION_COST,
-	CIRCUIT_ID_PRIVATE_LINK, CIRCUIT_ID_TRANSFER, CIRCUIT_ID_UNSHIELD, CIRCUIT_ID_VALUE_PROOF,
-	MAX_PUBLIC_INPUTS, PER_INPUT_COST, PRIVATE_LINK_PUBLIC_INPUTS, TRANSFER_PUBLIC_INPUTS,
-	UNSHIELD_PUBLIC_INPUTS, VALUE_PROOF_PUBLIC_INPUTS,
+	expected_public_inputs, Proof, PublicInputs, VerifierError, VerifyingKey,
+	BASE_VERIFICATION_COST, CIRCUIT_ID_PRIVATE_LINK, CIRCUIT_ID_TRANSFER, CIRCUIT_ID_UNSHIELD,
+	CIRCUIT_ID_VALUE_PROOF, MAX_PUBLIC_INPUTS, PER_INPUT_COST, PRIVATE_LINK_PUBLIC_INPUTS,
+	TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS, VALUE_PROOF_PUBLIC_INPUTS,
 };
 pub use verifier::Groth16Verifier;
