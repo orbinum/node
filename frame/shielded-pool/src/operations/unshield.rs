@@ -125,6 +125,10 @@ impl UnshieldOperation {
 			}
 		}
 
+		// Decrement only `amount`: the `fee` tokens stay physically in the pool as
+		// backing for the pending relayer fee, so the tracked balance must retain
+		// them too. This is correct ONLY because the guard above requires
+		// `>= amount + fee`; do not weaken it to `>= amount` or fees go unbacked.
 		PoolBalanceRepository::decrease_balance::<T>(asset_id, amount);
 
 		// Insert the change note commitment into the Merkle tree (partial unshield).
@@ -742,6 +746,177 @@ mod tests {
 			));
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 			assert!(UnshieldOperation::is_merkle_root_known::<Test>(&KNOWN_ROOT));
+		});
+	}
+
+	// ── SP-1 ledger-solvency invariant ───────────────────────────────────────
+	// Invariant (A): PoolBalancePerAsset[a] == Currency::free_balance(pool) for the
+	// native asset. Fees stay physically in the pool until their note is unshielded,
+	// so tracked and physical always move together.
+
+	fn pool_physical() -> u128 {
+		<pallet_balances::Pallet<Test> as Currency<u64>>::free_balance(
+			&crate::Pallet::<Test>::pool_account_id(),
+		)
+	}
+
+	fn tracked(asset_id: u32) -> u128 {
+		PoolBalanceRepository::get_asset_balance::<Test>(asset_id)
+	}
+
+	/// T2 — unshield with a fee decrements the ledger by `amount` only (the fee
+	/// stays physical as backing), and ledger == physical afterwards.
+	#[test]
+	fn unshield_with_fee_decrements_amount_only() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let (amount, fee) = (500u128, 50u128);
+			fund_pool(asset_id, amount + fee);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x21),
+				asset_id,
+				amount,
+				2u64,
+				fee,
+				[0u8; 32],
+				FrameEncryptedMemo::default(),
+				None,
+			));
+
+			// Only `amount` left the pool; `fee` stays as backing for pending fees.
+			assert_eq!(tracked(asset_id), fee);
+			assert_eq!(pool_physical(), fee);
+			assert_eq!(tracked(asset_id), pool_physical());
+			assert_eq!(crate::mock::mock_pending_fees_get(1u64, asset_id), fee);
+		});
+	}
+
+	/// T6 — the guard requires `>= amount + fee`: a pool covering only `amount`
+	/// (fee unbacked) must be rejected; covering `amount + fee` must succeed.
+	#[test]
+	fn unshield_guard_requires_amount_plus_fee() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let (amount, fee) = (500u128, 50u128);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			// Pool covers only `amount` → rejected.
+			fund_pool(asset_id, amount);
+			assert_noop!(
+				UnshieldOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifier(0x22),
+					asset_id,
+					amount,
+					2u64,
+					fee,
+					[0u8; 32],
+					FrameEncryptedMemo::default(),
+					None,
+				),
+				crate::pallet::Error::<Test>::InsufficientPoolBalance
+			);
+
+			// Pool covers `amount + fee` → accepted.
+			fund_pool(asset_id, amount + fee);
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x23),
+				asset_id,
+				amount,
+				2u64,
+				fee,
+				[0u8; 32],
+				FrameEncryptedMemo::default(),
+				None,
+			));
+		});
+	}
+
+	/// T1 + T4 — full fee lifecycle keeps ledger == physical at every step:
+	/// shield → unshield(with fee) → claim(mint fee note) → unshield(fee note).
+	#[test]
+	fn fee_lifecycle_preserves_ledger_invariant() {
+		use crate::operations::{fees::FeeOperation, shield::ShieldOperation};
+
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let memo = FrameEncryptedMemo::default();
+			let depositor: u64 = 7;
+			// Fund above the shield amount so KeepAlive leaves the ED intact.
+			let _ = <pallet_balances::Pallet<Test> as Currency<u64>>::deposit_creating(
+				&depositor, 2000,
+			);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			// Step 1: shield 1000. Ledger and physical both +1000.
+			assert_ok!(ShieldOperation::execute::<Test>(
+				depositor,
+				asset_id,
+				1000u128,
+				Commitment::new([0x31u8; 32]),
+				FrameEncryptedMemo::from_bytes(&[0u8; 176]).unwrap(),
+			));
+			assert_eq!(tracked(asset_id), pool_physical());
+			assert_eq!(tracked(asset_id), 1000);
+
+			// Step 2: unshield amount=700 fee=50. Only `amount` leaves; fee stays.
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x32),
+				asset_id,
+				700u128,
+				2u64,
+				50u128,
+				[0u8; 32],
+				memo.clone(),
+				None,
+			));
+			assert_eq!(tracked(asset_id), 300);
+			assert_eq!(tracked(asset_id), pool_physical());
+			assert_eq!(crate::mock::mock_pending_fees_get(1u64, asset_id), 50);
+
+			// Step 3: claim the 50 fee as a note. Ledger unchanged (same backing).
+			let fee_note = Commitment::new([0x33u8; 32]);
+			let mut signals = vec![0u8; 76];
+			signals[..32].copy_from_slice(&fee_note.0);
+			signals[32..40].copy_from_slice(&(50u64).to_le_bytes());
+			signals[40..44].copy_from_slice(&asset_id.to_le_bytes());
+			assert_ok!(FeeOperation::claim_shielded::<Test>(
+				1u64,
+				fee_note,
+				50u128,
+				asset_id,
+				crate::types::EncryptedMemo::from_bytes(&[0u8; 176]).unwrap(),
+				vec![0x01u8; 128],
+				signals,
+			));
+			assert_eq!(tracked(asset_id), 300);
+			assert_eq!(tracked(asset_id), pool_physical());
+			assert_eq!(crate::mock::mock_pending_fees_get(1u64, asset_id), 0);
+
+			// Step 4: unshield the 50 fee note (fee=0). Ledger and physical both −50.
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x34),
+				asset_id,
+				50u128,
+				2u64,
+				0u128,
+				[0u8; 32],
+				memo,
+				None,
+			));
+			assert_eq!(tracked(asset_id), 250);
+			assert_eq!(tracked(asset_id), pool_physical());
 		});
 	}
 }

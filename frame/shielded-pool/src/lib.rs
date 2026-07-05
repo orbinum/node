@@ -282,6 +282,25 @@ pub mod pallet {
 				 outside a benchmark build. This must never run on a live chain."
 			);
 		}
+
+		/// Ledger-solvency invariant: the tracked native-asset pool balance must
+		/// equal the pool account's physical free balance. Fees stay physical in
+		/// the pool until their note is unshielded, so both move together.
+		/// Only the native asset (0) is backed by `Currency`; other assets live in
+		/// external backends — TODO: extend when a per-asset balance reader exists.
+		#[cfg(feature = "try-runtime")]
+		fn try_state(_: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
+			let pool = Self::pool_account_id();
+			let physical = T::Currency::free_balance(&pool);
+			let tracked = PoolBalancePerAsset::<T>::get(0u32);
+			frame_support::ensure!(
+				tracked == physical,
+				sp_runtime::TryRuntimeError::Other(
+					"shielded-pool native ledger drifted from physical pool balance"
+				)
+			);
+			Ok(())
+		}
 	}
 
 	// ========================================================================

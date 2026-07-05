@@ -2,6 +2,18 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [Unreleased]
+
+### Security
+
+- Hardened the pool-balance ledger invariant (`PoolBalancePerAsset == physical
+  pool balance` for the native asset). The accounting was already correct; added
+  a `try_state` hook (feature `try-runtime`) that enforces it every block, a
+  `defensive_assert!` before the `saturating_sub` in `PoolBalanceRepository`, and
+  tests anchoring the invariant across the full fee lifecycle (shield → unshield
+  with fee → claim → unshield the fee note) and each operation. No behavioral
+  change to the ledger — verification and defense-in-depth only.
+
 ## [0.8.3] - 2026-07-04
 
 ### Security

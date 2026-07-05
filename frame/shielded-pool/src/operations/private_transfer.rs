@@ -611,4 +611,52 @@ mod tests {
 			);
 		});
 	}
+
+	// ── SP-1: private_transfer must leave the pool ledger untouched ───────────
+
+	/// A transfer moves value note-to-note; nothing enters or leaves the pool
+	/// physically, so PoolBalancePerAsset must not change. The fee becomes a
+	/// pending number backed by tokens already inside the pool.
+	#[test]
+	fn transfer_preserves_pool_ledger() {
+		use crate::storage::PoolBalanceRepository;
+		use frame_support::traits::Currency;
+
+		new_test_ext().execute_with(|| {
+			let asset_id = 0u32;
+			// Seed a pool ledger/physical balance the transfer must not disturb.
+			let pool = crate::Pallet::<Test>::pool_account_id();
+			let _ = <pallet_balances::Pallet<Test> as Currency<u64>>::deposit_creating(&pool, 1000);
+			PoolBalanceRepository::set_asset_balance::<Test>(asset_id, 1000);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			let ledger_before = PoolBalanceRepository::get_asset_balance::<Test>(asset_id);
+			let physical_before =
+				<pallet_balances::Pallet<Test> as Currency<u64>>::free_balance(&pool);
+			let fee = 25u128;
+
+			assert_ok!(PrivateTransferOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifiers_of(&[0x40]),
+				commitments_of(&[0x41]),
+				memos_of(1),
+				asset_id,
+				fee,
+				None,
+			));
+
+			assert_eq!(
+				PoolBalanceRepository::get_asset_balance::<Test>(asset_id),
+				ledger_before,
+				"transfer must not change the pool ledger"
+			);
+			assert_eq!(
+				<pallet_balances::Pallet<Test> as Currency<u64>>::free_balance(&pool),
+				physical_before,
+				"transfer must not move physical pool tokens"
+			);
+			assert_eq!(crate::mock::mock_pending_fees_get(1u64, asset_id), fee);
+		});
+	}
 }

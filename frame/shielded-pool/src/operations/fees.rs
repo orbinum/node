@@ -588,4 +588,47 @@ mod tests {
 			);
 		});
 	}
+
+	// ── SP-1 ledger invariant: claim must NOT change PoolBalancePerAsset ──────
+
+	#[test]
+	fn claim_does_not_change_pool_balance() {
+		use crate::storage::PoolBalanceRepository;
+		use frame_support::traits::Currency;
+
+		new_test_ext().execute_with(|| {
+			let validator: u64 = 1;
+			let asset_id = setup_asset();
+			let amount = 200u128;
+			let commitment = make_commitment();
+
+			// Seed pending fee + a pool ledger/physical balance backing it.
+			mock_pending_fees_set(validator, asset_id, amount);
+			let pool = crate::Pallet::<Test>::pool_account_id();
+			let _ =
+				<pallet_balances::Pallet<Test> as Currency<u64>>::deposit_creating(&pool, amount);
+			PoolBalanceRepository::set_asset_balance::<Test>(asset_id, amount);
+
+			let before = PoolBalanceRepository::get_asset_balance::<Test>(asset_id);
+
+			assert_ok!(FeeOperation::claim_shielded::<Test>(
+				validator,
+				commitment,
+				amount,
+				asset_id,
+				make_memo(),
+				make_proof(),
+				make_signals(&commitment, amount, asset_id),
+			));
+
+			// The claim swaps a pending number for a note; both are backed by the
+			// same physical tokens already counted in the ledger. It must NOT move
+			// PoolBalancePerAsset, and the ledger stays == physical balance.
+			let after = PoolBalanceRepository::get_asset_balance::<Test>(asset_id);
+			assert_eq!(after, before, "claim must not change the pool ledger");
+			let physical = <pallet_balances::Pallet<Test> as Currency<u64>>::free_balance(&pool);
+			assert_eq!(after, physical, "ledger must equal physical pool balance");
+			assert_eq!(mock_pending_fees_get(validator, asset_id), 0);
+		});
+	}
 }
