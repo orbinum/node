@@ -23,11 +23,6 @@ on:
         required: true
         default: true
         type: boolean
-      rolling_update:
-        description: "Rolling update node binary"
-        required: false
-        default: false
-        type: boolean
 
 concurrency:
   group: release-${{ github.ref }}
@@ -209,44 +204,8 @@ jobs:
           RPC_URL: ${{ secrets.TESTNET_RPC_URL }}
         run: bash scripts/healthcheck.sh --check-runtime "$RPC_URL"
 
-  # ── 4. Rolling update del binario en los nodos ───────────────────────────
-  rolling-update:
-    name: Rolling Node Binary Update
-    runs-on: ubuntu-latest
-    needs: [metadata, build, deploy-runtime]
-    # Solo si explícitamente solicitado — los upgrades de runtime no lo necesitan
-    if: github.event.inputs.rolling_update == 'true'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download binary artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: orbinum-node-${{ needs.metadata.outputs.version }}
-          path: ./artifacts/
-
-      - name: Set up SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.VALIDATOR_IPS }} >> ~/.ssh/known_hosts 2>/dev/null || true
-
-      - name: Rolling update validators
-        env:
-          VALIDATOR_IPS: ${{ secrets.VALIDATOR_IPS }}
-          RPC_NODE_IP: ${{ secrets.RPC_NODE_IP }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-        run: |
-          chmod +x artifacts/orbinum-node
-          bash scripts/rolling-update.sh \
-            --binary artifacts/orbinum-node \
-            --user "$DEPLOY_USER" \
-            --validators "$VALIDATOR_IPS" \
-            --rpc-node "$RPC_NODE_IP"
-
-  # ── 5. Publicar imagen Docker en GHCR ────────────────────────────────────
+  # ── 4. Publicar imagen Docker en GHCR ────────────────────────────────────
+  # El binario de los nodos se actualiza vía Watchtower siguiendo `testnet-latest`.
   docker-publish:
     name: Publish Docker Image
     runs-on: ubuntu-latest
