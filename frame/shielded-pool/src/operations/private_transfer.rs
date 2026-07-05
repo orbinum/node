@@ -145,7 +145,7 @@ impl PrivateTransferOperation {
 mod tests {
 	use super::*;
 	use crate::{
-		mock::{Test, new_test_ext},
+		mock::{Test, acc, new_test_ext},
 		pallet::Event as PalletEvent,
 		storage::{CommitmentRepository, MerkleRepository, NullifierRepository},
 		types::{Commitment, EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE, Nullifier},
@@ -438,7 +438,7 @@ mod tests {
 			));
 
 			// MockRelayer block_author = Some(1)
-			let pending = crate::mock::mock_pending_fees_get(1u64, 0u32);
+			let pending = crate::mock::mock_pending_fees_get(acc(1), 0u32);
 			assert_eq!(pending, fee);
 		});
 	}
@@ -459,7 +459,7 @@ mod tests {
 				None,
 			));
 
-			let pending = crate::mock::mock_pending_fees_get(1u64, 0u32);
+			let pending = crate::mock::mock_pending_fees_get(acc(1), 0u32);
 			assert_eq!(pending, 0u128);
 		});
 	}
@@ -621,18 +621,21 @@ mod tests {
 	fn transfer_preserves_pool_ledger() {
 		use crate::storage::PoolBalanceRepository;
 		use frame_support::traits::Currency;
+		use sp_runtime::AccountId32;
 
 		new_test_ext().execute_with(|| {
 			let asset_id = 0u32;
 			// Seed a pool ledger/physical balance the transfer must not disturb.
 			let pool = crate::Pallet::<Test>::pool_account_id();
-			let _ = <pallet_balances::Pallet<Test> as Currency<u64>>::deposit_creating(&pool, 1000);
+			let _ = <pallet_balances::Pallet<Test> as Currency<AccountId32>>::deposit_creating(
+				&pool, 1000,
+			);
 			PoolBalanceRepository::set_asset_balance::<Test>(asset_id, 1000);
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 
 			let ledger_before = PoolBalanceRepository::get_asset_balance::<Test>(asset_id);
 			let physical_before =
-				<pallet_balances::Pallet<Test> as Currency<u64>>::free_balance(&pool);
+				<pallet_balances::Pallet<Test> as Currency<AccountId32>>::free_balance(&pool);
 			let fee = 25u128;
 
 			assert_ok!(PrivateTransferOperation::execute::<Test>(
@@ -652,11 +655,11 @@ mod tests {
 				"transfer must not change the pool ledger"
 			);
 			assert_eq!(
-				<pallet_balances::Pallet<Test> as Currency<u64>>::free_balance(&pool),
+				<pallet_balances::Pallet<Test> as Currency<AccountId32>>::free_balance(&pool),
 				physical_before,
 				"transfer must not move physical pool tokens"
 			);
-			assert_eq!(crate::mock::mock_pending_fees_get(1u64, asset_id), fee);
+			assert_eq!(crate::mock::mock_pending_fees_get(acc(1), asset_id), fee);
 		});
 	}
 
@@ -668,8 +671,11 @@ mod tests {
 	fn transfer_fee_attribution_registered_vs_unregistered() {
 		new_test_ext().execute_with(|| {
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-			let relayer_acct = 7u64;
-			crate::mock::mock_register_relayer(relayer_acct, sp_core::H160::from([0xAA; 20]));
+			let relayer_acct = acc(7);
+			crate::mock::mock_register_relayer(
+				relayer_acct.clone(),
+				sp_core::H160::from([0xAA; 20]),
+			);
 
 			// Registered relayer 0xAA → fee to account 7.
 			assert_ok!(PrivateTransferOperation::execute::<Test>(
@@ -695,7 +701,7 @@ mod tests {
 				20u128,
 				Some(sp_core::H160::from([0xBB; 20])),
 			));
-			assert_eq!(crate::mock::mock_pending_fees_get(1u64, 0u32), 20);
+			assert_eq!(crate::mock::mock_pending_fees_get(acc(1), 0u32), 20);
 		});
 	}
 }

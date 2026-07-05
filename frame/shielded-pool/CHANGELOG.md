@@ -29,6 +29,12 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
   is misset. An `integrity_test` asserts `MaxTreeDepth == MAX_TREE_DEPTH` at
   runtime construction, keeping the depth reported to wallets consistent with the
   tree the pallet actually implements.
+- `unshield` now rejects a recipient whose encoding is not exactly 32 bytes with
+  `InvalidRecipient`, instead of silently binding a zeroed recipient into the
+  proof. Production `AccountId` is `AccountId32` (32 bytes) — and every signature
+  scheme Orbinum unifies (sr25519/ed25519/ECDSA/EVM, plus future ones like Solana)
+  maps to a 32-byte account — so the strict binding covers them all. The test mock
+  was migrated from `u64` to `AccountId32` so the binding is exercised end-to-end.
 
 ## [0.8.3] - 2026-07-04
 

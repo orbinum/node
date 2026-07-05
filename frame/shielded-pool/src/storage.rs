@@ -218,10 +218,11 @@ impl PoolBalanceRepository {
 mod tests {
 	use super::*;
 	use crate::{
-		mock::{Test, new_test_ext},
+		mock::{Test, acc, new_test_ext},
 		types::{AssetMetadata, Commitment, EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE, Nullifier},
 	};
 	use frame_support::{BoundedVec, pallet_prelude::ConstU32};
+	use sp_runtime::AccountId32;
 
 	// ── helpers ───────────────────────────────────────────────────────────────
 
@@ -237,14 +238,14 @@ mod tests {
 		EncryptedMemo::from_bytes(&[0x01u8; MAX_ENCRYPTED_MEMO_SIZE as usize]).unwrap()
 	}
 
-	fn make_asset_metadata(id: u32) -> AssetMetadata<u64, u64> {
+	fn make_asset_metadata(id: u32) -> AssetMetadata<AccountId32, u64> {
 		AssetMetadata::new(
 			id,
 			BoundedVec::try_from(b"Test".to_vec()).unwrap(),
 			BoundedVec::try_from(b"TST".to_vec()).unwrap(),
 			18,
 			0u64,
-			1u64,
+			acc(1),
 		)
 	}
 

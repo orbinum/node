@@ -3,9 +3,15 @@
 use crate as pallet_shielded_pool;
 use frame_support::{PalletId, derive_impl, parameter_types, traits::ConstU128};
 use pallet_zk_verifier::ZkVerifierPort;
-use sp_runtime::BuildStorage;
+use sp_runtime::{AccountId32, BuildStorage, traits::IdentityLookup};
 
 type Block = frame_system::mocking::MockBlock<Test>;
+type AccountId = AccountId32;
+
+/// Build a deterministic 32-byte test account (mirrors production `AccountId32`).
+pub fn acc(n: u8) -> AccountId {
+	AccountId32::new([n; 32])
+}
 
 // Configure a mock runtime to test the pallet.
 frame_support::construct_runtime!(
@@ -21,6 +27,8 @@ frame_support::construct_runtime!(
 impl frame_system::Config for Test {
 	type Block = Block;
 	type AccountData = pallet_balances::AccountData<u128>;
+	type AccountId = AccountId;
+	type Lookup = IdentityLookup<AccountId>;
 }
 
 #[derive_impl(pallet_balances::config_preludes::TestDefaultConfig)]
@@ -132,12 +140,12 @@ impl pallet_shielded_pool::Config for Test {
 /// Mock implementation of `RelayerInterface` for unit tests.
 ///
 /// - `min_relay_fee()` → 0 (no minimum in tests; set higher when testing fee enforcement)
-/// - `block_author()` → `Some(1u64)` (Alice)
+/// - `block_author()` → `Some(acc(1))` (Alice)
 /// - Fee tracking is backed by raw `TestExternalities` storage (auto-reset per test).
 pub struct MockRelayer;
 
 /// Read a pending-fee balance from raw test storage.
-pub fn mock_pending_fees_get(who: u64, asset_id: u32) -> u128 {
+pub fn mock_pending_fees_get(who: AccountId, asset_id: u32) -> u128 {
 	use parity_scale_codec::{Decode, Encode};
 	let key = [
 		b"mock:fees:".as_ref(),
@@ -151,7 +159,7 @@ pub fn mock_pending_fees_get(who: u64, asset_id: u32) -> u128 {
 }
 
 /// Write a pending-fee balance to raw test storage.
-pub fn mock_pending_fees_set(who: u64, asset_id: u32, amount: u128) {
+pub fn mock_pending_fees_set(who: AccountId, asset_id: u32, amount: u128) {
 	use parity_scale_codec::Encode;
 	let key = [
 		b"mock:fees:".as_ref(),
@@ -163,7 +171,7 @@ pub fn mock_pending_fees_set(who: u64, asset_id: u32, amount: u128) {
 }
 
 /// Read the registered EVM address for an account from raw test storage.
-pub fn mock_evm_address_get(who: u64) -> Option<sp_core::H160> {
+pub fn mock_evm_address_get(who: AccountId) -> Option<sp_core::H160> {
 	use parity_scale_codec::{Decode, Encode};
 	let key = [b"mock:evm:".as_ref(), who.encode().as_slice()].concat();
 	sp_io::storage::get(&key)
@@ -180,21 +188,21 @@ pub fn mock_set_min_relay_fee(fee: u128) {
 
 /// Register an EVM address → account mapping so `resolve_relayer` returns `Some`.
 /// Mirrors the governance-gated registry in `pallet-relayer` for tests.
-pub fn mock_register_relayer(who: u64, addr: sp_core::H160) {
+pub fn mock_register_relayer(who: AccountId, addr: sp_core::H160) {
 	use parity_scale_codec::Encode;
 	let key = [b"mock:resolve:".as_ref(), addr.as_bytes()].concat();
 	sp_io::storage::set(&key, &who.encode());
 }
 
 impl pallet_relayer::RelayerInterface for MockRelayer {
-	type AccountId = u64;
+	type AccountId = AccountId;
 
-	fn resolve_relayer(evm_address: &sp_core::H160) -> Option<u64> {
+	fn resolve_relayer(evm_address: &sp_core::H160) -> Option<AccountId> {
 		// Reads the test registry seeded by `mock_register_relayer`; unregistered
 		// addresses return None so fees fall back to block_author.
 		use parity_scale_codec::Decode;
 		let key = [b"mock:resolve:".as_ref(), evm_address.as_bytes()].concat();
-		sp_io::storage::get(&key).and_then(|v| u64::decode(&mut &v[..]).ok())
+		sp_io::storage::get(&key).and_then(|v| AccountId::decode(&mut &v[..]).ok())
 	}
 
 	fn min_relay_fee() -> u128 {
@@ -208,35 +216,35 @@ impl pallet_relayer::RelayerInterface for MockRelayer {
 		sp_std::vec![]
 	}
 
-	fn block_author() -> Option<u64> {
-		Some(1u64)
+	fn block_author() -> Option<AccountId> {
+		Some(acc(1))
 	}
 
-	fn accumulate_relay_fee(author: &u64, asset_id: u32, amount: u128) {
-		let current = mock_pending_fees_get(*author, asset_id);
-		mock_pending_fees_set(*author, asset_id, current.saturating_add(amount));
+	fn accumulate_relay_fee(author: &AccountId, asset_id: u32, amount: u128) {
+		let current = mock_pending_fees_get(author.clone(), asset_id);
+		mock_pending_fees_set(author.clone(), asset_id, current.saturating_add(amount));
 	}
 
-	fn pending_relay_fees(who: &u64, asset_id: u32) -> u128 {
-		mock_pending_fees_get(*who, asset_id)
+	fn pending_relay_fees(who: &AccountId, asset_id: u32) -> u128 {
+		mock_pending_fees_get(who.clone(), asset_id)
 	}
 
 	fn consume_relay_fee(
-		who: &u64,
+		who: &AccountId,
 		asset_id: u32,
 		amount: u128,
 	) -> frame_support::dispatch::DispatchResult {
-		let balance = mock_pending_fees_get(*who, asset_id);
+		let balance = mock_pending_fees_get(who.clone(), asset_id);
 		if balance >= amount {
-			mock_pending_fees_set(*who, asset_id, balance - amount);
+			mock_pending_fees_set(who.clone(), asset_id, balance - amount);
 			Ok(())
 		} else {
 			Err(sp_runtime::DispatchError::Other("InsufficientPendingFees"))
 		}
 	}
 
-	fn registered_evm_address(who: &u64) -> Option<sp_core::H160> {
-		mock_evm_address_get(*who)
+	fn registered_evm_address(who: &AccountId) -> Option<sp_core::H160> {
+		mock_evm_address_get(who.clone())
 	}
 }
 
@@ -247,7 +255,11 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 		.unwrap();
 
 	pallet_balances::GenesisConfig::<Test> {
-		balances: vec![(1, 1_000_000), (2, 1_000_000), (3, 1_000_000)],
+		balances: vec![
+			(acc(1), 1_000_000),
+			(acc(2), 1_000_000),
+			(acc(3), 1_000_000),
+		],
 		..Default::default()
 	}
 	.assimilate_storage(&mut t)
