@@ -16,10 +16,12 @@ use pallet_relayer::RelayerInterface as _;
 use parity_scale_codec::Encode;
 use sp_runtime::{
 	SaturatedConversion,
-	transaction_validity::{
-		InvalidTransaction, TransactionLongevity, TransactionValidity, ValidTransaction,
-	},
+	transaction_validity::{InvalidTransaction, TransactionValidity, ValidTransaction},
 };
+
+/// How long an unsigned transaction stays valid in the pool, in blocks. Bounded
+/// so a transaction that never gets included does not linger indefinitely.
+const TX_LONGEVITY: u64 = 64;
 
 /// Validate an incoming `private_transfer` unsigned transaction.
 pub fn validate_private_transfer<T: Config>(
@@ -69,7 +71,7 @@ pub fn validate_private_transfer<T: Config>(
 
 	ValidTransaction::with_tag_prefix("ShieldedPoolTransfer")
 		.priority((*fee).saturated_into())
-		.longevity(TransactionLongevity::MAX)
+		.longevity(TX_LONGEVITY)
 		.and_provides(provides)
 		.propagate(true)
 		.build()
@@ -114,7 +116,7 @@ pub fn validate_unshield<T: Config>(
 	// wins at equal fee).
 	ValidTransaction::with_tag_prefix("ShieldedPoolUnshield")
 		.priority((*fee).saturated_into())
-		.longevity(TransactionLongevity::MAX)
+		.longevity(TX_LONGEVITY)
 		.and_provides([nullifier.encode(), relayer.encode()])
 		.propagate(true)
 		.build()
@@ -548,6 +550,37 @@ mod tests {
 			let b = validate_private_transfer::<Test>(&KNOWN_ROOT, &ns, &10u128, &Some(evm(0xBB)))
 				.unwrap();
 			assert_ne!(a.provides, b.provides);
+		});
+	}
+
+	/// Unsigned transactions carry a bounded longevity (not `MAX`), so an
+	/// un-included transaction does not persist in the pool indefinitely.
+	#[test]
+	fn unsigned_txs_have_bounded_longevity() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			PoolBalanceRepository::set_asset_balance::<Test>(0, 1000u128);
+
+			let t = validate_private_transfer::<Test>(
+				&KNOWN_ROOT,
+				&nullifiers_of(&[0x90]),
+				&10u128,
+				&None,
+			)
+			.unwrap();
+			assert_eq!(t.longevity, TX_LONGEVITY);
+			assert!(t.longevity < sp_runtime::transaction_validity::TransactionLongevity::MAX);
+
+			let u = validate_unshield::<Test>(
+				&KNOWN_ROOT,
+				&make_nullifier(0x91),
+				&0u32,
+				&100u128,
+				&10u128,
+				&None,
+			)
+			.unwrap();
+			assert_eq!(u.longevity, TX_LONGEVITY);
 		});
 	}
 }

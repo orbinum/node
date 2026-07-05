@@ -40,6 +40,9 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
   of silently skipping accumulation and stranding the fee tokens in the pool. This
   is unreachable under normal operation (a transaction always executes inside a
   block, so a block author exists) but fails loudly on a misconfigured provider.
+- Unsigned `unshield`/`private_transfer` transactions now carry a bounded pool
+  longevity (64 blocks) instead of `TransactionLongevity::MAX`, so a transaction
+  that is never included does not linger in the pool indefinitely.
 
 ## [0.8.3] - 2026-07-04
 
