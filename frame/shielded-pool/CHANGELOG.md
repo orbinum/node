@@ -13,6 +13,13 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
   tests anchoring the invariant across the full fee lifecycle (shield → unshield
   with fee → claim → unshield the fee note) and each operation. No behavioral
   change to the ledger — verification and defense-in-depth only.
+- Bound the unsigned `relayer` field into the transaction-pool `provides` tag for
+  `unshield` and `private_transfer`. `ValidateUnsigned` now forwards `relayer` to
+  validation (it was previously dropped), so a variant differing only in the fee
+  recipient is a distinct pool entry and cannot silently replace the honest tx.
+  The relayer registry is governance-gated, so an unregistered address cannot
+  credit itself — it falls back to the block author (griefing at worst, never
+  theft). User funds are never at risk; only fee attribution is affected.
 
 ## [0.8.3] - 2026-07-04
 

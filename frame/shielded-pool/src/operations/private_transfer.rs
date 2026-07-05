@@ -612,7 +612,7 @@ mod tests {
 		});
 	}
 
-	// ── SP-1: private_transfer must leave the pool ledger untouched ───────────
+	// ── private_transfer must leave the pool ledger untouched ─────────────────
 
 	/// A transfer moves value note-to-note; nothing enters or leaves the pool
 	/// physically, so PoolBalancePerAsset must not change. The fee becomes a
@@ -657,6 +657,45 @@ mod tests {
 				"transfer must not move physical pool tokens"
 			);
 			assert_eq!(crate::mock::mock_pending_fees_get(1u64, asset_id), fee);
+		});
+	}
+
+	// ── relay-fee attribution ────────────────────────────────────────────────
+
+	/// A registered relayer receives the transfer fee; an unregistered attacker
+	/// address cannot credit itself (falls back to block author).
+	#[test]
+	fn transfer_fee_attribution_registered_vs_unregistered() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			let relayer_acct = 7u64;
+			crate::mock::mock_register_relayer(relayer_acct, sp_core::H160::from([0xAA; 20]));
+
+			// Registered relayer 0xAA → fee to account 7.
+			assert_ok!(PrivateTransferOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifiers_of(&[0x70]),
+				commitments_of(&[0x71]),
+				memos_of(1),
+				0u32,
+				30u128,
+				Some(sp_core::H160::from([0xAA; 20])),
+			));
+			assert_eq!(crate::mock::mock_pending_fees_get(relayer_acct, 0u32), 30);
+
+			// Unregistered 0xBB → falls back to block author (1), never the attacker.
+			assert_ok!(PrivateTransferOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifiers_of(&[0x72]),
+				commitments_of(&[0x73]),
+				memos_of(1),
+				0u32,
+				20u128,
+				Some(sp_core::H160::from([0xBB; 20])),
+			));
+			assert_eq!(crate::mock::mock_pending_fees_get(1u64, 0u32), 20);
 		});
 	}
 }

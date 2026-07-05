@@ -178,12 +178,23 @@ pub fn mock_set_min_relay_fee(fee: u128) {
 	sp_io::storage::set(b"mock:min_relay_fee", &fee.encode());
 }
 
+/// Register an EVM address → account mapping so `resolve_relayer` returns `Some`.
+/// Mirrors the governance-gated registry in `pallet-relayer` for tests.
+pub fn mock_register_relayer(who: u64, addr: sp_core::H160) {
+	use parity_scale_codec::Encode;
+	let key = [b"mock:resolve:".as_ref(), addr.as_bytes()].concat();
+	sp_io::storage::set(&key, &who.encode());
+}
+
 impl pallet_relayer::RelayerInterface for MockRelayer {
 	type AccountId = u64;
 
-	fn resolve_relayer(_evm_address: &sp_core::H160) -> Option<u64> {
-		// No registry in shielded-pool unit tests; fees fall back to block_author.
-		None
+	fn resolve_relayer(evm_address: &sp_core::H160) -> Option<u64> {
+		// Reads the test registry seeded by `mock_register_relayer`; unregistered
+		// addresses return None so fees fall back to block_author.
+		use parity_scale_codec::Decode;
+		let key = [b"mock:resolve:".as_ref(), evm_address.as_bytes()].concat();
+		sp_io::storage::get(&key).and_then(|v| u64::decode(&mut &v[..]).ok())
 	}
 
 	fn min_relay_fee() -> u128 {

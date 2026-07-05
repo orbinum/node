@@ -749,7 +749,7 @@ mod tests {
 		});
 	}
 
-	// ── SP-1 ledger-solvency invariant ───────────────────────────────────────
+	// ── ledger-solvency invariant ────────────────────────────────────────────
 	// Invariant (A): PoolBalancePerAsset[a] == Currency::free_balance(pool) for the
 	// native asset. Fees stay physically in the pool until their note is unshielded,
 	// so tracked and physical always move together.
@@ -917,6 +917,113 @@ mod tests {
 			));
 			assert_eq!(tracked(asset_id), 250);
 			assert_eq!(tracked(asset_id), pool_physical());
+		});
+	}
+
+	// ── relay-fee attribution ────────────────────────────────────────────────
+	// The `relayer` field steers the fee. resolve_relayer only maps
+	// governance-registered addresses; an unregistered address falls back to the
+	// block author, so an unregistered attacker can never credit themselves.
+
+	const BLOCK_AUTHOR: u64 = 1;
+
+	fn evm(byte: u8) -> sp_core::H160 {
+		sp_core::H160::from([byte; 20])
+	}
+
+	/// A registered relayer receives the fee it relayed.
+	#[test]
+	fn unshield_fee_lands_at_registered_relayer() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let (amount, fee) = (500u128, 50u128);
+			fund_pool(asset_id, amount + fee);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			let relayer_acct = 7u64;
+			crate::mock::mock_register_relayer(relayer_acct, evm(0xAA));
+
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x51),
+				asset_id,
+				amount,
+				2u64,
+				fee,
+				[0u8; 32],
+				FrameEncryptedMemo::default(),
+				Some(evm(0xAA)),
+			));
+
+			assert_eq!(
+				crate::mock::mock_pending_fees_get(relayer_acct, asset_id),
+				fee
+			);
+			assert_eq!(
+				crate::mock::mock_pending_fees_get(BLOCK_AUTHOR, asset_id),
+				0
+			);
+		});
+	}
+
+	/// An unregistered `relayer` address cannot credit itself — the fee falls back
+	/// to the block author (griefing at worst, never theft).
+	#[test]
+	fn unshield_unregistered_relayer_falls_back_to_block_author() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let (amount, fee) = (500u128, 50u128);
+			fund_pool(asset_id, amount + fee);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			// 0xBB is never registered → resolve_relayer returns None.
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x52),
+				asset_id,
+				amount,
+				2u64,
+				fee,
+				[0u8; 32],
+				FrameEncryptedMemo::default(),
+				Some(evm(0xBB)),
+			));
+
+			assert_eq!(
+				crate::mock::mock_pending_fees_get(BLOCK_AUTHOR, asset_id),
+				fee
+			);
+		});
+	}
+
+	/// `relayer = None` routes the fee to the block author.
+	#[test]
+	fn unshield_none_relayer_goes_to_block_author() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let (amount, fee) = (500u128, 50u128);
+			fund_pool(asset_id, amount + fee);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x53),
+				asset_id,
+				amount,
+				2u64,
+				fee,
+				[0u8; 32],
+				FrameEncryptedMemo::default(),
+				None,
+			));
+
+			assert_eq!(
+				crate::mock::mock_pending_fees_get(BLOCK_AUTHOR, asset_id),
+				fee
+			);
 		});
 	}
 }

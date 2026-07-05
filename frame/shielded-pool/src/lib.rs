@@ -805,11 +805,13 @@ pub mod pallet {
 					merkle_root,
 					nullifiers,
 					fee,
+					relayer,
 					..
 				} => crate::validate_unsigned::validate_private_transfer::<T>(
 					merkle_root,
 					nullifiers,
 					fee,
+					relayer,
 				),
 
 				Call::unshield {
@@ -818,6 +820,7 @@ pub mod pallet {
 					asset_id,
 					amount,
 					fee,
+					relayer,
 					..
 				} => crate::validate_unsigned::validate_unshield::<T>(
 					merkle_root,
@@ -825,6 +828,7 @@ pub mod pallet {
 					asset_id,
 					amount,
 					fee,
+					relayer,
 				),
 
 				_ => InvalidTransaction::Call.into(),

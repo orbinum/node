@@ -589,7 +589,7 @@ mod tests {
 		});
 	}
 
-	// ── SP-1 ledger invariant: claim must NOT change PoolBalancePerAsset ──────
+	// ── ledger invariant: claim must NOT change PoolBalancePerAsset ───────────
 
 	#[test]
 	fn claim_does_not_change_pool_balance() {
