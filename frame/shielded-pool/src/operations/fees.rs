@@ -631,4 +631,20 @@ mod tests {
 			assert_eq!(mock_pending_fees_get(validator, asset_id), 0);
 		});
 	}
+
+	// ── extrinsic input bounds (decode-before-reject guard) ──────────────────
+
+	/// The `claim_shielded_fees` extrinsic takes `BoundedVec`, so an oversized
+	/// proof/signals input is rejected by the codec bound before any body logic.
+	#[test]
+	fn claim_shielded_fees_inputs_are_bounded() {
+		use frame_support::{BoundedVec, traits::ConstU32};
+
+		// proof bound = 512: at-bound fits, over-bound rejected.
+		assert!(BoundedVec::<u8, ConstU32<512>>::try_from(vec![0u8; 512]).is_ok());
+		assert!(BoundedVec::<u8, ConstU32<512>>::try_from(vec![0u8; 513]).is_err());
+		// signals bound = 128: the real 76-byte payload fits, over-bound rejected.
+		assert!(BoundedVec::<u8, ConstU32<128>>::try_from(vec![0u8; 76]).is_ok());
+		assert!(BoundedVec::<u8, ConstU32<128>>::try_from(vec![0u8; 129]).is_err());
+	}
 }

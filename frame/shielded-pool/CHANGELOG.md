@@ -20,6 +20,9 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
   The relayer registry is governance-gated, so an unregistered address cannot
   credit itself — it falls back to the block author (griefing at worst, never
   theft). User funds are never at risk; only fee attribution is affected.
+- `claim_shielded_fees` now takes `BoundedVec` for `proof` (max 512) and
+  `public_signals` (max 128) instead of unbounded `Vec<u8>`, so oversized inputs
+  are rejected by the codec bound before dispatch, matching the other extrinsics.
 
 ## [0.8.3] - 2026-07-04
 

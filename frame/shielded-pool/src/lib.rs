@@ -764,8 +764,8 @@ pub mod pallet {
 			amount: BalanceOf<T>,
 			asset_id: u32,
 			memo: FrameEncryptedMemo,
-			proof: sp_std::vec::Vec<u8>,
-			public_signals: sp_std::vec::Vec<u8>,
+			proof: BoundedVec<u8, ConstU32<512>>,
+			public_signals: BoundedVec<u8, ConstU32<128>>,
 		) -> DispatchResult {
 			let validator = ensure_signed(origin)?;
 			crate::operations::fees::FeeOperation::claim_shielded::<T>(
@@ -774,8 +774,8 @@ pub mod pallet {
 				amount,
 				asset_id,
 				memo,
-				proof,
-				public_signals,
+				proof.into_inner(),
+				public_signals.into_inner(),
 			)
 		}
 	}

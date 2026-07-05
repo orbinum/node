@@ -207,7 +207,7 @@ mod benchmarks {
 		let amount: BalanceOf<T> = T::MinShieldAmount::get() * 10u32.into();
 		let amount_u128: u128 = amount.saturated_into();
 
-		// Acumular relay fees para el validator
+		// Accumulate relay fees for the validator.
 		T::Relayer::accumulate_relay_fee(&caller, asset_id, amount_u128);
 
 		let commitment = Commitment([0x11u8; 32]);
@@ -229,8 +229,8 @@ mod benchmarks {
 			amount,
 			asset_id,
 			memo,
-			proof,
-			public_signals,
+			proof.try_into().expect("proof fits bound"),
+			public_signals.try_into().expect("signals fit bound"),
 		);
 	}
 
