@@ -281,6 +281,12 @@ pub mod pallet {
 				 `runtime-benchmarks`: shield/unshield/transfer proofs are NOT verified \
 				 outside a benchmark build. This must never run on a live chain."
 			);
+
+			assert_eq!(
+				T::MaxTreeDepth::get(),
+				crate::types::MAX_TREE_DEPTH,
+				"MaxTreeDepth config must equal the fixed tree depth (MAX_TREE_DEPTH)"
+			);
 		}
 
 		/// Ledger-solvency invariant: the tracked native-asset pool balance must

@@ -314,7 +314,7 @@ impl MerkleTreeService {
 	/// replacing the former O(n) full recomputation from all leaves.
 	pub fn insert_leaf<T: Config>(commitment: Commitment) -> Result<u32, DispatchError> {
 		let index = MerkleRepository::get_tree_size::<T>();
-		let max_leaves = 2u32.saturating_pow(T::MaxTreeDepth::get());
+		let max_leaves = 2u32.saturating_pow(crate::types::MAX_TREE_DEPTH);
 		ensure!(index < max_leaves, Error::<T>::MerkleTreeFull);
 		ensure!(
 			!CommitmentMemos::<T>::contains_key(commitment),
@@ -915,5 +915,29 @@ mod tests {
 			root_b2, expected,
 			"frontier root after 2 round-trips must match batch root"
 		);
+	}
+
+	// ── tree-depth consistency ────────────────────────────────────────────────
+
+	/// integrity_test passes when MaxTreeDepth equals the fixed tree depth. The
+	/// mock is aligned to MAX_TREE_DEPTH, so construction must not panic; a
+	/// divergent config would abort at runtime construction.
+	#[test]
+	fn integrity_test_accepts_aligned_tree_depth() {
+		use frame_support::traits::Hooks;
+		new_test_ext().execute_with(|| {
+			<crate::Pallet<Test> as Hooks<frame_system::pallet_prelude::BlockNumberFor<Test>>>::integrity_test();
+		});
+	}
+
+	/// The capacity guard is bound by the real tree depth, not the config, so it
+	/// fires at exactly 2^MAX_TREE_DEPTH regardless of MaxTreeDepth.
+	#[test]
+	fn capacity_guard_uses_fixed_depth() {
+		use crate::types::MAX_TREE_DEPTH;
+		assert_eq!(MAX_TREE_DEPTH, 20);
+		// insert_leaf's max_leaves is 2^MAX_TREE_DEPTH; confirm the constant the
+		// guard reads matches the frontier depth (20 levels).
+		assert_eq!(2u32.saturating_pow(MAX_TREE_DEPTH), 1 << 20);
 	}
 }

@@ -23,6 +23,12 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 - `claim_shielded_fees` now takes `BoundedVec` for `proof` (max 512) and
   `public_signals` (max 128) instead of unbounded `Vec<u8>`, so oversized inputs
   are rejected by the codec bound before dispatch, matching the other extrinsics.
+- The Merkle-tree capacity guard now derives its limit from the fixed
+  `MAX_TREE_DEPTH` constant instead of the `MaxTreeDepth` config, so the
+  `MerkleTreeFull` check always fires at the real 2^20 capacity even if the config
+  is misset. An `integrity_test` asserts `MaxTreeDepth == MAX_TREE_DEPTH` at
+  runtime construction, keeping the depth reported to wallets consistent with the
+  tree the pallet actually implements.
 
 ## [0.8.3] - 2026-07-04
 
