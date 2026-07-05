@@ -112,12 +112,11 @@ impl PrivateTransferOperation {
 		}
 
 		if fee > <T::Currency as Currency<T::AccountId>>::Balance::zero() {
-			let fee_recipient: Option<T::AccountId> = relayer_evm
+			let recipient_account = relayer_evm
 				.and_then(|addr| T::Relayer::resolve_relayer(&addr))
-				.or_else(T::Relayer::block_author);
-			if let Some(recipient_account) = fee_recipient {
-				T::Relayer::accumulate_relay_fee(&recipient_account, asset_id, fee_u128);
-			}
+				.or_else(T::Relayer::block_author)
+				.ok_or(Error::<T>::FeeRecipientUnavailable)?;
+			T::Relayer::accumulate_relay_fee(&recipient_account, asset_id, fee_u128);
 		}
 
 		Pallet::<T>::deposit_event(Event::NullifiersSpent {
@@ -150,7 +149,7 @@ mod tests {
 		storage::{CommitmentRepository, MerkleRepository, NullifierRepository},
 		types::{Commitment, EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE, Nullifier},
 	};
-	use frame_support::{assert_noop, assert_ok};
+	use frame_support::{assert_err, assert_noop, assert_ok};
 
 	// ── helpers ───────────────────────────────────────────────────────────────
 
@@ -702,6 +701,29 @@ mod tests {
 				Some(sp_core::H160::from([0xBB; 20])),
 			));
 			assert_eq!(crate::mock::mock_pending_fees_get(acc(1), 0u32), 20);
+		});
+	}
+
+	/// A non-zero fee with no resolvable recipient errors, mirroring unshield.
+	#[test]
+	fn transfer_nonzero_fee_without_recipient_errors() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			crate::mock::mock_clear_block_author();
+
+			assert_err!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[0x80]),
+					commitments_of(&[0x81]),
+					memos_of(1),
+					0u32,
+					25u128,
+					None,
+				),
+				Error::<Test>::FeeRecipientUnavailable
+			);
 		});
 	}
 }

@@ -129,12 +129,11 @@ impl UnshieldOperation {
 		)?;
 
 		if fee > <T::Currency as Currency<T::AccountId>>::Balance::zero() {
-			let fee_recipient: Option<T::AccountId> = relayer_evm
+			let recipient_account = relayer_evm
 				.and_then(|addr| T::Relayer::resolve_relayer(&addr))
-				.or_else(T::Relayer::block_author);
-			if let Some(recipient_account) = fee_recipient {
-				T::Relayer::accumulate_relay_fee(&recipient_account, asset_id, fee_u128);
-			}
+				.or_else(T::Relayer::block_author)
+				.ok_or(Error::<T>::FeeRecipientUnavailable)?;
+			T::Relayer::accumulate_relay_fee(&recipient_account, asset_id, fee_u128);
 		}
 
 		// Decrement only `amount`: the `fee` tokens stay physically in the pool as
@@ -212,7 +211,7 @@ mod tests {
 		},
 		types::{Commitment, Nullifier},
 	};
-	use frame_support::{assert_noop, assert_ok, traits::Currency};
+	use frame_support::{assert_err, assert_noop, assert_ok, traits::Currency};
 	use sp_runtime::AccountId32;
 
 	// ── helpers ──────────────────────────────────────────────────────────────
@@ -1043,6 +1042,63 @@ mod tests {
 				crate::mock::mock_pending_fees_get(block_author(), asset_id),
 				fee
 			);
+		});
+	}
+
+	/// A non-zero fee with no resolvable recipient (no relayer, no block author)
+	/// errors instead of stranding the fee tokens in the pool.
+	#[test]
+	fn unshield_nonzero_fee_without_recipient_errors() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let (amount, fee) = (500u128, 50u128);
+			fund_pool(asset_id, amount + fee);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			crate::mock::mock_clear_block_author();
+
+			// assert_err (not assert_noop): the fee attribution runs after currency
+			// effects; in a real extrinsic the dispatch rolls those back on Err. Here
+			// we assert the error itself — the transactional rollback is Substrate's.
+			assert_err!(
+				UnshieldOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifier(0x60),
+					asset_id,
+					amount,
+					acc(2),
+					fee,
+					[0u8; 32],
+					FrameEncryptedMemo::default(),
+					None,
+				),
+				crate::pallet::Error::<Test>::FeeRecipientUnavailable
+			);
+		});
+	}
+
+	/// A zero fee with no recipient is fine — nothing to attribute.
+	#[test]
+	fn unshield_zero_fee_without_recipient_ok() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let amount = 500u128;
+			fund_pool(asset_id, amount);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			crate::mock::mock_clear_block_author();
+
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x61),
+				asset_id,
+				amount,
+				acc(2),
+				0u128,
+				[0u8; 32],
+				FrameEncryptedMemo::default(),
+				None,
+			));
 		});
 	}
 }

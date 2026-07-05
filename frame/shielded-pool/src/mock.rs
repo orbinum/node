@@ -194,6 +194,12 @@ pub fn mock_register_relayer(who: AccountId, addr: sp_core::H160) {
 	sp_io::storage::set(&key, &who.encode());
 }
 
+/// Force `block_author()` to return `None` (default is `Some(acc(1))`), to test
+/// the no-fee-recipient path.
+pub fn mock_clear_block_author() {
+	sp_io::storage::set(b"mock:no_author", &[1u8]);
+}
+
 impl pallet_relayer::RelayerInterface for MockRelayer {
 	type AccountId = AccountId;
 
@@ -217,7 +223,11 @@ impl pallet_relayer::RelayerInterface for MockRelayer {
 	}
 
 	fn block_author() -> Option<AccountId> {
-		Some(acc(1))
+		if sp_io::storage::get(b"mock:no_author").is_some() {
+			None
+		} else {
+			Some(acc(1))
+		}
 	}
 
 	fn accumulate_relay_fee(author: &AccountId, asset_id: u32, amount: u128) {

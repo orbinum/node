@@ -35,6 +35,11 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
   scheme Orbinum unifies (sr25519/ed25519/ECDSA/EVM, plus future ones like Solana)
   maps to a 32-byte account — so the strict binding covers them all. The test mock
   was migrated from `u64` to `AccountId32` so the binding is exercised end-to-end.
+- A non-zero relay fee that cannot be attributed to any recipient (no resolved
+  relayer and no block author) now errors with `FeeRecipientUnavailable` instead
+  of silently skipping accumulation and stranding the fee tokens in the pool. This
+  is unreachable under normal operation (a transaction always executes inside a
+  block, so a block author exists) but fails loudly on a misconfigured provider.
 
 ## [0.8.3] - 2026-07-04
 

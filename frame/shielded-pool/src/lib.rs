@@ -453,6 +453,9 @@ pub mod pallet {
 		CommitmentNotFound,
 		/// Pending validator fees are less than the requested claim amount
 		InsufficientPendingFees,
+		/// A non-zero fee could not be attributed to any recipient (no resolved
+		/// relayer and no block author). The fee tokens would otherwise be stranded.
+		FeeRecipientUnavailable,
 	}
 
 	// ========================================================================
