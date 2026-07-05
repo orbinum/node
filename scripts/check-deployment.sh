@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# Verifica qué versión de binario (impl) y runtime (spec) está corriendo cada
-# nodo, sobre uno o varios endpoints RPC. Úsalo para confirmar que un update de
-# imagen (Watchtower) o un runtime upgrade (setCode) llegó a la flota.
+# Reports which binary (impl) and runtime (spec) version each node is running,
+# across one or more RPC endpoints. Use it to confirm an image update
+# (Watchtower) or a runtime upgrade (setCode) reached the fleet.
 #
-# Uso:
+# Usage:
 #   scripts/check-deployment.sh <rpc_url> [<rpc_url> ...]
 #   scripts/check-deployment.sh --expect-spec 2 <rpc_url> ...
 #   scripts/check-deployment.sh --expect-impl 0.2.0 <rpc_url> ...
 #
-# Ejemplos:
+# Examples:
 #   scripts/check-deployment.sh https://rpc.testnet.orbinum.io
 #   scripts/check-deployment.sh --expect-spec 2 \
 #     https://rpc.testnet.orbinum.io ws://10.0.0.2:9944
 #
-# Salida por nodo: spec_version, impl_name/version, client version, mejor bloque
-# y bloque finalizado. Exit != 0 si algún nodo no responde o no cumple --expect-*.
+# Per-node output: spec_version, impl_name/version, client version, best block
+# and finalized block. Exit != 0 if a node is unreachable or fails --expect-*.
 set -euo pipefail
 
-EXPECT_SPEC=""   # spec_version esperado (runtime upgrade)
-EXPECT_IMPL=""   # substrato de la versión de cliente esperada (imagen/binario)
+EXPECT_SPEC=""   # expected spec_version (runtime upgrade)
+EXPECT_IMPL=""   # substring of the expected client version (image/binary)
 RPCS=()
 
 while [[ $# -gt 0 ]]; do
@@ -28,19 +28,19 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       grep '^#' "$0" | sed 's/^# \{0,1\}//; 1d'; exit 0 ;;
     http*|ws*) RPCS+=("$1"); shift ;;
-    *) echo "Argumento no reconocido: $1" >&2; exit 2 ;;
+    *) echo "Unrecognized argument: $1" >&2; exit 2 ;;
   esac
 done
 
 if [[ ${#RPCS[@]} -eq 0 ]]; then
-  echo "Falta al menos un RPC url. Uso: $0 [--expect-spec N] [--expect-impl X] <rpc_url> ..." >&2
+  echo "Need at least one RPC url. Usage: $0 [--expect-spec N] [--expect-impl X] <rpc_url> ..." >&2
   exit 2
 fi
 
-# ── Helper: llamada RPC (mismo patrón que healthcheck.sh) ─────────────────────
+# ── Helper: RPC call (same pattern as healthcheck.sh) ─────────────────────────
 rpc_call() {
   local url="$1" method="$2" params="${3:-[]}"
-  # normaliza ws(s):// → http(s)://
+  # normalize ws(s):// → http(s)://
   url="${url/ws:\/\//http://}"; url="${url/wss:\/\//https://}"
   curl -sf --max-time 8 \
     -H "Content-Type: application/json" \
@@ -48,7 +48,7 @@ rpc_call() {
     "$url" 2>/dev/null
 }
 
-# extrae un campo del JSON result con python3 (siempre disponible en los runners)
+# extract a field from the JSON result with python3 (always present on runners)
 jget() { python3 -c "import sys,json; print(json.load(sys.stdin).get('result',{}).get('$1',''))" 2>/dev/null || echo ""; }
 jget_raw() { python3 -c "import sys,json; print(json.load(sys.stdin).get('result',''))" 2>/dev/null || echo ""; }
 hex_to_dec() { [[ "$1" == 0x* ]] && printf "%d\n" "$1" 2>/dev/null || echo "${1:-0}"; }
@@ -60,7 +60,7 @@ for url in "${RPCS[@]}"; do
 
   RTV=$(rpc_call "$url" "state_getRuntimeVersion") || RTV=""
   if [[ -z "$RTV" ]]; then
-    echo "   ✗ sin respuesta (state_getRuntimeVersion)"
+    echo "   ✗ no response (state_getRuntimeVersion)"
     FAIL=1
     continue
   fi
@@ -85,26 +85,26 @@ for url in "${RPCS[@]}"; do
   echo "   best block   : $(hex_to_dec "${BEST_HEX:-0}")"
   echo "   finalized    : $(hex_to_dec "${FIN_HEX:-0}")"
 
-  # ── chequeos --expect-* ─────────────────────────────────────────────────────
+  # ── --expect-* checks ─────────────────────────────────────────────────────────
   if [[ -n "$EXPECT_SPEC" && "$SPEC" != "$EXPECT_SPEC" ]]; then
-    echo "   ✗ spec_version esperado=$EXPECT_SPEC, actual=$SPEC"
+    echo "   ✗ spec_version expected=$EXPECT_SPEC, actual=$SPEC"
     FAIL=1
   fi
   if [[ -n "$EXPECT_IMPL" && "$CLIENT" != *"$EXPECT_IMPL"* ]]; then
-    echo "   ✗ client esperado contiene '$EXPECT_IMPL', actual=$CLIENT"
+    echo "   ✗ client expected to contain '$EXPECT_IMPL', actual=$CLIENT"
     FAIL=1
   fi
   if [[ -z "$EXPECT_SPEC" && -z "$EXPECT_IMPL" ]]; then
-    echo "   ✓ responde"
+    echo "   ✓ responding"
   elif [[ $FAIL -eq 0 ]]; then
-    echo "   ✓ versión esperada"
+    echo "   ✓ expected version"
   fi
 done
 
 if [[ $FAIL -ne 0 ]]; then
   echo ""
-  echo "Resultado: al menos un nodo no responde o no cumple la versión esperada."
+  echo "Result: at least one node is unreachable or off the expected version."
   exit 1
 fi
 echo ""
-echo "Resultado: todos los nodos OK."
+echo "Result: all nodes OK."

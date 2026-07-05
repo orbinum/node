@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # =============================================================================
 # scripts/healthcheck.sh
-# Verifica el estado de la red Orbinum después de un deploy.
-# Puede usarse localmente o desde CI.
+# Checks Orbinum network health after a deploy.
+# Usable locally or from CI.
 #
-# USO:
+# USAGE:
 #   bash scripts/healthcheck.sh [opciones] <rpc_url>
 #
-# MODOS:
-#   (default)         Verifica salud, peers, producción de bloques
-#   --check-runtime   Verifica además que spec_version subió
-#   --wait-blocks N   Espera N bloques antes de declarar éxito (default: 3)
+# MODES:
+#   (default)         Checks health, peers, block production
+#   --check-runtime   Also verifies spec_version rose
+#   --wait-blocks N   Wait N blocks before declaring success (default: 3)
 #
-# EJEMPLOS:
+# EXAMPLES:
 #   bash scripts/healthcheck.sh http://127.0.0.1:9944
 #   bash scripts/healthcheck.sh --check-runtime http://rpc.testnet.orbinum.io
 #   bash scripts/healthcheck.sh --wait-blocks 5 http://127.0.0.1:9944
@@ -22,7 +22,7 @@ set -euo pipefail
 CHECK_RUNTIME=false
 WAIT_BLOCKS=3
 RPC_URL=""
-TIMEOUT=120   # segundos máximos de espera total
+TIMEOUT=120   # max total wait in seconds
 
 log()  { echo "[$(date '+%H:%M:%S')] $*"; }
 ok()   { echo "[$(date '+%H:%M:%S')] ✅ $*"; }
@@ -36,11 +36,11 @@ while [[ $# -gt 0 ]]; do
     --wait-blocks)   WAIT_BLOCKS="$2";      shift 2 ;;
     --timeout)       TIMEOUT="$2";          shift 2 ;;
     http*|ws*)       RPC_URL="$1";          shift ;;
-    *) echo "Opción desconocida: $1" >&2;   shift ;;
+    *) echo "Unknown option: $1" >&2;   shift ;;
   esac
 done
 
-# Normalizar URL: healthcheck usa HTTP, no WS
+# Normalize URL: healthcheck uses HTTP, not WS
 RPC_HTTP="${RPC_URL/ws:\/\//http://}"
 RPC_HTTP="${RPC_HTTP/wss:\/\//https://}"
 RPC_HTTP="${RPC_HTTP:-http://127.0.0.1:9944}"
@@ -60,19 +60,19 @@ rpc_call() {
 
 hex_to_dec() { printf "%d\n" "$1" 2>/dev/null || echo 0; }
 
-# ── 1. Esperar a que el nodo responda ─────────────────────────────────────────
-log "[1/5] Esperando que el nodo responda..."
+# ── 1. Wait for the node to respond ───────────────────────────────────────────
+log "[1/5] Waiting for the node to respond..."
 ELAPSED=0
 until rpc_call "system_health" &>/dev/null; do
   sleep 3
   ELAPSED=$((ELAPSED + 3))
-  [[ $ELAPSED -gt $TIMEOUT ]] && fail "El nodo no respondió en ${TIMEOUT}s"
-  log "  Esperando... (${ELAPSED}s)"
+  [[ $ELAPSED -gt $TIMEOUT ]] && fail "Node did not respond within ${TIMEOUT}s"
+  log "  Waiting... (${ELAPSED}s)"
 done
-ok "Nodo responde en $RPC_HTTP"
+ok "Node responding at $RPC_HTTP"
 
-# ── 2. Health check básico ────────────────────────────────────────────────────
-log "[2/5] Comprobando system_health..."
+# ── 2. Basic health check ─────────────────────────────────────────────────────
+log "[2/5] Checking system_health..."
 HEALTH=$(rpc_call "system_health")
 PEERS=$(echo "$HEALTH" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['peers'])" 2>/dev/null || echo "0")
 IS_SYNCING=$(echo "$HEALTH" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['isSyncing'])" 2>/dev/null || echo "true")
@@ -80,10 +80,10 @@ IS_SYNCING=$(echo "$HEALTH" | python3 -c "import sys,json; print(json.load(sys.s
 log "  Peers: $PEERS"
 log "  isSyncing: $IS_SYNCING"
 
-[[ "$PEERS" -gt 0 ]] || warn "El nodo no tiene peers todavía (puede ser normal si es la primera vez)"
+[[ "$PEERS" -gt 0 ]] || warn "Node has no peers yet (may be normal on first start)"
 
-# ── 3. Verificar producción de bloques ────────────────────────────────────────
-log "[3/5] Verificando producción de bloques (esperando $WAIT_BLOCKS bloques)..."
+# ── 3. Check block production ──────────────────────────────────────────────────
+log "[3/5] Checking block production (waiting for $WAIT_BLOCKS blocks)..."
 
 get_block() {
   local r
@@ -92,7 +92,7 @@ get_block() {
 }
 
 START_BLOCK=$(get_block)
-log "  Bloque inicial: #${START_BLOCK}"
+log "  Start block: #${START_BLOCK}"
 
 ELAPSED=0
 while true; do
@@ -101,20 +101,20 @@ while true; do
   CURRENT_BLOCK=$(get_block)
   DELTA=$((CURRENT_BLOCK - START_BLOCK))
 
-  log "  Bloque actual: #${CURRENT_BLOCK} (+${DELTA})"
+  log "  Current block: #${CURRENT_BLOCK} (+${DELTA})"
 
   if [[ $DELTA -ge $WAIT_BLOCKS ]]; then
-    ok "Red produciendo bloques: #${START_BLOCK} → #${CURRENT_BLOCK} (+${DELTA} bloques)"
+    ok "Network producing blocks: #${START_BLOCK} → #${CURRENT_BLOCK} (+${DELTA} blocks)"
     break
   fi
 
   if [[ $ELAPSED -gt $TIMEOUT ]]; then
-    fail "Red no produjo $WAIT_BLOCKS bloques en ${TIMEOUT}s. Último bloque: #${CURRENT_BLOCK}"
+    fail "Network did not produce $WAIT_BLOCKS blocks within ${TIMEOUT}s. Last block: #${CURRENT_BLOCK}"
   fi
 done
 
-# ── 4. Verificar finalización (GRANDPA) ──────────────────────────────────────
-log "[4/5] Verificando finalización GRANDPA..."
+# ── 4. Check finalization (GRANDPA) ────────────────────────────────────────────
+log "[4/5] Checking GRANDPA finalization..."
 FINALIZED_HEX=$(rpc_call "chain_getFinalizedHead" \
   | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',''))" 2>/dev/null || echo "")
 
@@ -123,14 +123,14 @@ if [[ -n "$FINALIZED_HEX" ]]; then
   FINALIZED_BLOCK=$(echo "$FINALIZED_HEADER" \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',{}).get('number','0x0'))" 2>/dev/null)
   FINALIZED_NUM=$(hex_to_dec "$FINALIZED_BLOCK")
-  ok "Bloque finalizado: #${FINALIZED_NUM}"
+  ok "Finalized block: #${FINALIZED_NUM}"
 else
-  warn "No se pudo obtener el bloque finalizado"
+  warn "Could not fetch the finalized block"
 fi
 
-# ── 5. Verificar spec_version (solo si --check-runtime) ──────────────────────
+# ── 5. Check spec_version (only with --check-runtime) ──────────────────────────
 if [[ "$CHECK_RUNTIME" == "true" ]]; then
-  log "[5/5] Verificando spec_version post-upgrade..."
+  log "[5/5] Checking spec_version post-upgrade..."
   RUNTIME_INFO=$(rpc_call "state_getRuntimeVersion")
   SPEC_VERSION=$(echo "$RUNTIME_INFO" \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',{}).get('specVersion',0))" 2>/dev/null || echo "0")
@@ -140,19 +140,19 @@ if [[ "$CHECK_RUNTIME" == "true" ]]; then
   ok "Runtime: ${SPEC_NAME} spec_version=${SPEC_VERSION}"
 
   if [[ "$SPEC_VERSION" -lt 1 ]]; then
-    fail "spec_version inválida: $SPEC_VERSION"
+    fail "Invalid spec_version: $SPEC_VERSION"
   fi
 else
-  log "[5/5] Saltando verificación de spec_version (no --check-runtime)"
+  log "[5/5] Skipping spec_version check (no --check-runtime)"
 fi
 
-# ── Resumen ───────────────────────────────────────────────────────────────────
+# ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "══════════════════════════════════════════════════════"
-ok "HEALTHCHECK SUPERADO"
+ok "HEALTHCHECK PASSED"
 echo "  RPC:             $RPC_HTTP"
 echo "  Peers:           $PEERS"
-echo "  Bloque actual:   #$(get_block)"
-echo "  Bloques nuevos:  +${DELTA}"
+echo "  Current block:   #$(get_block)"
+echo "  New blocks:      +${DELTA}"
 [[ "$CHECK_RUNTIME" == "true" ]] && echo "  spec_version:    $SPEC_VERSION"
 echo "══════════════════════════════════════════════════════"
