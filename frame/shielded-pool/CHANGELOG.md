@@ -44,6 +44,13 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
   longevity (64 blocks) instead of `TransactionLongevity::MAX`, so a transaction
   that is never included does not linger in the pool indefinitely.
 
+### Fixed
+
+- Corrected the `unverify_asset` doc-comment: it claimed existing notes could
+  still be spent, but unverifying an asset freezes both shields and unshields
+  (an intentional emergency kill-switch for a compromised asset). Behavior
+  unchanged; documentation now matches.
+
 ## [0.8.3] - 2026-07-04
 
 ### Security

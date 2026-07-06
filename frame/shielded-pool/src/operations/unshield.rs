@@ -1101,4 +1101,34 @@ mod tests {
 			));
 		});
 	}
+
+	/// Unverifying an asset freezes existing notes too: an unshield of a
+	/// previously-verified asset fails once it is unverified (emergency kill-switch).
+	#[test]
+	fn unverifying_asset_freezes_existing_note_unshield() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset(); // registered + verified
+			fund_pool(asset_id, 1_000u128);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			// Freeze the asset via governance.
+			AssetOperation::unverify::<Test>(asset_id).unwrap();
+
+			assert_noop!(
+				UnshieldOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifier(0x70),
+					asset_id,
+					100u128,
+					acc(2),
+					0u128,
+					[0u8; 32],
+					FrameEncryptedMemo::default(),
+					None,
+				),
+				crate::pallet::Error::<Test>::AssetNotVerified
+			);
+		});
+	}
 }

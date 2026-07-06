@@ -729,10 +729,13 @@ pub mod pallet {
 			crate::operations::assets::AssetOperation::verify::<T>(asset_id)
 		}
 
-		/// Unverify an asset, preventing its use in new transactions
+		/// Unverify an asset — an emergency freeze for a compromised asset.
 		///
-		/// Marks an asset as unverified. Existing private notes with this asset
-		/// can still be spent, but new shield operations are prevented.
+		/// Marks an asset as unverified. This freezes ALL activity for the asset:
+		/// both new shields AND unshields of existing notes require `is_verified`,
+		/// so governance can halt inflows and outflows if the asset is compromised.
+		/// Note: this also traps legitimate notes until the asset is re-verified —
+		/// a deliberate trade-off for a fund-holding pool.
 		///
 		/// # Arguments
 		/// * `origin` - Must be root (governance)
