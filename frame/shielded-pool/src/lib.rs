@@ -464,6 +464,8 @@ pub mod pallet {
 		FeeRecipientUnavailable,
 		/// Batch operation submitted with no operations.
 		EmptyBatch,
+		/// Asset id counter collided with an existing asset (would overwrite it).
+		AssetIdAlreadyExists,
 	}
 
 	// ========================================================================
