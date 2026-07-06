@@ -6,6 +6,11 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 
 ### Security
 
+- `private_transfer` now rejects an unregistered or unverified asset before any
+  effect (`InvalidAssetId` / `AssetNotVerified`), matching `shield` and
+  `unshield`. It was the only path that skipped the asset state-machine, so
+  value already shielded under a frozen asset could still be moved and split
+  in-pool; the emergency freeze (`unverify_asset`) now covers every path.
 - Hardened the pool-balance ledger invariant (`PoolBalancePerAsset == physical
   pool balance` for the native asset). The accounting was already correct; added
   a `try_state` hook (feature `try-runtime`) that enforces it every block, a

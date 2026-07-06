@@ -1,7 +1,7 @@
 use crate::{
 	merkle::MerkleTreeService,
 	pallet::{Config, Error, Event, Pallet},
-	storage::{CommitmentRepository, MerkleRepository, NullifierRepository},
+	storage::{AssetRepository, CommitmentRepository, MerkleRepository, NullifierRepository},
 	types::{Commitment, EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE, Nullifier},
 };
 use frame_support::{BoundedVec, pallet_prelude::*, traits::Currency};
@@ -24,6 +24,9 @@ impl PrivateTransferOperation {
 		fee: <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance,
 		relayer_evm: Option<sp_core::H160>,
 	) -> DispatchResult {
+		let asset = AssetRepository::get_asset::<T>(asset_id).ok_or(Error::<T>::InvalidAssetId)?;
+		ensure!(asset.is_verified, Error::<T>::AssetNotVerified);
+
 		ensure!(
 			nullifiers.len() == commitments.len(),
 			Error::<T>::TooManyInputsOrOutputs
@@ -723,6 +726,54 @@ mod tests {
 					None,
 				),
 				Error::<Test>::FeeRecipientUnavailable
+			);
+		});
+	}
+
+	// ── asset state-machine gate ─────────────────────────────────────────────
+
+	/// Unverifying an asset freezes in-pool transfers too, mirroring the
+	/// shield/unshield freeze (no path escapes the emergency kill-switch).
+	#[test]
+	fn transfer_frozen_asset_fails() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			crate::operations::assets::AssetOperation::unverify::<Test>(0u32).unwrap();
+
+			assert_noop!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[0x90]),
+					commitments_of(&[0x91]),
+					memos_of(1),
+					0u32,
+					0u128,
+					None,
+				),
+				Error::<Test>::AssetNotVerified
+			);
+		});
+	}
+
+	/// A transfer on an unregistered asset id is rejected before any effect.
+	#[test]
+	fn transfer_unknown_asset_fails() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			assert_noop!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[0x92]),
+					commitments_of(&[0x93]),
+					memos_of(1),
+					999u32,
+					0u128,
+					None,
+				),
+				Error::<Test>::InvalidAssetId
 			);
 		});
 	}
