@@ -18,14 +18,22 @@ extern crate alloc;
 use alloc::vec;
 
 #[benchmarks(
-	where T: pallet_zk_verifier::Config
+	where T: pallet_zk_verifier::Config + pallet_relayer::Config
 )]
 mod benchmarks {
 	use super::*;
 	use crate::FrameEncryptedMemo;
 	use crate::pallet::{Assets, HistoricPoseidonRoots, NextAssetId, PoolBalancePerAsset};
 	use pallet_relayer::RelayerInterface;
+	use sp_core::H160;
 	use sp_std::vec::Vec;
+
+	fn setup_relayer<T: Config + pallet_relayer::Config>() -> H160 {
+		let addr = H160::from([0xAA; 20]);
+		let relayer: T::AccountId = account("relayer", 0, 0);
+		pallet_relayer::RelayerRegistry::<T>::insert(addr, relayer);
+		addr
+	}
 
 	fn setup_benchmark_env<T: Config>() -> (T::AccountId, u32) {
 		let caller: T::AccountId = whitelisted_caller();
@@ -121,6 +129,7 @@ mod benchmarks {
 		let asset_id = 0u32;
 		// Must be >= T::Relayer::min_relay_fee() to pass the FeeTooLow check.
 		let fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
+		let relayer = setup_relayer::<T>();
 
 		#[extrinsic_call]
 		private_transfer(
@@ -132,7 +141,7 @@ mod benchmarks {
 			encrypted_memos,
 			asset_id,
 			fee,
-			None,
+			Some(relayer),
 		);
 	}
 
@@ -157,6 +166,7 @@ mod benchmarks {
 
 		// Must be >= T::Relayer::min_relay_fee() to pass the FeeTooLow check.
 		let fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
+		let relayer = setup_relayer::<T>();
 
 		#[extrinsic_call]
 		unshield(
@@ -170,7 +180,7 @@ mod benchmarks {
 			fee,
 			Hash::default(),    // change_commitment: [0u8; 32] for total unshield
 			Default::default(), // change_encrypted_memo: empty for total unshield
-			None,               // relayer
+			Some(relayer),      // relayer resolves the fee recipient
 		);
 	}
 
