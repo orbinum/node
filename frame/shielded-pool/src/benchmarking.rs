@@ -94,7 +94,7 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn private_transfer() {
+	fn private_transfer(n: Linear<1, 2>) {
 		let (_caller, _) = setup_benchmark_env::<T>();
 		let merkle_root = [1u8; 32];
 
@@ -102,15 +102,21 @@ mod benchmarks {
 		HistoricPoseidonRoots::<T>::insert(merkle_root, true);
 
 		let proof: BoundedVec<u8, ConstU32<512>> = vec![0u8; 128].try_into().unwrap();
-		let nullifiers: BoundedVec<Nullifier, ConstU32<2>> =
-			vec![Nullifier([2u8; 32])].try_into().unwrap();
-		let commitments: BoundedVec<Commitment, ConstU32<2>> =
-			vec![Commitment([3u8; 32])].try_into().unwrap();
-		let memo_bytes = vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
+
+		// n inputs/outputs: the leaf-insertion loop runs n times (worst case n=2).
+		let mut nulls = Vec::new();
+		let mut comms = Vec::new();
+		let mut memos = Vec::new();
+		for i in 0..n {
+			nulls.push(Nullifier([(0x20 + i) as u8; 32]));
+			comms.push(Commitment([(0x30 + i) as u8; 32]));
+			let memo_bytes = vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
+			memos.push(FrameEncryptedMemo(memo_bytes.try_into().unwrap()));
+		}
+		let nullifiers: BoundedVec<Nullifier, ConstU32<2>> = nulls.try_into().unwrap();
+		let commitments: BoundedVec<Commitment, ConstU32<2>> = comms.try_into().unwrap();
 		let encrypted_memos: BoundedVec<FrameEncryptedMemo, ConstU32<2>> =
-			vec![FrameEncryptedMemo(memo_bytes.try_into().unwrap())]
-				.try_into()
-				.unwrap();
+			memos.try_into().unwrap();
 
 		let asset_id = 0u32;
 		// Must be >= T::Relayer::min_relay_fee() to pass the FeeTooLow check.

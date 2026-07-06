@@ -356,4 +356,33 @@ mod tests {
 			);
 		});
 	}
+
+	// ── batch guard ──────────────────────────────────────────────────────────
+
+	/// An empty `shield_batch` is rejected instead of dispatching at zero weight.
+	#[test]
+	fn shield_batch_empty_fails() {
+		use crate::mock::{RuntimeOrigin, ShieldedPool};
+		new_test_ext().execute_with(|| {
+			let empty = frame_support::BoundedVec::default();
+			assert_noop!(
+				ShieldedPool::shield_batch(RuntimeOrigin::signed(acc(1)), empty),
+				crate::pallet::Error::<Test>::EmptyBatch
+			);
+		});
+	}
+
+	/// The benchmarked `shield_batch(n)` weight has a non-zero base and scales
+	/// with n (guards against the old ad-hoc `shield()*n*0.8` that hit zero at n=0).
+	#[test]
+	fn shield_batch_weight_has_base_and_scales() {
+		use crate::weights::WeightInfo;
+		let zero = <() as WeightInfo>::shield_batch(0);
+		let one = <() as WeightInfo>::shield_batch(1);
+		assert!(
+			zero.ref_time() > 0,
+			"empty batch must still carry a base weight"
+		);
+		assert!(one.ref_time() > zero.ref_time(), "weight must scale with n");
+	}
 }

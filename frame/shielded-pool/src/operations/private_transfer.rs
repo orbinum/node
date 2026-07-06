@@ -777,4 +777,24 @@ mod tests {
 			);
 		});
 	}
+
+	// ── weight scales with outputs ───────────────────────────────────────────
+
+	/// A 2-output transfer inserts two leaves and must be weighted heavier than a
+	/// 1-output one (guards against the flat weight that under-priced the second
+	/// insert).
+	#[test]
+	fn private_transfer_weight_scales_with_outputs() {
+		use crate::weights::WeightInfo;
+		let one = <() as WeightInfo>::private_transfer(1);
+		let two = <() as WeightInfo>::private_transfer(2);
+		assert!(
+			two.ref_time() > one.ref_time(),
+			"two outputs must cost more ref_time than one"
+		);
+		assert!(
+			two.proof_size() > one.proof_size(),
+			"two outputs must cost more proof_size than one"
+		);
+	}
 }

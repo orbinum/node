@@ -41,7 +41,7 @@ use core::marker::PhantomData;
 pub trait WeightInfo {
 	fn shield() -> Weight;
 	fn shield_batch(n: u32, ) -> Weight;
-	fn private_transfer() -> Weight;
+	fn private_transfer(n: u32, ) -> Weight;
 	fn unshield() -> Weight;
 	fn register_asset() -> Weight;
 	fn verify_asset() -> Weight;
@@ -180,14 +180,20 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `ShieldedPool::MerkleLeaves` (`max_values`: None, `max_size`: Some(52), added: 2527, mode: `MaxEncodedLen`)
 	/// Storage: `ShieldedPool::CommitmentToLeafIndex` (r:0 w:1)
 	/// Proof: `ShieldedPool::CommitmentToLeafIndex` (`max_values`: None, `max_size`: Some(52), added: 2527, mode: `MaxEncodedLen`)
-	fn private_transfer() -> Weight {
+	/// The range of component `n` (outputs/leaves inserted) is `[1, 2]`.
+	fn private_transfer(n: u32, ) -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `1016`
 		//  Estimated: `4687`
 		// Minimum execution time: 696_789_000 picoseconds.
+		// Base measures one leaf insertion; each extra output adds a full insert
+		// (~20 Poseidon hashes + storage). Per-leaf cost taken from shield_batch's
+		// benchmarked per-item figure as a safe upper bound until re-benchmarked.
 		Weight::from_parts(707_598_000, 4687)
+			.saturating_add(Weight::from_parts(677_433_214, 2701).saturating_mul(n.saturating_sub(1).into()))
 			.saturating_add(T::DbWeight::get().reads(16_u64))
 			.saturating_add(T::DbWeight::get().writes(13_u64))
+			.saturating_add(T::DbWeight::get().writes((7_u64).saturating_mul(n.saturating_sub(1).into())))
 	}
 	/// Storage: `ShieldedPool::Assets` (r:1 w:0)
 	/// Proof: `ShieldedPool::Assets` (`max_values`: None, `max_size`: Some(166), added: 2641, mode: `MaxEncodedLen`)
@@ -456,14 +462,20 @@ impl WeightInfo for () {
 	/// Proof: `ShieldedPool::MerkleLeaves` (`max_values`: None, `max_size`: Some(52), added: 2527, mode: `MaxEncodedLen`)
 	/// Storage: `ShieldedPool::CommitmentToLeafIndex` (r:0 w:1)
 	/// Proof: `ShieldedPool::CommitmentToLeafIndex` (`max_values`: None, `max_size`: Some(52), added: 2527, mode: `MaxEncodedLen`)
-	fn private_transfer() -> Weight {
+	/// The range of component `n` (outputs/leaves inserted) is `[1, 2]`.
+	fn private_transfer(n: u32, ) -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `1016`
 		//  Estimated: `4687`
 		// Minimum execution time: 696_789_000 picoseconds.
+		// Base measures one leaf insertion; each extra output adds a full insert
+		// (~20 Poseidon hashes + storage). Per-leaf cost taken from shield_batch's
+		// benchmarked per-item figure as a safe upper bound until re-benchmarked.
 		Weight::from_parts(707_598_000, 4687)
+			.saturating_add(Weight::from_parts(677_433_214, 2701).saturating_mul(n.saturating_sub(1).into()))
 			.saturating_add(RocksDbWeight::get().reads(16_u64))
 			.saturating_add(RocksDbWeight::get().writes(13_u64))
+			.saturating_add(RocksDbWeight::get().writes((7_u64).saturating_mul(n.saturating_sub(1).into())))
 	}
 	/// Storage: `ShieldedPool::Assets` (r:1 w:0)
 	/// Proof: `ShieldedPool::Assets` (`max_values`: None, `max_size`: Some(166), added: 2641, mode: `MaxEncodedLen`)

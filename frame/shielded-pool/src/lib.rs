@@ -456,6 +456,8 @@ pub mod pallet {
 		/// A non-zero fee could not be attributed to any recipient (no resolved
 		/// relayer and no block author). The fee tokens would otherwise be stranded.
 		FeeRecipientUnavailable,
+		/// Batch operation submitted with no operations.
+		EmptyBatch,
 	}
 
 	// ========================================================================
@@ -518,15 +520,16 @@ pub mod pallet {
 		///
 		/// # Errors
 		/// * Same as `shield()` for any individual operation
+		/// * `EmptyBatch` - Batch submitted with no operations
 		/// * `TooManyOperations` - Batch exceeds maximum size (20)
 		///
 		/// # Events
 		/// * `Shielded` - Emitted for each successful shield in the batch
 		///
 		/// # Weight
-		/// Approximately `N * shield_weight * 0.8` (20% batch discount)
+		/// Benchmarked per operation count via `shield_batch(n)`.
 		#[pallet::call_index(12)]
-		#[pallet::weight(T::WeightInfo::shield().saturating_mul(operations.len() as u64).saturating_mul(4) / 5)]
+		#[pallet::weight(T::WeightInfo::shield_batch(operations.len() as u32))]
 		pub fn shield_batch(
 			origin: OriginFor<T>,
 			operations: BoundedVec<
@@ -535,6 +538,7 @@ pub mod pallet {
 			>,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
+			ensure!(!operations.is_empty(), Error::<T>::EmptyBatch);
 
 			// Process each shield operation
 			for (asset_id, amount, commitment, encrypted_memo) in operations.into_iter() {
@@ -576,7 +580,7 @@ pub mod pallet {
 		/// * `InvalidMemoSize` - Any encrypted memo is not exactly 168 bytes
 		/// * `MemoCommitmentMismatch` - Number of memos does not match number of commitments
 		#[pallet::call_index(1)]
-		#[pallet::weight(T::WeightInfo::private_transfer())]
+		#[pallet::weight(T::WeightInfo::private_transfer(commitments.len() as u32))]
 		#[allow(clippy::too_many_arguments)]
 		pub fn private_transfer(
 			origin: OriginFor<T>,

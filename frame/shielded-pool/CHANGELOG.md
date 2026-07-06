@@ -11,6 +11,18 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
   `unshield`. It was the only path that skipped the asset state-machine, so
   value already shielded under a frozen asset could still be moved and split
   in-pool; the emergency freeze (`unverify_asset`) now covers every path.
+- `private_transfer` weight is now parameterized by the number of outputs. It
+  inserts up to two Merkle leaves (a 2-in/2-out transfer) but was charged a flat
+  weight benchmarked for a single leaf, under-pricing the second insert (~20
+  extra Poseidon hashes plus storage) and letting an attacker fill blocks past
+  the metered limit. The benchmark now sweeps `n` outputs and the extrinsic
+  charges `private_transfer(commitments.len())`. (Weights carry an interim
+  upper-bound placeholder for the extra leaf; regenerate on the benchmark VPS.)
+- `shield_batch` now uses its benchmarked `shield_batch(n)` weight and rejects an
+  empty batch with `EmptyBatch`. It previously used an ad-hoc `shield() * n * 0.8`
+  weight with no fixed base term, which evaluated to zero for an empty batch —
+  a free-to-submit signed spam vector — and mispriced small batches versus the
+  measured curve.
 - Hardened the pool-balance ledger invariant (`PoolBalancePerAsset == physical
   pool balance` for the native asset). The accounting was already correct; added
   a `try_state` hook (feature `try-runtime`) that enforces it every block, a
