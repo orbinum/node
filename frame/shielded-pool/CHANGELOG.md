@@ -23,6 +23,12 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
   weight with no fixed base term, which evaluated to zero for an empty batch —
   a free-to-submit signed spam vector — and mispriced small batches versus the
   measured curve.
+- Hardened the historic Merkle-root window. `integrity_test` now asserts
+  `MaxHistoricRoots > 0` (a zero window would let the known-root map grow
+  unbounded while accepting every root forever). Root insertion is now atomic —
+  the order vector is pushed before the map is marked, so the two can never
+  desync — and eviction keeps a root known while any duplicate copy remains in
+  the window.
 - Hardened the pool-balance ledger invariant (`PoolBalancePerAsset == physical
   pool balance` for the native asset). The accounting was already correct; added
   a `try_state` hook (feature `try-runtime`) that enforces it every block, a

@@ -287,6 +287,12 @@ pub mod pallet {
 				crate::types::MAX_TREE_DEPTH,
 				"MaxTreeDepth config must equal the fixed tree depth (MAX_TREE_DEPTH)"
 			);
+
+			assert!(
+				T::MaxHistoricRoots::get() > 0,
+				"MaxHistoricRoots must be non-zero, otherwise the historic-root map \
+				 grows unbounded and the root window never evicts"
+			);
 		}
 
 		/// Ledger-solvency invariant: the tracked native-asset pool balance must
