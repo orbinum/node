@@ -29,6 +29,15 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
   the order vector is pushed before the map is marked, so the two can never
   desync — and eviction keeps a root known while any duplicate copy remains in
   the window.
+- Asset registration now rejects an id collision with `AssetIdAlreadyExists`
+  instead of silently overwriting an existing asset, guarding against a genesis
+  re-init resetting the id counter over live slots. Genesis native-asset
+  metadata now uses `expect` instead of `unwrap_or_default`, so an over-long
+  name/symbol fails the build loudly rather than launching with an empty string.
+- `Note.asset_id` is now `u32` (was `u64`), matching the on-chain registry and
+  the circuit's public signal (4-byte LE). The wider field serialized an
+  incompatible commitment preimage; the type is test-only today, but the mismatch
+  was a latent fund-loss footgun for any wallet building notes from it.
 - Hardened the pool-balance ledger invariant (`PoolBalancePerAsset == physical
   pool balance` for the native asset). The accounting was already correct; added
   a `try_state` hook (feature `try-runtime`) that enforces it every block, a

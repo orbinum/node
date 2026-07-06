@@ -200,7 +200,7 @@ pub struct Note {
 	value: u128,
 	owner_pubkey: Hash,
 	blinding: Hash,
-	asset_id: u64,
+	asset_id: u32,
 }
 
 impl Note {
@@ -226,7 +226,7 @@ impl Note {
 		value: u128,
 		owner_pubkey: Hash,
 		blinding: Hash,
-		asset_id: u64,
+		asset_id: u32,
 	) -> Result<Self, &'static str> {
 		let mut note = Self::new(value, owner_pubkey, blinding)?;
 		note.asset_id = asset_id;
@@ -242,7 +242,7 @@ impl Note {
 	pub fn blinding(&self) -> &Hash {
 		&self.blinding
 	}
-	pub fn asset_id(&self) -> u64 {
+	pub fn asset_id(&self) -> u32 {
 		self.asset_id
 	}
 
@@ -601,8 +601,17 @@ mod tests {
 	#[test]
 	fn note_to_bytes_has_correct_length() {
 		let note = Note::new(100, [0x01u8; 32], [0x02u8; 32]).unwrap();
-		// 16 (value u128) + 8 (asset_id u64) + 32 (pubkey) + 32 (blinding) = 88
-		assert_eq!(note.to_bytes().len(), 88);
+		// 16 (value u128) + 4 (asset_id u32) + 32 (pubkey) + 32 (blinding) = 84
+		assert_eq!(note.to_bytes().len(), 84);
+	}
+
+	#[test]
+	fn note_asset_id_serializes_as_4_bytes() {
+		// asset_id must be 4 LE bytes to match the circuit's public signal
+		// (commitment[0..32] | value[32..40] | asset_id[40..44] | ...).
+		let note = Note::new_with_asset(100, [0x01u8; 32], [0x02u8; 32], 0x01020304).unwrap();
+		let bytes = note.to_bytes();
+		assert_eq!(&bytes[16..20], &0x01020304u32.to_le_bytes());
 	}
 
 	// ── MerklePath ──────────────────────────────────────────────────────────
