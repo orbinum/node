@@ -771,6 +771,11 @@ pub mod pallet {
 		/// A value_proof ZK proof must be supplied, proving that `commitment`
 		/// encodes exactly `amount` and `asset_id`.
 		///
+		/// The caller can only spend its own pending fees (keyed by the signed
+		/// origin), but the resulting note's owner is chosen by the caller — the
+		/// note need not belong to the validator. This is intentional: a relayer
+		/// may direct its own earned fees to any shielded recipient.
+		///
 		/// # Errors
 		/// * `InvalidProof` - ZK proof verification failed or wrong length (expected 128 bytes)
 		/// * `InvalidPublicSignals` - Signals mismatch commitment/amount/asset_id, or wrong length (expected 76 bytes)
