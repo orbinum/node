@@ -45,7 +45,7 @@ impl<T: Config> Pallet<T> {
 #[cfg(test)]
 mod tests {
 	use crate::{
-		mock::{Test, new_test_ext},
+		mock::{Test, acc, new_test_ext},
 		storage::MerkleRepository,
 		types::Commitment,
 	};
@@ -55,7 +55,7 @@ mod tests {
 	fn pool_account_id_is_non_zero() {
 		new_test_ext().execute_with(|| {
 			let pool = crate::Pallet::<Test>::pool_account_id();
-			assert_ne!(pool, 0u64);
+			assert_ne!(pool, acc(0));
 		});
 	}
 

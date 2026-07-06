@@ -64,7 +64,7 @@ mod tests {
 		new_test_ext().execute_with(|| {
 			let (_root, size, depth) = crate::Pallet::<Test>::get_merkle_tree_info();
 			assert_eq!(size, 0);
-			assert_eq!(depth, 32); // MaxTreeDepth = 32 in mock
+			assert_eq!(depth, 20); // MaxTreeDepth = 20 (matches MAX_TREE_DEPTH)
 		});
 	}
 

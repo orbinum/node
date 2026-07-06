@@ -2,6 +2,87 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [Unreleased]
+
+### Security
+
+- `private_transfer` now rejects an unregistered or unverified asset before any
+  effect (`InvalidAssetId` / `AssetNotVerified`), matching `shield` and
+  `unshield`. It was the only path that skipped the asset state-machine, so
+  value already shielded under a frozen asset could still be moved and split
+  in-pool; the emergency freeze (`unverify_asset`) now covers every path.
+- `private_transfer` weight is now parameterized by the number of outputs. It
+  inserts up to two Merkle leaves (a 2-in/2-out transfer) but was charged a flat
+  weight benchmarked for a single leaf, under-pricing the second insert (~20
+  extra Poseidon hashes plus storage) and letting an attacker fill blocks past
+  the metered limit. The benchmark now sweeps `n` outputs and the extrinsic
+  charges `private_transfer(commitments.len())`. (Weights carry an interim
+  upper-bound placeholder for the extra leaf; regenerate on the benchmark VPS.)
+- `shield_batch` now uses its benchmarked `shield_batch(n)` weight and rejects an
+  empty batch with `EmptyBatch`. It previously used an ad-hoc `shield() * n * 0.8`
+  weight with no fixed base term, which evaluated to zero for an empty batch —
+  a free-to-submit signed spam vector — and mispriced small batches versus the
+  measured curve.
+- Hardened the historic Merkle-root window. `integrity_test` now asserts
+  `MaxHistoricRoots > 0` (a zero window would let the known-root map grow
+  unbounded while accepting every root forever). Root insertion is now atomic —
+  the order vector is pushed before the map is marked, so the two can never
+  desync — and eviction keeps a root known while any duplicate copy remains in
+  the window.
+- Asset registration now rejects an id collision with `AssetIdAlreadyExists`
+  instead of silently overwriting an existing asset, guarding against a genesis
+  re-init resetting the id counter over live slots. Genesis native-asset
+  metadata now uses `expect` instead of `unwrap_or_default`, so an over-long
+  name/symbol fails the build loudly rather than launching with an empty string.
+- `Note.asset_id` is now `u32` (was `u64`), matching the on-chain registry and
+  the circuit's public signal (4-byte LE). The wider field serialized an
+  incompatible commitment preimage; the type is test-only today, but the mismatch
+  was a latent fund-loss footgun for any wallet building notes from it.
+- Hardened the pool-balance ledger invariant (`PoolBalancePerAsset == physical
+  pool balance` for the native asset). The accounting was already correct; added
+  a `try_state` hook (feature `try-runtime`) that enforces it every block, a
+  `defensive_assert!` before the `saturating_sub` in `PoolBalanceRepository`, and
+  tests anchoring the invariant across the full fee lifecycle (shield → unshield
+  with fee → claim → unshield the fee note) and each operation. No behavioral
+  change to the ledger — verification and defense-in-depth only.
+- Bound the unsigned `relayer` field into the transaction-pool `provides` tag for
+  `unshield` and `private_transfer`. `ValidateUnsigned` now forwards `relayer` to
+  validation (it was previously dropped), so a variant differing only in the fee
+  recipient is a distinct pool entry and cannot silently replace the honest tx.
+  The relayer registry is governance-gated, so an unregistered address cannot
+  credit itself — it falls back to the block author (griefing at worst, never
+  theft). User funds are never at risk; only fee attribution is affected.
+- `claim_shielded_fees` now takes `BoundedVec` for `proof` (max 512) and
+  `public_signals` (max 128) instead of unbounded `Vec<u8>`, so oversized inputs
+  are rejected by the codec bound before dispatch, matching the other extrinsics.
+- The Merkle-tree capacity guard now derives its limit from the fixed
+  `MAX_TREE_DEPTH` constant instead of the `MaxTreeDepth` config, so the
+  `MerkleTreeFull` check always fires at the real 2^20 capacity even if the config
+  is misset. An `integrity_test` asserts `MaxTreeDepth == MAX_TREE_DEPTH` at
+  runtime construction, keeping the depth reported to wallets consistent with the
+  tree the pallet actually implements.
+- `unshield` now rejects a recipient whose encoding is not exactly 32 bytes with
+  `InvalidRecipient`, instead of silently binding a zeroed recipient into the
+  proof. Production `AccountId` is `AccountId32` (32 bytes) — and every signature
+  scheme Orbinum unifies (sr25519/ed25519/ECDSA/EVM, plus future ones like Solana)
+  maps to a 32-byte account — so the strict binding covers them all. The test mock
+  was migrated from `u64` to `AccountId32` so the binding is exercised end-to-end.
+- A non-zero relay fee that cannot be attributed to any recipient (no resolved
+  relayer and no block author) now errors with `FeeRecipientUnavailable` instead
+  of silently skipping accumulation and stranding the fee tokens in the pool. This
+  is unreachable under normal operation (a transaction always executes inside a
+  block, so a block author exists) but fails loudly on a misconfigured provider.
+- Unsigned `unshield`/`private_transfer` transactions now carry a bounded pool
+  longevity (64 blocks) instead of `TransactionLongevity::MAX`, so a transaction
+  that is never included does not linger in the pool indefinitely.
+
+### Fixed
+
+- Corrected the `unverify_asset` doc-comment: it claimed existing notes could
+  still be spent, but unverifying an asset freezes both shields and unshields
+  (an intentional emergency kill-switch for a compromised asset). Behavior
+  unchanged; documentation now matches.
+
 ## [0.8.3] - 2026-07-04
 
 ### Security

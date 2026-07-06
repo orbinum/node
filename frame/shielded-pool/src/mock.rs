@@ -1,11 +1,21 @@
 //! Mock runtime for testing pallet-shielded-pool
 
 use crate as pallet_shielded_pool;
-use frame_support::{PalletId, derive_impl, parameter_types, traits::ConstU128};
+use frame_support::{
+	PalletId, derive_impl, parameter_types,
+	traits::{ConstU32, ConstU128},
+};
+use frame_system::EnsureRoot;
 use pallet_zk_verifier::ZkVerifierPort;
-use sp_runtime::BuildStorage;
+use sp_runtime::{AccountId32, BuildStorage, traits::IdentityLookup};
 
 type Block = frame_system::mocking::MockBlock<Test>;
+type AccountId = AccountId32;
+
+/// Build a deterministic 32-byte test account (mirrors production `AccountId32`).
+pub fn acc(n: u8) -> AccountId {
+	AccountId32::new([n; 32])
+}
 
 // Configure a mock runtime to test the pallet.
 frame_support::construct_runtime!(
@@ -13,6 +23,7 @@ frame_support::construct_runtime!(
 		System: frame_system,
 		Balances: pallet_balances,
 		ZkVerifier: pallet_zk_verifier,
+		Relayer: pallet_relayer,
 		ShieldedPool: pallet_shielded_pool,
 	}
 );
@@ -21,6 +32,8 @@ frame_support::construct_runtime!(
 impl frame_system::Config for Test {
 	type Block = Block;
 	type AccountData = pallet_balances::AccountData<u128>;
+	type AccountId = AccountId;
+	type Lookup = IdentityLookup<AccountId>;
 }
 
 #[derive_impl(pallet_balances::config_preludes::TestDefaultConfig)]
@@ -32,7 +45,7 @@ impl pallet_balances::Config for Test {
 
 parameter_types! {
 	pub const ShieldedPoolPalletId: PalletId = PalletId(*b"shldpool");
-	pub const MaxTreeDepth: u32 = 32;
+	pub const MaxTreeDepth: u32 = 20;
 	pub const MaxHistoricRoots: u32 = 100;
 	pub const MinShieldAmount: u128 = 100;
 	pub const MaxProofSize: u32 = 256;
@@ -118,6 +131,30 @@ impl ZkVerifierPort for MockZkVerifier {
 	}
 }
 
+/// Block-author provider for the real `pallet-relayer` in tests.
+///
+/// Returns `None` when the raw `b"mock:no_author"` flag is set (see
+/// `mock_clear_block_author`), otherwise `Some(acc(1))` (Alice) — preserving the
+/// behavior the previous `MockRelayer` exposed.
+pub struct MockBlockAuthor;
+impl frame_support::traits::Get<Option<AccountId>> for MockBlockAuthor {
+	fn get() -> Option<AccountId> {
+		if sp_io::storage::get(b"mock:no_author").is_some() {
+			None
+		} else {
+			Some(acc(1))
+		}
+	}
+}
+
+impl pallet_relayer::Config for Test {
+	type BlockAuthor = MockBlockAuthor;
+	type DefaultMinRelayFee = ConstU128<0>;
+	type ManageOrigin = EnsureRoot<AccountId>;
+	type MaxAllowedSelectors = ConstU32<16>;
+	type WeightInfo = ();
+}
+
 impl pallet_shielded_pool::Config for Test {
 	type Currency = Balances;
 	type ZkVerifier = MockZkVerifier;
@@ -126,107 +163,48 @@ impl pallet_shielded_pool::Config for Test {
 	type MaxHistoricRoots = MaxHistoricRoots;
 	type MinShieldAmount = MinShieldAmount;
 	type WeightInfo = ();
-	type Relayer = MockRelayer;
+	type Relayer = pallet_relayer::Pallet<Test>;
 }
 
-/// Mock implementation of `RelayerInterface` for unit tests.
-///
-/// - `min_relay_fee()` → 0 (no minimum in tests; set higher when testing fee enforcement)
-/// - `block_author()` → `Some(1u64)` (Alice)
-/// - Fee tracking is backed by raw `TestExternalities` storage (auto-reset per test).
-pub struct MockRelayer;
+// ── Relayer test helpers ─────────────────────────────────────────────────────
+//
+// These drive the REAL `pallet-relayer` storage so `mock::Test` exercises the
+// same code path as the runtime. Signatures are unchanged from the previous
+// `MockRelayer` helpers, so callers stay the same.
 
-/// Read a pending-fee balance from raw test storage.
-pub fn mock_pending_fees_get(who: u64, asset_id: u32) -> u128 {
-	use parity_scale_codec::{Decode, Encode};
-	let key = [
-		b"mock:fees:".as_ref(),
-		who.encode().as_slice(),
-		asset_id.encode().as_slice(),
-	]
-	.concat();
-	sp_io::storage::get(&key)
-		.and_then(|v| u128::decode(&mut &v[..]).ok())
-		.unwrap_or(0)
+/// Read a pending-fee balance from `pallet-relayer`.
+pub fn mock_pending_fees_get(who: AccountId, asset_id: u32) -> u128 {
+	pallet_relayer::PendingRelayerFees::<Test>::get(who, asset_id)
 }
 
-/// Write a pending-fee balance to raw test storage.
-pub fn mock_pending_fees_set(who: u64, asset_id: u32, amount: u128) {
-	use parity_scale_codec::Encode;
-	let key = [
-		b"mock:fees:".as_ref(),
-		who.encode().as_slice(),
-		asset_id.encode().as_slice(),
-	]
-	.concat();
-	sp_io::storage::set(&key, &amount.encode());
+/// Write a pending-fee balance into `pallet-relayer`.
+pub fn mock_pending_fees_set(who: AccountId, asset_id: u32, amount: u128) {
+	pallet_relayer::PendingRelayerFees::<Test>::insert(who, asset_id, amount);
 }
 
-/// Read the registered EVM address for an account from raw test storage.
-pub fn mock_evm_address_get(who: u64) -> Option<sp_core::H160> {
-	use parity_scale_codec::{Decode, Encode};
-	let key = [b"mock:evm:".as_ref(), who.encode().as_slice()].concat();
-	sp_io::storage::get(&key)
-		.and_then(|v| <[u8; 20]>::decode(&mut &v[..]).ok())
-		.map(sp_core::H160::from)
+/// Read the registered EVM address for an account from `pallet-relayer`'s
+/// reverse index.
+#[allow(dead_code)]
+pub fn mock_evm_address_get(who: AccountId) -> Option<sp_core::H160> {
+	pallet_relayer::RelayerByAccount::<Test>::get(who)
 }
 
-/// Write a minimum relay fee to raw test storage.
-/// By default `MockRelayer::min_relay_fee()` returns 0; call this to raise the floor.
+/// Set the minimum relay fee in `pallet-relayer`.
+/// Defaults to 0 (`DefaultMinRelayFee = ConstU128<0>`); call this to raise the floor.
 pub fn mock_set_min_relay_fee(fee: u128) {
-	use parity_scale_codec::Encode;
-	sp_io::storage::set(b"mock:min_relay_fee", &fee.encode());
+	pallet_relayer::MinRelayFee::<Test>::put(fee);
 }
 
-impl pallet_relayer::RelayerInterface for MockRelayer {
-	type AccountId = u64;
+/// Register an EVM address → account mapping so `resolve_relayer` returns `Some`.
+/// Writes directly into `pallet-relayer`'s registry for tests.
+pub fn mock_register_relayer(who: AccountId, addr: sp_core::H160) {
+	pallet_relayer::RelayerRegistry::<Test>::insert(addr, who);
+}
 
-	fn resolve_relayer(_evm_address: &sp_core::H160) -> Option<u64> {
-		// No registry in shielded-pool unit tests; fees fall back to block_author.
-		None
-	}
-
-	fn min_relay_fee() -> u128 {
-		use parity_scale_codec::Decode;
-		sp_io::storage::get(b"mock:min_relay_fee")
-			.and_then(|v| u128::decode(&mut &v[..]).ok())
-			.unwrap_or(0)
-	}
-
-	fn allowed_selectors() -> sp_std::vec::Vec<[u8; 4]> {
-		sp_std::vec![]
-	}
-
-	fn block_author() -> Option<u64> {
-		Some(1u64)
-	}
-
-	fn accumulate_relay_fee(author: &u64, asset_id: u32, amount: u128) {
-		let current = mock_pending_fees_get(*author, asset_id);
-		mock_pending_fees_set(*author, asset_id, current.saturating_add(amount));
-	}
-
-	fn pending_relay_fees(who: &u64, asset_id: u32) -> u128 {
-		mock_pending_fees_get(*who, asset_id)
-	}
-
-	fn consume_relay_fee(
-		who: &u64,
-		asset_id: u32,
-		amount: u128,
-	) -> frame_support::dispatch::DispatchResult {
-		let balance = mock_pending_fees_get(*who, asset_id);
-		if balance >= amount {
-			mock_pending_fees_set(*who, asset_id, balance - amount);
-			Ok(())
-		} else {
-			Err(sp_runtime::DispatchError::Other("InsufficientPendingFees"))
-		}
-	}
-
-	fn registered_evm_address(who: &u64) -> Option<sp_core::H160> {
-		mock_evm_address_get(*who)
-	}
+/// Force the relayer's `block_author()` to return `None` (default is `Some(acc(1))`),
+/// to test the no-fee-recipient path. Read by `MockBlockAuthor`.
+pub fn mock_clear_block_author() {
+	sp_io::storage::set(b"mock:no_author", &[1u8]);
 }
 
 /// Build genesis storage for testing
@@ -236,7 +214,11 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 		.unwrap();
 
 	pallet_balances::GenesisConfig::<Test> {
-		balances: vec![(1, 1_000_000), (2, 1_000_000), (3, 1_000_000)],
+		balances: vec![
+			(acc(1), 1_000_000),
+			(acc(2), 1_000_000),
+			(acc(3), 1_000_000),
+		],
 		..Default::default()
 	}
 	.assimilate_storage(&mut t)

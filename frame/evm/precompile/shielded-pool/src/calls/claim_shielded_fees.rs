@@ -86,18 +86,21 @@ where
 		return Err(err("claimShieldedFees: proof must be non-empty"));
 	}
 
-	let public_signals: Vec<u8> = abi::decode_bytes_at_slot(params, 160)?;
+	let public_signals_raw: Vec<u8> = abi::decode_bytes_at_slot(params, 160)?;
 
-	if public_signals.len() != 76 {
+	if public_signals_raw.len() != 76 {
 		return Err(err("claimShieldedFees: public_signals must be 76 bytes"));
 	}
+	let public_signals = public_signals_raw
+		.try_into()
+		.map_err(|_| err("claimShieldedFees: public_signals too long"))?;
 
 	Ok(pallet_shielded_pool::Call::<T>::claim_shielded_fees {
 		commitment,
 		amount,
 		asset_id,
 		memo,
-		proof: proof.into(),
+		proof,
 		public_signals,
 	})
 }

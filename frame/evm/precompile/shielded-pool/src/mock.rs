@@ -118,7 +118,7 @@ impl pallet_evm::Config for Test {
 
 parameter_types! {
 	pub const ShieldedPoolPalletId: PalletId = PalletId(*b"shldpool");
-	pub const MaxTreeDepth: u32 = 32;
+	pub const MaxTreeDepth: u32 = 20;
 	pub const MaxHistoricRoots: u32 = 100;
 	pub const MinShieldAmount: u128 = 100;
 }

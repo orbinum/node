@@ -18,14 +18,22 @@ extern crate alloc;
 use alloc::vec;
 
 #[benchmarks(
-	where T: pallet_zk_verifier::Config
+	where T: pallet_zk_verifier::Config + pallet_relayer::Config
 )]
 mod benchmarks {
 	use super::*;
 	use crate::FrameEncryptedMemo;
 	use crate::pallet::{Assets, HistoricPoseidonRoots, NextAssetId, PoolBalancePerAsset};
 	use pallet_relayer::RelayerInterface;
+	use sp_core::H160;
 	use sp_std::vec::Vec;
+
+	fn setup_relayer<T: Config + pallet_relayer::Config>() -> H160 {
+		let addr = H160::from([0xAA; 20]);
+		let relayer: T::AccountId = account("relayer", 0, 0);
+		pallet_relayer::RelayerRegistry::<T>::insert(addr, relayer);
+		addr
+	}
 
 	fn setup_benchmark_env<T: Config>() -> (T::AccountId, u32) {
 		let caller: T::AccountId = whitelisted_caller();
@@ -94,7 +102,7 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn private_transfer() {
+	fn private_transfer(n: Linear<1, 2>) {
 		let (_caller, _) = setup_benchmark_env::<T>();
 		let merkle_root = [1u8; 32];
 
@@ -102,19 +110,26 @@ mod benchmarks {
 		HistoricPoseidonRoots::<T>::insert(merkle_root, true);
 
 		let proof: BoundedVec<u8, ConstU32<512>> = vec![0u8; 128].try_into().unwrap();
-		let nullifiers: BoundedVec<Nullifier, ConstU32<2>> =
-			vec![Nullifier([2u8; 32])].try_into().unwrap();
-		let commitments: BoundedVec<Commitment, ConstU32<2>> =
-			vec![Commitment([3u8; 32])].try_into().unwrap();
-		let memo_bytes = vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
+
+		// n inputs/outputs: the leaf-insertion loop runs n times (worst case n=2).
+		let mut nulls = Vec::new();
+		let mut comms = Vec::new();
+		let mut memos = Vec::new();
+		for i in 0..n {
+			nulls.push(Nullifier([(0x20 + i) as u8; 32]));
+			comms.push(Commitment([(0x30 + i) as u8; 32]));
+			let memo_bytes = vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
+			memos.push(FrameEncryptedMemo(memo_bytes.try_into().unwrap()));
+		}
+		let nullifiers: BoundedVec<Nullifier, ConstU32<2>> = nulls.try_into().unwrap();
+		let commitments: BoundedVec<Commitment, ConstU32<2>> = comms.try_into().unwrap();
 		let encrypted_memos: BoundedVec<FrameEncryptedMemo, ConstU32<2>> =
-			vec![FrameEncryptedMemo(memo_bytes.try_into().unwrap())]
-				.try_into()
-				.unwrap();
+			memos.try_into().unwrap();
 
 		let asset_id = 0u32;
 		// Must be >= T::Relayer::min_relay_fee() to pass the FeeTooLow check.
 		let fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
+		let relayer = setup_relayer::<T>();
 
 		#[extrinsic_call]
 		private_transfer(
@@ -126,7 +141,7 @@ mod benchmarks {
 			encrypted_memos,
 			asset_id,
 			fee,
-			None,
+			Some(relayer),
 		);
 	}
 
@@ -151,6 +166,7 @@ mod benchmarks {
 
 		// Must be >= T::Relayer::min_relay_fee() to pass the FeeTooLow check.
 		let fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
+		let relayer = setup_relayer::<T>();
 
 		#[extrinsic_call]
 		unshield(
@@ -164,7 +180,7 @@ mod benchmarks {
 			fee,
 			Hash::default(),    // change_commitment: [0u8; 32] for total unshield
 			Default::default(), // change_encrypted_memo: empty for total unshield
-			None,               // relayer
+			Some(relayer),      // relayer resolves the fee recipient
 		);
 	}
 
@@ -207,7 +223,7 @@ mod benchmarks {
 		let amount: BalanceOf<T> = T::MinShieldAmount::get() * 10u32.into();
 		let amount_u128: u128 = amount.saturated_into();
 
-		// Acumular relay fees para el validator
+		// Accumulate relay fees for the validator.
 		T::Relayer::accumulate_relay_fee(&caller, asset_id, amount_u128);
 
 		let commitment = Commitment([0x11u8; 32]);
@@ -229,8 +245,8 @@ mod benchmarks {
 			amount,
 			asset_id,
 			memo,
-			proof,
-			public_signals,
+			proof.try_into().expect("proof fits bound"),
+			public_signals.try_into().expect("signals fit bound"),
 		);
 	}
 

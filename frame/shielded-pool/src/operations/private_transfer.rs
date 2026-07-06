@@ -1,7 +1,7 @@
 use crate::{
 	merkle::MerkleTreeService,
 	pallet::{Config, Error, Event, Pallet},
-	storage::{CommitmentRepository, MerkleRepository, NullifierRepository},
+	storage::{AssetRepository, CommitmentRepository, MerkleRepository, NullifierRepository},
 	types::{Commitment, EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE, Nullifier},
 };
 use frame_support::{BoundedVec, pallet_prelude::*, traits::Currency};
@@ -24,6 +24,9 @@ impl PrivateTransferOperation {
 		fee: <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance,
 		relayer_evm: Option<sp_core::H160>,
 	) -> DispatchResult {
+		let asset = AssetRepository::get_asset::<T>(asset_id).ok_or(Error::<T>::InvalidAssetId)?;
+		ensure!(asset.is_verified, Error::<T>::AssetNotVerified);
+
 		ensure!(
 			nullifiers.len() == commitments.len(),
 			Error::<T>::TooManyInputsOrOutputs
@@ -112,12 +115,11 @@ impl PrivateTransferOperation {
 		}
 
 		if fee > <T::Currency as Currency<T::AccountId>>::Balance::zero() {
-			let fee_recipient: Option<T::AccountId> = relayer_evm
+			let recipient_account = relayer_evm
 				.and_then(|addr| T::Relayer::resolve_relayer(&addr))
-				.or_else(T::Relayer::block_author);
-			if let Some(recipient_account) = fee_recipient {
-				T::Relayer::accumulate_relay_fee(&recipient_account, asset_id, fee_u128);
-			}
+				.or_else(T::Relayer::block_author)
+				.ok_or(Error::<T>::FeeRecipientUnavailable)?;
+			T::Relayer::accumulate_relay_fee(&recipient_account, asset_id, fee_u128);
 		}
 
 		Pallet::<T>::deposit_event(Event::NullifiersSpent {
@@ -145,12 +147,12 @@ impl PrivateTransferOperation {
 mod tests {
 	use super::*;
 	use crate::{
-		mock::{Test, new_test_ext},
+		mock::{Test, acc, new_test_ext},
 		pallet::Event as PalletEvent,
 		storage::{CommitmentRepository, MerkleRepository, NullifierRepository},
 		types::{Commitment, EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE, Nullifier},
 	};
-	use frame_support::{assert_noop, assert_ok};
+	use frame_support::{assert_err, assert_noop, assert_ok};
 
 	// ── helpers ───────────────────────────────────────────────────────────────
 
@@ -438,7 +440,7 @@ mod tests {
 			));
 
 			// MockRelayer block_author = Some(1)
-			let pending = crate::mock::mock_pending_fees_get(1u64, 0u32);
+			let pending = crate::mock::mock_pending_fees_get(acc(1), 0u32);
 			assert_eq!(pending, fee);
 		});
 	}
@@ -459,7 +461,7 @@ mod tests {
 				None,
 			));
 
-			let pending = crate::mock::mock_pending_fees_get(1u64, 0u32);
+			let pending = crate::mock::mock_pending_fees_get(acc(1), 0u32);
 			assert_eq!(pending, 0u128);
 		});
 	}
@@ -610,5 +612,189 @@ mod tests {
 				Error::<Test>::TooManyInputsOrOutputs
 			);
 		});
+	}
+
+	// ── private_transfer must leave the pool ledger untouched ─────────────────
+
+	/// A transfer moves value note-to-note; nothing enters or leaves the pool
+	/// physically, so PoolBalancePerAsset must not change. The fee becomes a
+	/// pending number backed by tokens already inside the pool.
+	#[test]
+	fn transfer_preserves_pool_ledger() {
+		use crate::storage::PoolBalanceRepository;
+		use frame_support::traits::Currency;
+		use sp_runtime::AccountId32;
+
+		new_test_ext().execute_with(|| {
+			let asset_id = 0u32;
+			// Seed a pool ledger/physical balance the transfer must not disturb.
+			let pool = crate::Pallet::<Test>::pool_account_id();
+			let _ = <pallet_balances::Pallet<Test> as Currency<AccountId32>>::deposit_creating(
+				&pool, 1000,
+			);
+			PoolBalanceRepository::set_asset_balance::<Test>(asset_id, 1000);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			let ledger_before = PoolBalanceRepository::get_asset_balance::<Test>(asset_id);
+			let physical_before =
+				<pallet_balances::Pallet<Test> as Currency<AccountId32>>::free_balance(&pool);
+			let fee = 25u128;
+
+			assert_ok!(PrivateTransferOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifiers_of(&[0x40]),
+				commitments_of(&[0x41]),
+				memos_of(1),
+				asset_id,
+				fee,
+				None,
+			));
+
+			assert_eq!(
+				PoolBalanceRepository::get_asset_balance::<Test>(asset_id),
+				ledger_before,
+				"transfer must not change the pool ledger"
+			);
+			assert_eq!(
+				<pallet_balances::Pallet<Test> as Currency<AccountId32>>::free_balance(&pool),
+				physical_before,
+				"transfer must not move physical pool tokens"
+			);
+			assert_eq!(crate::mock::mock_pending_fees_get(acc(1), asset_id), fee);
+		});
+	}
+
+	// ── relay-fee attribution ────────────────────────────────────────────────
+
+	/// A registered relayer receives the transfer fee; an unregistered attacker
+	/// address cannot credit itself (falls back to block author).
+	#[test]
+	fn transfer_fee_attribution_registered_vs_unregistered() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			let relayer_acct = acc(7);
+			crate::mock::mock_register_relayer(
+				relayer_acct.clone(),
+				sp_core::H160::from([0xAA; 20]),
+			);
+
+			// Registered relayer 0xAA → fee to account 7.
+			assert_ok!(PrivateTransferOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifiers_of(&[0x70]),
+				commitments_of(&[0x71]),
+				memos_of(1),
+				0u32,
+				30u128,
+				Some(sp_core::H160::from([0xAA; 20])),
+			));
+			assert_eq!(crate::mock::mock_pending_fees_get(relayer_acct, 0u32), 30);
+
+			// Unregistered 0xBB → falls back to block author (1), never the attacker.
+			assert_ok!(PrivateTransferOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifiers_of(&[0x72]),
+				commitments_of(&[0x73]),
+				memos_of(1),
+				0u32,
+				20u128,
+				Some(sp_core::H160::from([0xBB; 20])),
+			));
+			assert_eq!(crate::mock::mock_pending_fees_get(acc(1), 0u32), 20);
+		});
+	}
+
+	/// A non-zero fee with no resolvable recipient errors, mirroring unshield.
+	#[test]
+	fn transfer_nonzero_fee_without_recipient_errors() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			crate::mock::mock_clear_block_author();
+
+			assert_err!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[0x80]),
+					commitments_of(&[0x81]),
+					memos_of(1),
+					0u32,
+					25u128,
+					None,
+				),
+				Error::<Test>::FeeRecipientUnavailable
+			);
+		});
+	}
+
+	// ── asset state-machine gate ─────────────────────────────────────────────
+
+	/// Unverifying an asset freezes in-pool transfers too, mirroring the
+	/// shield/unshield freeze (no path escapes the emergency kill-switch).
+	#[test]
+	fn transfer_frozen_asset_fails() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			crate::operations::assets::AssetOperation::unverify::<Test>(0u32).unwrap();
+
+			assert_noop!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[0x90]),
+					commitments_of(&[0x91]),
+					memos_of(1),
+					0u32,
+					0u128,
+					None,
+				),
+				Error::<Test>::AssetNotVerified
+			);
+		});
+	}
+
+	/// A transfer on an unregistered asset id is rejected before any effect.
+	#[test]
+	fn transfer_unknown_asset_fails() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			assert_noop!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[0x92]),
+					commitments_of(&[0x93]),
+					memos_of(1),
+					999u32,
+					0u128,
+					None,
+				),
+				Error::<Test>::InvalidAssetId
+			);
+		});
+	}
+
+	// ── weight scales with outputs ───────────────────────────────────────────
+
+	/// A 2-output transfer inserts two leaves and must be weighted heavier than a
+	/// 1-output one (guards against the flat weight that under-priced the second
+	/// insert).
+	#[test]
+	fn private_transfer_weight_scales_with_outputs() {
+		use crate::weights::WeightInfo;
+		let one = <() as WeightInfo>::private_transfer(1);
+		let two = <() as WeightInfo>::private_transfer(2);
+		assert!(
+			two.ref_time() > one.ref_time(),
+			"two outputs must cost more ref_time than one"
+		);
+		assert!(
+			two.proof_size() > one.proof_size(),
+			"two outputs must cost more proof_size than one"
+		);
 	}
 }

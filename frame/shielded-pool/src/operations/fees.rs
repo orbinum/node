@@ -102,7 +102,7 @@ impl FeeOperation {
 mod tests {
 	use super::*;
 	use crate::{
-		mock::{Test, mock_pending_fees_get, mock_pending_fees_set, new_test_ext},
+		mock::{Test, acc, mock_pending_fees_get, mock_pending_fees_set, new_test_ext},
 		operations::assets::AssetOperation,
 		pallet::Event as PalletEvent,
 		storage::CommitmentRepository,
@@ -115,7 +115,7 @@ mod tests {
 	fn setup_asset() -> u32 {
 		let name = frame_support::BoundedVec::try_from(b"ORB".to_vec()).unwrap();
 		let sym = frame_support::BoundedVec::try_from(b"ORB".to_vec()).unwrap();
-		AssetOperation::register_asset::<Test>(name, sym, 18, None, 1u64).unwrap()
+		AssetOperation::register_asset::<Test>(name, sym, 18, None, acc(1)).unwrap()
 	}
 
 	fn make_commitment() -> Commitment {
@@ -146,14 +146,14 @@ mod tests {
 	#[test]
 	fn claim_shielded_works() {
 		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
+			let validator = acc(1);
 			let asset_id = setup_asset();
 			let amount = 200u128;
 			let commitment = make_commitment();
-			mock_pending_fees_set(validator, asset_id, amount);
+			mock_pending_fees_set(validator.clone(), asset_id, amount);
 
 			assert_ok!(FeeOperation::claim_shielded::<Test>(
-				validator,
+				validator.clone(),
 				commitment,
 				amount,
 				asset_id,
@@ -170,7 +170,7 @@ mod tests {
 			let commitment = make_commitment();
 			assert_noop!(
 				FeeOperation::claim_shielded::<Test>(
-					1u64,
+					acc(1),
 					commitment,
 					100u128,
 					99u32, // not registered — fails before proof check
@@ -186,15 +186,15 @@ mod tests {
 	#[test]
 	fn claim_shielded_insufficient_pending_fees_fails() {
 		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
+			let validator = acc(1);
 			let asset_id = setup_asset();
 			let commitment = make_commitment();
 			let amount = 100u128;
-			mock_pending_fees_set(validator, asset_id, 50u128); // only 50 available
+			mock_pending_fees_set(validator.clone(), asset_id, 50u128); // only 50 available
 
 			assert_noop!(
 				FeeOperation::claim_shielded::<Test>(
-					validator,
+					validator.clone(),
 					commitment,
 					amount, // requesting 100
 					asset_id,
@@ -210,16 +210,16 @@ mod tests {
 	#[test]
 	fn claim_shielded_inserts_commitment_into_tree() {
 		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
+			let validator = acc(1);
 			let asset_id = setup_asset();
 			let amount = 100u128;
 			let commitment = make_commitment();
-			mock_pending_fees_set(validator, asset_id, amount);
+			mock_pending_fees_set(validator.clone(), asset_id, amount);
 
 			assert!(!CommitmentRepository::exists::<Test>(&commitment));
 
 			assert_ok!(FeeOperation::claim_shielded::<Test>(
-				validator,
+				validator.clone(),
 				commitment,
 				amount,
 				asset_id,
@@ -235,15 +235,15 @@ mod tests {
 	#[test]
 	fn claim_shielded_stores_memo() {
 		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
+			let validator = acc(1);
 			let asset_id = setup_asset();
 			let amount = 100u128;
 			let commitment = make_commitment();
 			let memo = make_memo();
-			mock_pending_fees_set(validator, asset_id, amount);
+			mock_pending_fees_set(validator.clone(), asset_id, amount);
 
 			assert_ok!(FeeOperation::claim_shielded::<Test>(
-				validator,
+				validator.clone(),
 				commitment,
 				amount,
 				asset_id,
@@ -260,15 +260,15 @@ mod tests {
 	#[test]
 	fn claim_shielded_deducts_pending_fees() {
 		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
+			let validator = acc(1);
 			let asset_id = setup_asset();
 			let initial = 500u128;
 			let claim = 200u128;
-			mock_pending_fees_set(validator, asset_id, initial);
+			mock_pending_fees_set(validator.clone(), asset_id, initial);
 
 			let commitment = make_commitment();
 			assert_ok!(FeeOperation::claim_shielded::<Test>(
-				validator,
+				validator.clone(),
 				commitment,
 				claim,
 				asset_id,
@@ -285,14 +285,14 @@ mod tests {
 	#[test]
 	fn claim_shielded_emits_validator_fees_claimed_event() {
 		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
+			let validator = acc(1);
 			let asset_id = setup_asset();
 			let amount = 300u128;
 			let commitment = make_commitment();
-			mock_pending_fees_set(validator, asset_id, amount);
+			mock_pending_fees_set(validator.clone(), asset_id, amount);
 
 			assert_ok!(FeeOperation::claim_shielded::<Test>(
-				validator,
+				validator.clone(),
 				commitment,
 				amount,
 				asset_id,
@@ -322,15 +322,15 @@ mod tests {
 	fn claim_shielded_zero_amount_fails_with_insufficient() {
 		new_test_ext().execute_with(|| {
 			// pending fees = 0, amount = 0 would pass the check, but let's verify the boundary
-			let validator: u64 = 2;
+			let validator = acc(2);
 			let asset_id = setup_asset();
-			mock_pending_fees_set(validator, asset_id, 0u128);
+			mock_pending_fees_set(validator.clone(), asset_id, 0u128);
 
 			// requesting 1 with 0 available → InsufficientPendingFees
 			let commitment = make_commitment();
 			assert_noop!(
 				FeeOperation::claim_shielded::<Test>(
-					validator,
+					validator.clone(),
 					commitment,
 					1u128,
 					asset_id,
@@ -349,14 +349,14 @@ mod tests {
 		// encodes value=0 is cryptographically valid but inserts a worthless leaf into
 		// the Merkle tree — cheap spam that wastes tree capacity.
 		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
+			let validator = acc(1);
 			let asset_id = setup_asset();
-			mock_pending_fees_set(validator, asset_id, 500u128);
+			mock_pending_fees_set(validator.clone(), asset_id, 500u128);
 
 			let commitment = make_commitment();
 			assert_noop!(
 				FeeOperation::claim_shielded::<Test>(
-					validator,
+					validator.clone(),
 					commitment,
 					0u128,
 					asset_id,
@@ -390,17 +390,17 @@ mod tests {
 	#[cfg(not(feature = "runtime-benchmarks"))]
 	fn claim_shielded_with_cryptographically_invalid_proof_returns_invalid_proof_error() {
 		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
+			let validator = acc(1);
 			let asset_id = setup_asset();
 			let amount = 100u128;
 			let commitment = make_commitment();
-			mock_pending_fees_set(validator, asset_id, amount);
+			mock_pending_fees_set(validator.clone(), asset_id, amount);
 
 			// Proof has correct length (128) and correct signals, but the mock
 			// verifier returns Ok(false) for proofs starting with 0x00.
 			assert_noop!(
 				FeeOperation::claim_shielded::<Test>(
-					validator,
+					validator.clone(),
 					commitment,
 					amount,
 					asset_id,
@@ -418,14 +418,14 @@ mod tests {
 	fn claim_shielded_rejected_proof_leaves_no_state_changes() {
 		// A rejected proof must not insert the commitment or consume fees.
 		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
+			let validator = acc(1);
 			let asset_id = setup_asset();
 			let amount = 200u128;
 			let commitment = make_commitment();
-			mock_pending_fees_set(validator, asset_id, amount);
+			mock_pending_fees_set(validator.clone(), asset_id, amount);
 
 			let _ = FeeOperation::claim_shielded::<Test>(
-				validator,
+				validator.clone(),
 				commitment,
 				amount,
 				asset_id,
@@ -444,15 +444,15 @@ mod tests {
 	#[test]
 	fn claim_shielded_empty_proof_fails() {
 		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
+			let validator = acc(1);
 			let asset_id = setup_asset();
 			let amount = 100u128;
 			let commitment = make_commitment();
-			mock_pending_fees_set(validator, asset_id, amount);
+			mock_pending_fees_set(validator.clone(), asset_id, amount);
 
 			assert_noop!(
 				FeeOperation::claim_shielded::<Test>(
-					validator,
+					validator.clone(),
 					commitment,
 					amount,
 					asset_id,
@@ -468,15 +468,15 @@ mod tests {
 	#[test]
 	fn claim_shielded_wrong_proof_length_fails() {
 		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
+			let validator = acc(1);
 			let asset_id = setup_asset();
 			let amount = 100u128;
 			let commitment = make_commitment();
-			mock_pending_fees_set(validator, asset_id, amount);
+			mock_pending_fees_set(validator.clone(), asset_id, amount);
 
 			assert_noop!(
 				FeeOperation::claim_shielded::<Test>(
-					validator,
+					validator.clone(),
 					commitment,
 					amount,
 					asset_id,
@@ -492,15 +492,15 @@ mod tests {
 	#[test]
 	fn claim_shielded_wrong_signals_length_fails() {
 		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
+			let validator = acc(1);
 			let asset_id = setup_asset();
 			let amount = 100u128;
 			let commitment = make_commitment();
-			mock_pending_fees_set(validator, asset_id, amount);
+			mock_pending_fees_set(validator.clone(), asset_id, amount);
 
 			assert_noop!(
 				FeeOperation::claim_shielded::<Test>(
-					validator,
+					validator.clone(),
 					commitment,
 					amount,
 					asset_id,
@@ -516,17 +516,17 @@ mod tests {
 	#[test]
 	fn claim_shielded_signals_commitment_mismatch_fails() {
 		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
+			let validator = acc(1);
 			let asset_id = setup_asset();
 			let amount = 100u128;
 			let commitment = make_commitment();
 			let other_commitment = Commitment::new([0xAAu8; 32]);
-			mock_pending_fees_set(validator, asset_id, amount);
+			mock_pending_fees_set(validator.clone(), asset_id, amount);
 
 			// signals have a different commitment than the extrinsic argument
 			assert_noop!(
 				FeeOperation::claim_shielded::<Test>(
-					validator,
+					validator.clone(),
 					commitment,
 					amount,
 					asset_id,
@@ -542,16 +542,16 @@ mod tests {
 	#[test]
 	fn claim_shielded_signals_amount_mismatch_fails() {
 		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
+			let validator = acc(1);
 			let asset_id = setup_asset();
 			let amount = 100u128;
 			let commitment = make_commitment();
-			mock_pending_fees_set(validator, asset_id, amount);
+			mock_pending_fees_set(validator.clone(), asset_id, amount);
 
 			// signals encode 999 but extrinsic claims 100
 			assert_noop!(
 				FeeOperation::claim_shielded::<Test>(
-					validator,
+					validator.clone(),
 					commitment,
 					amount,
 					asset_id,
@@ -567,16 +567,16 @@ mod tests {
 	#[test]
 	fn claim_shielded_signals_asset_id_mismatch_fails() {
 		new_test_ext().execute_with(|| {
-			let validator: u64 = 1;
+			let validator = acc(1);
 			let asset_id = setup_asset();
 			let amount = 100u128;
 			let commitment = make_commitment();
-			mock_pending_fees_set(validator, asset_id, amount);
+			mock_pending_fees_set(validator.clone(), asset_id, amount);
 
 			// signals encode asset_id=999 but extrinsic claims registered asset_id
 			assert_noop!(
 				FeeOperation::claim_shielded::<Test>(
-					validator,
+					validator.clone(),
 					commitment,
 					amount,
 					asset_id,
@@ -587,5 +587,67 @@ mod tests {
 				crate::pallet::Error::<Test>::InvalidPublicSignals
 			);
 		});
+	}
+
+	// ── ledger invariant: claim must NOT change PoolBalancePerAsset ───────────
+
+	#[test]
+	fn claim_does_not_change_pool_balance() {
+		use crate::storage::PoolBalanceRepository;
+		use frame_support::traits::Currency;
+		use sp_runtime::AccountId32;
+
+		new_test_ext().execute_with(|| {
+			let validator = acc(1);
+			let asset_id = setup_asset();
+			let amount = 200u128;
+			let commitment = make_commitment();
+
+			// Seed pending fee + a pool ledger/physical balance backing it.
+			mock_pending_fees_set(validator.clone(), asset_id, amount);
+			let pool = crate::Pallet::<Test>::pool_account_id();
+			let _ = <pallet_balances::Pallet<Test> as Currency<AccountId32>>::deposit_creating(
+				&pool, amount,
+			);
+			PoolBalanceRepository::set_asset_balance::<Test>(asset_id, amount);
+
+			let before = PoolBalanceRepository::get_asset_balance::<Test>(asset_id);
+
+			assert_ok!(FeeOperation::claim_shielded::<Test>(
+				validator.clone(),
+				commitment,
+				amount,
+				asset_id,
+				make_memo(),
+				make_proof(),
+				make_signals(&commitment, amount, asset_id),
+			));
+
+			// The claim swaps a pending number for a note; both are backed by the
+			// same physical tokens already counted in the ledger. It must NOT move
+			// PoolBalancePerAsset, and the ledger stays == physical balance.
+			let after = PoolBalanceRepository::get_asset_balance::<Test>(asset_id);
+			assert_eq!(after, before, "claim must not change the pool ledger");
+			let physical =
+				<pallet_balances::Pallet<Test> as Currency<AccountId32>>::free_balance(&pool);
+			assert_eq!(after, physical, "ledger must equal physical pool balance");
+			assert_eq!(mock_pending_fees_get(validator, asset_id), 0);
+		});
+	}
+
+	// ── extrinsic input bounds (decode-before-reject guard) ──────────────────
+
+	/// The `claim_shielded_fees` extrinsic takes `BoundedVec`, so an oversized
+	/// proof/signals input is rejected by the codec bound before any body logic.
+	#[test]
+	fn claim_shielded_fees_inputs_are_bounded() {
+		use frame_support::{BoundedVec, traits::ConstU32};
+
+		// proof bound = 512: at-bound fits, over-bound rejected.
+		assert!(BoundedVec::<u8, ConstU32<512>>::try_from(vec![0u8; 512]).is_ok());
+		assert!(BoundedVec::<u8, ConstU32<512>>::try_from(vec![0u8; 513]).is_err());
+		// signals bound = 128: the real 76-byte payload fits, over-bound rejected.
+		assert!(BoundedVec::<u8, ConstU32<128>>::try_from(vec![0u8; 76]).is_ok());
+		assert!(BoundedVec::<u8, ConstU32<128>>::try_from(vec![0u8; 129]).is_err());
 	}
 }

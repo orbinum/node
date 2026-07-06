@@ -77,13 +77,14 @@ impl ShieldOperation {
 mod tests {
 	use super::*;
 	use crate::{
-		mock::{Test, new_test_ext},
+		mock::{Test, acc, new_test_ext},
 		operations::assets::AssetOperation,
 		pallet::Event as PalletEvent,
 		storage::{CommitmentRepository, PoolBalanceRepository},
 		types::{Commitment, EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE},
 	};
 	use frame_support::{assert_noop, assert_ok};
+	use sp_runtime::AccountId32;
 
 	// ── helpers ──────────────────────────────────────────────────────────────
 
@@ -91,7 +92,7 @@ mod tests {
 	fn setup_asset() -> u32 {
 		let name = frame_support::BoundedVec::try_from(b"Orbinum".to_vec()).unwrap();
 		let symbol = frame_support::BoundedVec::try_from(b"ORB".to_vec()).unwrap();
-		let id = AssetOperation::register_asset::<Test>(name, symbol, 18, None, 1u64).unwrap();
+		let id = AssetOperation::register_asset::<Test>(name, symbol, 18, None, acc(1)).unwrap();
 		AssetOperation::verify::<Test>(id).unwrap();
 		id
 	}
@@ -117,7 +118,7 @@ mod tests {
 			let c = commitment(0x01);
 
 			assert_ok!(ShieldOperation::execute::<Test>(
-				1u64,
+				acc(1),
 				asset_id,
 				500u128,
 				c,
@@ -130,7 +131,13 @@ mod tests {
 	fn execute_invalid_asset_fails() {
 		new_test_ext().execute_with(|| {
 			assert_noop!(
-				ShieldOperation::execute::<Test>(1u64, 99u32, 500u128, commitment(1), memo_valid()),
+				ShieldOperation::execute::<Test>(
+					acc(1),
+					99u32,
+					500u128,
+					commitment(1),
+					memo_valid()
+				),
 				crate::pallet::Error::<Test>::InvalidAssetId
 			);
 		});
@@ -141,11 +148,12 @@ mod tests {
 		new_test_ext().execute_with(|| {
 			let name = frame_support::BoundedVec::try_from(b"Orbinum".to_vec()).unwrap();
 			let symbol = frame_support::BoundedVec::try_from(b"ORB".to_vec()).unwrap();
-			let id = AssetOperation::register_asset::<Test>(name, symbol, 18, None, 1u64).unwrap();
+			let id =
+				AssetOperation::register_asset::<Test>(name, symbol, 18, None, acc(1)).unwrap();
 			// Not verified
 
 			assert_noop!(
-				ShieldOperation::execute::<Test>(1u64, id, 500u128, commitment(1), memo_valid()),
+				ShieldOperation::execute::<Test>(acc(1), id, 500u128, commitment(1), memo_valid()),
 				crate::pallet::Error::<Test>::AssetNotVerified
 			);
 		});
@@ -158,7 +166,7 @@ mod tests {
 			// MinShieldAmount = 100; amount = 50 < 100
 			assert_noop!(
 				ShieldOperation::execute::<Test>(
-					1u64,
+					acc(1),
 					asset_id,
 					50u128,
 					commitment(1),
@@ -175,7 +183,7 @@ mod tests {
 			let asset_id = setup_asset();
 			assert_noop!(
 				ShieldOperation::execute::<Test>(
-					1u64,
+					acc(1),
 					asset_id,
 					500u128,
 					commitment(1),
@@ -192,7 +200,7 @@ mod tests {
 			let asset_id = setup_asset();
 			let before = PoolBalanceRepository::get_asset_balance::<Test>(asset_id);
 			assert_ok!(ShieldOperation::execute::<Test>(
-				1u64,
+				acc(1),
 				asset_id,
 				500u128,
 				commitment(0x02),
@@ -209,7 +217,7 @@ mod tests {
 			let asset_id = setup_asset();
 			let c = commitment(0x03);
 			assert_ok!(ShieldOperation::execute::<Test>(
-				1u64,
+				acc(1),
 				asset_id,
 				200u128,
 				c,
@@ -225,7 +233,7 @@ mod tests {
 			let asset_id = setup_asset();
 			let c = commitment(0x04);
 			assert_ok!(ShieldOperation::execute::<Test>(
-				1u64,
+				acc(1),
 				asset_id,
 				300u128,
 				c,
@@ -236,11 +244,11 @@ mod tests {
 				matches!(
 					r.event,
 					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::Shielded {
-						depositor: 1,
+						depositor: ref ed,
 						amount: 300,
 						commitment: ec,
 						..
-					}) if ec == c
+					}) if ec == c && *ed == acc(1)
 				)
 			});
 			assert!(found, "Shielded event not emitted");
@@ -251,13 +259,13 @@ mod tests {
 	fn execute_transfers_currency_to_pool() {
 		new_test_ext().execute_with(|| {
 			let asset_id = setup_asset();
-			let sender: u64 = 1;
+			let sender = acc(1);
 			let pool = crate::Pallet::<Test>::pool_account_id();
 			let balance_before =
-				<pallet_balances::Pallet<Test> as frame_support::traits::Currency<u64>>::free_balance(&sender);
+				<pallet_balances::Pallet<Test> as frame_support::traits::Currency<AccountId32>>::free_balance(&sender);
 
 			assert_ok!(ShieldOperation::execute::<Test>(
-				sender,
+				sender.clone(),
 				asset_id,
 				1_000u128,
 				commitment(0x05),
@@ -265,9 +273,9 @@ mod tests {
 			));
 
 			let balance_after =
-				<pallet_balances::Pallet<Test> as frame_support::traits::Currency<u64>>::free_balance(&sender);
+				<pallet_balances::Pallet<Test> as frame_support::traits::Currency<AccountId32>>::free_balance(&sender);
 			let pool_balance = <pallet_balances::Pallet<Test> as frame_support::traits::Currency<
-				u64,
+				AccountId32,
 			>>::free_balance(&pool);
 
 			assert_eq!(balance_before - balance_after, 1_000u128);
@@ -292,7 +300,7 @@ mod tests {
 			let asset_id = setup_asset();
 			let c = commitment(0xBB);
 			assert_ok!(ShieldOperation::execute::<Test>(
-				1u64,
+				acc(1),
 				asset_id,
 				200u128,
 				c,
@@ -319,7 +327,7 @@ mod tests {
 			// Unverified asset
 			let name = frame_support::BoundedVec::try_from(b"Other".to_vec()).unwrap();
 			let sym = frame_support::BoundedVec::try_from(b"OTH".to_vec()).unwrap();
-			let id2 = AssetOperation::register_asset::<Test>(name, sym, 6, None, 2u64).unwrap();
+			let id2 = AssetOperation::register_asset::<Test>(name, sym, 6, None, acc(2)).unwrap();
 			assert!(!ShieldOperation::is_asset_verified::<Test>(id2));
 		});
 	}
@@ -335,7 +343,7 @@ mod tests {
 			let c = commitment(0xDE);
 
 			assert_ok!(ShieldOperation::execute::<Test>(
-				1u64,
+				acc(1),
 				asset_id,
 				500u128,
 				c,
@@ -343,9 +351,38 @@ mod tests {
 			));
 
 			assert_noop!(
-				ShieldOperation::execute::<Test>(1u64, asset_id, 500u128, c, memo_valid()),
+				ShieldOperation::execute::<Test>(acc(1), asset_id, 500u128, c, memo_valid()),
 				crate::pallet::Error::<Test>::CommitmentAlreadyExists
 			);
 		});
+	}
+
+	// ── batch guard ──────────────────────────────────────────────────────────
+
+	/// An empty `shield_batch` is rejected instead of dispatching at zero weight.
+	#[test]
+	fn shield_batch_empty_fails() {
+		use crate::mock::{RuntimeOrigin, ShieldedPool};
+		new_test_ext().execute_with(|| {
+			let empty = frame_support::BoundedVec::default();
+			assert_noop!(
+				ShieldedPool::shield_batch(RuntimeOrigin::signed(acc(1)), empty),
+				crate::pallet::Error::<Test>::EmptyBatch
+			);
+		});
+	}
+
+	/// The benchmarked `shield_batch(n)` weight has a non-zero base and scales
+	/// with n (guards against the old ad-hoc `shield()*n*0.8` that hit zero at n=0).
+	#[test]
+	fn shield_batch_weight_has_base_and_scales() {
+		use crate::weights::WeightInfo;
+		let zero = <() as WeightInfo>::shield_batch(0);
+		let one = <() as WeightInfo>::shield_batch(1);
+		assert!(
+			zero.ref_time() > 0,
+			"empty batch must still carry a base weight"
+		);
+		assert!(one.ref_time() > zero.ref_time(), "weight must scale with n");
 	}
 }

@@ -314,7 +314,7 @@ impl MerkleTreeService {
 	/// replacing the former O(n) full recomputation from all leaves.
 	pub fn insert_leaf<T: Config>(commitment: Commitment) -> Result<u32, DispatchError> {
 		let index = MerkleRepository::get_tree_size::<T>();
-		let max_leaves = 2u32.saturating_pow(T::MaxTreeDepth::get());
+		let max_leaves = 2u32.saturating_pow(crate::types::MAX_TREE_DEPTH);
 		ensure!(index < max_leaves, Error::<T>::MerkleTreeFull);
 		ensure!(
 			!CommitmentMemos::<T>::contains_key(commitment),
@@ -359,17 +359,20 @@ impl MerkleTreeService {
 		Ok(index)
 	}
 
-	fn add_poseidon_historic_root<T: Config>(poseidon_root: Hash) {
+	pub(crate) fn add_poseidon_historic_root<T: Config>(poseidon_root: Hash) {
 		let mut order = MerkleRepository::get_historic_roots_order::<T>();
 		if order.len() >= T::MaxHistoricRoots::get() as usize {
 			if let Some(oldest_root) = order.first().copied() {
-				MerkleRepository::remove_poseidon_historic_root::<T>(&oldest_root);
 				order.remove(0);
+				if !order.contains(&oldest_root) {
+					MerkleRepository::remove_poseidon_historic_root::<T>(&oldest_root);
+				}
 			}
 		}
-		MerkleRepository::add_historic_poseidon_root::<T>(poseidon_root);
-		let _ = order.try_push(poseidon_root);
-		MerkleRepository::set_historic_roots_order::<T>(order);
+		if order.try_push(poseidon_root).is_ok() {
+			MerkleRepository::add_historic_poseidon_root::<T>(poseidon_root);
+			MerkleRepository::set_historic_roots_order::<T>(order);
+		}
 	}
 
 	pub fn is_known_root<T: Config>(root: &Hash) -> bool {
@@ -915,5 +918,103 @@ mod tests {
 			root_b2, expected,
 			"frontier root after 2 round-trips must match batch root"
 		);
+	}
+
+	// ── tree-depth consistency ────────────────────────────────────────────────
+
+	/// integrity_test passes when MaxTreeDepth equals the fixed tree depth. The
+	/// mock is aligned to MAX_TREE_DEPTH, so construction must not panic; a
+	/// divergent config would abort at runtime construction.
+	#[test]
+	fn integrity_test_accepts_aligned_tree_depth() {
+		use frame_support::traits::Hooks;
+		new_test_ext().execute_with(|| {
+			<crate::Pallet<Test> as Hooks<frame_system::pallet_prelude::BlockNumberFor<Test>>>::integrity_test();
+		});
+	}
+
+	/// The capacity guard is bound by the real tree depth, not the config, so it
+	/// fires at exactly 2^MAX_TREE_DEPTH regardless of MaxTreeDepth.
+	#[test]
+	fn capacity_guard_uses_fixed_depth() {
+		use crate::types::MAX_TREE_DEPTH;
+		assert_eq!(MAX_TREE_DEPTH, 20);
+		// insert_leaf's max_leaves is 2^MAX_TREE_DEPTH; confirm the constant the
+		// guard reads matches the frontier depth (20 levels).
+		assert_eq!(2u32.saturating_pow(MAX_TREE_DEPTH), 1 << 20);
+	}
+
+	// ── historic-root window ──────────────────────────────────────────────────
+
+	/// integrity_test rejects a zero root window (checked via the mock's non-zero
+	/// MaxHistoricRoots passing construction).
+	#[test]
+	fn integrity_test_accepts_nonzero_root_window() {
+		use frame_support::traits::Hooks;
+		new_test_ext().execute_with(|| {
+			assert!(<Test as crate::Config>::MaxHistoricRoots::get() > 0);
+			<crate::Pallet<Test> as Hooks<frame_system::pallet_prelude::BlockNumberFor<Test>>>::integrity_test();
+		});
+	}
+
+	/// Once the window is full, the oldest root is evicted from both the order
+	/// vector and the known-root map, and the map/order stay in sync (SP-15).
+	#[test]
+	fn historic_root_window_evicts_oldest() {
+		new_test_ext().execute_with(|| {
+			let cap = <Test as crate::Config>::MaxHistoricRoots::get();
+			// Fill the window with `cap` distinct roots.
+			for i in 0..cap {
+				let mut root = [0u8; 32];
+				root[..4].copy_from_slice(&i.to_le_bytes());
+				MerkleTreeService::add_poseidon_historic_root::<Test>(root);
+			}
+			let mut oldest = [0u8; 32];
+			oldest[..4].copy_from_slice(&0u32.to_le_bytes());
+			assert!(MerkleTreeService::is_known_root::<Test>(&oldest));
+
+			// One more root evicts the oldest.
+			let mut newest = [0u8; 32];
+			newest[..4].copy_from_slice(&cap.to_le_bytes());
+			MerkleTreeService::add_poseidon_historic_root::<Test>(newest);
+
+			assert!(
+				!MerkleTreeService::is_known_root::<Test>(&oldest),
+				"oldest must be evicted"
+			);
+			assert!(
+				MerkleTreeService::is_known_root::<Test>(&newest),
+				"newest must be known"
+			);
+			// Order vector holds exactly `cap` entries — no unbounded growth.
+			assert_eq!(
+				MerkleRepository::get_historic_roots_order::<Test>().len(),
+				cap as usize
+			);
+		});
+	}
+
+	/// A duplicate root value is not removed from the map while another copy of it
+	/// still sits in the window (guards the map/order multiplicity mismatch).
+	#[test]
+	fn historic_root_duplicate_survives_partial_eviction() {
+		new_test_ext().execute_with(|| {
+			let dup = [0x77u8; 32];
+			// Two copies of `dup` plus fillers spanning the window.
+			MerkleTreeService::add_poseidon_historic_root::<Test>(dup);
+			MerkleTreeService::add_poseidon_historic_root::<Test>(dup);
+			let cap = <Test as crate::Config>::MaxHistoricRoots::get();
+			for i in 0..(cap - 1) {
+				let mut root = [0u8; 32];
+				root[..4].copy_from_slice(&i.to_le_bytes());
+				root[31] = 1; // distinct namespace from `dup`
+				MerkleTreeService::add_poseidon_historic_root::<Test>(root);
+			}
+			// The first `dup` was evicted, but the second copy keeps it known.
+			assert!(
+				MerkleTreeService::is_known_root::<Test>(&dup),
+				"duplicate root must stay known while a copy remains in the window"
+			);
+		});
 	}
 }

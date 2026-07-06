@@ -20,6 +20,18 @@ use sp_runtime::{SaturatedConversion, traits::Zero};
 
 pub struct UnshieldOperation;
 
+/// Encode a recipient account into the exact 32-byte field element bound into the
+/// unshield proof. Orbinum's `AccountId` is always `AccountId32` (every signature
+/// scheme — sr25519/ed25519/ECDSA/EVM, and future ones like Solana — unifies to a
+/// 32-byte account). A non-32-byte encoding is rejected with `InvalidRecipient`
+/// rather than silently binding a zeroed recipient.
+#[cfg(not(feature = "skip-proof-verification"))]
+fn recipient_to_field<T: Config>(
+	recipient: &<T as frame_system::Config>::AccountId,
+) -> Result<[u8; 32], Error<T>> {
+	<[u8; 32]>::try_from(recipient.encode().as_slice()).map_err(|_| Error::<T>::InvalidRecipient)
+}
+
 impl UnshieldOperation {
 	#[allow(clippy::too_many_arguments)]
 	pub fn execute<T: Config>(
@@ -87,7 +99,7 @@ impl UnshieldOperation {
 
 		#[cfg(not(feature = "skip-proof-verification"))]
 		{
-			let recipient_bytes: [u8; 32] = recipient.encode().try_into().unwrap_or([0u8; 32]);
+			let recipient_bytes = recipient_to_field::<T>(&recipient)?;
 			let valid = T::ZkVerifier::verify_unshield_proof(
 				proof,
 				&merkle_root,
@@ -117,14 +129,17 @@ impl UnshieldOperation {
 		)?;
 
 		if fee > <T::Currency as Currency<T::AccountId>>::Balance::zero() {
-			let fee_recipient: Option<T::AccountId> = relayer_evm
+			let recipient_account = relayer_evm
 				.and_then(|addr| T::Relayer::resolve_relayer(&addr))
-				.or_else(T::Relayer::block_author);
-			if let Some(recipient_account) = fee_recipient {
-				T::Relayer::accumulate_relay_fee(&recipient_account, asset_id, fee_u128);
-			}
+				.or_else(T::Relayer::block_author)
+				.ok_or(Error::<T>::FeeRecipientUnavailable)?;
+			T::Relayer::accumulate_relay_fee(&recipient_account, asset_id, fee_u128);
 		}
 
+		// Decrement only `amount`: the `fee` tokens stay physically in the pool as
+		// backing for the pending relayer fee, so the tracked balance must retain
+		// them too. This is correct ONLY because the guard above requires
+		// `>= amount + fee`; do not weaken it to `>= amount` or fees go unbacked.
 		PoolBalanceRepository::decrease_balance::<T>(asset_id, amount);
 
 		// Insert the change note commitment into the Merkle tree (partial unshield).
@@ -188,7 +203,7 @@ impl UnshieldOperation {
 mod tests {
 	use super::*;
 	use crate::{
-		mock::{Test, new_test_ext},
+		mock::{Test, acc, new_test_ext},
 		operations::assets::AssetOperation,
 		pallet::Event as PalletEvent,
 		storage::{
@@ -196,7 +211,8 @@ mod tests {
 		},
 		types::{Commitment, Nullifier},
 	};
-	use frame_support::{assert_noop, assert_ok, traits::Currency};
+	use frame_support::{assert_err, assert_noop, assert_ok, traits::Currency};
+	use sp_runtime::AccountId32;
 
 	// ── helpers ──────────────────────────────────────────────────────────────
 
@@ -205,7 +221,7 @@ mod tests {
 	fn setup_asset() -> u32 {
 		let name = frame_support::BoundedVec::try_from(b"Orbinum".to_vec()).unwrap();
 		let symbol = frame_support::BoundedVec::try_from(b"ORB".to_vec()).unwrap();
-		let id = AssetOperation::register_asset::<Test>(name, symbol, 18, None, 1u64).unwrap();
+		let id = AssetOperation::register_asset::<Test>(name, symbol, 18, None, acc(1)).unwrap();
 		AssetOperation::verify::<Test>(id).unwrap();
 		id
 	}
@@ -213,7 +229,9 @@ mod tests {
 	/// Fund pool account (currency + pool balance tracker).
 	fn fund_pool(asset_id: u32, total: u128) {
 		let pool = crate::Pallet::<Test>::pool_account_id();
-		let _ = <pallet_balances::Pallet<Test> as Currency<u64>>::deposit_creating(&pool, total);
+		let _ = <pallet_balances::Pallet<Test> as Currency<AccountId32>>::deposit_creating(
+			&pool, total,
+		);
 		PoolBalanceRepository::set_asset_balance::<Test>(asset_id, total);
 	}
 
@@ -242,7 +260,7 @@ mod tests {
 				nullifier(0x01),
 				asset_id,
 				amount,
-				2u64, // recipient
+				acc(2), // recipient
 				0u128,
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
@@ -262,7 +280,7 @@ mod tests {
 					nullifier(1),
 					99u32,
 					100u128,
-					2u64,
+					acc(2),
 					0u128,
 					[0u8; 32],
 					FrameEncryptedMemo::default(),
@@ -278,7 +296,7 @@ mod tests {
 		new_test_ext().execute_with(|| {
 			let name = frame_support::BoundedVec::try_from(b"T".to_vec()).unwrap();
 			let sym = frame_support::BoundedVec::try_from(b"T".to_vec()).unwrap();
-			let id = AssetOperation::register_asset::<Test>(name, sym, 18, None, 1u64).unwrap();
+			let id = AssetOperation::register_asset::<Test>(name, sym, 18, None, acc(1)).unwrap();
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 			fund_pool(id, 1_000u128);
 
@@ -289,7 +307,7 @@ mod tests {
 					nullifier(1),
 					id,
 					100u128,
-					2u64,
+					acc(2),
 					0u128,
 					[0u8; 32],
 					FrameEncryptedMemo::default(),
@@ -317,7 +335,7 @@ mod tests {
 					nullifier(0x77),
 					asset_id,
 					0u128,
-					2u64,
+					acc(2),
 					0u128,
 					[0u8; 32],
 					FrameEncryptedMemo::default(),
@@ -368,7 +386,7 @@ mod tests {
 					nullifier(1),
 					asset_id,
 					100u128,
-					2u64,
+					acc(2),
 					0u128,
 					[0u8; 32],
 					FrameEncryptedMemo::default(),
@@ -396,7 +414,7 @@ mod tests {
 					n,
 					asset_id,
 					500u128,
-					2u64,
+					acc(2),
 					0u128,
 					[0u8; 32],
 					FrameEncryptedMemo::default(),
@@ -422,7 +440,7 @@ mod tests {
 					nullifier(1),
 					asset_id,
 					100u128,
-					2u64,
+					acc(2),
 					0u128,
 					[0u8; 32],
 					FrameEncryptedMemo::default(),
@@ -448,7 +466,7 @@ mod tests {
 				n,
 				asset_id,
 				300u128,
-				2u64,
+				acc(2),
 				0u128,
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
@@ -472,7 +490,7 @@ mod tests {
 				nullifier(0x06),
 				asset_id,
 				amount,
-				2u64,
+				acc(2),
 				0u128,
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
@@ -488,12 +506,13 @@ mod tests {
 	fn execute_transfers_currency_to_recipient() {
 		new_test_ext().execute_with(|| {
 			let asset_id = setup_asset();
-			let recipient: u64 = 2;
+			let recipient = acc(2);
 			let amount = 300u128;
 			fund_pool(asset_id, 1_000u128);
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 
-			let before = <pallet_balances::Pallet<Test> as Currency<u64>>::free_balance(&recipient);
+			let before =
+				<pallet_balances::Pallet<Test> as Currency<AccountId32>>::free_balance(&recipient);
 
 			assert_ok!(UnshieldOperation::execute::<Test>(
 				proof(),
@@ -501,14 +520,15 @@ mod tests {
 				nullifier(0x07),
 				asset_id,
 				amount,
-				recipient,
+				recipient.clone(),
 				0u128,
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
 				None,
 			));
 
-			let after = <pallet_balances::Pallet<Test> as Currency<u64>>::free_balance(&recipient);
+			let after =
+				<pallet_balances::Pallet<Test> as Currency<AccountId32>>::free_balance(&recipient);
 			assert_eq!(after - before, amount);
 		});
 	}
@@ -527,7 +547,7 @@ mod tests {
 				n,
 				asset_id,
 				200u128,
-				2u64,
+				acc(2),
 				0u128,
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
@@ -541,11 +561,11 @@ mod tests {
 					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::Unshielded {
 						nullifier: en,
 						amount: 200,
-						recipient: 2,
+						recipient: ref er,
 						change_commitment: None,
 						change_encrypted_memo: None,
 						change_leaf_index: None,
-					}) if en == n
+					}) if en == n && *er == acc(2)
 				)
 			});
 			assert!(found, "Unshielded event not emitted");
@@ -567,7 +587,7 @@ mod tests {
 				nullifier(0x09),
 				asset_id,
 				amount,
-				2u64,
+				acc(2),
 				fee,
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
@@ -575,7 +595,7 @@ mod tests {
 			));
 
 			// MockRelayer block_author returns Some(1); fee should be accumulated there
-			let pending = crate::mock::mock_pending_fees_get(1u64, asset_id);
+			let pending = crate::mock::mock_pending_fees_get(acc(1), asset_id);
 			assert_eq!(pending, fee);
 		});
 	}
@@ -599,7 +619,7 @@ mod tests {
 				nullifier(0x10),
 				asset_id,
 				amount,
-				2u64,
+				acc(2),
 				0u128,
 				change_comm_bytes,
 				FrameEncryptedMemo::default(),
@@ -655,7 +675,7 @@ mod tests {
 				nullifier(0x11),
 				asset_id,
 				amount,
-				2u64,
+				acc(2),
 				0u128,
 				[0u8; 32], // zero change_commitment = total unshield
 				FrameEncryptedMemo::default(),
@@ -712,7 +732,7 @@ mod tests {
 					nullifier(0x12),
 					asset_id,
 					500u128,
-					2u64,
+					acc(2),
 					0u128,
 					change_comm_bytes,
 					FrameEncryptedMemo::default(),
@@ -742,6 +762,373 @@ mod tests {
 			));
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 			assert!(UnshieldOperation::is_merkle_root_known::<Test>(&KNOWN_ROOT));
+		});
+	}
+
+	// ── ledger-solvency invariant ────────────────────────────────────────────
+	// Invariant (A): PoolBalancePerAsset[a] == Currency::free_balance(pool) for the
+	// native asset. Fees stay physically in the pool until their note is unshielded,
+	// so tracked and physical always move together.
+
+	fn pool_physical() -> u128 {
+		<pallet_balances::Pallet<Test> as Currency<AccountId32>>::free_balance(
+			&crate::Pallet::<Test>::pool_account_id(),
+		)
+	}
+
+	fn tracked(asset_id: u32) -> u128 {
+		PoolBalanceRepository::get_asset_balance::<Test>(asset_id)
+	}
+
+	/// T2 — unshield with a fee decrements the ledger by `amount` only (the fee
+	/// stays physical as backing), and ledger == physical afterwards.
+	#[test]
+	fn unshield_with_fee_decrements_amount_only() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let (amount, fee) = (500u128, 50u128);
+			fund_pool(asset_id, amount + fee);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x21),
+				asset_id,
+				amount,
+				acc(2),
+				fee,
+				[0u8; 32],
+				FrameEncryptedMemo::default(),
+				None,
+			));
+
+			// Only `amount` left the pool; `fee` stays as backing for pending fees.
+			assert_eq!(tracked(asset_id), fee);
+			assert_eq!(pool_physical(), fee);
+			assert_eq!(tracked(asset_id), pool_physical());
+			assert_eq!(crate::mock::mock_pending_fees_get(acc(1), asset_id), fee);
+		});
+	}
+
+	/// T6 — the guard requires `>= amount + fee`: a pool covering only `amount`
+	/// (fee unbacked) must be rejected; covering `amount + fee` must succeed.
+	#[test]
+	fn unshield_guard_requires_amount_plus_fee() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let (amount, fee) = (500u128, 50u128);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			// Pool covers only `amount` → rejected.
+			fund_pool(asset_id, amount);
+			assert_noop!(
+				UnshieldOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifier(0x22),
+					asset_id,
+					amount,
+					acc(2),
+					fee,
+					[0u8; 32],
+					FrameEncryptedMemo::default(),
+					None,
+				),
+				crate::pallet::Error::<Test>::InsufficientPoolBalance
+			);
+
+			// Pool covers `amount + fee` → accepted.
+			fund_pool(asset_id, amount + fee);
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x23),
+				asset_id,
+				amount,
+				acc(2),
+				fee,
+				[0u8; 32],
+				FrameEncryptedMemo::default(),
+				None,
+			));
+		});
+	}
+
+	/// T1 + T4 — full fee lifecycle keeps ledger == physical at every step:
+	/// shield → unshield(with fee) → claim(mint fee note) → unshield(fee note).
+	#[test]
+	fn fee_lifecycle_preserves_ledger_invariant() {
+		use crate::operations::{fees::FeeOperation, shield::ShieldOperation};
+
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let memo = FrameEncryptedMemo::default();
+			let depositor = acc(7);
+			// Fund above the shield amount so KeepAlive leaves the ED intact.
+			let _ = <pallet_balances::Pallet<Test> as Currency<AccountId32>>::deposit_creating(
+				&depositor, 2000,
+			);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			// Step 1: shield 1000. Ledger and physical both +1000.
+			assert_ok!(ShieldOperation::execute::<Test>(
+				depositor,
+				asset_id,
+				1000u128,
+				Commitment::new([0x31u8; 32]),
+				FrameEncryptedMemo::from_bytes(&[0u8; 176]).unwrap(),
+			));
+			assert_eq!(tracked(asset_id), pool_physical());
+			assert_eq!(tracked(asset_id), 1000);
+
+			// Step 2: unshield amount=700 fee=50. Only `amount` leaves; fee stays.
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x32),
+				asset_id,
+				700u128,
+				acc(2),
+				50u128,
+				[0u8; 32],
+				memo.clone(),
+				None,
+			));
+			assert_eq!(tracked(asset_id), 300);
+			assert_eq!(tracked(asset_id), pool_physical());
+			assert_eq!(crate::mock::mock_pending_fees_get(acc(1), asset_id), 50);
+
+			// Step 3: claim the 50 fee as a note. Ledger unchanged (same backing).
+			let fee_note = Commitment::new([0x33u8; 32]);
+			let mut signals = vec![0u8; 76];
+			signals[..32].copy_from_slice(&fee_note.0);
+			signals[32..40].copy_from_slice(&(50u64).to_le_bytes());
+			signals[40..44].copy_from_slice(&asset_id.to_le_bytes());
+			assert_ok!(FeeOperation::claim_shielded::<Test>(
+				acc(1),
+				fee_note,
+				50u128,
+				asset_id,
+				crate::types::EncryptedMemo::from_bytes(&[0u8; 176]).unwrap(),
+				vec![0x01u8; 128],
+				signals,
+			));
+			assert_eq!(tracked(asset_id), 300);
+			assert_eq!(tracked(asset_id), pool_physical());
+			assert_eq!(crate::mock::mock_pending_fees_get(acc(1), asset_id), 0);
+
+			// Step 4: unshield the 50 fee note (fee=0). Ledger and physical both −50.
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x34),
+				asset_id,
+				50u128,
+				acc(2),
+				0u128,
+				[0u8; 32],
+				memo,
+				None,
+			));
+			assert_eq!(tracked(asset_id), 250);
+			assert_eq!(tracked(asset_id), pool_physical());
+		});
+	}
+
+	// ── relay-fee attribution ────────────────────────────────────────────────
+	// The `relayer` field steers the fee. resolve_relayer only maps
+	// governance-registered addresses; an unregistered address falls back to the
+	// block author, so an unregistered attacker can never credit themselves.
+
+	fn block_author() -> sp_runtime::AccountId32 {
+		acc(1)
+	}
+
+	fn evm(byte: u8) -> sp_core::H160 {
+		sp_core::H160::from([byte; 20])
+	}
+
+	/// A registered relayer receives the fee it relayed.
+	#[test]
+	fn unshield_fee_lands_at_registered_relayer() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let (amount, fee) = (500u128, 50u128);
+			fund_pool(asset_id, amount + fee);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			let relayer_acct = acc(7);
+			crate::mock::mock_register_relayer(relayer_acct.clone(), evm(0xAA));
+
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x51),
+				asset_id,
+				amount,
+				acc(2),
+				fee,
+				[0u8; 32],
+				FrameEncryptedMemo::default(),
+				Some(evm(0xAA)),
+			));
+
+			assert_eq!(
+				crate::mock::mock_pending_fees_get(relayer_acct, asset_id),
+				fee
+			);
+			assert_eq!(
+				crate::mock::mock_pending_fees_get(block_author(), asset_id),
+				0
+			);
+		});
+	}
+
+	/// An unregistered `relayer` address cannot credit itself — the fee falls back
+	/// to the block author (griefing at worst, never theft).
+	#[test]
+	fn unshield_unregistered_relayer_falls_back_to_block_author() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let (amount, fee) = (500u128, 50u128);
+			fund_pool(asset_id, amount + fee);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			// 0xBB is never registered → resolve_relayer returns None.
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x52),
+				asset_id,
+				amount,
+				acc(2),
+				fee,
+				[0u8; 32],
+				FrameEncryptedMemo::default(),
+				Some(evm(0xBB)),
+			));
+
+			assert_eq!(
+				crate::mock::mock_pending_fees_get(block_author(), asset_id),
+				fee
+			);
+		});
+	}
+
+	/// `relayer = None` routes the fee to the block author.
+	#[test]
+	fn unshield_none_relayer_goes_to_block_author() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let (amount, fee) = (500u128, 50u128);
+			fund_pool(asset_id, amount + fee);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x53),
+				asset_id,
+				amount,
+				acc(2),
+				fee,
+				[0u8; 32],
+				FrameEncryptedMemo::default(),
+				None,
+			));
+
+			assert_eq!(
+				crate::mock::mock_pending_fees_get(block_author(), asset_id),
+				fee
+			);
+		});
+	}
+
+	/// A non-zero fee with no resolvable recipient (no relayer, no block author)
+	/// errors instead of stranding the fee tokens in the pool.
+	#[test]
+	fn unshield_nonzero_fee_without_recipient_errors() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let (amount, fee) = (500u128, 50u128);
+			fund_pool(asset_id, amount + fee);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			crate::mock::mock_clear_block_author();
+
+			// assert_err (not assert_noop): the fee attribution runs after currency
+			// effects; in a real extrinsic the dispatch rolls those back on Err. Here
+			// we assert the error itself — the transactional rollback is Substrate's.
+			assert_err!(
+				UnshieldOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifier(0x60),
+					asset_id,
+					amount,
+					acc(2),
+					fee,
+					[0u8; 32],
+					FrameEncryptedMemo::default(),
+					None,
+				),
+				crate::pallet::Error::<Test>::FeeRecipientUnavailable
+			);
+		});
+	}
+
+	/// A zero fee with no recipient is fine — nothing to attribute.
+	#[test]
+	fn unshield_zero_fee_without_recipient_ok() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let amount = 500u128;
+			fund_pool(asset_id, amount);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			crate::mock::mock_clear_block_author();
+
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x61),
+				asset_id,
+				amount,
+				acc(2),
+				0u128,
+				[0u8; 32],
+				FrameEncryptedMemo::default(),
+				None,
+			));
+		});
+	}
+
+	/// Unverifying an asset freezes existing notes too: an unshield of a
+	/// previously-verified asset fails once it is unverified (emergency kill-switch).
+	#[test]
+	fn unverifying_asset_freezes_existing_note_unshield() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset(); // registered + verified
+			fund_pool(asset_id, 1_000u128);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			// Freeze the asset via governance.
+			AssetOperation::unverify::<Test>(asset_id).unwrap();
+
+			assert_noop!(
+				UnshieldOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifier(0x70),
+					asset_id,
+					100u128,
+					acc(2),
+					0u128,
+					[0u8; 32],
+					FrameEncryptedMemo::default(),
+					None,
+				),
+				crate::pallet::Error::<Test>::AssetNotVerified
+			);
 		});
 	}
 }

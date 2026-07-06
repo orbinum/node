@@ -36,8 +36,11 @@ pub fn initialize_genesis<T: Config>(initial_root: Hash) {
 		name: b"Orbinum Native Token"
 			.to_vec()
 			.try_into()
-			.unwrap_or_default(),
-		symbol: b"ORB".to_vec().try_into().unwrap_or_default(),
+			.expect("native asset name fits the metadata bound"),
+		symbol: b"ORB"
+			.to_vec()
+			.try_into()
+			.expect("native asset symbol fits the metadata bound"),
 		decimals: 18,
 		is_verified: true,
 		contract_address: None,

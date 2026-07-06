@@ -30,6 +30,11 @@ impl AssetOperation {
 		Self::validate_metadata::<T>(&name, &symbol, decimals)?;
 
 		let asset_id = AssetRepository::increment_asset_id::<T>();
+
+		ensure!(
+			!AssetRepository::exists::<T>(asset_id),
+			Error::<T>::AssetIdAlreadyExists
+		);
 		let current_block = frame_system::Pallet::<T>::block_number();
 
 		let metadata = AssetMetadata {
@@ -122,7 +127,7 @@ mod tests {
 		pallet::Event as PalletEvent,
 		storage::AssetRepository,
 	};
-	use frame_support::{assert_noop, assert_ok};
+	use frame_support::{assert_err, assert_noop, assert_ok};
 
 	// ── helpers ──────────────────────────────────────────────────────────────
 
@@ -371,6 +376,22 @@ mod tests {
 	fn get_asset_metadata_returns_none_when_missing() {
 		new_test_ext().execute_with(|| {
 			assert!(AssetOperation::get_asset_metadata::<Test>(42u32).is_none());
+		});
+	}
+
+	// ── id-collision guard ────────────────────────────────────────────────────
+
+	/// Registration refuses to overwrite an existing asset if the id counter is
+	/// reset over a live slot (e.g. a genesis re-init).
+	#[test]
+	fn register_rejects_colliding_asset_id() {
+		new_test_ext().execute_with(|| {
+			let id = register_orb().unwrap();
+			// Rewind the counter so the next register targets the same slot.
+			crate::pallet::NextAssetId::<Test>::put(id);
+			// increment_asset_id runs before the guard, so storage is touched;
+			// the dispatch layer rolls back — assert the error, not no-op.
+			assert_err!(register_orb(), Error::<Test>::AssetIdAlreadyExists);
 		});
 	}
 }

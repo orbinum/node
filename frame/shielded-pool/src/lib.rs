@@ -281,6 +281,37 @@ pub mod pallet {
 				 `runtime-benchmarks`: shield/unshield/transfer proofs are NOT verified \
 				 outside a benchmark build. This must never run on a live chain."
 			);
+
+			assert_eq!(
+				T::MaxTreeDepth::get(),
+				crate::types::MAX_TREE_DEPTH,
+				"MaxTreeDepth config must equal the fixed tree depth (MAX_TREE_DEPTH)"
+			);
+
+			assert!(
+				T::MaxHistoricRoots::get() > 0,
+				"MaxHistoricRoots must be non-zero, otherwise the historic-root map \
+				 grows unbounded and the root window never evicts"
+			);
+		}
+
+		/// Ledger-solvency invariant: the tracked native-asset pool balance must
+		/// equal the pool account's physical free balance. Fees stay physical in
+		/// the pool until their note is unshielded, so both move together.
+		/// Only the native asset (0) is backed by `Currency`; other assets live in
+		/// external backends — TODO: extend when a per-asset balance reader exists.
+		#[cfg(feature = "try-runtime")]
+		fn try_state(_: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
+			let pool = Self::pool_account_id();
+			let physical = T::Currency::free_balance(&pool);
+			let tracked = PoolBalancePerAsset::<T>::get(0u32);
+			frame_support::ensure!(
+				tracked == physical,
+				sp_runtime::TryRuntimeError::Other(
+					"shielded-pool native ledger drifted from physical pool balance"
+				)
+			);
+			Ok(())
 		}
 	}
 
@@ -428,6 +459,13 @@ pub mod pallet {
 		CommitmentNotFound,
 		/// Pending validator fees are less than the requested claim amount
 		InsufficientPendingFees,
+		/// A non-zero fee could not be attributed to any recipient (no resolved
+		/// relayer and no block author). The fee tokens would otherwise be stranded.
+		FeeRecipientUnavailable,
+		/// Batch operation submitted with no operations.
+		EmptyBatch,
+		/// Asset id counter collided with an existing asset (would overwrite it).
+		AssetIdAlreadyExists,
 	}
 
 	// ========================================================================
@@ -490,15 +528,16 @@ pub mod pallet {
 		///
 		/// # Errors
 		/// * Same as `shield()` for any individual operation
+		/// * `EmptyBatch` - Batch submitted with no operations
 		/// * `TooManyOperations` - Batch exceeds maximum size (20)
 		///
 		/// # Events
 		/// * `Shielded` - Emitted for each successful shield in the batch
 		///
 		/// # Weight
-		/// Approximately `N * shield_weight * 0.8` (20% batch discount)
+		/// Benchmarked per operation count via `shield_batch(n)`.
 		#[pallet::call_index(12)]
-		#[pallet::weight(T::WeightInfo::shield().saturating_mul(operations.len() as u64).saturating_mul(4) / 5)]
+		#[pallet::weight(T::WeightInfo::shield_batch(operations.len() as u32))]
 		pub fn shield_batch(
 			origin: OriginFor<T>,
 			operations: BoundedVec<
@@ -507,6 +546,7 @@ pub mod pallet {
 			>,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
+			ensure!(!operations.is_empty(), Error::<T>::EmptyBatch);
 
 			// Process each shield operation
 			for (asset_id, amount, commitment, encrypted_memo) in operations.into_iter() {
@@ -548,7 +588,7 @@ pub mod pallet {
 		/// * `InvalidMemoSize` - Any encrypted memo is not exactly 168 bytes
 		/// * `MemoCommitmentMismatch` - Number of memos does not match number of commitments
 		#[pallet::call_index(1)]
-		#[pallet::weight(T::WeightInfo::private_transfer())]
+		#[pallet::weight(T::WeightInfo::private_transfer(commitments.len() as u32))]
 		#[allow(clippy::too_many_arguments)]
 		pub fn private_transfer(
 			origin: OriginFor<T>,
@@ -701,10 +741,13 @@ pub mod pallet {
 			crate::operations::assets::AssetOperation::verify::<T>(asset_id)
 		}
 
-		/// Unverify an asset, preventing its use in new transactions
+		/// Unverify an asset — an emergency freeze for a compromised asset.
 		///
-		/// Marks an asset as unverified. Existing private notes with this asset
-		/// can still be spent, but new shield operations are prevented.
+		/// Marks an asset as unverified. This freezes ALL activity for the asset:
+		/// both new shields AND unshields of existing notes require `is_verified`,
+		/// so governance can halt inflows and outflows if the asset is compromised.
+		/// Note: this also traps legitimate notes until the asset is re-verified —
+		/// a deliberate trade-off for a fund-holding pool.
 		///
 		/// # Arguments
 		/// * `origin` - Must be root (governance)
@@ -730,6 +773,11 @@ pub mod pallet {
 		/// A value_proof ZK proof must be supplied, proving that `commitment`
 		/// encodes exactly `amount` and `asset_id`.
 		///
+		/// The caller can only spend its own pending fees (keyed by the signed
+		/// origin), but the resulting note's owner is chosen by the caller — the
+		/// note need not belong to the validator. This is intentional: a relayer
+		/// may direct its own earned fees to any shielded recipient.
+		///
 		/// # Errors
 		/// * `InvalidProof` - ZK proof verification failed or wrong length (expected 128 bytes)
 		/// * `InvalidPublicSignals` - Signals mismatch commitment/amount/asset_id, or wrong length (expected 76 bytes)
@@ -745,8 +793,8 @@ pub mod pallet {
 			amount: BalanceOf<T>,
 			asset_id: u32,
 			memo: FrameEncryptedMemo,
-			proof: sp_std::vec::Vec<u8>,
-			public_signals: sp_std::vec::Vec<u8>,
+			proof: BoundedVec<u8, ConstU32<512>>,
+			public_signals: BoundedVec<u8, ConstU32<128>>,
 		) -> DispatchResult {
 			let validator = ensure_signed(origin)?;
 			crate::operations::fees::FeeOperation::claim_shielded::<T>(
@@ -755,8 +803,8 @@ pub mod pallet {
 				amount,
 				asset_id,
 				memo,
-				proof,
-				public_signals,
+				proof.into_inner(),
+				public_signals.into_inner(),
 			)
 		}
 	}
@@ -786,11 +834,13 @@ pub mod pallet {
 					merkle_root,
 					nullifiers,
 					fee,
+					relayer,
 					..
 				} => crate::validate_unsigned::validate_private_transfer::<T>(
 					merkle_root,
 					nullifiers,
 					fee,
+					relayer,
 				),
 
 				Call::unshield {
@@ -799,6 +849,7 @@ pub mod pallet {
 					asset_id,
 					amount,
 					fee,
+					relayer,
 					..
 				} => crate::validate_unsigned::validate_unshield::<T>(
 					merkle_root,
@@ -806,6 +857,7 @@ pub mod pallet {
 					asset_id,
 					amount,
 					fee,
+					relayer,
 				),
 
 				_ => InvalidTransaction::Call.into(),

@@ -203,6 +203,10 @@ impl PoolBalanceRepository {
 	}
 	pub fn decrease_balance<T: Config>(asset_id: u32, amount: BalanceOf<T>) {
 		PoolBalancePerAsset::<T>::mutate(asset_id, |balance| {
+			// The unshield guard (`>= amount + fee`) makes `balance >= amount` always
+			// hold here; `defensive!` trips in tests/try-runtime if that invariant is
+			// ever broken, while `saturating_sub` keeps production safe.
+			frame_support::defensive_assert!(*balance >= amount);
 			*balance = balance.saturating_sub(amount);
 		});
 	}
@@ -214,10 +218,11 @@ impl PoolBalanceRepository {
 mod tests {
 	use super::*;
 	use crate::{
-		mock::{Test, new_test_ext},
+		mock::{Test, acc, new_test_ext},
 		types::{AssetMetadata, Commitment, EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE, Nullifier},
 	};
 	use frame_support::{BoundedVec, pallet_prelude::ConstU32};
+	use sp_runtime::AccountId32;
 
 	// ── helpers ───────────────────────────────────────────────────────────────
 
@@ -233,14 +238,14 @@ mod tests {
 		EncryptedMemo::from_bytes(&[0x01u8; MAX_ENCRYPTED_MEMO_SIZE as usize]).unwrap()
 	}
 
-	fn make_asset_metadata(id: u32) -> AssetMetadata<u64, u64> {
+	fn make_asset_metadata(id: u32) -> AssetMetadata<AccountId32, u64> {
 		AssetMetadata::new(
 			id,
 			BoundedVec::try_from(b"Test".to_vec()).unwrap(),
 			BoundedVec::try_from(b"TST".to_vec()).unwrap(),
 			18,
 			0u64,
-			1u64,
+			acc(1),
 		)
 	}
 
@@ -562,11 +567,26 @@ mod tests {
 	}
 
 	#[test]
-	fn pool_balance_repo_decrease_saturates_at_zero() {
+	fn pool_balance_repo_decrease_to_exact_zero() {
+		new_test_ext().execute_with(|| {
+			// Decrementing by the full balance reaches zero without tripping the
+			// `defensive_assert!(balance >= amount)` guard.
+			PoolBalanceRepository::set_asset_balance::<Test>(4, 100u128);
+			PoolBalanceRepository::decrease_balance::<Test>(4, 100u128);
+			assert_eq!(PoolBalanceRepository::get_asset_balance::<Test>(4), 0u128);
+		});
+	}
+
+	#[test]
+	#[cfg(debug_assertions)]
+	#[should_panic(expected = "Defensive")]
+	fn pool_balance_repo_decrease_below_balance_is_defensive() {
+		// An over-decrement (balance < amount) is an accounting bug: the defensive
+		// guard trips in test/debug. In production `saturating_sub` still floors at
+		// zero, but this path must never be reached under invariant (A).
 		new_test_ext().execute_with(|| {
 			PoolBalanceRepository::set_asset_balance::<Test>(4, 10u128);
 			PoolBalanceRepository::decrease_balance::<Test>(4, 100u128);
-			assert_eq!(PoolBalanceRepository::get_asset_balance::<Test>(4), 0u128);
 		});
 	}
 

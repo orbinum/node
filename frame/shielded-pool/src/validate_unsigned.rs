@@ -16,16 +16,19 @@ use pallet_relayer::RelayerInterface as _;
 use parity_scale_codec::Encode;
 use sp_runtime::{
 	SaturatedConversion,
-	transaction_validity::{
-		InvalidTransaction, TransactionLongevity, TransactionValidity, ValidTransaction,
-	},
+	transaction_validity::{InvalidTransaction, TransactionValidity, ValidTransaction},
 };
+
+/// How long an unsigned transaction stays valid in the pool, in blocks. Bounded
+/// so a transaction that never gets included does not linger indefinitely.
+const TX_LONGEVITY: u64 = 64;
 
 /// Validate an incoming `private_transfer` unsigned transaction.
 pub fn validate_private_transfer<T: Config>(
 	merkle_root: &Hash,
 	nullifiers: &BoundedVec<Nullifier, ConstU32<2>>,
 	fee: &BalanceOf<T>,
+	relayer: &Option<sp_core::H160>,
 ) -> TransactionValidity {
 	// Anti-spam: fee must meet minimum relay fee
 	let min_fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
@@ -54,16 +57,21 @@ pub fn validate_private_transfer<T: Config>(
 		return InvalidTransaction::Custom(2).into();
 	}
 
-	// Exclude dummy nullifiers (zero) from provides — they carry no identity
-	let provides: alloc::vec::Vec<alloc::vec::Vec<u8>> = nullifiers
+	// Exclude dummy nullifiers (zero) from provides — they carry no identity.
+	// Bind the fee recipient (`relayer`) into the tag so a variant differing only
+	// in `relayer` is a distinct pool entry and cannot silently replace the honest
+	// tx. The shared nullifier tag already makes same-nullifier variants mutually
+	// exclusive (first-seen wins at equal fee); this hardens that boundary.
+	let mut provides: alloc::vec::Vec<alloc::vec::Vec<u8>> = nullifiers
 		.iter()
 		.filter(|n| n.0 != [0u8; 32])
 		.map(|n| n.encode())
 		.collect();
+	provides.push(relayer.encode());
 
 	ValidTransaction::with_tag_prefix("ShieldedPoolTransfer")
 		.priority((*fee).saturated_into())
-		.longevity(TransactionLongevity::MAX)
+		.longevity(TX_LONGEVITY)
 		.and_provides(provides)
 		.propagate(true)
 		.build()
@@ -76,6 +84,7 @@ pub fn validate_unshield<T: Config>(
 	asset_id: &u32,
 	amount: &BalanceOf<T>,
 	fee: &BalanceOf<T>,
+	relayer: &Option<sp_core::H160>,
 ) -> TransactionValidity {
 	// Anti-spam: fee must meet minimum relay fee
 	let min_fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
@@ -101,10 +110,14 @@ pub fn validate_unshield<T: Config>(
 		return InvalidTransaction::Custom(3).into();
 	}
 
+	// Bind `relayer` into the tag alongside the nullifier: a variant differing only
+	// in the fee recipient is a distinct pool entry, so it cannot silently replace
+	// the honest tx. Same-nullifier variants stay mutually exclusive (first-seen
+	// wins at equal fee).
 	ValidTransaction::with_tag_prefix("ShieldedPoolUnshield")
 		.priority((*fee).saturated_into())
-		.longevity(TransactionLongevity::MAX)
-		.and_provides([nullifier.encode()])
+		.longevity(TX_LONGEVITY)
+		.and_provides([nullifier.encode(), relayer.encode()])
 		.propagate(true)
 		.build()
 }
@@ -138,8 +151,12 @@ mod tests {
 	fn private_transfer_valid_transaction() {
 		new_test_ext().execute_with(|| {
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-			let result =
-				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers_of(&[0x01]), &0u128);
+			let result = validate_private_transfer::<Test>(
+				&KNOWN_ROOT,
+				&nullifiers_of(&[0x01]),
+				&0u128,
+				&None,
+			);
 			assert!(result.is_ok());
 		});
 	}
@@ -147,8 +164,12 @@ mod tests {
 	#[test]
 	fn private_transfer_unknown_root_rejected() {
 		new_test_ext().execute_with(|| {
-			let result =
-				validate_private_transfer::<Test>(&[0xFFu8; 32], &nullifiers_of(&[0x01]), &0u128);
+			let result = validate_private_transfer::<Test>(
+				&[0xFFu8; 32],
+				&nullifiers_of(&[0x01]),
+				&0u128,
+				&None,
+			);
 			assert!(result.is_err());
 		});
 	}
@@ -159,8 +180,12 @@ mod tests {
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 			let n = make_nullifier(0x05);
 			NullifierRepository::mark_as_used::<Test>(n, 1u64);
-			let result =
-				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers_of(&[0x05]), &0u128);
+			let result = validate_private_transfer::<Test>(
+				&KNOWN_ROOT,
+				&nullifiers_of(&[0x05]),
+				&0u128,
+				&None,
+			);
 			assert!(result.is_err());
 		});
 	}
@@ -176,6 +201,7 @@ mod tests {
 				&KNOWN_ROOT,
 				&nullifiers_of(&[0x10, 0x11]),
 				&0u128,
+				&None,
 			);
 			assert!(result.is_err());
 		});
@@ -188,7 +214,8 @@ mod tests {
 			let result = validate_private_transfer::<Test>(
 				&KNOWN_ROOT,
 				&nullifiers_of(&[0xA1, 0xA2]),
-				&100u128, // non-zero fee
+				&100u128, // non-zero fee,
+				&None,
 			);
 			assert!(result.is_ok());
 		});
@@ -206,7 +233,7 @@ mod tests {
 			let mut nullifiers: BoundedVec<Nullifier, ConstU32<2>> = BoundedVec::new();
 			nullifiers.try_push(make_nullifier(0x01)).ok();
 			nullifiers.try_push(Nullifier::new([0u8; 32])).ok(); // dummy
-			let result = validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128);
+			let result = validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128, &None);
 			assert!(
 				result.is_ok(),
 				"dummy nullifier should not cause Stale rejection"
@@ -225,7 +252,7 @@ mod tests {
 			let mut nullifiers: BoundedVec<Nullifier, ConstU32<2>> = BoundedVec::new();
 			nullifiers.try_push(real).ok();
 			nullifiers.try_push(Nullifier::new([0u8; 32])).ok(); // dummy
-			let result = validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128);
+			let result = validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128, &None);
 			assert!(
 				result.is_err(),
 				"used real nullifier must still be rejected"
@@ -242,7 +269,7 @@ mod tests {
 			let mut nullifiers: BoundedVec<Nullifier, ConstU32<2>> = BoundedVec::new();
 			nullifiers.try_push(Nullifier::new([0u8; 32])).ok();
 			nullifiers.try_push(Nullifier::new([0u8; 32])).ok();
-			let result = validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128);
+			let result = validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128, &None);
 			assert!(result.is_err(), "all-dummy-nullifier tx must be rejected");
 		});
 	}
@@ -260,6 +287,7 @@ mod tests {
 				&0u32,
 				&500u128,
 				&0u128,
+				&None,
 			);
 			assert!(result.is_ok());
 		});
@@ -275,6 +303,7 @@ mod tests {
 				&0u32,
 				&500u128,
 				&0u128,
+				&None,
 			);
 			assert!(result.is_err());
 		});
@@ -287,7 +316,7 @@ mod tests {
 			PoolBalanceRepository::set_asset_balance::<Test>(0, 1_000u128);
 			let n = make_nullifier(0x20);
 			NullifierRepository::mark_as_used::<Test>(n, 1u64);
-			let result = validate_unshield::<Test>(&KNOWN_ROOT, &n, &0u32, &500u128, &0u128);
+			let result = validate_unshield::<Test>(&KNOWN_ROOT, &n, &0u32, &500u128, &0u128, &None);
 			assert!(result.is_err());
 		});
 	}
@@ -303,6 +332,7 @@ mod tests {
 				&0u32,
 				&100u128, // 100 > 50
 				&0u128,
+				&None,
 			);
 			assert!(result.is_err());
 		});
@@ -320,6 +350,7 @@ mod tests {
 				&0u32,
 				&100u128,
 				&60u128,
+				&None,
 			);
 			assert!(result.is_err());
 		});
@@ -337,6 +368,7 @@ mod tests {
 				&0u32,
 				&100u128,
 				&50u128,
+				&None,
 			);
 			assert!(result.is_ok());
 		});
@@ -355,8 +387,12 @@ mod tests {
 			crate::mock::mock_set_min_relay_fee(100);
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 			// fee=50 < min_relay_fee=100 → InvalidTransaction::Payment
-			let result =
-				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers_of(&[0x01]), &50u128);
+			let result = validate_private_transfer::<Test>(
+				&KNOWN_ROOT,
+				&nullifiers_of(&[0x01]),
+				&50u128,
+				&None,
+			);
 			assert!(result.is_err(), "fee below minimum must be rejected");
 			assert_eq!(
 				result.unwrap_err(),
@@ -373,8 +409,12 @@ mod tests {
 			crate::mock::mock_set_min_relay_fee(100);
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 			// fee == min_relay_fee → accept
-			let result =
-				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers_of(&[0x01]), &100u128);
+			let result = validate_private_transfer::<Test>(
+				&KNOWN_ROOT,
+				&nullifiers_of(&[0x01]),
+				&100u128,
+				&None,
+			);
 			assert!(result.is_ok(), "fee equal to minimum must be accepted");
 		});
 	}
@@ -392,6 +432,7 @@ mod tests {
 				&0u32,
 				&100u128,
 				&50u128,
+				&None,
 			);
 			assert!(result.is_err(), "fee below minimum must be rejected");
 			assert_eq!(
@@ -416,8 +457,130 @@ mod tests {
 				&0u32,
 				&100u128,
 				&200u128,
+				&None,
 			);
 			assert!(result.is_ok(), "fee equal to minimum must be accepted");
+		});
+	}
+
+	// ── relayer bound into the provides tag ──────────────────────────────────
+
+	fn evm(byte: u8) -> sp_core::H160 {
+		sp_core::H160::from([byte; 20])
+	}
+
+	/// Two unshield variants differing only in `relayer` produce different
+	/// `provides` tag sets, so a spoofed variant is a distinct pool entry and
+	/// cannot silently replace the honest one.
+	#[test]
+	fn unshield_relayer_changes_provides_tag() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			PoolBalanceRepository::set_asset_balance::<Test>(0, 1000u128);
+			let n = make_nullifier(0x61);
+
+			let a = validate_unshield::<Test>(
+				&KNOWN_ROOT,
+				&n,
+				&0u32,
+				&100u128,
+				&10u128,
+				&Some(evm(0xAA)),
+			)
+			.unwrap();
+			let b = validate_unshield::<Test>(
+				&KNOWN_ROOT,
+				&n,
+				&0u32,
+				&100u128,
+				&10u128,
+				&Some(evm(0xBB)),
+			)
+			.unwrap();
+			let none = validate_unshield::<Test>(&KNOWN_ROOT, &n, &0u32, &100u128, &10u128, &None)
+				.unwrap();
+
+			assert_ne!(a.provides, b.provides, "different relayer → different tags");
+			assert_ne!(a.provides, none.provides, "Some vs None → different tags");
+			// Fee steers priority, not the relayer field.
+			assert_eq!(a.priority, b.priority);
+		});
+	}
+
+	/// Identical relayer + nullifier yields identical provides (honest re-gossip
+	/// is idempotent, first-seen wins at equal fee).
+	#[test]
+	fn unshield_same_relayer_same_provides() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			PoolBalanceRepository::set_asset_balance::<Test>(0, 1000u128);
+			let n = make_nullifier(0x62);
+
+			let a = validate_unshield::<Test>(
+				&KNOWN_ROOT,
+				&n,
+				&0u32,
+				&100u128,
+				&10u128,
+				&Some(evm(0xAA)),
+			)
+			.unwrap();
+			let b = validate_unshield::<Test>(
+				&KNOWN_ROOT,
+				&n,
+				&0u32,
+				&100u128,
+				&10u128,
+				&Some(evm(0xAA)),
+			)
+			.unwrap();
+			assert_eq!(a.provides, b.provides);
+		});
+	}
+
+	/// Same for private_transfer.
+	#[test]
+	fn transfer_relayer_changes_provides_tag() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			let ns = nullifiers_of(&[0x63]);
+
+			let a = validate_private_transfer::<Test>(&KNOWN_ROOT, &ns, &10u128, &Some(evm(0xAA)))
+				.unwrap();
+			let b = validate_private_transfer::<Test>(&KNOWN_ROOT, &ns, &10u128, &Some(evm(0xBB)))
+				.unwrap();
+			assert_ne!(a.provides, b.provides);
+		});
+	}
+
+	/// Unsigned transactions carry a bounded longevity (not `MAX`), so an
+	/// un-included transaction does not persist in the pool indefinitely.
+	#[test]
+	fn unsigned_txs_have_bounded_longevity() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			PoolBalanceRepository::set_asset_balance::<Test>(0, 1000u128);
+
+			let t = validate_private_transfer::<Test>(
+				&KNOWN_ROOT,
+				&nullifiers_of(&[0x90]),
+				&10u128,
+				&None,
+			)
+			.unwrap();
+			assert_eq!(t.longevity, TX_LONGEVITY);
+			assert!(t.longevity < sp_runtime::transaction_validity::TransactionLongevity::MAX);
+
+			let u = validate_unshield::<Test>(
+				&KNOWN_ROOT,
+				&make_nullifier(0x91),
+				&0u32,
+				&100u128,
+				&10u128,
+				&None,
+			)
+			.unwrap();
+			assert_eq!(u.longevity, TX_LONGEVITY);
 		});
 	}
 }
