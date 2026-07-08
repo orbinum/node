@@ -185,6 +185,10 @@ impl ZkVerifierPort for MockZkVerifier {
 		}
 		Ok(true)
 	}
+
+	fn is_supported_version(_circuit_id: u32, version: u32) -> bool {
+		version != 0
+	}
 }
 
 pub struct MockBlockAuthor;

@@ -23,6 +23,7 @@ impl PrivateTransferOperation {
 		asset_id: u32,
 		fee: <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance,
 		relayer_evm: Option<sp_core::H160>,
+		circuit_version: u32,
 	) -> DispatchResult {
 		let asset = AssetRepository::get_asset::<T>(asset_id).ok_or(Error::<T>::InvalidAssetId)?;
 		ensure!(asset.is_verified, Error::<T>::AssetNotVerified);
@@ -82,11 +83,13 @@ impl PrivateTransferOperation {
 				&commitment_arrays,
 				asset_id,
 				fee_u128,
-				None,
+				Some(circuit_version),
 			)?;
 
 			ensure!(valid, Error::<T>::ProofVerificationFailed);
 		}
+		#[cfg(feature = "skip-proof-verification")]
+		let _ = circuit_version;
 
 		#[cfg(feature = "skip-proof-verification")]
 		{
@@ -219,6 +222,7 @@ mod tests {
 				0u32,
 				0u128,
 				None,
+				1,
 			));
 		});
 	}
@@ -237,6 +241,7 @@ mod tests {
 				0u32,
 				0u128,
 				None,
+				1,
 			));
 		});
 	}
@@ -255,6 +260,7 @@ mod tests {
 					0u32,
 					0u128,
 					None,
+					1,
 				),
 				crate::pallet::Error::<Test>::UnknownMerkleRoot
 			);
@@ -278,6 +284,7 @@ mod tests {
 					0u32,
 					0u128,
 					None,
+					1,
 				),
 				crate::pallet::Error::<Test>::NullifierAlreadyUsed
 			);
@@ -300,6 +307,7 @@ mod tests {
 					0u32,
 					0u128,
 					None,
+					1,
 				),
 				crate::pallet::Error::<Test>::MemoCommitmentMismatch
 			);
@@ -324,6 +332,7 @@ mod tests {
 					0u32,
 					0u128,
 					None,
+					1,
 				),
 				crate::pallet::Error::<Test>::InvalidMemoSize
 			);
@@ -349,6 +358,7 @@ mod tests {
 				0u32,
 				0u128,
 				None,
+				1,
 			));
 
 			assert!(PrivateTransferOperation::is_nullifier_used::<Test>(&n1));
@@ -373,6 +383,7 @@ mod tests {
 				0u32,
 				0u128,
 				None,
+				1,
 			));
 
 			assert!(CommitmentRepository::exists::<Test>(&c));
@@ -396,6 +407,7 @@ mod tests {
 				0u32,
 				0u128,
 				None,
+				1,
 			));
 
 			let events = frame_system::Pallet::<Test>::events();
@@ -437,6 +449,7 @@ mod tests {
 				0u32,
 				fee,
 				None,
+				1,
 			));
 
 			// MockRelayer block_author = Some(1)
@@ -459,6 +472,7 @@ mod tests {
 				0u32,
 				0u128,
 				None,
+				1,
 			));
 
 			let pending = crate::mock::mock_pending_fees_get(acc(1), 0u32);
@@ -514,6 +528,7 @@ mod tests {
 				0u32,
 				0u128,
 				None,
+				1,
 			));
 
 			// Real nullifier must be marked used
@@ -547,6 +562,7 @@ mod tests {
 				0u32,
 				0u128,
 				None,
+				1,
 			));
 
 			// Second tx with a different real nullifier but same dummy — must succeed
@@ -559,6 +575,7 @@ mod tests {
 				0u32,
 				0u128,
 				None,
+				1,
 			));
 		});
 	}
@@ -584,6 +601,7 @@ mod tests {
 					0u32,
 					0u128,
 					None,
+					1,
 				),
 				Error::<Test>::InvalidAmount
 			);
@@ -608,6 +626,7 @@ mod tests {
 					0u32,
 					0u128,
 					None,
+					1,
 				),
 				Error::<Test>::TooManyInputsOrOutputs
 			);
@@ -649,6 +668,7 @@ mod tests {
 				asset_id,
 				fee,
 				None,
+				1,
 			));
 
 			assert_eq!(
@@ -689,6 +709,7 @@ mod tests {
 				0u32,
 				30u128,
 				Some(sp_core::H160::from([0xAA; 20])),
+				1,
 			));
 			assert_eq!(crate::mock::mock_pending_fees_get(relayer_acct, 0u32), 30);
 
@@ -702,6 +723,7 @@ mod tests {
 				0u32,
 				20u128,
 				Some(sp_core::H160::from([0xBB; 20])),
+				1,
 			));
 			assert_eq!(crate::mock::mock_pending_fees_get(acc(1), 0u32), 20);
 		});
@@ -724,6 +746,7 @@ mod tests {
 					0u32,
 					25u128,
 					None,
+					1,
 				),
 				Error::<Test>::FeeRecipientUnavailable
 			);
@@ -750,6 +773,7 @@ mod tests {
 					0u32,
 					0u128,
 					None,
+					1,
 				),
 				Error::<Test>::AssetNotVerified
 			);
@@ -772,6 +796,7 @@ mod tests {
 					999u32,
 					0u128,
 					None,
+					1,
 				),
 				Error::<Test>::InvalidAssetId
 			);

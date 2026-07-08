@@ -7,7 +7,7 @@ extern crate alloc;
 
 use crate::{
 	CircuitVersionInfo, VkVersionHash,
-	pallet::{ActiveCircuitVersion, Config, VerificationKeys},
+	pallet::{ActiveCircuitVersion, Config, RetiredVersions, VerificationKeys, VkHashes},
 	types::CircuitId,
 };
 
@@ -18,6 +18,7 @@ impl<T: Config> crate::Pallet<T> {
 
 		let mut supported: alloc::vec::Vec<u32> = VerificationKeys::<T>::iter_prefix(cid)
 			.map(|(v, _)| v)
+			.filter(|v| !RetiredVersions::<T>::contains_key(cid, v))
 			.collect();
 		if supported.is_empty() {
 			return None;
@@ -29,9 +30,13 @@ impl<T: Config> crate::Pallet<T> {
 		let vk_hashes = supported
 			.iter()
 			.filter_map(|v| {
-				VerificationKeys::<T>::get(cid, v).map(|vk| VkVersionHash {
+				let vk_hash = VkHashes::<T>::get(cid, v).or_else(|| {
+					VerificationKeys::<T>::get(cid, v)
+						.map(|vk| sp_io::hashing::blake2_256(vk.key_data.as_slice()))
+				})?;
+				Some(VkVersionHash {
 					version: *v,
-					vk_hash: sp_io::hashing::blake2_256(vk.key_data.as_slice()),
+					vk_hash,
 				})
 			})
 			.collect();

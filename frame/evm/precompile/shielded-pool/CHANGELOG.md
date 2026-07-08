@@ -2,6 +2,25 @@
 
 All notable changes to `pallet-evm-precompile-shielded-pool` will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **ABI: added a trailing `uint32 circuitVersion` to `privateTransfer`, `unshield`
+  and `claimShieldedFees`** — the circuit version the spent note was created under,
+  forwarded to the pallet so the proof is verified against that version's VK. This
+  changes each function's selector (**breaking**): `privateTransfer` `0x8c0f5d24` →
+  `0x66ed2cd4`, `unshield` `0xcc1a3b38` → `0x4e505348`, `claimShieldedFees`
+  `0x42e1e74c` → `0x88d9deba`. Callers (SDK / app) must send the new calldata.
+- Fixed the stale `unshield` selector/signature in the router doc table
+  (`0x47fc44a2` → the actual on-chain value).
+
+### Security
+- **`unshield` change-memo decode fails loudly for a partial unshield.** A
+  malformed `change_encrypted_memo` offset pointer previously fell back to an
+  empty memo (`unwrap_or_default`), silently turning a partial unshield into one
+  whose change note is unrecoverable. It now errors unless the unshield is total
+  (`change_commitment == [0; 32]`), where an absent memo is legitimate.
+
 ## [0.2.0] - 2026-05-08
 
 ### Changed

@@ -1,9 +1,9 @@
 //! ABI decoding and call construction for
-//! `unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes)`.
+//! `unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)`.
 //!
 //! ## Selector
-//! `keccak256("unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes)")[0..4]`
-//! = `0xcc1a3b38`
+//! `keccak256("unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)")[0..4]`
+//! = `0x4e505348`
 //!
 //! ## ABI layout (`input[4..]`)
 //! | Slot (bytes) | Type      | Field           |
@@ -17,6 +17,7 @@
 //! | 192..224    | `uint256` | `fee`           |
 //! | 224..256    | `bytes32` | `change_commitment` |
 //! | 256..288    | `uint256` | offset → `change_encrypted_memo` |
+//! | 288..320    | `uint32`  | `circuit_version` |
 //!
 //! `recipient` is an `AccountId32` encoded as a 32-byte ABI `bytes32` slot.
 //! This can be a Substrate-native account or the `AccountId32` derived from
@@ -38,8 +39,10 @@ use sp_core::U256;
 
 use crate::abi;
 
-/// `keccak256("unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes)")[0..4]`
-pub const SELECTOR: [u8; 4] = [0xcc, 0x1a, 0x3b, 0x38];
+/// `keccak256("unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)")[0..4]`
+/// The trailing `uint32` is `circuitVersion` — the circuit version the spent
+/// notes were created under, so the proof is verified against that version's VK.
+pub const SELECTOR: [u8; 4] = [0x4e, 0x50, 0x53, 0x48];
 
 /// Maximum byte length of a serialised Groth16 proof accepted by the pallet.
 const MAX_PROOF_LEN: u32 = 512;
@@ -107,11 +110,21 @@ where
 	};
 
 	let change_commitment: pallet_shielded_pool::Hash = abi::read_bytes32(params, 224)?;
+	let is_total_unshield = change_commitment == [0u8; 32];
 
-	// Decode change_encrypted_memo as a dynamic bytes field.
-	// Offset pointer lives at slot 256 (params[256..288]).
+	// Decode change_encrypted_memo as a dynamic bytes field (offset pointer at
+	// slot 256). For a partial unshield (non-zero change_commitment) a malformed
+	// offset must fail loudly — silently defaulting to an empty memo would make
+	// the change note unrecoverable. A total unshield legitimately has no memo.
 	let change_encrypted_memo_bytes = if params.len() >= 288 {
-		abi::decode_bytes_at_slot(params, 256).unwrap_or_default()
+		match abi::decode_bytes_at_slot(params, 256) {
+			Ok(bytes) => bytes,
+			Err(e) if is_total_unshield => {
+				let _ = e;
+				Vec::new()
+			}
+			Err(_) => return Err(err("unshield: malformed change_encrypted_memo offset")),
+		}
 	} else {
 		Vec::new()
 	};
@@ -130,6 +143,11 @@ where
 
 	let relayer = Some(handle.context().caller);
 
+	if params.len() < 320 {
+		return Err(err("unshield: input too short (missing circuitVersion)"));
+	}
+	let circuit_version = abi::decode_u32(&params[288..320])?;
+
 	Ok(pallet_shielded_pool::Call::<T>::unshield {
 		proof,
 		merkle_root,
@@ -141,6 +159,7 @@ where
 		change_commitment,
 		change_encrypted_memo,
 		relayer,
+		circuit_version,
 	})
 }
 

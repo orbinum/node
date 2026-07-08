@@ -4,6 +4,22 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **`private_transfer`, `unshield` and `claim_shielded_fees` now take a required
+  `circuit_version: u32`** (last param). The proof is verified against that
+  circuit version's VK instead of always the active version, so a note created
+  under an older circuit stays spendable after a VK rotation. The three operation
+  functions pass `Some(circuit_version)` to the verifier (no more hardcoded
+  `None`). **Consensus-affecting**: the dispatch signatures change → runtime
+  `spec_version` 3→4 and `transaction_version` 1→2. The EVM precompile calldata
+  gains a trailing `uint32 circuitVersion` (new selectors — see the precompile
+  changelog).
+- **`validate_unsigned` rejects an unsupported circuit version early**
+  (`InvalidTransaction::Custom(10)`) via the new `ZkVerifier::is_supported_version`
+  port method, so the tx-pool is not flooded with proofs for versions that have
+  no registered VK.
+
 ### Security
 
 - `private_transfer` now rejects an unregistered or unverified asset before any

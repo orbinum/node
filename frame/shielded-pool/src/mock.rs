@@ -129,6 +129,10 @@ impl ZkVerifierPort for MockZkVerifier {
 		// Always return true for testing (bypass ZK verification)
 		Ok(true)
 	}
+
+	fn is_supported_version(_circuit_id: u32, version: u32) -> bool {
+		version != 0
+	}
 }
 
 /// Block-author provider for the real `pallet-relayer` in tests.

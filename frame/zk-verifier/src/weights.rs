@@ -43,6 +43,8 @@ pub trait WeightInfo {
 	fn register_verification_key() -> Weight;
 	fn set_active_version() -> Weight;
 	fn remove_verification_key() -> Weight;
+	fn retire_version() -> Weight;
+	fn unretire_version() -> Weight;
 	fn batch_register_verification_keys(n: u32, ) -> Weight;
 }
 
@@ -135,6 +137,18 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		//  Measured:  `242`
 		//  Estimated: `11704`
 		// Minimum execution time: 20_820_000 picoseconds.
+		Weight::from_parts(21_470_000, 11704)
+			.saturating_add(T::DbWeight::get().reads(6_u64))
+			.saturating_add(T::DbWeight::get().writes(3_u64))
+	}
+	/// Placeholder until regenerated — retire toggles one flag (1 read + 1 write).
+	fn retire_version() -> Weight {
+		Weight::from_parts(21_470_000, 11704)
+			.saturating_add(T::DbWeight::get().reads(6_u64))
+			.saturating_add(T::DbWeight::get().writes(3_u64))
+	}
+	/// Placeholder until regenerated — unretire clears one flag (1 read + 1 write).
+	fn unretire_version() -> Weight {
 		Weight::from_parts(21_470_000, 11704)
 			.saturating_add(T::DbWeight::get().reads(6_u64))
 			.saturating_add(T::DbWeight::get().writes(3_u64))
@@ -256,6 +270,18 @@ impl WeightInfo for () {
 		//  Measured:  `242`
 		//  Estimated: `11704`
 		// Minimum execution time: 20_820_000 picoseconds.
+		Weight::from_parts(21_470_000, 11704)
+			.saturating_add(RocksDbWeight::get().reads(6_u64))
+			.saturating_add(RocksDbWeight::get().writes(3_u64))
+	}
+	/// Placeholder until regenerated — retire toggles one flag (1 read + 1 write).
+	fn retire_version() -> Weight {
+		Weight::from_parts(21_470_000, 11704)
+			.saturating_add(RocksDbWeight::get().reads(6_u64))
+			.saturating_add(RocksDbWeight::get().writes(3_u64))
+	}
+	/// Placeholder until regenerated — unretire clears one flag (1 read + 1 write).
+	fn unretire_version() -> Weight {
 		Weight::from_parts(21_470_000, 11704)
 			.saturating_add(RocksDbWeight::get().reads(6_u64))
 			.saturating_add(RocksDbWeight::get().writes(3_u64))

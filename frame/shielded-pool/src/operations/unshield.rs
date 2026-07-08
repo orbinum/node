@@ -45,6 +45,7 @@ impl UnshieldOperation {
 		change_commitment: [u8; 32],
 		change_encrypted_memo: FrameEncryptedMemo,
 		relayer_evm: Option<sp_core::H160>,
+		circuit_version: u32,
 	) -> DispatchResult {
 		let asset = AssetRepository::get_asset::<T>(asset_id).ok_or(Error::<T>::InvalidAssetId)?;
 		ensure!(asset.is_verified, Error::<T>::AssetNotVerified);
@@ -109,11 +110,13 @@ impl UnshieldOperation {
 				asset_id,
 				fee_u128,
 				&change_commitment,
-				None,
+				Some(circuit_version),
 			)?;
 
 			ensure!(valid, Error::<T>::ProofVerificationFailed);
 		}
+		#[cfg(feature = "skip-proof-verification")]
+		let _ = circuit_version;
 
 		#[cfg(feature = "skip-proof-verification")]
 		{
@@ -265,6 +268,7 @@ mod tests {
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
 				None,
+				1,
 			));
 		});
 	}
@@ -285,6 +289,7 @@ mod tests {
 					[0u8; 32],
 					FrameEncryptedMemo::default(),
 					None,
+					1,
 				),
 				crate::pallet::Error::<Test>::InvalidAssetId
 			);
@@ -312,6 +317,7 @@ mod tests {
 					[0u8; 32],
 					FrameEncryptedMemo::default(),
 					None,
+					1,
 				),
 				crate::pallet::Error::<Test>::AssetNotVerified
 			);
@@ -340,6 +346,7 @@ mod tests {
 					[0u8; 32],
 					FrameEncryptedMemo::default(),
 					None,
+					1,
 				),
 				crate::pallet::Error::<Test>::InvalidAmount
 			);
@@ -366,6 +373,7 @@ mod tests {
 					[0u8; 32],
 					FrameEncryptedMemo::default(),
 					None,
+					1,
 				),
 				crate::pallet::Error::<Test>::InvalidRecipient
 			);
@@ -391,6 +399,7 @@ mod tests {
 					[0u8; 32],
 					FrameEncryptedMemo::default(),
 					None,
+					1,
 				),
 				crate::pallet::Error::<Test>::UnknownMerkleRoot
 			);
@@ -419,6 +428,7 @@ mod tests {
 					[0u8; 32],
 					FrameEncryptedMemo::default(),
 					None,
+					1,
 				),
 				crate::pallet::Error::<Test>::NullifierAlreadyUsed
 			);
@@ -445,6 +455,7 @@ mod tests {
 					[0u8; 32],
 					FrameEncryptedMemo::default(),
 					None,
+					1,
 				),
 				crate::pallet::Error::<Test>::InsufficientPoolBalance
 			);
@@ -471,6 +482,7 @@ mod tests {
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
 				None,
+				1,
 			));
 			assert!(UnshieldOperation::is_nullifier_used::<Test>(&n));
 		});
@@ -495,6 +507,7 @@ mod tests {
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
 				None,
+				1,
 			));
 
 			let remaining = PoolBalanceRepository::get_asset_balance::<Test>(asset_id);
@@ -525,6 +538,7 @@ mod tests {
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
 				None,
+				1,
 			));
 
 			let after =
@@ -552,6 +566,7 @@ mod tests {
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
 				None,
+				1,
 			));
 
 			let events = frame_system::Pallet::<Test>::events();
@@ -592,6 +607,7 @@ mod tests {
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
 				None,
+				1,
 			));
 
 			// MockRelayer block_author returns Some(1); fee should be accumulated there
@@ -624,6 +640,7 @@ mod tests {
 				change_comm_bytes,
 				FrameEncryptedMemo::default(),
 				None,
+				1,
 			));
 
 			// The change commitment must now exist as a leaf in the Merkle tree.
@@ -680,6 +697,7 @@ mod tests {
 				[0u8; 32], // zero change_commitment = total unshield
 				FrameEncryptedMemo::default(),
 				None,
+				1,
 			));
 
 			// Pool balance must be zero.
@@ -737,6 +755,7 @@ mod tests {
 					change_comm_bytes,
 					FrameEncryptedMemo::default(),
 					None,
+					1,
 				),
 				Error::<Test>::CommitmentAlreadyExists
 			);
@@ -801,6 +820,7 @@ mod tests {
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
 				None,
+				1,
 			));
 
 			// Only `amount` left the pool; `fee` stays as backing for pending fees.
@@ -834,6 +854,7 @@ mod tests {
 					[0u8; 32],
 					FrameEncryptedMemo::default(),
 					None,
+					1,
 				),
 				crate::pallet::Error::<Test>::InsufficientPoolBalance
 			);
@@ -851,6 +872,7 @@ mod tests {
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
 				None,
+				1,
 			));
 		});
 	}
@@ -894,6 +916,7 @@ mod tests {
 				[0u8; 32],
 				memo.clone(),
 				None,
+				1,
 			));
 			assert_eq!(tracked(asset_id), 300);
 			assert_eq!(tracked(asset_id), pool_physical());
@@ -913,6 +936,7 @@ mod tests {
 				crate::types::EncryptedMemo::from_bytes(&[0u8; 176]).unwrap(),
 				vec![0x01u8; 128],
 				signals,
+				1,
 			));
 			assert_eq!(tracked(asset_id), 300);
 			assert_eq!(tracked(asset_id), pool_physical());
@@ -930,6 +954,7 @@ mod tests {
 				[0u8; 32],
 				memo,
 				None,
+				1,
 			));
 			assert_eq!(tracked(asset_id), 250);
 			assert_eq!(tracked(asset_id), pool_physical());
@@ -972,6 +997,7 @@ mod tests {
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
 				Some(evm(0xAA)),
+				1,
 			));
 
 			assert_eq!(
@@ -1007,6 +1033,7 @@ mod tests {
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
 				Some(evm(0xBB)),
+				1,
 			));
 
 			assert_eq!(
@@ -1036,6 +1063,7 @@ mod tests {
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
 				None,
+				1,
 			));
 
 			assert_eq!(
@@ -1071,6 +1099,7 @@ mod tests {
 					[0u8; 32],
 					FrameEncryptedMemo::default(),
 					None,
+					1,
 				),
 				crate::pallet::Error::<Test>::FeeRecipientUnavailable
 			);
@@ -1098,6 +1127,7 @@ mod tests {
 				[0u8; 32],
 				FrameEncryptedMemo::default(),
 				None,
+				1,
 			));
 		});
 	}
@@ -1126,6 +1156,7 @@ mod tests {
 					[0u8; 32],
 					FrameEncryptedMemo::default(),
 					None,
+					1,
 				),
 				crate::pallet::Error::<Test>::AssetNotVerified
 			);

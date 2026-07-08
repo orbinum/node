@@ -57,7 +57,7 @@ mod benchmarks {
 			.bytes
 	}
 
-	/// VK for the TRANSFER circuit (arity 5) — used by the storage benchmarks,
+	/// VK for the TRANSFER circuit (arity 7) — used by the storage benchmarks,
 	/// which validate that a registered VK deserializes and matches circuit arity.
 	fn sample_verification_key() -> Vec<u8> {
 		synthetic_vk(orbinum_zk_verifier::TRANSFER_PUBLIC_INPUTS)
@@ -184,6 +184,63 @@ mod benchmarks {
 			circuit_id,
 			active_version
 		));
+	}
+
+	#[benchmark]
+	fn retire_version() {
+		let circuit_id = CircuitId::TRANSFER;
+		let active = 1u32;
+		let target = 2u32;
+		let registered_at = frame_system::Pallet::<T>::block_number();
+
+		let vk_active = VerificationKeyInfo {
+			key_data: sample_verification_key().try_into().unwrap(),
+			system: ProofSystem::Groth16,
+			registered_at,
+		};
+		let vk_target = VerificationKeyInfo {
+			key_data: sample_verification_key().try_into().unwrap(),
+			system: ProofSystem::Groth16,
+			registered_at,
+		};
+
+		VerificationKeys::<T>::insert(circuit_id, active, vk_active);
+		VerificationKeys::<T>::insert(circuit_id, target, vk_target);
+		ActiveCircuitVersion::<T>::insert(circuit_id, active);
+
+		#[extrinsic_call]
+		_(RawOrigin::Root, circuit_id, target);
+
+		assert!(RetiredVersions::<T>::contains_key(circuit_id, target));
+	}
+
+	#[benchmark]
+	fn unretire_version() {
+		let circuit_id = CircuitId::TRANSFER;
+		let active_version = 1u32;
+		let retired = 2u32;
+		let registered_at = frame_system::Pallet::<T>::block_number();
+
+		let vk_active = VerificationKeyInfo {
+			key_data: sample_verification_key().try_into().unwrap(),
+			system: ProofSystem::Groth16,
+			registered_at,
+		};
+		let vk_retired = VerificationKeyInfo {
+			key_data: sample_verification_key().try_into().unwrap(),
+			system: ProofSystem::Groth16,
+			registered_at,
+		};
+
+		VerificationKeys::<T>::insert(circuit_id, active_version, vk_active);
+		VerificationKeys::<T>::insert(circuit_id, retired, vk_retired);
+		ActiveCircuitVersion::<T>::insert(circuit_id, active_version);
+		RetiredVersions::<T>::insert(circuit_id, retired, ());
+
+		#[extrinsic_call]
+		_(RawOrigin::Root, circuit_id, retired);
+
+		assert!(!RetiredVersions::<T>::contains_key(circuit_id, retired));
 	}
 
 	#[benchmark]

@@ -1,9 +1,9 @@
 //! ABI decoding and call construction for
-//! `privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)`.
+//! `privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)`.
 //!
 //! ## Selector
-//! `keccak256("privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)")[0..4]`
-//! = `0x8c0f5d24`
+//! `keccak256("privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)")[0..4]`
+//! = `0x66ed2cd4`
 //!
 //! ## ABI layout (`input[4..]`) — standard head/tail encoding
 //! | Slot (bytes) | Type        | Field              |
@@ -15,6 +15,7 @@
 //! | 128..160    | `uint256`   | offset → memos     |
 //! | 160..192    | `uint32`    | `asset_id`         |
 //! | 192..224    | `uint256`   | `fee`              |
+//! | 224..256    | `uint32`    | `circuit_version`  |
 //!
 //! `relayer` is derived from `handle.context().caller` — not part of the ABI.
 
@@ -24,8 +25,10 @@ use sp_core::U256;
 
 use crate::abi;
 
-/// `keccak256("privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)")[0..4]`
-pub const SELECTOR: [u8; 4] = [0x8c, 0x0f, 0x5d, 0x24];
+/// `keccak256("privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)")[0..4]`
+/// The trailing `uint32` is `circuitVersion` — the circuit version the spent
+/// notes were created under, so the proof is verified against that version's VK.
+pub const SELECTOR: [u8; 4] = [0x66, 0xed, 0x2c, 0xd4];
 
 /// Maximum byte length of a serialised Groth16 proof accepted by the pallet.
 const MAX_PROOF_LEN: u32 = 512;
@@ -46,7 +49,7 @@ where
 	pallet_shielded_pool::BalanceOf<T>: TryFrom<u128>,
 {
 	let params = &input[4..];
-	if params.len() < 224 {
+	if params.len() < 256 {
 		return Err(err("privateTransfer: input too short"));
 	}
 
@@ -120,6 +123,8 @@ where
 
 	let relayer = Some(handle.context().caller);
 
+	let circuit_version = abi::decode_u32(&params[224..256])?;
+
 	Ok(pallet_shielded_pool::Call::<T>::private_transfer {
 		proof,
 		merkle_root,
@@ -129,6 +134,7 @@ where
 		asset_id,
 		fee,
 		relayer,
+		circuit_version,
 	})
 }
 

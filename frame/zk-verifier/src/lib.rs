@@ -85,6 +85,23 @@ pub mod pallet {
 	pub type ActiveCircuitVersion<T: Config> =
 		StorageMap<_, Blake2_128Concat, CircuitId, u32, OptionQuery>;
 
+	/// Retired `(circuit_id, version)` pairs rejected during verification.
+	#[pallet::storage]
+	pub type RetiredVersions<T: Config> =
+		StorageDoubleMap<_, Blake2_128Concat, CircuitId, Blake2_128Concat, u32, (), OptionQuery>;
+
+	/// Cached `blake2_256(key_data)` hash for each registered verification key.
+	#[pallet::storage]
+	pub type VkHashes<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat,
+		CircuitId,
+		Blake2_128Concat,
+		u32,
+		[u8; 32],
+		OptionQuery,
+	>;
+
 	/// Verification statistics per (circuit_id, version).
 	#[pallet::storage]
 	pub type VerificationStats<T: Config> = StorageDoubleMap<
@@ -122,6 +139,7 @@ pub mod pallet {
 					.try_into()
 					.expect("Genesis VK exceeds maximum size (8 KB)");
 
+				let hash = sp_io::hashing::blake2_256(key_data.as_slice());
 				VerificationKeys::<T>::insert(
 					circuit_id,
 					1u32,
@@ -131,6 +149,7 @@ pub mod pallet {
 						registered_at: BlockNumberFor::<T>::default(),
 					},
 				);
+				VkHashes::<T>::insert(circuit_id, 1u32, hash);
 				ActiveCircuitVersion::<T>::insert(circuit_id, 1u32);
 			}
 		}
@@ -162,6 +181,8 @@ pub mod pallet {
 		VerificationKeyRegistered { circuit_id: CircuitId, version: u32 },
 		ActiveVersionSet { circuit_id: CircuitId, version: u32 },
 		VerificationKeyRemoved { circuit_id: CircuitId, version: u32 },
+		VersionRetired { circuit_id: CircuitId, version: u32 },
+		VersionUnretired { circuit_id: CircuitId, version: u32 },
 		ProofVerified { circuit_id: CircuitId, version: u32 },
 		ProofVerificationFailed { circuit_id: CircuitId, version: u32 },
 		BatchVerificationKeysRegistered { count: u32 },
@@ -192,6 +213,11 @@ pub mod pallet {
 		CircuitAlreadyExists,
 		ActiveVersionNotSet,
 		CannotRemoveActiveVersion,
+		UnsupportedCircuitVersion,
+		CannotRetireActiveVersion,
+		VersionAlreadyRetired,
+		VersionNotRetired,
+		TooManyVersions,
 		// Infrastructure
 		RepositoryError,
 		DeserializationError,
@@ -206,6 +232,18 @@ pub mod pallet {
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		/// Register a verification key version for a circuit (Root only).
+		///
+		/// SECURITY INVARIANT: a new version of an EXISTING circuit id must only be
+		/// a key rotation of the *same* circuit (identical R1CS / public-signal
+		/// semantics — e.g. a fresh trusted setup). A note's circuit version is NOT
+		/// bound into its commitment (see shielded-pool Limitation 1), so the
+		/// submitter picks the version freely; verification is safe only because a
+		/// proof verifies solely under the exact VK of the circuit that produced it.
+		/// Registering a version whose circuit keeps the same public-input arity but
+		/// changes a constraint's *meaning* would let a note be spent under weaker
+		/// rules. A semantic change MUST use a NEW circuit id, never a new version.
+		/// `ensure_vk_arity` enforces arity, NOT semantics — that is a governance
+		/// responsibility. Retire a superseded weak version with `retire_version`.
 		#[pallet::call_index(0)]
 		#[pallet::weight(T::WeightInfo::register_verification_key())]
 		pub fn register_verification_key(
@@ -223,25 +261,13 @@ pub mod pallet {
 				verification_key.len() >= 256,
 				Error::<T>::InvalidVerificationKey
 			);
-			// Reject a malformed or wrong-arity VK at registration, not at proof time.
 			Self::ensure_vk_arity(circuit_id, &verification_key)?;
-			// Prevent silent overwrite of an existing VK. Replacing a key that is
-			// already referenced by recorded stats would desync the stats from the
-			// actual key in use. Use set_active_version to switch active versions.
 			ensure!(
 				!VerificationKeys::<T>::contains_key(circuit_id, version),
 				Error::<T>::CircuitAlreadyExists
 			);
 
-			VerificationKeys::<T>::insert(
-				circuit_id,
-				version,
-				VerificationKeyInfo {
-					key_data: verification_key,
-					system: ProofSystem::Groth16,
-					registered_at: frame_system::Pallet::<T>::block_number(),
-				},
-			);
+			Self::store_vk(circuit_id, version, verification_key)?;
 
 			if ActiveCircuitVersion::<T>::get(circuit_id).is_none() {
 				ActiveCircuitVersion::<T>::insert(circuit_id, version);
@@ -299,6 +325,7 @@ pub mod pallet {
 			ensure!(active != version, Error::<T>::CannotRemoveActiveVersion);
 
 			VerificationKeys::<T>::remove(circuit_id, version);
+			RetiredVersions::<T>::remove(circuit_id, version);
 			Self::deposit_event(Event::VerificationKeyRemoved {
 				circuit_id,
 				version,
@@ -373,15 +400,11 @@ pub mod pallet {
 					Error::<T>::CircuitAlreadyExists
 				);
 
-				VerificationKeys::<T>::insert(
+				Self::store_vk(
 					entry.circuit_id,
 					entry.version,
-					VerificationKeyInfo {
-						key_data: entry.verification_key.clone(),
-						system: ProofSystem::Groth16,
-						registered_at: frame_system::Pallet::<T>::block_number(),
-					},
-				);
+					entry.verification_key.clone(),
+				)?;
 
 				let auto_activate = ActiveCircuitVersion::<T>::get(entry.circuit_id).is_none();
 				if entry.set_active || auto_activate {
@@ -400,6 +423,56 @@ pub mod pallet {
 
 			Self::deposit_event(Event::BatchVerificationKeysRegistered {
 				count: entries.len() as u32,
+			});
+			Ok(())
+		}
+
+		/// Retires a verification key version while preserving its data.
+		#[pallet::call_index(5)]
+		#[pallet::weight(T::WeightInfo::retire_version())]
+		pub fn retire_version(
+			origin: OriginFor<T>,
+			circuit_id: CircuitId,
+			version: u32,
+		) -> DispatchResult {
+			ensure_root(origin)?;
+			ensure!(
+				VerificationKeys::<T>::contains_key(circuit_id, version),
+				Error::<T>::VerificationKeyNotFound
+			);
+			ensure!(
+				!RetiredVersions::<T>::contains_key(circuit_id, version),
+				Error::<T>::VersionAlreadyRetired
+			);
+			let active = ActiveCircuitVersion::<T>::get(circuit_id)
+				.ok_or(Error::<T>::ActiveVersionNotSet)?;
+			ensure!(active != version, Error::<T>::CannotRetireActiveVersion);
+
+			RetiredVersions::<T>::insert(circuit_id, version, ());
+			Self::deposit_event(Event::VersionRetired {
+				circuit_id,
+				version,
+			});
+			Ok(())
+		}
+
+		/// Reverse `retire_version`: allow proofs for `(circuit_id, version)` again.
+		#[pallet::call_index(6)]
+		#[pallet::weight(T::WeightInfo::unretire_version())]
+		pub fn unretire_version(
+			origin: OriginFor<T>,
+			circuit_id: CircuitId,
+			version: u32,
+		) -> DispatchResult {
+			ensure_root(origin)?;
+			ensure!(
+				RetiredVersions::<T>::contains_key(circuit_id, version),
+				Error::<T>::VersionNotRetired
+			);
+			RetiredVersions::<T>::remove(circuit_id, version);
+			Self::deposit_event(Event::VersionUnretired {
+				circuit_id,
+				version,
 			});
 			Ok(())
 		}
@@ -422,6 +495,39 @@ pub mod pallet {
 			}
 			Ok(())
 		}
+
+		/// Upper bound on stored versions per circuit — keeps the versions DoubleMap
+		/// and the runtime-API iteration provably bounded. Registration is Root-only,
+		/// so this is operator-discipline, not an attacker limit.
+		pub(crate) const MAX_VERSIONS_PER_CIRCUIT: u32 = 64;
+
+		/// Insert a validated VK for `(circuit_id, version)` and store its hash.
+		/// Enforces the per-circuit version cap. Callers must have already run
+		/// `ensure_vk_arity` + the silent-overwrite check.
+		fn store_vk(
+			circuit_id: CircuitId,
+			version: u32,
+			key_data: BoundedVec<u8, ConstU32<8192>>,
+		) -> DispatchResult {
+			let count = VerificationKeys::<T>::iter_key_prefix(circuit_id).count() as u32;
+			ensure!(
+				count < Self::MAX_VERSIONS_PER_CIRCUIT,
+				Error::<T>::TooManyVersions
+			);
+
+			let hash = sp_io::hashing::blake2_256(key_data.as_slice());
+			VerificationKeys::<T>::insert(
+				circuit_id,
+				version,
+				VerificationKeyInfo {
+					key_data,
+					system: ProofSystem::Groth16,
+					registered_at: frame_system::Pallet::<T>::block_number(),
+				},
+			);
+			VkHashes::<T>::insert(circuit_id, version, hash);
+			Ok(())
+		}
 	}
 }
 
@@ -432,7 +538,7 @@ mod tests {
 	use super::*;
 	use crate::{
 		mock::{MaxProofSize, MaxPublicInputs, RuntimeEvent, Test, ZkVerifier},
-		pallet::{ActiveCircuitVersion, Event, VerificationKeys},
+		pallet::{ActiveCircuitVersion, Event, RetiredVersions, VerificationKeys},
 		types::{ProofSystem, VkEntry},
 	};
 	use frame_support::{BoundedVec, assert_err, assert_noop, assert_ok};
@@ -1358,6 +1464,146 @@ mod tests {
 			assert_eq!(
 				ActiveCircuitVersion::<Test>::get(CircuitId::UNSHIELD),
 				Some(1u32)
+			);
+		});
+	}
+
+	// ── retire_version / unretire_version ─────────────────────────────────────
+
+	#[test]
+	fn retire_version_requires_root() {
+		new_test_ext().execute_with(|| {
+			insert_vk(CircuitId::TRANSFER, 1);
+			insert_vk(CircuitId::TRANSFER, 2);
+			activate(CircuitId::TRANSFER, 1);
+			assert_noop!(
+				ZkVerifier::retire_version(signed().into(), CircuitId::TRANSFER, 2),
+				sp_runtime::DispatchError::BadOrigin
+			);
+		});
+	}
+
+	#[test]
+	fn retire_version_rejects_active_and_unknown() {
+		new_test_ext().execute_with(|| {
+			insert_vk(CircuitId::TRANSFER, 1);
+			activate(CircuitId::TRANSFER, 1);
+			// active version cannot be retired
+			assert_noop!(
+				ZkVerifier::retire_version(root().into(), CircuitId::TRANSFER, 1),
+				Error::<Test>::CannotRetireActiveVersion
+			);
+			// unknown version cannot be retired
+			assert_noop!(
+				ZkVerifier::retire_version(root().into(), CircuitId::TRANSFER, 9),
+				Error::<Test>::VerificationKeyNotFound
+			);
+		});
+	}
+
+	#[test]
+	fn retire_then_unretire_toggles_the_flag() {
+		new_test_ext().execute_with(|| {
+			insert_vk(CircuitId::TRANSFER, 1);
+			insert_vk(CircuitId::TRANSFER, 2);
+			activate(CircuitId::TRANSFER, 1);
+
+			assert_ok!(ZkVerifier::retire_version(
+				root().into(),
+				CircuitId::TRANSFER,
+				2
+			));
+			assert!(RetiredVersions::<Test>::contains_key(
+				CircuitId::TRANSFER,
+				2
+			));
+			assert!(has_event(Event::VersionRetired {
+				circuit_id: CircuitId::TRANSFER,
+				version: 2
+			}));
+			// double-retire rejected
+			assert_noop!(
+				ZkVerifier::retire_version(root().into(), CircuitId::TRANSFER, 2),
+				Error::<Test>::VersionAlreadyRetired
+			);
+
+			assert_ok!(ZkVerifier::unretire_version(
+				root().into(),
+				CircuitId::TRANSFER,
+				2
+			));
+			assert!(!RetiredVersions::<Test>::contains_key(
+				CircuitId::TRANSFER,
+				2
+			));
+			// unretire of a non-retired version rejected
+			assert_noop!(
+				ZkVerifier::unretire_version(root().into(), CircuitId::TRANSFER, 2),
+				Error::<Test>::VersionNotRetired
+			);
+		});
+	}
+
+	#[test]
+	fn removing_a_vk_clears_its_retirement_flag() {
+		new_test_ext().execute_with(|| {
+			insert_vk(CircuitId::TRANSFER, 1);
+			insert_vk(CircuitId::TRANSFER, 2);
+			activate(CircuitId::TRANSFER, 1);
+			assert_ok!(ZkVerifier::retire_version(
+				root().into(),
+				CircuitId::TRANSFER,
+				2
+			));
+			assert_ok!(ZkVerifier::remove_verification_key(
+				root().into(),
+				CircuitId::TRANSFER,
+				2
+			));
+			assert!(!RetiredVersions::<Test>::contains_key(
+				CircuitId::TRANSFER,
+				2
+			));
+		});
+	}
+
+	// ── version cap + stored vk_hash ──────────────────────────────────────────
+
+	#[test]
+	fn register_stores_the_vk_hash() {
+		new_test_ext().execute_with(|| {
+			let vk = real_vk(TRANSFER_PUBLIC_INPUTS);
+			assert_ok!(ZkVerifier::register_verification_key(
+				root().into(),
+				CircuitId::TRANSFER,
+				1,
+				vk.clone()
+			));
+			let expected = sp_io::hashing::blake2_256(vk.as_slice());
+			assert_eq!(
+				crate::pallet::VkHashes::<Test>::get(CircuitId::TRANSFER, 1),
+				Some(expected)
+			);
+		});
+	}
+
+	#[test]
+	fn register_rejects_beyond_max_versions_per_circuit() {
+		new_test_ext().execute_with(|| {
+			// Fill the circuit up to the cap with direct inserts (versions 1..=MAX).
+			let max = Pallet::<Test>::MAX_VERSIONS_PER_CIRCUIT;
+			for v in 1..=max {
+				insert_vk(CircuitId::TRANSFER, v);
+			}
+			// One more via the real path must be rejected by the cap.
+			assert_noop!(
+				ZkVerifier::register_verification_key(
+					root().into(),
+					CircuitId::TRANSFER,
+					max + 1,
+					real_vk(TRANSFER_PUBLIC_INPUTS)
+				),
+				Error::<Test>::TooManyVersions
 			);
 		});
 	}

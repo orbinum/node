@@ -1,9 +1,9 @@
 //! ABI decoding and call construction for
-//! `claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes)`.
+//! `claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes,uint32)`.
 //!
 //! ## Selector
-//! `keccak256("claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes)")[0..4]`
-//! = `0x42e1e74c`
+//! `keccak256("claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes,uint32)")[0..4]`
+//! = `0x88d9deba`
 //!
 //! ## ABI layout (`input[4..]`)
 //! | Slot (bytes) | Type      | Field              |
@@ -14,6 +14,7 @@
 //! | 96..128     | `uint256` | offset → `memo`    |
 //! | 128..160    | `uint256` | offset → `proof`   |
 //! | 160..192    | `uint256` | offset → `public_signals` |
+//! | 192..224    | `uint32`  | `circuit_version`  |
 //!
 //! The **validator** origin is derived from `handle.context().caller`
 //! (the EVM address that sent the transaction), mapped to an `AccountId`
@@ -30,8 +31,10 @@ use sp_core::U256;
 
 use crate::abi;
 
-/// `keccak256("claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes)")[0..4]`
-pub const SELECTOR: [u8; 4] = [0x42, 0xe1, 0xe7, 0x4c];
+/// `keccak256("claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes,uint32)")[0..4]`
+/// The trailing `uint32` is `circuitVersion` — the circuit version the spent
+/// notes were created under, so the proof is verified against that version's VK.
+pub const SELECTOR: [u8; 4] = [0x88, 0xd9, 0xde, 0xba];
 
 /// Maximum byte length of a serialised Groth16 proof accepted by the pallet.
 const MAX_PROOF_LEN: u32 = 512;
@@ -95,6 +98,13 @@ where
 		.try_into()
 		.map_err(|_| err("claimShieldedFees: public_signals too long"))?;
 
+	if params.len() < 224 {
+		return Err(err(
+			"claimShieldedFees: input too short (missing circuitVersion)",
+		));
+	}
+	let circuit_version = abi::decode_u32(&params[192..224])?;
+
 	Ok(pallet_shielded_pool::Call::<T>::claim_shielded_fees {
 		commitment,
 		amount,
@@ -102,6 +112,7 @@ where
 		memo,
 		proof,
 		public_signals,
+		circuit_version,
 	})
 }
 
@@ -171,8 +182,8 @@ mod tests {
 
 	/// Encodes a full `claimShieldedFees` ABI call (selector + params).
 	///
-	/// ABI head (192 bytes after selector):
-	/// `[commitment(32) | amount(32) | asset_id(32) | off_memo(32) | off_proof(32) | off_ps(32)]`
+	/// ABI head (224 bytes after selector):
+	/// `[commitment(32) | amount(32) | asset_id(32) | off_memo(32) | off_proof(32) | off_ps(32) | circuit_version(32)]`
 	fn encode_claim_shielded_fees(
 		commitment: [u8; 32],
 		amount: u128,
@@ -180,13 +191,14 @@ mod tests {
 		memo: &[u8],
 		proof: &[u8],
 		public_signals: &[u8],
+		circuit_version: u32,
 	) -> Vec<u8> {
 		let memo_enc = encode_bytes(memo);
 		let proof_enc = encode_bytes(proof);
 		let ps_enc = encode_bytes(public_signals);
 
-		// 6 fixed head slots × 32 bytes = 192
-		let head_size = 192usize;
+		// 7 fixed head slots × 32 bytes = 224 (added trailing uint32 circuitVersion)
+		let head_size = 224usize;
 		let memo_off = head_size;
 		let proof_off = head_size + memo_enc.len();
 		let ps_off = head_size + memo_enc.len() + proof_enc.len();
@@ -198,6 +210,7 @@ mod tests {
 		head[96..128].copy_from_slice(&u256_word(memo_off));
 		head[128..160].copy_from_slice(&u256_word(proof_off));
 		head[160..192].copy_from_slice(&u256_word(ps_off));
+		head[220..224].copy_from_slice(&circuit_version.to_be_bytes());
 
 		let mut input = SELECTOR.to_vec();
 		input.extend_from_slice(&head);
@@ -243,6 +256,7 @@ mod tests {
 			&valid_memo(),
 			PROOF,
 			&valid_public_signals(),
+			1,
 		)
 	}
 
@@ -278,6 +292,7 @@ mod tests {
 			&valid_memo(),
 			PROOF,
 			&valid_public_signals(),
+			1,
 		);
 		let h = MockHandle::new(input.clone());
 		let result = super::decode::<Test>(&h, &input);
@@ -295,6 +310,7 @@ mod tests {
 				&valid_memo(),
 				PROOF,
 				&bad_signals,
+				1,
 			);
 			let h = MockHandle::new(input.clone());
 			let result = super::decode::<Test>(&h, &input);
@@ -316,6 +332,7 @@ mod tests {
 			&valid_memo(),
 			&oversized_proof,
 			&valid_public_signals(),
+			1,
 		);
 		let h = MockHandle::new(input.clone());
 		let result = super::decode::<Test>(&h, &input);
@@ -334,6 +351,7 @@ mod tests {
 			&valid_memo(),
 			&[], // ← empty proof
 			&valid_public_signals(),
+			1,
 		);
 		let h = MockHandle::new(input.clone());
 		let result = super::decode::<Test>(&h, &input);
@@ -361,6 +379,7 @@ mod tests {
 			&valid_memo(),
 			PROOF,
 			make_public_signals(commitment, AMOUNT as u64, ASSET_ID).as_ref(),
+			1,
 		);
 		let h = MockHandle::new(input.clone());
 		match super::decode::<Test>(&h, &input).unwrap() {
@@ -382,6 +401,7 @@ mod tests {
 			&valid_memo(),
 			PROOF,
 			ps.as_ref(),
+			1,
 		);
 		let h = MockHandle::new(input.clone());
 		match super::decode::<Test>(&h, &input).unwrap() {
@@ -402,6 +422,7 @@ mod tests {
 			&valid_memo(),
 			PROOF,
 			make_public_signals(COMMITMENT, AMOUNT as u64, 0).as_ref(),
+			1,
 		);
 		let h = MockHandle::new(input.clone());
 		match super::decode::<Test>(&h, &input).unwrap() {
@@ -455,6 +476,7 @@ mod tests {
 				&valid_memo(),
 				PROOF,
 				&valid_public_signals(),
+				1,
 			);
 			let mut h = MockHandle::new(input);
 			expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
@@ -471,6 +493,7 @@ mod tests {
 				&valid_memo(),
 				&[],
 				&valid_public_signals(),
+				1,
 			);
 			let mut h = MockHandle::new(input);
 			expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
@@ -489,6 +512,7 @@ mod tests {
 				&valid_memo(),
 				PROOF,
 				&bad_ps,
+				1,
 			);
 			let mut h = MockHandle::new(input);
 			expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
@@ -508,6 +532,7 @@ mod tests {
 				&valid_memo(),
 				PROOF,
 				mismatched.as_ref(),
+				1,
 			);
 			let mut h = MockHandle::new(input);
 			expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
@@ -527,6 +552,7 @@ mod tests {
 				&valid_memo(),
 				PROOF,
 				mismatched.as_ref(),
+				1,
 			);
 			let mut h = MockHandle::new(input);
 			expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
@@ -546,6 +572,7 @@ mod tests {
 				&valid_memo(),
 				PROOF,
 				mismatched.as_ref(),
+				1,
 			);
 			let mut h = MockHandle::new(input);
 			expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
@@ -637,6 +664,7 @@ mod tests {
 				&valid_memo(),
 				PROOF,
 				ps.as_ref(),
+				1,
 			);
 			let mut h = MockHandle::new(input);
 			expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
