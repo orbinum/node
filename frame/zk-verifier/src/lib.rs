@@ -702,13 +702,13 @@ mod tests {
 	#[test]
 	fn register_vk_rejects_wrong_arity() {
 		new_test_ext().execute_with(|| {
-			// TRANSFER expects 5 public inputs; a VK built for 7 must be rejected.
+			// TRANSFER expects TRANSFER_PUBLIC_INPUTS; a VK of a different arity is rejected.
 			assert_noop!(
 				ZkVerifier::register_verification_key(
 					root().into(),
 					CircuitId::TRANSFER,
 					1,
-					real_vk(UNSHIELD_PUBLIC_INPUTS)
+					real_vk(TRANSFER_PUBLIC_INPUTS + 1)
 				),
 				Error::<Test>::InvalidVerificationKey
 			);
