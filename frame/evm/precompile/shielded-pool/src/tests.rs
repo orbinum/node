@@ -105,6 +105,7 @@ fn encode_shield(asset_id: u32, commitment: [u8; 32], memo: &[u8]) -> Vec<u8> {
 }
 
 /// `privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)`  selector `0x8c0f5d24`
+#[allow(clippy::too_many_arguments)]
 fn encode_private_transfer(
 	proof: &[u8],
 	merkle_root: [u8; 32],
