@@ -2,9 +2,12 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
-## [Unreleased]
+## [0.9.0] - 2026-07-09
 
 ### Changed
+
+- **Weights regenerated** on the benchmark host for the `circuit_version`-carrying
+  `private_transfer` / `unshield` / `claim_shielded_fees` and the rest of the pallet.
 
 - **`private_transfer`, `unshield` and `claim_shielded_fees` now take a required
   `circuit_version: u32`** (last param). The proof is verified against that

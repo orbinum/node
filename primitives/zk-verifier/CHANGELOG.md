@@ -4,7 +4,7 @@ All notable changes to this crate are documented here.
 
 ---
 
-## [Unreleased]
+## [1.3.0] - 2026-07-09
 
 ### Fixed
 

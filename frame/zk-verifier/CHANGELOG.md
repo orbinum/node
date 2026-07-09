@@ -4,7 +4,7 @@ All notable changes to this pallet are documented here.
 
 ---
 
-## [Unreleased]
+## [0.9.0] - 2026-07-09
 
 ### Added
 
@@ -41,6 +41,11 @@ All notable changes to this pallet are documented here.
   identical circuit; a semantic change must use a NEW circuit id. The note commitment
   does not bind the version (shielded-pool Limitation 1), so this is a governance-
   enforced rule that `ensure_vk_arity` (arity only) cannot check.
+
+### Changed
+
+- **Weights regenerated** on the benchmark host, including real measured weights
+  for `retire_version` (~20.96ms) and `unretire_version` (~15.41ms).
 
 ### Fixed
 

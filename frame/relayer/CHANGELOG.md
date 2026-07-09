@@ -2,6 +2,15 @@
 
 All notable changes to `pallet-relayer` will be documented in this file.
 
+## [0.3.1] - 2026-07-09
+
+### Changed
+
+- Weights regenerated on the benchmark host (AMD EPYC-Genoa, 32 GB). No logic
+  change — refreshed alongside the per-note circuit-version release.
+  `set_allowed_selectors` no longer scales with its component (`n` → `_n`); the
+  measured cost did not vary with the selector count.
+
 ## [0.3.0] - 2026-06-03
 
 ### Changed

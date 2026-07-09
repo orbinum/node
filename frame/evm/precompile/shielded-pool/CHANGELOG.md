@@ -2,7 +2,7 @@
 
 All notable changes to `pallet-evm-precompile-shielded-pool` will be documented in this file.
 
-## [Unreleased]
+## [0.3.0] - 2026-07-09
 
 ### Changed
 - **ABI: added a trailing `uint32 circuitVersion` to `privateTransfer`, `unshield`
