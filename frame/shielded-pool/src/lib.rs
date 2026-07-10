@@ -490,7 +490,7 @@ pub mod pallet {
 		/// * `AmountTooSmall` - Amount is below minimum
 		/// * `MerkleTreeFull` - No more space in the tree
 		/// * `CommitmentAlreadyExists` - Duplicate commitment
-		/// * `InvalidMemoSize` - Encrypted memo is not exactly 168 bytes
+		/// * `InvalidMemoSize` - Encrypted memo is not exactly 180 bytes
 		#[pallet::call_index(0)]
 		#[pallet::weight(T::WeightInfo::shield())]
 		pub fn shield(
@@ -585,7 +585,7 @@ pub mod pallet {
 		/// * `NullifierAlreadyUsed` - Double-spend attempt
 		/// * `InvalidProof` - ZK proof verification failed
 		/// * `FeeTooLow` - Fee is below `T::Relayer::min_relay_fee()`
-		/// * `InvalidMemoSize` - Any encrypted memo is not exactly 168 bytes
+		/// * `InvalidMemoSize` - Any encrypted memo is not exactly 180 bytes
 		/// * `MemoCommitmentMismatch` - Number of memos does not match number of commitments
 		#[pallet::call_index(1)]
 		#[pallet::weight(T::WeightInfo::private_transfer(commitments.len() as u32))]
@@ -600,8 +600,6 @@ pub mod pallet {
 			asset_id: u32,
 			fee: BalanceOf<T>,
 			relayer: Option<sp_core::H160>,
-			// Circuit version the spent notes were created under; the proof is
-			// verified against this version's VK (not merely the active one).
 			circuit_version: u32,
 		) -> DispatchResult {
 			ensure_none(origin)?;

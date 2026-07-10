@@ -71,7 +71,7 @@ impl UnshieldOperation {
 				!CommitmentRepository::exists::<T>(&change_comm),
 				Error::<T>::CommitmentAlreadyExists
 			);
-			// For partial unshield, memo must be valid size (176 bytes).
+			// For partial unshield, memo must be valid size (180 bytes).
 			if !change_encrypted_memo.is_empty() {
 				ensure!(
 					change_encrypted_memo.is_valid_size(),
@@ -899,7 +899,7 @@ mod tests {
 				asset_id,
 				1000u128,
 				Commitment::new([0x31u8; 32]),
-				FrameEncryptedMemo::from_bytes(&[0u8; 176]).unwrap(),
+				FrameEncryptedMemo::from_bytes(&[0u8; 180]).unwrap(),
 			));
 			assert_eq!(tracked(asset_id), pool_physical());
 			assert_eq!(tracked(asset_id), 1000);
@@ -933,7 +933,7 @@ mod tests {
 				fee_note,
 				50u128,
 				asset_id,
-				crate::types::EncryptedMemo::from_bytes(&[0u8; 176]).unwrap(),
+				crate::types::EncryptedMemo::from_bytes(&[0u8; 180]).unwrap(),
 				vec![0x01u8; 128],
 				signals,
 				1,
