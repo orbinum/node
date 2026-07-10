@@ -16,12 +16,12 @@ use sp_runtime::traits::Dispatchable;
 ///
 /// Four functions are exposed, each identified by a 4-byte ABI selector:
 ///
-/// | Selector     | Solidity signature                                                                    |
-/// |-------------|---------------------------------------------------------------------------------------|
-/// | `0x9feb22ea` | `shield(uint32,bytes32,bytes)` — payable, amount = `msg.value`                       |
-/// | `0x8c0f5d24` | `privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)`           |
-/// | `0x47fc44a2` | `unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256)`                     |
-/// | `0x42e1e74c` | `claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes)` — signed (validators) |
+/// | Selector     | Solidity signature                                                                            |
+/// |-------------|-----------------------------------------------------------------------------------------------|
+/// | `0x9feb22ea` | `shield(uint32,bytes32,bytes)` — payable, amount = `msg.value`                               |
+/// | `0x66ed2cd4` | `privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)`            |
+/// | `0x4e505348` | `unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)`         |
+/// | `0x88d9deba` | `claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes,uint32)` — signed (validators)   |
 ///
 /// Selector computation: `bytes4(keccak256("functionName(argTypes)"))`.
 /// Verify with: `node -e "const {ethers}=require('ethers'); console.log(ethers.id('sig').slice(0,10))"`

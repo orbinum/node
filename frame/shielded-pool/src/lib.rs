@@ -599,8 +599,10 @@ pub mod pallet {
 			encrypted_memos: BoundedVec<FrameEncryptedMemo, ConstU32<2>>,
 			asset_id: u32,
 			fee: BalanceOf<T>,
-			// EVM address of the relay node that signed the tx (from precompile caller); None for direct Substrate.
 			relayer: Option<sp_core::H160>,
+			// Circuit version the spent notes were created under; the proof is
+			// verified against this version's VK (not merely the active one).
+			circuit_version: u32,
 		) -> DispatchResult {
 			ensure_none(origin)?;
 
@@ -614,6 +616,7 @@ pub mod pallet {
 				asset_id,
 				fee,
 				relayer,
+				circuit_version,
 			)
 		}
 
@@ -663,6 +666,9 @@ pub mod pallet {
 			change_encrypted_memo: FrameEncryptedMemo,
 			// EVM address of the relay node that signed the tx (from precompile caller); None for direct Substrate.
 			relayer: Option<sp_core::H160>,
+			// Circuit version the spent notes were created under; the proof is
+			// verified against this version's VK (not merely the active one).
+			circuit_version: u32,
 		) -> DispatchResult {
 			ensure_none(origin)?;
 
@@ -678,6 +684,7 @@ pub mod pallet {
 				change_commitment,
 				change_encrypted_memo,
 				relayer,
+				circuit_version,
 			)
 		}
 
@@ -795,6 +802,9 @@ pub mod pallet {
 			memo: FrameEncryptedMemo,
 			proof: BoundedVec<u8, ConstU32<512>>,
 			public_signals: BoundedVec<u8, ConstU32<128>>,
+			// Circuit version the spent notes were created under; the proof is
+			// verified against this version's VK (not merely the active one).
+			circuit_version: u32,
 		) -> DispatchResult {
 			let validator = ensure_signed(origin)?;
 			crate::operations::fees::FeeOperation::claim_shielded::<T>(
@@ -805,6 +815,7 @@ pub mod pallet {
 				memo,
 				proof.into_inner(),
 				public_signals.into_inner(),
+				circuit_version,
 			)
 		}
 	}
@@ -835,12 +846,14 @@ pub mod pallet {
 					nullifiers,
 					fee,
 					relayer,
+					circuit_version,
 					..
 				} => crate::validate_unsigned::validate_private_transfer::<T>(
 					merkle_root,
 					nullifiers,
 					fee,
 					relayer,
+					*circuit_version,
 				),
 
 				Call::unshield {
@@ -850,6 +863,7 @@ pub mod pallet {
 					amount,
 					fee,
 					relayer,
+					circuit_version,
 					..
 				} => crate::validate_unsigned::validate_unshield::<T>(
 					merkle_root,
@@ -858,6 +872,7 @@ pub mod pallet {
 					amount,
 					fee,
 					relayer,
+					*circuit_version,
 				),
 
 				_ => InvalidTransaction::Call.into(),

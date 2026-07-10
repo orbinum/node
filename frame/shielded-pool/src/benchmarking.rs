@@ -142,6 +142,7 @@ mod benchmarks {
 			asset_id,
 			fee,
 			Some(relayer),
+			1u32,
 		);
 	}
 
@@ -181,6 +182,7 @@ mod benchmarks {
 			Hash::default(),    // change_commitment: [0u8; 32] for total unshield
 			Default::default(), // change_encrypted_memo: empty for total unshield
 			Some(relayer),      // relayer resolves the fee recipient
+			1u32,               // circuit_version
 		);
 	}
 
@@ -247,6 +249,7 @@ mod benchmarks {
 			memo,
 			proof.try_into().expect("proof fits bound"),
 			public_signals.try_into().expect("signals fit bound"),
+			1u32,
 		);
 	}
 

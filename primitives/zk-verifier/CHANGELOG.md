@@ -4,6 +4,21 @@ All notable changes to this crate are documented here.
 
 ---
 
+## [1.3.0] - 2026-07-09
+
+### Fixed
+
+- **`TRANSFER_PUBLIC_INPUTS` corrected from 5 to 7.** The constant counted the
+  transfer circuit's declared public-signal names, but `nullifiers[2]` and
+  `commitments[2]` are arrays, so the true arity is 7 (`merkle_root` + 2
+  nullifiers + 2 commitments + `asset_id` + `fee`), matching every published
+  VK's `nPublic`. The value was dead until `expected_public_inputs` began
+  gating VK registration; the check then rejected every valid transfer VK.
+  Proof verification was unaffected — it reads arity from the deserialized VK,
+  never from this constant.
+
+---
+
 ## [1.2.0] - 2026-07-04
 
 ### Added

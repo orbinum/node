@@ -26,6 +26,7 @@ impl FeeOperation {
 	///
 	/// # public_signals layout (76 bytes)
 	/// `commitment[0..32] | value[32..40] | asset_id[40..44] | owner_hash[44..76]`
+	#[allow(clippy::too_many_arguments)]
 	pub fn claim_shielded<T: Config>(
 		validator: T::AccountId,
 		commitment: Commitment,
@@ -34,6 +35,7 @@ impl FeeOperation {
 		memo: EncryptedMemo,
 		proof: sp_std::vec::Vec<u8>,
 		public_signals: sp_std::vec::Vec<u8>,
+		circuit_version: u32,
 	) -> DispatchResult {
 		ensure!(
 			Assets::<T>::contains_key(asset_id),
@@ -53,9 +55,12 @@ impl FeeOperation {
 
 		#[cfg(not(feature = "skip-proof-verification"))]
 		{
-			let is_valid = T::ZkVerifier::verify_value_proof(&proof, &public_signals, None)?;
+			let is_valid =
+				T::ZkVerifier::verify_value_proof(&proof, &public_signals, Some(circuit_version))?;
 			ensure!(is_valid, Error::<T>::InvalidProof);
 		}
+		#[cfg(feature = "skip-proof-verification")]
+		let _ = circuit_version;
 
 		// signals[0..32]: commitment must match the extrinsic argument
 		ensure!(
@@ -160,6 +165,7 @@ mod tests {
 				make_memo(),
 				make_proof(),
 				make_signals(&commitment, amount, asset_id),
+				1,
 			));
 		});
 	}
@@ -177,6 +183,7 @@ mod tests {
 					make_memo(),
 					make_proof(),
 					make_signals(&commitment, 100u128, 99u32),
+					1,
 				),
 				crate::pallet::Error::<Test>::InvalidAssetId
 			);
@@ -201,6 +208,7 @@ mod tests {
 					make_memo(),
 					make_proof(),
 					make_signals(&commitment, amount, asset_id),
+					1,
 				),
 				crate::pallet::Error::<Test>::InsufficientPendingFees
 			);
@@ -226,6 +234,7 @@ mod tests {
 				make_memo(),
 				make_proof(),
 				make_signals(&commitment, amount, asset_id),
+				1,
 			));
 
 			assert!(CommitmentRepository::exists::<Test>(&commitment));
@@ -250,6 +259,7 @@ mod tests {
 				memo.clone(),
 				make_proof(),
 				make_signals(&commitment, amount, asset_id),
+				1,
 			));
 
 			let stored = CommitmentRepository::get_memo::<Test>(&commitment);
@@ -275,6 +285,7 @@ mod tests {
 				make_memo(),
 				make_proof(),
 				make_signals(&commitment, claim, asset_id),
+				1,
 			));
 
 			let remaining = mock_pending_fees_get(validator, asset_id);
@@ -299,6 +310,7 @@ mod tests {
 				make_memo(),
 				make_proof(),
 				make_signals(&commitment, amount, asset_id),
+				1,
 			));
 
 			let events = frame_system::Pallet::<Test>::events();
@@ -337,6 +349,7 @@ mod tests {
 					make_memo(),
 					make_proof(),
 					make_signals(&commitment, 1u128, asset_id),
+					1,
 				),
 				crate::pallet::Error::<Test>::InsufficientPendingFees
 			);
@@ -363,6 +376,7 @@ mod tests {
 					make_memo(),
 					make_proof(),
 					make_signals(&commitment, 0u128, asset_id),
+					1,
 				),
 				crate::pallet::Error::<Test>::InvalidAmount
 			);
@@ -407,6 +421,7 @@ mod tests {
 					make_memo(),
 					make_rejected_proof(), // Ok(false) from verifier
 					make_signals(&commitment, amount, asset_id),
+					1,
 				),
 				crate::pallet::Error::<Test>::InvalidProof
 			);
@@ -432,6 +447,7 @@ mod tests {
 				make_memo(),
 				make_rejected_proof(),
 				make_signals(&commitment, amount, asset_id),
+				1,
 			);
 
 			// Commitment must NOT be in the tree
@@ -459,6 +475,7 @@ mod tests {
 					make_memo(),
 					vec![], // empty proof
 					make_signals(&commitment, amount, asset_id),
+					1,
 				),
 				crate::pallet::Error::<Test>::InvalidProof
 			);
@@ -483,6 +500,7 @@ mod tests {
 					make_memo(),
 					vec![0x01u8; 64], // wrong length (not 128)
 					make_signals(&commitment, amount, asset_id),
+					1,
 				),
 				crate::pallet::Error::<Test>::InvalidProof
 			);
@@ -507,6 +525,7 @@ mod tests {
 					make_memo(),
 					make_proof(),
 					vec![0u8; 32], // wrong length (not 76)
+					1,
 				),
 				crate::pallet::Error::<Test>::InvalidPublicSignals
 			);
@@ -533,6 +552,7 @@ mod tests {
 					make_memo(),
 					make_proof(),
 					make_signals(&other_commitment, amount, asset_id),
+					1,
 				),
 				crate::pallet::Error::<Test>::InvalidPublicSignals
 			);
@@ -558,6 +578,7 @@ mod tests {
 					make_memo(),
 					make_proof(),
 					make_signals(&commitment, 999u128, asset_id),
+					1,
 				),
 				crate::pallet::Error::<Test>::InvalidPublicSignals
 			);
@@ -583,6 +604,7 @@ mod tests {
 					make_memo(),
 					make_proof(),
 					make_signals(&commitment, amount, 999u32),
+					1,
 				),
 				crate::pallet::Error::<Test>::InvalidPublicSignals
 			);
@@ -621,6 +643,7 @@ mod tests {
 				make_memo(),
 				make_proof(),
 				make_signals(&commitment, amount, asset_id),
+				1,
 			));
 
 			// The claim swaps a pending number for a note; both are backed by the

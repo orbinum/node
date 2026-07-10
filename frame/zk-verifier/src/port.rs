@@ -57,6 +57,9 @@ pub trait ZkVerifierPort {
 		call_hash_fe: &[u8; 32],
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError>;
+
+	/// Whether a verification key is registered for `(circuit_id, version)`.
+	fn is_supported_version(circuit_id: u32, version: u32) -> bool;
 }
 
 // ─── impl ─────────────────────────────────────────────────────────────────────
@@ -132,6 +135,12 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 		let raw = encoding::encode_private_link(commitment, call_hash_fe);
 		verifier::verify::<T>(CircuitId::PRIVATE_LINK, version, proof, raw).map(|(ok, _)| ok)
 	}
+
+	fn is_supported_version(circuit_id: u32, version: u32) -> bool {
+		let cid = CircuitId(circuit_id);
+		crate::pallet::VerificationKeys::<T>::contains_key(cid, version)
+			&& !crate::pallet::RetiredVersions::<T>::contains_key(cid, version)
+	}
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -142,7 +151,7 @@ mod tests {
 	use crate::{
 		Error,
 		mock::Test,
-		pallet::{ActiveCircuitVersion, VerificationKeys},
+		pallet::{ActiveCircuitVersion, RetiredVersions, VerificationKeys},
 		types::{ProofSystem, VerificationKeyInfo},
 	};
 	use frame_support::{BoundedVec, assert_err};
@@ -234,7 +243,7 @@ mod tests {
 	}
 
 	#[test]
-	fn transfer_missing_vk_returns_not_found() {
+	fn transfer_explicit_unsupported_version_rejected() {
 		new_test_ext().execute_with(|| {
 			assert_err!(
 				<Pallet<Test> as ZkVerifierPort>::verify_transfer_proof(
@@ -246,7 +255,7 @@ mod tests {
 					0,
 					Some(99),
 				),
-				Error::<Test>::VerificationKeyNotFound
+				Error::<Test>::UnsupportedCircuitVersion
 			);
 		});
 	}
@@ -399,7 +408,7 @@ mod tests {
 	}
 
 	#[test]
-	fn unshield_missing_vk_returns_not_found() {
+	fn unshield_explicit_unsupported_version_rejected() {
 		new_test_ext().execute_with(|| {
 			assert_err!(
 				<Pallet<Test> as ZkVerifierPort>::verify_unshield_proof(
@@ -413,7 +422,7 @@ mod tests {
 					&[0u8; 32],
 					Some(99),
 				),
-				Error::<Test>::VerificationKeyNotFound
+				Error::<Test>::UnsupportedCircuitVersion
 			);
 		});
 	}
@@ -519,7 +528,7 @@ mod tests {
 	}
 
 	#[test]
-	fn private_link_missing_vk_returns_not_found() {
+	fn private_link_explicit_unsupported_version_rejected() {
 		new_test_ext().execute_with(|| {
 			assert_err!(
 				<Pallet<Test> as ZkVerifierPort>::verify_private_link_proof(
@@ -528,7 +537,7 @@ mod tests {
 					&[0u8; 32],
 					Some(99),
 				),
-				Error::<Test>::VerificationKeyNotFound
+				Error::<Test>::UnsupportedCircuitVersion
 			);
 		});
 	}
@@ -563,6 +572,69 @@ mod tests {
 			)
 			.unwrap();
 			assert!(ok);
+		});
+	}
+
+	// ── is_supported_version ───────────────────────────────────────────────────
+
+	#[test]
+	fn is_supported_version_reflects_registered_vks() {
+		new_test_ext().execute_with(|| {
+			// No VK yet → unsupported.
+			assert!(!<Pallet<Test> as ZkVerifierPort>::is_supported_version(
+				CircuitId::TRANSFER.0,
+				1
+			));
+			insert_vk(CircuitId::TRANSFER, 1);
+			// Registered → supported; other versions/circuits stay unsupported.
+			assert!(<Pallet<Test> as ZkVerifierPort>::is_supported_version(
+				CircuitId::TRANSFER.0,
+				1
+			));
+			assert!(!<Pallet<Test> as ZkVerifierPort>::is_supported_version(
+				CircuitId::TRANSFER.0,
+				2
+			));
+			assert!(!<Pallet<Test> as ZkVerifierPort>::is_supported_version(
+				CircuitId::UNSHIELD.0,
+				1
+			));
+		});
+	}
+
+	#[test]
+	fn retired_version_is_not_supported_and_verify_rejects_it() {
+		new_test_ext().execute_with(|| {
+			// v1 active, v2 registered and retired.
+			insert_vk(CircuitId::TRANSFER, 1);
+			insert_vk(CircuitId::TRANSFER, 2);
+			activate(CircuitId::TRANSFER, 1);
+			RetiredVersions::<Test>::insert(CircuitId::TRANSFER, 2, ());
+
+			// A retired version drops out of is_supported_version even though its VK exists.
+			assert!(VerificationKeys::<Test>::contains_key(
+				CircuitId::TRANSFER,
+				2
+			));
+			assert!(!<Pallet<Test> as ZkVerifierPort>::is_supported_version(
+				CircuitId::TRANSFER.0,
+				2
+			));
+
+			// verify against the retired version fails closed (UnsupportedCircuitVersion),
+			// not by falling through to the active version.
+			assert_err!(
+				<Pallet<Test> as ZkVerifierPort>::verify_transfer_proof(
+					&proof(),
+					&merkle_root(),
+					&[[0u8; 32]],
+					&[[0u8; 32]],
+					0,
+					0,
+					Some(2),
+				),
+				Error::<Test>::UnsupportedCircuitVersion
+			);
 		});
 	}
 }

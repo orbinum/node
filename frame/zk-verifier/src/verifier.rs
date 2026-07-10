@@ -6,7 +6,7 @@
 
 use crate::{
 	Error,
-	pallet::{ActiveCircuitVersion, Config, VerificationKeys, VerificationStats},
+	pallet::{ActiveCircuitVersion, Config, RetiredVersions, VerificationKeys, VerificationStats},
 	types::CircuitId,
 };
 use alloc::vec::Vec;
@@ -29,12 +29,21 @@ pub fn verify<T: Config>(
 	frame_support::ensure!(!proof_bytes.is_empty(), Error::<T>::EmptyProof);
 	frame_support::ensure!(!raw_inputs.is_empty(), Error::<T>::EmptyPublicInputs);
 
+	let explicit = version.is_some();
 	let resolved = version
 		.or_else(|| ActiveCircuitVersion::<T>::get(circuit_id))
 		.ok_or(Error::<T>::CircuitNotFound)?;
 
-	let vk_info = VerificationKeys::<T>::get(circuit_id, resolved)
-		.ok_or(Error::<T>::VerificationKeyNotFound)?;
+	frame_support::ensure!(
+		!RetiredVersions::<T>::contains_key(circuit_id, resolved),
+		Error::<T>::UnsupportedCircuitVersion
+	);
+
+	let vk_info = VerificationKeys::<T>::get(circuit_id, resolved).ok_or(if explicit {
+		Error::<T>::UnsupportedCircuitVersion
+	} else {
+		Error::<T>::VerificationKeyNotFound
+	})?;
 
 	let result = do_verify(vk_info.key_data.as_slice(), proof_bytes, raw_inputs);
 	record_stats::<T>(circuit_id, resolved, result);
@@ -164,11 +173,11 @@ mod tests {
 	}
 
 	#[test]
-	fn explicit_version_without_vk_returns_not_found() {
+	fn explicit_version_without_vk_is_unsupported() {
 		new_test_ext().execute_with(|| {
 			assert_err!(
 				verify::<Test>(CircuitId::TRANSFER, Some(99), &proof_bytes(), inputs()),
-				crate::Error::<Test>::VerificationKeyNotFound
+				crate::Error::<Test>::UnsupportedCircuitVersion
 			);
 		});
 	}

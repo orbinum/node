@@ -13,11 +13,17 @@ use crate::{
 };
 use frame_support::pallet_prelude::*;
 use pallet_relayer::RelayerInterface as _;
+use pallet_zk_verifier::ZkVerifierPort as _;
 use parity_scale_codec::Encode;
 use sp_runtime::{
 	SaturatedConversion,
 	transaction_validity::{InvalidTransaction, TransactionValidity, ValidTransaction},
 };
+
+/// On-chain circuit ids used for the version guard (mirror the zk-verifier's
+/// `CircuitId` constants: TRANSFER = 1, UNSHIELD = 2).
+const CIRCUIT_TRANSFER: u32 = 1;
+const CIRCUIT_UNSHIELD: u32 = 2;
 
 /// How long an unsigned transaction stays valid in the pool, in blocks. Bounded
 /// so a transaction that never gets included does not linger indefinitely.
@@ -29,7 +35,13 @@ pub fn validate_private_transfer<T: Config>(
 	nullifiers: &BoundedVec<Nullifier, ConstU32<2>>,
 	fee: &BalanceOf<T>,
 	relayer: &Option<sp_core::H160>,
+	circuit_version: u32,
 ) -> TransactionValidity {
+	// Anti-spam: reject an unsupported circuit version before pool admission.
+	if !T::ZkVerifier::is_supported_version(CIRCUIT_TRANSFER, circuit_version) {
+		return InvalidTransaction::Custom(10).into();
+	}
+
 	// Anti-spam: fee must meet minimum relay fee
 	let min_fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
 	if *fee < min_fee {
@@ -85,7 +97,13 @@ pub fn validate_unshield<T: Config>(
 	amount: &BalanceOf<T>,
 	fee: &BalanceOf<T>,
 	relayer: &Option<sp_core::H160>,
+	circuit_version: u32,
 ) -> TransactionValidity {
+	// Anti-spam: reject an unsupported circuit version before pool admission.
+	if !T::ZkVerifier::is_supported_version(CIRCUIT_UNSHIELD, circuit_version) {
+		return InvalidTransaction::Custom(10).into();
+	}
+
 	// Anti-spam: fee must meet minimum relay fee
 	let min_fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
 	if *fee < min_fee {
@@ -156,6 +174,7 @@ mod tests {
 				&nullifiers_of(&[0x01]),
 				&0u128,
 				&None,
+				1,
 			);
 			assert!(result.is_ok());
 		});
@@ -169,6 +188,7 @@ mod tests {
 				&nullifiers_of(&[0x01]),
 				&0u128,
 				&None,
+				1,
 			);
 			assert!(result.is_err());
 		});
@@ -185,6 +205,7 @@ mod tests {
 				&nullifiers_of(&[0x05]),
 				&0u128,
 				&None,
+				1,
 			);
 			assert!(result.is_err());
 		});
@@ -202,6 +223,7 @@ mod tests {
 				&nullifiers_of(&[0x10, 0x11]),
 				&0u128,
 				&None,
+				1,
 			);
 			assert!(result.is_err());
 		});
@@ -216,6 +238,7 @@ mod tests {
 				&nullifiers_of(&[0xA1, 0xA2]),
 				&100u128, // non-zero fee,
 				&None,
+				1,
 			);
 			assert!(result.is_ok());
 		});
@@ -233,7 +256,8 @@ mod tests {
 			let mut nullifiers: BoundedVec<Nullifier, ConstU32<2>> = BoundedVec::new();
 			nullifiers.try_push(make_nullifier(0x01)).ok();
 			nullifiers.try_push(Nullifier::new([0u8; 32])).ok(); // dummy
-			let result = validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128, &None);
+			let result =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128, &None, 1);
 			assert!(
 				result.is_ok(),
 				"dummy nullifier should not cause Stale rejection"
@@ -252,7 +276,8 @@ mod tests {
 			let mut nullifiers: BoundedVec<Nullifier, ConstU32<2>> = BoundedVec::new();
 			nullifiers.try_push(real).ok();
 			nullifiers.try_push(Nullifier::new([0u8; 32])).ok(); // dummy
-			let result = validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128, &None);
+			let result =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128, &None, 1);
 			assert!(
 				result.is_err(),
 				"used real nullifier must still be rejected"
@@ -269,7 +294,8 @@ mod tests {
 			let mut nullifiers: BoundedVec<Nullifier, ConstU32<2>> = BoundedVec::new();
 			nullifiers.try_push(Nullifier::new([0u8; 32])).ok();
 			nullifiers.try_push(Nullifier::new([0u8; 32])).ok();
-			let result = validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128, &None);
+			let result =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128, &None, 1);
 			assert!(result.is_err(), "all-dummy-nullifier tx must be rejected");
 		});
 	}
@@ -288,6 +314,7 @@ mod tests {
 				&500u128,
 				&0u128,
 				&None,
+				1,
 			);
 			assert!(result.is_ok());
 		});
@@ -304,6 +331,7 @@ mod tests {
 				&500u128,
 				&0u128,
 				&None,
+				1,
 			);
 			assert!(result.is_err());
 		});
@@ -316,7 +344,8 @@ mod tests {
 			PoolBalanceRepository::set_asset_balance::<Test>(0, 1_000u128);
 			let n = make_nullifier(0x20);
 			NullifierRepository::mark_as_used::<Test>(n, 1u64);
-			let result = validate_unshield::<Test>(&KNOWN_ROOT, &n, &0u32, &500u128, &0u128, &None);
+			let result =
+				validate_unshield::<Test>(&KNOWN_ROOT, &n, &0u32, &500u128, &0u128, &None, 1);
 			assert!(result.is_err());
 		});
 	}
@@ -333,6 +362,7 @@ mod tests {
 				&100u128, // 100 > 50
 				&0u128,
 				&None,
+				1,
 			);
 			assert!(result.is_err());
 		});
@@ -351,6 +381,7 @@ mod tests {
 				&100u128,
 				&60u128,
 				&None,
+				1,
 			);
 			assert!(result.is_err());
 		});
@@ -369,6 +400,7 @@ mod tests {
 				&100u128,
 				&50u128,
 				&None,
+				1,
 			);
 			assert!(result.is_ok());
 		});
@@ -392,6 +424,7 @@ mod tests {
 				&nullifiers_of(&[0x01]),
 				&50u128,
 				&None,
+				1,
 			);
 			assert!(result.is_err(), "fee below minimum must be rejected");
 			assert_eq!(
@@ -414,6 +447,7 @@ mod tests {
 				&nullifiers_of(&[0x01]),
 				&100u128,
 				&None,
+				1,
 			);
 			assert!(result.is_ok(), "fee equal to minimum must be accepted");
 		});
@@ -433,6 +467,7 @@ mod tests {
 				&100u128,
 				&50u128,
 				&None,
+				1,
 			);
 			assert!(result.is_err(), "fee below minimum must be rejected");
 			assert_eq!(
@@ -458,6 +493,7 @@ mod tests {
 				&100u128,
 				&200u128,
 				&None,
+				1,
 			);
 			assert!(result.is_ok(), "fee equal to minimum must be accepted");
 		});
@@ -486,6 +522,7 @@ mod tests {
 				&100u128,
 				&10u128,
 				&Some(evm(0xAA)),
+				1,
 			)
 			.unwrap();
 			let b = validate_unshield::<Test>(
@@ -495,10 +532,12 @@ mod tests {
 				&100u128,
 				&10u128,
 				&Some(evm(0xBB)),
+				1,
 			)
 			.unwrap();
-			let none = validate_unshield::<Test>(&KNOWN_ROOT, &n, &0u32, &100u128, &10u128, &None)
-				.unwrap();
+			let none =
+				validate_unshield::<Test>(&KNOWN_ROOT, &n, &0u32, &100u128, &10u128, &None, 1)
+					.unwrap();
 
 			assert_ne!(a.provides, b.provides, "different relayer → different tags");
 			assert_ne!(a.provides, none.provides, "Some vs None → different tags");
@@ -523,6 +562,7 @@ mod tests {
 				&100u128,
 				&10u128,
 				&Some(evm(0xAA)),
+				1,
 			)
 			.unwrap();
 			let b = validate_unshield::<Test>(
@@ -532,6 +572,7 @@ mod tests {
 				&100u128,
 				&10u128,
 				&Some(evm(0xAA)),
+				1,
 			)
 			.unwrap();
 			assert_eq!(a.provides, b.provides);
@@ -545,10 +586,12 @@ mod tests {
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 			let ns = nullifiers_of(&[0x63]);
 
-			let a = validate_private_transfer::<Test>(&KNOWN_ROOT, &ns, &10u128, &Some(evm(0xAA)))
-				.unwrap();
-			let b = validate_private_transfer::<Test>(&KNOWN_ROOT, &ns, &10u128, &Some(evm(0xBB)))
-				.unwrap();
+			let a =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &ns, &10u128, &Some(evm(0xAA)), 1)
+					.unwrap();
+			let b =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &ns, &10u128, &Some(evm(0xBB)), 1)
+					.unwrap();
 			assert_ne!(a.provides, b.provides);
 		});
 	}
@@ -566,6 +609,7 @@ mod tests {
 				&nullifiers_of(&[0x90]),
 				&10u128,
 				&None,
+				1,
 			)
 			.unwrap();
 			assert_eq!(t.longevity, TX_LONGEVITY);
@@ -578,9 +622,59 @@ mod tests {
 				&100u128,
 				&10u128,
 				&None,
+				1,
 			)
 			.unwrap();
 			assert_eq!(u.longevity, TX_LONGEVITY);
+		});
+	}
+
+	// ── circuit-version guard (anti-spam) ─────────────────────────────────────
+	//
+	// The mock's `is_supported_version` treats version 0 as unsupported; a
+	// supported version passes the guard, an unsupported one is rejected before
+	// any other check.
+
+	#[test]
+	fn private_transfer_unsupported_version_rejected() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			let result = validate_private_transfer::<Test>(
+				&KNOWN_ROOT,
+				&nullifiers_of(&[0x01]),
+				&0u128,
+				&None,
+				0,
+			);
+			assert_eq!(
+				result.unwrap_err(),
+				sp_runtime::transaction_validity::TransactionValidityError::Invalid(
+					sp_runtime::transaction_validity::InvalidTransaction::Custom(10)
+				),
+			);
+		});
+	}
+
+	#[test]
+	fn unshield_unsupported_version_rejected() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			PoolBalanceRepository::set_asset_balance::<Test>(0, 1_000u128);
+			let result = validate_unshield::<Test>(
+				&KNOWN_ROOT,
+				&make_nullifier(0x10),
+				&0u32,
+				&500u128,
+				&0u128,
+				&None,
+				0,
+			);
+			assert_eq!(
+				result.unwrap_err(),
+				sp_runtime::transaction_validity::TransactionValidityError::Invalid(
+					sp_runtime::transaction_validity::InvalidTransaction::Custom(10)
+				),
+			);
 		});
 	}
 }

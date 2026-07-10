@@ -24,8 +24,8 @@ pub const CIRCUIT_ID_VALUE_PROOF: u8 = 6;
 pub const CIRCUIT_ID_PRIVATE_LINK: u8 = 5;
 
 /// Number of public inputs for the transfer circuit.
-/// Public inputs: [merkle_root, nullifier1, nullifier2, commitment1, commitment2]
-pub const TRANSFER_PUBLIC_INPUTS: usize = 5;
+/// Public inputs: [merkle_root, nullifier1, nullifier2, commitment1, commitment2, asset_id, fee]
+pub const TRANSFER_PUBLIC_INPUTS: usize = 7;
 /// Number of public inputs for the unshield circuit.
 /// Public inputs: [merkle_root, nullifier, amount, recipient, asset_id, fee, change_commitment]
 pub const UNSHIELD_PUBLIC_INPUTS: usize = 7;
@@ -310,7 +310,7 @@ mod tests {
 
 	#[test]
 	fn test_public_input_counts_are_expected() {
-		assert_eq!(TRANSFER_PUBLIC_INPUTS, 5);
+		assert_eq!(TRANSFER_PUBLIC_INPUTS, 7);
 		assert_eq!(UNSHIELD_PUBLIC_INPUTS, 7);
 		assert_eq!(VALUE_PROOF_PUBLIC_INPUTS, 4);
 		assert_eq!(PRIVATE_LINK_PUBLIC_INPUTS, 2);
@@ -318,7 +318,7 @@ mod tests {
 
 	#[test]
 	fn expected_public_inputs_maps_known_circuits() {
-		assert_eq!(expected_public_inputs(CIRCUIT_ID_TRANSFER), Some(5));
+		assert_eq!(expected_public_inputs(CIRCUIT_ID_TRANSFER), Some(7));
 		assert_eq!(expected_public_inputs(CIRCUIT_ID_UNSHIELD), Some(7));
 		assert_eq!(expected_public_inputs(CIRCUIT_ID_PRIVATE_LINK), Some(2));
 		assert_eq!(expected_public_inputs(CIRCUIT_ID_VALUE_PROOF), Some(4));

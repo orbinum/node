@@ -6,10 +6,10 @@ set -euo pipefail
 # DEV on-chain VK rotation for the 4 supported circuits.
 #
 # Flow:
-#   1) register NEW_VERSION on 1,2,4,5
-#   2) set-active NEW_VERSION on 1,2,4,5
+#   1) register NEW_VERSION on 1,2,6,5
+#   2) set-active NEW_VERSION on 1,2,6,5
 #   3) RPC validation per circuit
-#   4) optional: remove OLD_VERSION on 1,2,4,5 (if --remove-old)
+#   4) optional: remove OLD_VERSION on 1,2,6,5 (if --remove-old)
 #
 # USAGE:
 #   bash scripts/vk/workflows/rotate-dev.sh <new_version> [rpc_ws] [sudo_seed] [old_version]

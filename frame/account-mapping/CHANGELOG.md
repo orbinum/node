@@ -2,6 +2,13 @@
 
 All notable changes to `pallet-account-mapping` will be documented in this file.
 
+## [0.3.2] - 2026-07-09
+
+### Changed
+
+- Weights regenerated on the benchmark host (AMD EPYC-Genoa, 32 GB). No logic
+  change — refreshed alongside the per-note circuit-version release.
+
 ## [0.3.1] - 2026-06-01
 
 ### Changed

@@ -4,6 +4,57 @@ All notable changes to this pallet are documented here.
 
 ---
 
+## [0.9.0] - 2026-07-09
+
+### Added
+
+- **`Error::UnsupportedCircuitVersion`** — `verifier::verify` now distinguishes an
+  explicit version request with no registered VK (→ `UnsupportedCircuitVersion`)
+  from a `None`/active-unset resolution (→ `CircuitNotFound` /
+  `VerificationKeyNotFound`), giving callers a clear "that version is not
+  supported" signal instead of a generic key-not-found.
+- **`ZkVerifierPort::is_supported_version(circuit_id, version) -> bool`** — returns
+  whether a VK is registered for `(circuit, version)` AND not retired, so callers
+  (e.g. the shielded-pool `validate_unsigned`) can reject an unsupported version early.
+- **Dedicated benchmarks + `WeightInfo` for `retire_version` / `unretire_version`**
+  so both weigh their own storage cost instead of borrowing
+  `remove_verification_key`'s.
+
+### Security
+
+- **Version retirement (`retire_version` / `unretire_version`, Root only)** — a
+  `RetiredVersions` set lets governance refuse proofs for a `(circuit, version)`
+  whose VK is compromised/weak, WITHOUT deleting the VK (audit + stats preserved).
+  `verify` and `is_supported_version` reject a retired version fail-closed. This
+  closes the downgrade-to-weak-key path: superseding an active version with
+  `set_active_version` does not disable the old VK, so a caller could still request
+  the old version explicitly; retiring it makes notes minted under it unspendable
+  (the nuclear option for a bad VK). The active version cannot be retired.
+- **`MAX_VERSIONS_PER_CIRCUIT = 64` cap** on registered versions per circuit
+  (`store_vk`), bounding the versions DoubleMap and the runtime-API iteration.
+  Registration is Root-only, so this is operator-discipline, not an attacker limit.
+- **Stored VK hash (`VkHashes`)** — `blake2_256(key_data)` is computed once at
+  registration and read by the runtime API, instead of re-hashing every VK (up to
+  8 KB) on each RPC call. Falls back to recompute for keys registered earlier.
+- **Documented the circuit-version security invariant** on `register_verification_key`:
+  a new version of an existing circuit id must be a key rotation of a semantically
+  identical circuit; a semantic change must use a NEW circuit id. The note commitment
+  does not bind the version (shielded-pool Limitation 1), so this is a governance-
+  enforced rule that `ensure_vk_arity` (arity only) cannot check.
+
+### Changed
+
+- **Weights regenerated** on the benchmark host, including real measured weights
+  for `retire_version` (~20.96ms) and `unretire_version` (~15.41ms).
+
+### Fixed
+
+- **VK registration no longer rejects valid transfer keys.** `ensure_vk_arity`
+  compares a key's arity against `expected_public_inputs`, which returned 5 for
+  transfer while the circuit (and every published VK) has arity 7. Registering a
+  transfer VK failed with `InvalidVerificationKey`. Fixed upstream in
+  `orbinum-zk-verifier` (`TRANSFER_PUBLIC_INPUTS` 5 → 7).
+
 ## [0.8.0] - 2026-07-04
 
 ### Security
