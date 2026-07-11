@@ -289,8 +289,8 @@ pub type DefaultMerklePath = MerklePath<DEFAULT_TREE_DEPTH>;
 // EncryptedMemo (concrete, FRAME-compatible — used in storage & extrinsics)
 // ════════════════════════════════════════════════════════════════════════════
 
-/// Max encrypted memo size: `nonce(12) + ciphertext(116) + MAC(16) + ephPk(32) = 176`.
-pub const MAX_ENCRYPTED_MEMO_SIZE: u32 = 176;
+/// Max encrypted memo size: `nonce(12) + ciphertext(120) + MAC(16) + ephPk(32) = 180`.
+pub const MAX_ENCRYPTED_MEMO_SIZE: u32 = 180;
 
 /// Encrypted memo attached to a commitment (ChaCha20-Poly1305).
 #[derive(
@@ -348,7 +348,7 @@ impl EncryptedMemo {
 		}
 	}
 	pub fn ciphertext(&self) -> &[u8] {
-		// Invariant: see nonce(). ciphertext occupies bytes 12..128.
+		// Invariant: see nonce(). ciphertext occupies bytes 12..132.
 		debug_assert_eq!(
 			self.0.len(),
 			MAX_ENCRYPTED_MEMO_SIZE as usize,
@@ -356,14 +356,14 @@ impl EncryptedMemo {
 			MAX_ENCRYPTED_MEMO_SIZE,
 			self.0.len()
 		);
-		if self.0.len() >= 128 {
-			&self.0[12..128]
+		if self.0.len() >= 132 {
+			&self.0[12..132]
 		} else {
 			&[]
 		}
 	}
 	pub fn tag(&self) -> &[u8] {
-		// Layout: nonce(0..12) | ciphertext(12..128) | tag/MAC(128..144) | ephPk(144..176)
+		// Layout: nonce(0..12) | ciphertext(12..132) | tag/MAC(132..148) | ephPk(148..180)
 		debug_assert_eq!(
 			self.0.len(),
 			MAX_ENCRYPTED_MEMO_SIZE as usize,
@@ -371,14 +371,14 @@ impl EncryptedMemo {
 			MAX_ENCRYPTED_MEMO_SIZE,
 			self.0.len()
 		);
-		if self.0.len() >= 144 {
-			&self.0[128..144]
+		if self.0.len() >= 148 {
+			&self.0[132..148]
 		} else {
 			&[]
 		}
 	}
 	pub fn eph_pk(&self) -> &[u8] {
-		// Ephemeral BabyJubJub public key (packed, LE) occupies bytes 144..176.
+		// Ephemeral BabyJubJub public key (packed, LE) occupies bytes 148..180.
 		debug_assert_eq!(
 			self.0.len(),
 			MAX_ENCRYPTED_MEMO_SIZE as usize,
@@ -386,8 +386,8 @@ impl EncryptedMemo {
 			MAX_ENCRYPTED_MEMO_SIZE,
 			self.0.len()
 		);
-		if self.0.len() >= 176 {
-			&self.0[144..176]
+		if self.0.len() >= 180 {
+			&self.0[148..180]
 		} else {
 			&[]
 		}
@@ -663,7 +663,7 @@ mod tests {
 		let bytes = [0x01u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
 		let memo = EncryptedMemo::from_bytes(&bytes).unwrap();
 		assert_eq!(memo.nonce().len(), 12);
-		assert_eq!(memo.ciphertext().len(), 116);
+		assert_eq!(memo.ciphertext().len(), 120);
 		assert_eq!(memo.tag().len(), 16);
 		assert_eq!(memo.eph_pk().len(), 32);
 	}

@@ -187,7 +187,7 @@ fn encode_unshield(
 // ─── Convenience: shield then return the current Merkle root ─────────────────
 
 fn do_shield(commitment: [u8; 32], value: u128) {
-	let input = encode_shield(0, commitment, &[0xAB; 176]);
+	let input = encode_shield(0, commitment, &[0xAB; 180]);
 	let mut h = MockHandle::with_value(input, value);
 	assert_success(ShieldedPoolPrecompile::<Test>::execute(&mut h));
 }
@@ -379,7 +379,7 @@ fn shield_rejects_truncated_input() {
 fn shield_rejects_below_min_amount() {
 	// MinShieldAmount = 100; sending value = 1 should be rejected by the pallet.
 	new_test_ext().execute_with(|| {
-		let input = encode_shield(0, [0x11; 32], &[0xAB; 168]);
+		let input = encode_shield(0, [0x11; 32], &[0xAB; 180]);
 		let mut h = MockHandle::with_value(input, 1);
 		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
 	});
@@ -389,7 +389,7 @@ fn shield_rejects_below_min_amount() {
 fn shield_stores_commitment_and_updates_balance() {
 	new_test_ext().execute_with(|| {
 		let commitment = [0x11; 32];
-		let input = encode_shield(0, commitment, &[0xAB; 176]);
+		let input = encode_shield(0, commitment, &[0xAB; 180]);
 		let mut h = MockHandle::with_value(input, 1_000);
 		assert_success(ShieldedPoolPrecompile::<Test>::execute(&mut h));
 
@@ -433,7 +433,7 @@ fn shield_updates_merkle_root_after_each_insertion() {
 #[test]
 fn shield_with_zero_value_rejected() {
 	new_test_ext().execute_with(|| {
-		let input = encode_shield(0, [0xAA; 32], &[0x00; 168]);
+		let input = encode_shield(0, [0xAA; 32], &[0x00; 180]);
 		let mut h = MockHandle::with_value(input, 0);
 		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
 	});
@@ -462,7 +462,7 @@ fn private_transfer_rejects_empty_proof() {
 			root,
 			&[[0x11; 32], [0x22; 32]],
 			&[[0x33; 32], [0x44; 32]],
-			&[vec![0xAA; 176], vec![0xBB; 176]],
+			&[vec![0xAA; 180], vec![0xBB; 180]],
 			0,
 			0,
 			1,
@@ -505,7 +505,7 @@ fn private_transfer_rejects_mismatched_nullifier_commitment_count() {
 			root,
 			&[[0x11; 32], [0x22; 32]], // 2 nullifiers
 			&[[0x33; 32]],             // 1 commitment
-			&[vec![0xAA; 176]],        // 1 memo
+			&[vec![0xAA; 180]],        // 1 memo
 			0,
 			0,
 			1,
@@ -526,7 +526,7 @@ fn private_transfer_rejects_mismatched_commitment_memo_count() {
 			root,
 			&[[0x11; 32], [0x22; 32]], // 2 nullifiers
 			&[[0x33; 32], [0x44; 32]], // 2 commitments
-			&[vec![0xAA; 176]],        // 1 memo — mismatch
+			&[vec![0xAA; 180]],        // 1 memo — mismatch
 			0,
 			0,
 			1,
@@ -551,7 +551,7 @@ fn private_transfer_happy_path() {
 			root,
 			&[nullifier_1, nullifier_2],
 			&[commitment_1, commitment_2],
-			&[vec![0xAA; 176], vec![0xBB; 176]],
+			&[vec![0xAA; 180], vec![0xBB; 180]],
 			0,
 			0,
 			1,
@@ -594,7 +594,7 @@ fn private_transfer_rejects_double_spend() {
 			root,
 			&[nullifier, [0x02; 32]],
 			&[[0x03; 32], [0x04; 32]],
-			&[vec![0xAA; 176], vec![0xBB; 176]],
+			&[vec![0xAA; 180], vec![0xBB; 180]],
 			0,
 			0,
 			1,
@@ -619,7 +619,7 @@ fn private_transfer_root_updates_after_outputs() {
 			root_before,
 			&[[0x11; 32], [0x22; 32]],
 			&[[0x33; 32], [0x44; 32]],
-			&[vec![0xAA; 176], vec![0xBB; 176]],
+			&[vec![0xAA; 180], vec![0xBB; 180]],
 			0,
 			0,
 			1,
@@ -825,7 +825,7 @@ fn full_lifecycle_shield_transfer_unshield() {
 			root_1,
 			&[nullifier_in, [0x00; 32]],
 			&[commitment_out_1, commitment_out_2],
-			&[vec![0xAA; 176], vec![0xBB; 176]],
+			&[vec![0xAA; 180], vec![0xBB; 180]],
 			0,
 			0,
 			1,

@@ -2,6 +2,15 @@
 
 All notable changes to `orbinum-encrypted-memo` will be documented in this file.
 
+## [0.7.0] - 2026-07-10
+
+### Changed
+- **`MemoData` now carries `circuit_version: u32`** as the last plaintext field, so a note's ZK circuit version travels inside the note itself (recovered on scan without an external lookup). Plaintext grows 116 → 120 bytes; encrypted wire format 176 → 180 bytes: `nonce(12) | ciphertext(120) | MAC(16) | ephPk(32)`. Layout: `circuit_version` at plaintext bytes `[116..120]` (u32 LE).
+- `MemoData::new` / `new_without_counterparty` gain a trailing `circuit_version` argument. `MEMO_DATA_SIZE` 116 → 120; `MAX_ENCRYPTED_MEMO_SIZE` recomputes to 180.
+
+### Breaking
+- Wire format changed: memos written by ≤ 0.6.0 (176 bytes) cannot be decoded by 0.7.0, and vice-versa.
+
 ## [0.6.0] - 2026-05-14
 
 ### Added

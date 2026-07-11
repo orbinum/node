@@ -3,11 +3,13 @@
 //! # Size layout
 //!
 //! ```text
-//! Plaintext  (MemoData):  value_lo(8) | value_hi(8) | owner_pk(32) | blinding(32) | asset_id(4) | counterparty_pk(32) = 116 bytes
-//! Encrypted wire format:  nonce(12) | ciphertext(116) | MAC(16) | ephPk(32)                                           = 176 bytes
+//! Plaintext  (MemoData):  value_lo(8) | value_hi(8) | owner_pk(32) | blinding(32) | asset_id(4) | counterparty_pk(32) | circuit_version(4) = 120 bytes
+//! Encrypted wire format:  nonce(12) | ciphertext(120) | MAC(16) | ephPk(32)                                                                = 180 bytes
 //! ```
 //!
 //! `value` is stored as a 128-bit LE unsigned integer (two u64 words: lo at [0..8), hi at [8..16)).
+//! `circuit_version` is the ZK circuit version the note is spent under, carried inside the note
+//! itself so a scan-recovered note stays spendable across a VK rotation without an external lookup.
 
 use alloc::vec::Vec;
 use chacha20poly1305::{
@@ -19,8 +21,8 @@ use crate::keys::derive_encryption_key;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-/// Plaintext memo size: `value_lo(8) + value_hi(8) + owner_pk(32) + blinding(32) + asset_id(4) + counterparty_pk(32)`
-pub const MEMO_DATA_SIZE: usize = 116;
+/// Plaintext memo size: `value_lo(8) + value_hi(8) + owner_pk(32) + blinding(32) + asset_id(4) + counterparty_pk(32) + circuit_version(4)`
+pub const MEMO_DATA_SIZE: usize = 120;
 
 /// ChaCha20-Poly1305 nonce size.
 pub const NONCE_SIZE: usize = 12;
@@ -31,7 +33,7 @@ pub const MAC_SIZE: usize = 16;
 /// Ephemeral BabyJubJub public key (packed LE) appended to the memo for ECDH recipient decryption.
 pub const EPH_PK_SIZE: usize = 32;
 
-/// Maximum encrypted memo size: `nonce(12) + ciphertext(108) + MAC(16) + ephPk(32)`
+/// Maximum encrypted memo size: `nonce(12) + ciphertext(120) + MAC(16) + ephPk(32)` = 180
 pub const MAX_ENCRYPTED_MEMO_SIZE: usize = NONCE_SIZE + MEMO_DATA_SIZE + MAC_SIZE + EPH_PK_SIZE;
 
 /// Minimum encrypted memo size: `nonce(12) + MAC(16)` (zero-length plaintext)
@@ -79,11 +81,12 @@ impl std::error::Error for MemoError {}
 
 /// Plaintext content of an encrypted note memo.
 ///
-/// Serialized layout (116 bytes): `value_lo(8) | value_hi(8) | owner_pk(32) | blinding(32) | asset_id(4) | counterparty_pk(32)`
+/// Serialized layout (120 bytes): `value_lo(8) | value_hi(8) | owner_pk(32) | blinding(32) | asset_id(4) | counterparty_pk(32) | circuit_version(4)`
 ///
 /// `value` is stored as a 128-bit LE integer (two u64 words: lo at [0..8), hi at [8..16)).
 /// `counterparty_pk` is the BabyJubJub Ax coordinate of the other party in the transaction
 /// (recipient's key in the change note; sender's key in the output note). Zero for shield/unshield.
+/// `circuit_version` (u32 LE) is the ZK circuit version the note is spent under.
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(
 	all(feature = "parity-scale-codec", feature = "scale-info"),
@@ -104,6 +107,8 @@ pub struct MemoData {
 	pub asset_id: u32,
 	/// Counterparty's public key (32 bytes). Zero for shield/unshield notes.
 	pub counterparty_pk: [u8; 32],
+	/// ZK circuit version the note is spent under (u32). Carried in the note itself.
+	pub circuit_version: u32,
 }
 
 impl MemoData {
@@ -114,6 +119,7 @@ impl MemoData {
 		blinding: [u8; 32],
 		asset_id: u32,
 		counterparty_pk: [u8; 32],
+		circuit_version: u32,
 	) -> Self {
 		Self {
 			value,
@@ -121,6 +127,7 @@ impl MemoData {
 			blinding,
 			asset_id,
 			counterparty_pk,
+			circuit_version,
 		}
 	}
 
@@ -130,6 +137,7 @@ impl MemoData {
 		owner_pk: [u8; 32],
 		blinding: [u8; 32],
 		asset_id: u32,
+		circuit_version: u32,
 	) -> Self {
 		Self {
 			value,
@@ -137,10 +145,11 @@ impl MemoData {
 			blinding,
 			asset_id,
 			counterparty_pk: [0u8; 32],
+			circuit_version,
 		}
 	}
 
-	/// Serializes to 116 bytes: value_lo(8) | value_hi(8) | owner_pk(32) | blinding(32) | asset_id(4) | counterparty_pk(32).
+	/// Serializes to 120 bytes: value_lo(8) | value_hi(8) | owner_pk(32) | blinding(32) | asset_id(4) | counterparty_pk(32) | circuit_version(4).
 	pub fn to_bytes(&self) -> [u8; MEMO_DATA_SIZE] {
 		let mut bytes = [0u8; MEMO_DATA_SIZE];
 		let value_lo = (self.value & 0xffff_ffff_ffff_ffff) as u64;
@@ -151,10 +160,11 @@ impl MemoData {
 		bytes[48..80].copy_from_slice(&self.blinding);
 		bytes[80..84].copy_from_slice(&self.asset_id.to_le_bytes());
 		bytes[84..116].copy_from_slice(&self.counterparty_pk);
+		bytes[116..120].copy_from_slice(&self.circuit_version.to_le_bytes());
 		bytes
 	}
 
-	/// Deserializes from exactly 116 bytes.
+	/// Deserializes from exactly 120 bytes.
 	pub fn from_bytes(bytes: &[u8]) -> Result<Self, MemoError> {
 		if bytes.len() != MEMO_DATA_SIZE {
 			return Err(MemoError::InvalidNoteData);
@@ -175,12 +185,16 @@ impl MemoData {
 		);
 		let mut counterparty_pk = [0u8; 32];
 		counterparty_pk.copy_from_slice(&bytes[84..116]);
+		let circuit_version = u32::from_le_bytes(
+			bytes[116..120].try_into().map_err(|_| MemoError::InvalidNoteData)?,
+		);
 		Ok(Self {
 			value,
 			owner_pk,
 			blinding,
 			asset_id,
 			counterparty_pk,
+			circuit_version,
 		})
 	}
 }
@@ -194,7 +208,7 @@ pub fn is_valid_encrypted_memo(data: &[u8]) -> bool {
 
 /// Encrypts memo data using ChaCha20-Poly1305.
 ///
-/// Returns `nonce(12) || ciphertext(116) || MAC(16) || ephPk(32)` = 176 bytes.
+/// Returns `nonce(12) || ciphertext(120) || MAC(16) || ephPk(32)` = 180 bytes.
 /// The ephemeral public key is set to all-zeros (symmetric / public-note mode).
 /// For full ECDH, compute the shared secret externally with BabyJubJub and pass it as
 /// `shared_secret`. The caller is responsible for appending the real ephPk after the call
@@ -238,10 +252,10 @@ pub fn encrypt_memo_random(
 
 /// Decrypts an encrypted memo.
 ///
-/// Expects `nonce(12) || ciphertext + MAC(132) || ephPk(32)` (176 bytes).
-/// The trailing `ephPk` bytes are stripped; the first 144 bytes are fed to ChaCha20-Poly1305.
+/// Expects `nonce(12) || ciphertext + MAC(136) || ephPk(32)` (180 bytes).
+/// The trailing `ephPk` bytes are stripped; the first 148 bytes are fed to ChaCha20-Poly1305.
 ///
-/// **ECDH callers**: extract `ephPk = encrypted[144..176]`, derive the BabyJubJub ECDH
+/// **ECDH callers**: extract `ephPk = encrypted[148..180]`, derive the BabyJubJub ECDH
 /// shared secret externally (x-coordinate of `BJJ_mul(ephPk_point, ivsk_scalar)`), then
 /// pass that 32-byte value as `shared_secret`.
 ///
@@ -289,7 +303,7 @@ mod tests {
 	use super::*;
 
 	fn sample_memo() -> MemoData {
-		MemoData::new(1000, [1u8; 32], [2u8; 32], 5, [6u8; 32])
+		MemoData::new(1000, [1u8; 32], [2u8; 32], 5, [6u8; 32], 1)
 	}
 
 	const COMMITMENT: [u8; 32] = [3u8; 32];
@@ -300,7 +314,7 @@ mod tests {
 
 	#[test]
 	fn layout_constants_are_coherent() {
-		assert_eq!(MEMO_DATA_SIZE, 116);
+		assert_eq!(MEMO_DATA_SIZE, 120);
 		assert_eq!(NONCE_SIZE, 12);
 		assert_eq!(MAC_SIZE, 16);
 		assert_eq!(EPH_PK_SIZE, 32);
@@ -309,7 +323,7 @@ mod tests {
 			NONCE_SIZE + MEMO_DATA_SIZE + MAC_SIZE + EPH_PK_SIZE
 		);
 		assert_eq!(MIN_ENCRYPTED_MEMO_SIZE, NONCE_SIZE + MAC_SIZE);
-		assert_eq!(MAX_ENCRYPTED_MEMO_SIZE, 176);
+		assert_eq!(MAX_ENCRYPTED_MEMO_SIZE, 180);
 		assert_eq!(MIN_ENCRYPTED_MEMO_SIZE, 28);
 	}
 
@@ -352,7 +366,7 @@ mod tests {
 	#[test]
 	fn memo_data_field_layout() {
 		let val: u128 = u64::MAX as u128;
-		let m = MemoData::new(val, [0xAAu8; 32], [0xBBu8; 32], u32::MAX, [0xCCu8; 32]);
+		let m = MemoData::new(val, [0xAAu8; 32], [0xBBu8; 32], u32::MAX, [0xCCu8; 32], 7);
 		let b = m.to_bytes();
 		// value_lo at [0..8) = lower 64 bits of val
 		assert_eq!(b[0..8], (val as u64).to_le_bytes());
@@ -368,14 +382,14 @@ mod tests {
 	fn memo_data_u128_value_roundtrip() {
 		// 50 * 10^18 — overflows u64
 		let big_val: u128 = 50_000_000_000_000_000_000u128;
-		let m = MemoData::new(big_val, [0x01u8; 32], [0x02u8; 32], 0, [0u8; 32]);
+		let m = MemoData::new(big_val, [0x01u8; 32], [0x02u8; 32], 0, [0u8; 32], 1);
 		let dec = MemoData::from_bytes(&m.to_bytes()).unwrap();
 		assert_eq!(dec.value, big_val);
 	}
 
 	#[test]
 	fn new_without_counterparty_zeroes_counterparty_pk() {
-		let m = MemoData::new_without_counterparty(42, [0x01u8; 32], [0x02u8; 32], 1);
+		let m = MemoData::new_without_counterparty(42, [0x01u8; 32], [0x02u8; 32], 1, 1);
 		assert_eq!(m.counterparty_pk, [0u8; 32]);
 		let b = m.to_bytes();
 		assert_eq!(b[84..116], [0u8; 32]);
@@ -476,7 +490,7 @@ mod tests {
 	#[test]
 	fn counterparty_pk_nonzero_roundtrip() {
 		let cpk = [0xABu8; 32];
-		let m = MemoData::new(1_000, [0x01u8; 32], [0x02u8; 32], 7, cpk);
+		let m = MemoData::new(1_000, [0x01u8; 32], [0x02u8; 32], 7, cpk, 1);
 		let enc = encrypt_memo(&m, &COMMITMENT, &VK, &NONCE).unwrap();
 		let dec = decrypt_memo(&enc, &COMMITMENT, &VK).unwrap();
 		assert_eq!(dec.counterparty_pk, cpk);

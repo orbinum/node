@@ -13,12 +13,12 @@
 //!
 //! // Symmetric mode: use viewing_key as shared_secret
 //! let keys = KeySet::from_spending_key(spending_key);
-//! let memo = MemoData::new(1000, owner_pk, blinding, 0, [0u8; 32]);
+//! let memo = MemoData::new(1000, owner_pk, blinding, 0, [0u8; 32], 1);
 //! let encrypted = encrypt_memo(&memo, &commitment, keys.viewing_key.as_bytes(), &nonce)?;
 //! let decrypted = decrypt_memo(&encrypted, &commitment, keys.viewing_key.as_bytes())?;
 //!
 //! // ECDH mode: derive shared_secret externally via BabyJubJub before calling decrypt_memo
-//! // let eph_pk = &encrypted[144..176];
+//! // let eph_pk = &encrypted[148..180];
 //! // let shared_secret = bjj_ecdh(ivsk_scalar, eph_pk);
 //! // let decrypted = decrypt_memo(&encrypted, &commitment, &shared_secret)?;
 //! ```

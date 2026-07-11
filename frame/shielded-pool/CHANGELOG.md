@@ -2,6 +2,15 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.10.0] - 2026-07-10
+
+### Changed
+- **`MAX_ENCRYPTED_MEMO_SIZE` 176 → 180** to accommodate the new `circuit_version` field carried in the memo plaintext (see `orbinum-encrypted-memo` 0.7.0). `EncryptedMemo` wire offsets updated: `ciphertext [12..132]`, `tag [132..148]`, `ephPk [148..180]`. The pallet still treats the memo as opaque bytes — only the length bound and slice offsets change.
+- **Weights regenerated** (`src/weights.rs`) — the larger memo raises `CommitmentMemos`' `MaxEncodedLen` (`max_size` 226 → 230), changing the `proof_size` of every extrinsic that reads/writes it (`shield`, `shield_batch`, `private_transfer`, `unshield`, `claim_shielded_fees`). Benchmarked on the reference host (`ubuntu-32gb-fsn1-1`, AMD EPYC-Genoa) with `--steps=50 --repeat=20 --chain=dev`. Runtime `spec_version` 5 → 6.
+
+### Breaking
+- `EncryptedMemo` now requires exactly 180 bytes; 176-byte memos are rejected. Consensus-affecting (covered by the `spec_version` bump). `transaction_version` is intentionally **not** bumped: the extrinsic SCALE codec is unchanged (the memo arg is still `BoundedVec<u8>` — only its max bound rose), so offline-signed extrinsics still decode identically.
+
 ## [0.9.0] - 2026-07-09
 
 ### Changed
