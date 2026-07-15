@@ -9,20 +9,17 @@ NC='\033[0m' # No Color
 
 echo -e "${GREEN}=== Orbinum Testnet Chain Spec Generator ===${NC}\n"
 
-# Resolve script location so all relative paths work regardless of cwd
+# Resolve script location so all relative paths work regardless of cwd.
+# Script lives in docker/testnet/, so the repo root is two levels up.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-NODE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+NODE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Prefer release binary; fall back to debug; build if neither exists
-if [ -f "$NODE_ROOT/target/release/orbinum-node" ]; then
-    BINARY="$NODE_ROOT/target/release/orbinum-node"
-elif [ -f "$NODE_ROOT/target/debug/orbinum-node" ]; then
-    echo -e "${YELLOW}Release binary not found, using debug build.${NC}"
-    BINARY="$NODE_ROOT/target/debug/orbinum-node"
-else
-    echo -e "${YELLOW}No binary found. Building (debug)...${NC}"
-    (cd "$NODE_ROOT" && cargo build --package orbinum-node)
-    BINARY="$NODE_ROOT/target/debug/orbinum-node"
+# The release binary is required: the WASM it embeds becomes the genesis `:code`,
+# so a debug build would produce a different genesis hash than the one nodes run.
+BINARY="$NODE_ROOT/target/release/orbinum-node"
+if [ ! -f "$BINARY" ]; then
+    echo -e "${YELLOW}Release binary not found. Building...${NC}"
+    (cd "$NODE_ROOT" && cargo build --release --package orbinum-node)
     echo -e "${GREEN}✓ Build complete${NC}\n"
 fi
 

@@ -21,57 +21,16 @@ pub(crate) use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 pub(crate) use sp_consensus_grandpa::AuthorityId as GrandpaId;
 #[allow(unused_imports)]
 pub use sp_core::ecdsa;
-use sp_core::{ed25519, sr25519, Pair, Public};
+use sp_core::{Pair, Public};
 use sp_runtime::traits::{IdentifyAccount, Verify};
 
-use orbinum_runtime::{evm_bytes_to_account_id_bytes, AccountId, Balance, SS58Prefix, Signature};
+use orbinum_runtime::{AccountId, SS58Prefix, Signature};
 
 pub type ChainSpec = sc_service::GenericChainSpec;
 
 // ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/// Smallest indivisible unit of ORB (1 ORB = 10^18 planck).
-pub(crate) const PLANCK: Balance = 1_000_000_000_000_000_000;
-
-/// Total ORB supply minted at genesis: 1,000,000,000 ORB.
-pub(crate) const TOTAL_SUPPLY: Balance = 1_000_000_000 * PLANCK;
-
-/// Small operational balance granted to the sudo account.
-pub(crate) const DEV_BALANCE: Balance = 10_000 * PLANCK;
-
-/// Initial faucet allocation: 100,000,000 ORB.
-pub(crate) const FAUCET_BALANCE: Balance = 100_000_000 * PLANCK;
-
-/// EVM chain ID for Orbinum Mainnet (registered in ChainList).
-pub(crate) const EVM_CHAIN_ID: u64 = 270;
-
-/// EVM chain ID for Orbinum Testnet (registered in ChainList).
-pub(crate) const TESTNET_EVM_CHAIN_ID: u64 = 2700;
-
-/// Initial base fee per gas for testnet genesis: 1 gwei.
-/// EIP-1559 adjusts this value dynamically with network traffic.
-pub(crate) const TESTNET_BASE_FEE: u64 = 1_000_000_000;
-
-// ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
-
-/// Converts a 20-byte Ethereum address into a Substrate `AccountId`.
-pub(crate) fn ethereum_account_id(eth_address: [u8; 20]) -> AccountId {
-	evm_bytes_to_account_id_bytes(eth_address).into()
-}
-
-/// Wraps a raw 32-byte Sr25519 public key as an `AuraId`.
-pub(crate) fn aura_id(bytes: [u8; 32]) -> AuraId {
-	sr25519::Public::from_raw(bytes).into()
-}
-
-/// Wraps a raw 32-byte Ed25519 public key as a `GrandpaId`.
-pub(crate) fn grandpa_id(bytes: [u8; 32]) -> GrandpaId {
-	ed25519::Public::from_raw(bytes).into()
-}
 
 /// Derives a public key from a well-known dev seed (e.g. `"Alice"`, `"Bob"`).
 pub fn get_from_seed<TPublic: Public>(seed: &str) -> <TPublic::Pair as Pair>::Public {

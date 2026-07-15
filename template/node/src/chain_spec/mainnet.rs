@@ -4,19 +4,21 @@
 //!
 //! EVM chain ID: **270** (registered in ChainList).
 //!
-//! This file is a placeholder. Before triggering mainnet genesis, configure:
+//! Genesis state lives in the runtime preset `orbinum_mainnet_runtime_preset`
+//! — see `template/runtime/src/genesis_config_preset/mainnet.rs`. It is a
+//! placeholder: before triggering mainnet genesis, configure there:
 //! - Sudo key (Sr25519)
 //! - Validator set (Aura + GRANDPA keys)
 //! - Genesis balances (treasury, team, investors)
 
 use sc_chain_spec::ChainType;
 
-use super::{properties, ChainSpec, EVM_CHAIN_ID};
+use super::{properties, ChainSpec};
 
 /// Orbinum Mainnet configuration (placeholder — not yet launched).
 ///
-/// Currently only registers the EVM chain ID (270). All other genesis
-/// parameters must be filled in before mainnet launch.
+/// - **Genesis preset:** `"orbinum_mainnet_runtime_preset"` (placeholder values)
+/// - **EVM chain ID:** 270
 pub fn orbinum_mainnet_config() -> ChainSpec {
 	ChainSpec::builder(
 		orbinum_runtime::WASM_BINARY.expect("WASM not available"),
@@ -26,13 +28,6 @@ pub fn orbinum_mainnet_config() -> ChainSpec {
 	.with_id("orbinum_mainnet")
 	.with_chain_type(ChainType::Live)
 	.with_properties(properties())
-	.with_genesis_config_patch(mainnet_genesis())
+	.with_genesis_config_preset_name("orbinum_mainnet_runtime_preset")
 	.build()
-}
-
-fn mainnet_genesis() -> serde_json::Value {
-	// TODO: Add sudo key, validators and genesis balances before mainnet launch.
-	serde_json::json!({
-		"evmChainId": { "chainId": EVM_CHAIN_ID }
-	})
 }

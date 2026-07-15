@@ -15,7 +15,9 @@ use super::{aura_to_account, authority_keys_from_seed, properties, session_keys,
 /// - **2 validators:** Alice + Bob (well-known dev keys, deterministic)
 /// - **No manual seal:** Aura produces blocks on a fixed slot schedule;
 ///   GRANDPA finalises once 2/3+1 validators agree (both nodes required)
-/// - **Genesis preset:** `"orbinum_local_testnet_runtime_preset"`
+/// - **Genesis preset:** `"development"` — shared with `--dev`, which supplies
+///   the same balances and EVM chain ID (42). The validator set is the only
+///   difference and is patched in below.
 pub fn local_testnet_config() -> ChainSpec {
 	let (alice_aura, alice_grandpa) = authority_keys_from_seed("Alice");
 	let (bob_aura, bob_grandpa) = authority_keys_from_seed("Bob");
@@ -30,7 +32,7 @@ pub fn local_testnet_config() -> ChainSpec {
 	.with_id("local_testnet")
 	.with_chain_type(ChainType::Local)
 	.with_properties(properties())
-	.with_genesis_config_preset_name("orbinum_local_testnet_runtime_preset")
+	.with_genesis_config_preset_name("development")
 	.with_genesis_config_patch(serde_json::json!({
 		// Aura and GRANDPA are populated by pallet-session — leave empty.
 		"aura": { "authorities": [] },

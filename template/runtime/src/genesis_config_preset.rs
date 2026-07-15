@@ -1,5 +1,4 @@
 mod development;
-mod local;
 mod mainnet;
 mod testnet;
 
@@ -151,8 +150,7 @@ pub(super) fn build_genesis(
 /// Provides the JSON representation of predefined genesis config for given `id`.
 pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 	let patch = match id.as_str() {
-		DEV_PRESET_ID => development::development(),
-		LOCAL_PRESET_ID => local::local_testnet(),
+		DEV_PRESET_ID | LOCAL_PRESET_ID => development::development(),
 		TESTNET_PRESET_ID => testnet::testnet(),
 		MAINNET_PRESET_ID => mainnet::mainnet(),
 		_ => return None,
