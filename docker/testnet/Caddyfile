@@ -3,10 +3,24 @@
 	order rate_limit before basic_auth
 }
 
+# Proxy to the node, stripping its CORS headers so only Caddy's single copy
+# survives (the node also emits CORS via --rpc-cors all; duplicates make the
+# browser reject the response with "multiple values '*, *'").
+(rpc_upstream) {
+	reverse_proxy localhost:9944 {
+		header_down -Access-Control-Allow-Origin
+		header_down -Access-Control-Allow-Methods
+		header_down -Access-Control-Allow-Headers
+		header_down -Access-Control-Expose-Headers
+		header_down -Vary
+	}
+}
+
 {$RPC_DOMAIN:rpc-1.testnet.orbinum.io} {
 	tls /etc/caddy/origin.pem /etc/caddy/origin.key
 
-	# Access log — needed to see who gets 429'd and with which client IP.
+	# Access log — who gets 429'd, with which client IP, and whether a 429 came
+	# from Caddy (Retry-After present) or the node ("Too many connections" body).
 	log {
 		output file /data/access.log {
 			roll_size 50mb
@@ -16,13 +30,9 @@
 	}
 
 	# ── CORS — Caddy is the single source ───────────────────────────────────────
-	# The node also emits CORS (--rpc-cors all), so on proxied responses BOTH Caddy
-	# and the node would add Access-Control-Allow-Origin → the browser rejects the
-	# duplicate ("multiple values '*, *'"). Each reverse_proxy below strips the
-	# node's CORS headers (header_down -...) so only Caddy's remain. Setting them
-	# at the Caddy layer (not just the proxy) also covers Caddy-generated responses
-	# — the rate-limit 429 — which never reach the node; a 429 without CORS is what
-	# the browser turned into an opaque "CORS error" and broke the explorer.
+	# Set at the Caddy layer (not just the proxy) so Caddy-generated responses —
+	# the rate-limit 429 — carry CORS too; a 429 without CORS is what the browser
+	# turned into an opaque "CORS error" and broke the explorer.
 	header {
 		Access-Control-Allow-Origin "*"
 		Access-Control-Allow-Methods "GET, POST, OPTIONS"
@@ -39,27 +49,19 @@
 	# request. The limiter counts requests, so without this split each reconnect
 	# would burn a rate event and, under load, clients could not re-establish their
 	# subscription (the WSS-failed errors). Route upgrades straight to the node,
-	# unthrottled; total connections stay capped by --rpc-max-connections (1000).
+	# unthrottled; total connections stay capped by --rpc-max-connections (5000).
 	@websocket header Connection *Upgrade*
 	handle @websocket {
-		reverse_proxy localhost:9944 {
-			# Strip the node's CORS so only Caddy's single copy survives.
-			header_down -Access-Control-Allow-Origin
-			header_down -Access-Control-Allow-Methods
-			header_down -Access-Control-Allow-Headers
-			header_down -Access-Control-Expose-Headers
-			header_down -Vary
-		}
+		import rpc_upstream
 	}
 
-	# HTTP JSON-RPC (POST): per-IP rate limit. 500 events / 10s = 50 req/s per
+	# HTTP JSON-RPC (POST): per-IP rate limit, 500 events / 10s = 50 req/s per
 	# IP — headroom for explorers/wallets/light bots that burst, while still
-	# capping an abusive IP. Two zones instead of one keyed via `map`: requests
-	# that came through Cloudflare are keyed on the real client IP CF forwards
-	# (the direct peer is always a CF edge, {remote_host} would limit everyone
-	# as one), and direct-origin requests fall back to their peer IP in a
-	# separate zone so an empty header can never collapse everyone into a
-	# single shared bucket.
+	# capping an abusive IP. Two zones by traffic source: Cloudflare-proxied
+	# requests are keyed on the real client IP CF forwards (the direct peer is
+	# always a CF edge, {remote_host} would limit everyone as one bucket), and
+	# direct-origin requests are keyed on their peer IP in a separate zone —
+	# a missing header can never collapse everyone into one shared bucket.
 	@viaCf header CF-Connecting-IP *
 	handle @viaCf {
 		rate_limit {
@@ -69,14 +71,7 @@
 				window 10s
 			}
 		}
-		reverse_proxy localhost:9944 {
-			# Strip the node's CORS so only Caddy's single copy survives.
-			header_down -Access-Control-Allow-Origin
-			header_down -Access-Control-Allow-Methods
-			header_down -Access-Control-Allow-Headers
-			header_down -Access-Control-Expose-Headers
-			header_down -Vary
-		}
+		import rpc_upstream
 	}
 
 	handle {
@@ -87,13 +82,6 @@
 				window 10s
 			}
 		}
-		reverse_proxy localhost:9944 {
-			# Strip the node's CORS so only Caddy's single copy survives.
-			header_down -Access-Control-Allow-Origin
-			header_down -Access-Control-Allow-Methods
-			header_down -Access-Control-Allow-Headers
-			header_down -Access-Control-Expose-Headers
-			header_down -Vary
-		}
+		import rpc_upstream
 	}
 }
