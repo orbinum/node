@@ -17,7 +17,7 @@ services:
       --rpc-cors all
       --rpc-external
       --rpc-methods Safe
-      --rpc-max-connections 1000
+      --rpc-max-connections 5000
       --state-pruning archive
       --blocks-pruning archive
       --no-mdns
