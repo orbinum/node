@@ -67,6 +67,10 @@
 	# IP. The previous 100/10s (10 req/s) was low enough that one indexer load test
 	# 429'd real users.
 	handle {
+		# Debug: expose the resolved rate-limit key per request in the access
+		# log (extra.rl_key) — remove once per-IP bucketing is verified.
+		log_append rl_key {rl_key}
+		log_append cf_ip {http.request.header.CF-Connecting-IP}
 		rate_limit {
 			zone rpc {
 				key {rl_key}
