@@ -6,6 +6,23 @@
 {$RPC_DOMAIN:rpc-1.testnet.orbinum.io} {
 	tls /etc/caddy/origin.pem /etc/caddy/origin.key
 
+	# Access log — needed to see who gets 429'd and with which client IP.
+	log {
+		output file /data/access.log {
+			roll_size 50mb
+			roll_keep 3
+		}
+		format json
+	}
+
+	# Rate-limit key: real client IP from Cloudflare; if the request did not come
+	# through CF the header is empty and every such client would share ONE bucket
+	# (mass 429s), so fall back to the direct peer IP.
+	map {header.CF-Connecting-IP} {rl_key} {
+		"" {remote_host}
+		default {header.CF-Connecting-IP}
+	}
+
 	# ── CORS — Caddy is the single source ───────────────────────────────────────
 	# The node also emits CORS (--rpc-cors all), so on proxied responses BOTH Caddy
 	# and the node would add Access-Control-Allow-Origin → the browser rejects the
@@ -52,7 +69,7 @@
 	handle {
 		rate_limit {
 			zone rpc {
-				key {http.request.header.CF-Connecting-IP}
+				key {rl_key}
 				events 500
 				window 10s
 			}
