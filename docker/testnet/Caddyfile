@@ -15,14 +15,6 @@
 		format json
 	}
 
-	# Rate-limit key: real client IP from Cloudflare; if the request did not come
-	# through CF the header is empty and every such client would share ONE bucket
-	# (mass 429s), so fall back to the direct peer IP.
-	map {header.CF-Connecting-IP} {rl_key} {
-		"" {remote_host}
-		default {header.CF-Connecting-IP}
-	}
-
 	# ── CORS — Caddy is the single source ───────────────────────────────────────
 	# The node also emits CORS (--rpc-cors all), so on proxied responses BOTH Caddy
 	# and the node would add Access-Control-Allow-Origin → the browser rejects the
@@ -60,20 +52,37 @@
 		}
 	}
 
-	# HTTP JSON-RPC (POST): per-IP rate limit, keyed on the real client IP that
-	# Cloudflare forwards (the direct peer is always Cloudflare, so {remote_host}
-	# would limit everyone as one). 500 events / 10s = 50 req/s per IP — headroom
-	# for explorers/wallets/light bots that burst, while still capping an abusive
-	# IP. The previous 100/10s (10 req/s) was low enough that one indexer load test
-	# 429'd real users.
-	handle {
-		# Debug: expose the resolved rate-limit key per request in the access
-		# log (extra.rl_key) — remove once per-IP bucketing is verified.
-		log_append rl_key {rl_key}
-		log_append cf_ip {http.request.header.CF-Connecting-IP}
+	# HTTP JSON-RPC (POST): per-IP rate limit. 500 events / 10s = 50 req/s per
+	# IP — headroom for explorers/wallets/light bots that burst, while still
+	# capping an abusive IP. Two zones instead of one keyed via `map`: requests
+	# that came through Cloudflare are keyed on the real client IP CF forwards
+	# (the direct peer is always a CF edge, {remote_host} would limit everyone
+	# as one), and direct-origin requests fall back to their peer IP in a
+	# separate zone so an empty header can never collapse everyone into a
+	# single shared bucket.
+	@viaCf header CF-Connecting-IP *
+	handle @viaCf {
 		rate_limit {
-			zone rpc {
-				key {rl_key}
+			zone rpc_cf {
+				key {http.request.header.CF-Connecting-IP}
+				events 500
+				window 10s
+			}
+		}
+		reverse_proxy localhost:9944 {
+			# Strip the node's CORS so only Caddy's single copy survives.
+			header_down -Access-Control-Allow-Origin
+			header_down -Access-Control-Allow-Methods
+			header_down -Access-Control-Allow-Headers
+			header_down -Access-Control-Expose-Headers
+			header_down -Vary
+		}
+	}
+
+	handle {
+		rate_limit {
+			zone rpc_direct {
+				key {remote_host}
 				events 500
 				window 10s
 			}
