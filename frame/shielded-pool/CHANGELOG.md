@@ -2,6 +2,20 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.10.1] - 2026-07-17
+
+### Fixed
+- **`unshield` rejected most Substrate recipients with `ProofVerificationFailed`.**
+  `recipient_to_field` passed the raw 32 `AccountId32` bytes as the `recipient`
+  public input, but provers bind `recipient` reduced mod BN254 r (LE bytes mod r)
+  and the verifier rejects non-canonical public inputs — so any recipient whose
+  LE value ≥ r (~4 of 5 random AccountId32s) always failed verification. EVM
+  recipients were unaffected (H160 + 12 zero bytes is always < r), which masked
+  the bug on the precompile path. `recipient_to_field` now reduces mod r,
+  matching the prover. **Consensus-affecting** (verification acceptance
+  changes): runtime `spec_version` 1 → 2. `transaction_version` unchanged —
+  extrinsic SCALE encoding is untouched.
+
 ## [0.10.0] - 2026-07-10
 
 ### Changed

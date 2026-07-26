@@ -25,11 +25,24 @@ pub struct UnshieldOperation;
 /// scheme — sr25519/ed25519/ECDSA/EVM, and future ones like Solana — unifies to a
 /// 32-byte account). A non-32-byte encoding is rejected with `InvalidRecipient`
 /// rather than silently binding a zeroed recipient.
+///
+/// The raw bytes are reduced mod BN254 r: provers bind `recipient` as a field
+/// element (LE bytes mod r), and most AccountId32 values exceed r — the verifier
+/// rejects non-canonical public inputs, so passing raw bytes would fail
+/// verification for any such recipient.
 #[cfg(not(feature = "skip-proof-verification"))]
 fn recipient_to_field<T: Config>(
 	recipient: &<T as frame_system::Config>::AccountId,
 ) -> Result<[u8; 32], Error<T>> {
-	<[u8; 32]>::try_from(recipient.encode().as_slice()).map_err(|_| Error::<T>::InvalidRecipient)
+	use ark_ff::{BigInteger, PrimeField};
+	let raw: [u8; 32] = <[u8; 32]>::try_from(recipient.encode().as_slice())
+		.map_err(|_| Error::<T>::InvalidRecipient)?;
+	let le = ark_bn254::Fr::from_le_bytes_mod_order(&raw)
+		.into_bigint()
+		.to_bytes_le();
+	let mut out = [0u8; 32];
+	out[..le.len().min(32)].copy_from_slice(&le[..le.len().min(32)]);
+	Ok(out)
 }
 
 impl UnshieldOperation {
@@ -216,6 +229,41 @@ mod tests {
 	};
 	use frame_support::{assert_err, assert_noop, assert_ok, traits::Currency};
 	use sp_runtime::AccountId32;
+
+	// ── recipient_to_field: canonicity (regression for testnet halt) ───────────
+	// A recipient whose raw 32 LE bytes exceed the BN254 scalar field modulus r
+	// must be reduced mod r before it reaches the verifier. Passing raw bytes made
+	// `PublicInputs::to_field_elements` reject them as non-canonical, which
+	// diverged execution between block author and importer and halted the chain.
+	#[test]
+	fn recipient_to_field_reduces_non_canonical_account() {
+		use ark_ff::{BigInteger, PrimeField};
+		// AccountId32 = [0xff; 32] — guaranteed to exceed r.
+		let recipient = AccountId32::new([0xffu8; 32]);
+		let out = recipient_to_field::<Test>(&recipient).expect("must not error");
+
+		// Output must equal the canonical LE encoding of (raw mod r) …
+		let expected = ark_bn254::Fr::from_le_bytes_mod_order(&[0xffu8; 32])
+			.into_bigint()
+			.to_bytes_le();
+		let mut expected32 = [0u8; 32];
+		expected32[..expected.len().min(32)].copy_from_slice(&expected[..expected.len().min(32)]);
+		assert_eq!(out, expected32);
+
+		// … and must itself round-trip as canonical (what the verifier requires).
+		let fe = ark_bn254::Fr::from_le_bytes_mod_order(&out);
+		assert_eq!(fe.into_bigint().to_bytes_le().as_slice(), &out[..]);
+	}
+
+	// A recipient already below r is passed through unchanged.
+	#[test]
+	fn recipient_to_field_passes_canonical_account() {
+		let mut raw = [0u8; 32];
+		raw[0] = 0x2a; // tiny value, well below r
+		let recipient = AccountId32::new(raw);
+		let out = recipient_to_field::<Test>(&recipient).expect("must not error");
+		assert_eq!(out, raw);
+	}
 
 	// ── helpers ──────────────────────────────────────────────────────────────
 
