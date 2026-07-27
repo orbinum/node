@@ -231,11 +231,14 @@ mod tests {
 	use sp_runtime::AccountId32;
 
 	// ── recipient_to_field: canonicity (regression for testnet halt) ───────────
+	// Gated like the function itself: with `skip-proof-verification` there is no
+	// proof to bind a recipient into, so `recipient_to_field` isn't compiled.
 	// A recipient whose raw 32 LE bytes exceed the BN254 scalar field modulus r
 	// must be reduced mod r before it reaches the verifier. Passing raw bytes made
 	// `PublicInputs::to_field_elements` reject them as non-canonical, which
 	// diverged execution between block author and importer and halted the chain.
 	#[test]
+	#[cfg(not(feature = "skip-proof-verification"))]
 	fn recipient_to_field_reduces_non_canonical_account() {
 		use ark_ff::{BigInteger, PrimeField};
 		// AccountId32 = [0xff; 32] — guaranteed to exceed r.
@@ -257,6 +260,7 @@ mod tests {
 
 	// A recipient already below r is passed through unchanged.
 	#[test]
+	#[cfg(not(feature = "skip-proof-verification"))]
 	fn recipient_to_field_passes_canonical_account() {
 		let mut raw = [0u8; 32];
 		raw[0] = 0x2a; // tiny value, well below r
