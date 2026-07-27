@@ -111,8 +111,12 @@ const [,, wasmFile, rpcWs, sudoSeed] = process.argv;
         }
       });
 
-      if (status.isFinalized) {
-        console.log(`[success] Finalized block: ${status.asFinalized}`);
+      // Resolve on isInBlock, not isFinalized: setCode swaps the runtime, and the
+      // long wait to finalization frequently outlives the WS connection (observed
+      // 1006 abnormal closure ~3 min in). Inclusion in a block is enough to
+      // confirm the upgrade applied; spec_version is re-checked below regardless.
+      if (status.isInBlock) {
+        console.log(`[success] Included in block: ${status.asInBlock}`);
         resolve();
       }
     }).catch(reject);
