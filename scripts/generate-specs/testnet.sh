@@ -10,7 +10,7 @@ NC='\033[0m' # No Color
 echo -e "${GREEN}=== Orbinum Testnet Chain Spec Generator ===${NC}\n"
 
 # Resolve script location so all relative paths work regardless of cwd.
-# Script lives in docker/testnet/, so the repo root is two levels up.
+# Script lives in scripts/generate-specs/, so the repo root is two levels up.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 NODE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
@@ -23,7 +23,10 @@ if [ ! -f "$BINARY" ]; then
     echo -e "${GREEN}✓ Build complete${NC}\n"
 fi
 
-DEPLOY_DIR="$SCRIPT_DIR"
+# Output goes to scripts/generate-specs/dist/ (gitignored). The generated spec
+# is NOT consumed from here — copy it into the node-deploy repo (see final step).
+DEPLOY_DIR="$SCRIPT_DIR/dist"
+mkdir -p "$DEPLOY_DIR"
 
 echo -e "${YELLOW}Step 1: Generating plain chain spec from 'testnet' config${NC}"
 $BINARY build-spec --chain testnet --disable-default-bootnode > "$DEPLOY_DIR/testnet-spec-plain.json"
@@ -60,14 +63,14 @@ echo -e "${GREEN}Genesis Hash: ${GENESIS_HASH}${NC}"
 rm -f "$DEPLOY_DIR/testnet-spec-plain.json" "$DEPLOY_DIR/testnet-spec-customized.json"
 
 echo -e "\n${GREEN}=== Chain Spec Generation Complete ===${NC}\n"
-echo -e "Generated files:"
-echo -e "  ${GREEN}✓${NC} deploy/testnet-spec.json (Use this for your nodes)\n"
+echo -e "Generated file:"
+echo -e "  ${GREEN}✓${NC} $DEPLOY_DIR/testnet-spec.json\n"
 
-echo -e "${YELLOW}Next steps:${NC}"
-echo -e "1. Share testnet-spec.json with all testnet participants"
-echo -e "2. Generate validator keys: ${GREEN}$BINARY key generate${NC}"
-echo -e "3. Start your node: ${GREEN}docker-compose up -d${NC}"
-echo -e "4. Add boot nodes to testnet-spec.json after first nodes are running\n"
+echo -e "${YELLOW}Deploy it — copy into the node-deploy repo (nodes read it from there):${NC}"
+echo -e "  ${GREEN}cp \"$DEPLOY_DIR/testnet-spec.json\" /path/to/node-deploy/testnet/chainspec/testnet-spec.json${NC}"
+echo -e "  ${GREEN}cd /path/to/node-deploy && git add testnet/chainspec/testnet-spec.json && git commit${NC}\n"
 
-echo -e "${YELLOW}To get your node's Peer ID:${NC}"
-echo -e "  ${GREEN}docker-compose logs | grep 'Local node identity'${NC}\n"
+echo -e "${YELLOW}Notes:${NC}"
+echo -e "  - Changing genesis is a NEW chain: every node must purge its DB and resync."
+echo -e "  - Bootnodes are hardcoded above (rpc-1 / rpc-2)."
+echo -e "  - Peer ID of a running node: ${GREEN}docker logs <container> | grep 'Local node identity'${NC}\n"

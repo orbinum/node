@@ -47,3 +47,6 @@ docker/testnet/.env
 # RPC TLS — Cloudflare Origin Certificate + private key, never commit
 docker/testnet/origin.pem
 docker/testnet/origin.key
+
+# Generated chain specs (canonical copy lives in node-deploy)
+scripts/generate-specs/dist/
