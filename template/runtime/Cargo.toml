@@ -92,7 +92,7 @@ polkadot-runtime-common = { workspace = true }
 cumulus-pallet-weight-reclaim = { workspace = true }
 
 [build-dependencies]
-substrate-wasm-builder = { workspace = true, optional = true }
+substrate-wasm-builder = { workspace = true, optional = true, features = ["metadata-hash"] }
 
 [features]
 default = ["std", "with-rocksdb-weights", "poseidon-native-runtime"]

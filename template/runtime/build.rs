@@ -6,6 +6,7 @@ fn main() {
 			.export_heap_base()
 			.import_memory()
 			.enable_feature("poseidon-native-runtime")
+			.enable_metadata_hash("ORB", 18)
 			.build();
 	}
 }
