@@ -23,6 +23,11 @@ on:
         required: true
         default: true
         type: boolean
+      image_tag:
+        description: "Published image tag to deploy the runtime from (e.g. 0.1.0-rc.10). Extracts the WASM from ghcr.io/<owner>/node:<tag> instead of recompiling."
+        required: true
+        default: "testnet-latest"
+        type: string
 
 concurrency:
   group: release-${{ github.ref }}
@@ -165,22 +170,37 @@ jobs:
             ${{ env.RUNTIME_WASM }}.sha256
           retention-days: 30
 
-  # ── 3. Deploy runtime on-chain (sin reiniciar nodos) ─────────────────────
+  # ── 3. Deploy runtime on-chain ─────────────────────
   deploy-runtime:
     name: Runtime Upgrade (on-chain)
     runs-on: ubuntu-latest
-    needs: [metadata, build]
-    # Deshabilitado hasta tener nodo testnet estable — activar con workflow_dispatch
+    needs: [metadata]
     if: github.event.inputs.deploy_runtime == 'true'
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download WASM artifact
-        uses: actions/download-artifact@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          name: orbinum-runtime-wasm-${{ needs.metadata.outputs.version }}
-          path: ./artifacts/
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract runtime WASM from published image
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/node:${{ github.event.inputs.image_tag }}"
+          echo "Pulling $IMAGE"
+          docker pull "$IMAGE"
+          mkdir -p ./artifacts
+          CID=$(docker create "$IMAGE")
+          docker cp "$CID:/usr/local/share/orbinum/orbinum_runtime.compact.compressed.wasm" \
+            ./artifacts/orbinum_runtime.compact.compressed.wasm
+          docker rm "$CID"
+          ls -l ./artifacts
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -248,7 +268,9 @@ jobs:
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # ignore-error: a flaky gha cache backend (intermittent "not_found" on
+          # export) must not fail a job whose image already pushed successfully.
+          cache-to: type=gha,mode=max,ignore-error=true
           platforms: linux/amd64
 
   # ── 6. Crear GitHub Release ───────────────────────────────────────────────

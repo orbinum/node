@@ -1,6 +1,6 @@
 # Multi-stage build for Orbinum Node
 # Stage 1: Build the node binary
-FROM rust:1.88-bookworm as builder
+FROM rust:1.88-bookworm AS builder
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
@@ -41,6 +41,13 @@ RUN useradd -m -u 1000 -U -s /bin/sh orbinum && \
 
 # Copy binary from builder
 COPY --from=builder /orbinum/target/release/orbinum-node /usr/local/bin/orbinum-node
+
+# Copy the runtime WASM built alongside the binary. Bundling it lets the deploy
+# job pull the exact runtime the nodes run (docker cp from this image) instead of
+# recompiling — guaranteeing the on-chain setCode matches the nodes' binary.
+COPY --from=builder \
+    /orbinum/target/release/wbuild/orbinum-runtime/orbinum_runtime.compact.compressed.wasm \
+    /usr/local/share/orbinum/orbinum_runtime.compact.compressed.wasm
 
 # Set user
 USER orbinum
