@@ -2,6 +2,58 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.12.0] - 2026-07-30
+
+### Added
+- **Multi-tree forest: the 2^20-note network ceiling is gone.** When a tree
+  reaches `MaxLeavesPerTree` the filling insert seals it and inserts continue
+  in a fresh tree. The global u32 leaf index never resets
+  (`tree_id = leaf_index / MaxLeavesPerTree`), so event shapes, indexer
+  chunking and wallet scan cursors are untouched. Zero circuit, VK,
+  extrinsic-signature or precompile-ABI changes — anchoring stays root-only.
+- New storage `SealedTreeRoots` / `SealedRootIndex`: a sealed tree's final
+  root is a **permanent** anchor (bounded by tree count, max 4096 — never
+  evicted, unlike the historic ring), so notes in sealed trees stay spendable
+  forever. `MerkleRepository::is_known_root` = historic ring OR sealed set;
+  transfer/unshield/validate_unsigned call sites unchanged. Regression test:
+  a sealed root survives `MaxHistoricRoots + N` later inserts.
+- New Config `MaxLeavesPerTree` (production 2^20; `integrity_test` enforces
+  power-of-two ≤ 2^`MAX_TREE_DEPTH` — clients derive `tree_id` from this
+  constant, so it must never change on a live chain). Mocks use 8 to make
+  rollover testable.
+- New event `TreeSealed { tree_id, final_root, first_leaf_index, leaf_count }`,
+  emitted after the `MerkleRootUpdated` that carries the final root.
+- Runtime API v2 (`api_version(2)`): `get_forest_info()` and
+  `get_root_for_leaf(leaf_index)` — sealed trees resolve to their permanent
+  root, the active tree to the live `PoseidonRoot`.
+- `STORAGE_VERSION` 2 with version-only `migrations::v2::MigrateToV2`
+  (sealed maps start empty). Forest invariants merged into the existing
+  `try_state` hook: active root always known, one sealed root per completed
+  tree, sealed maps bijective.
+
+### Changed
+- `Error::MerkleTreeFull` now means the absolute forest ceiling (u32
+  leaf-index space, ~4096 trees) — practically unreachable — instead of the
+  per-tree 2^20 cap.
+- `insert_leaf` / `get_merkle_path` index `MerkleNodes` by tree-local
+  position (`leaf_index % MaxLeavesPerTree`). Identical to the previous
+  global indexing for tree 0, so v1-backfilled data needs no migration.
+- Consensus-affecting (seal writes new storage on the filling insert):
+  requires a runtime `spec_version` bump at release. `transaction_version`
+  unchanged.
+
+### Fixed
+- Privacy RPC (`fc-rpc-v2`): proof endpoints no longer fall back to the
+  active root when a leaf's anchoring root cannot be resolved — that would
+  have served a sealed-tree path with the wrong anchor; they now return an
+  explicit error. Both endpoints gain a `tree_id` response field (additive).
+
+### Verified E2E
+- Against a local dev node with an 8-leaf cap: 10 shields cross the first
+  seal; `TreeSealed` fires; sealed leaves anchor to the permanent final root
+  and active leaves to the live root via `privacy_getMerkleProof*`
+  (`ts-tests/test-forest-e2e.ts`).
+
 ## [0.11.0] - 2026-07-30
 
 ### Added

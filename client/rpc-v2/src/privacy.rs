@@ -69,7 +69,9 @@ fn map_key(item: &[u8], k: &[u8]) -> Vec<u8> {
 /// Response for `privacy_getMerkleProof`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MerkleProofResponse {
-	/// Current Merkle root read from the same block as the proof (`0x`-prefixed hex).
+	/// Root the leaf's tree anchors to, read at the same block as the proof
+	/// (`0x`-prefixed hex): the permanent sealed root for completed trees,
+	/// the live root for the active tree.
 	pub root: String,
 	/// Sibling path — 20 `0x`-prefixed hex strings.
 	pub path: Vec<String>,
@@ -77,6 +79,8 @@ pub struct MerkleProofResponse {
 	pub leaf_index: u32,
 	/// Tree depth (always 20 for circuit compatibility).
 	pub tree_depth: u32,
+	/// Forest tree the leaf belongs to (0 until the first tree seals).
+	pub tree_id: u32,
 }
 
 /// Response for `privacy_getNullifierStatus`.
@@ -237,7 +241,7 @@ where
 		let best_hash = self.client.info().best_hash;
 		let api = self.client.runtime_api();
 
-		let (root, tree_size, tree_depth) = api
+		let (_, tree_size, tree_depth) = api
 			.get_merkle_tree_info(best_hash)
 			.map_err(internal_error)?;
 
@@ -255,6 +259,16 @@ where
 			.map_err(internal_error)?
 			.ok_or_else(|| internal_error(format!("no proof for leaf_index {leaf_index}")))?;
 
+		// Sealed trees anchor to their permanent root, not the active one.
+		// A missing entry for an existing leaf means broken sealed-root state;
+		// erroring beats silently serving the wrong anchor.
+		let (root, tree_id) = api
+			.get_root_for_leaf(best_hash, leaf_index)
+			.map_err(internal_error)?
+			.ok_or_else(|| {
+				internal_error(format!("no anchoring root for leaf_index {leaf_index}"))
+			})?;
+
 		Ok(MerkleProofResponse {
 			root: format!("0x{}", hex::encode(root)),
 			path: proof
@@ -264,6 +278,7 @@ where
 				.collect(),
 			leaf_index,
 			tree_depth,
+			tree_id,
 		})
 	}
 
@@ -282,7 +297,7 @@ where
 		}
 		let target = H256::from_slice(&bytes);
 
-		let (root, tree_size, tree_depth) = api
+		let (_, tree_size, tree_depth) = api
 			.get_merkle_tree_info(best_hash)
 			.map_err(internal_error)?;
 
@@ -299,6 +314,16 @@ where
 				))
 			})?;
 
+		// Sealed trees anchor to their permanent root, not the active one.
+		// A missing entry for an existing leaf means broken sealed-root state;
+		// erroring beats silently serving the wrong anchor.
+		let (root, tree_id) = api
+			.get_root_for_leaf(best_hash, leaf_index)
+			.map_err(internal_error)?
+			.ok_or_else(|| {
+				internal_error(format!("no anchoring root for leaf_index {leaf_index}"))
+			})?;
+
 		Ok(MerkleProofResponse {
 			root: format!("0x{}", hex::encode(root)),
 			path: proof
@@ -308,6 +333,7 @@ where
 				.collect(),
 			leaf_index,
 			tree_depth,
+			tree_id,
 		})
 	}
 
@@ -492,11 +518,13 @@ mod tests {
 				path: vec!["0x1111".to_string(), "0x2222".to_string()],
 				leaf_index: 7,
 				tree_depth: 20,
+				tree_id: 0,
 			};
 			let json = serde_json::to_value(&resp).unwrap();
 			assert_eq!(json["root"], "0xaabb");
 			assert_eq!(json["leaf_index"], 7);
 			assert_eq!(json["tree_depth"], 20);
+			assert_eq!(json["tree_id"], 0);
 			assert_eq!(json["path"].as_array().unwrap().len(), 2);
 		}
 
@@ -507,6 +535,7 @@ mod tests {
 				path: vec!["0xaa".to_string()],
 				leaf_index: 3,
 				tree_depth: 20,
+				tree_id: 0,
 			};
 			let back: MerkleProofResponse =
 				serde_json::from_str(&serde_json::to_string(&orig).unwrap()).unwrap();

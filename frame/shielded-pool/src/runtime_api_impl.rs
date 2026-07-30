@@ -30,6 +30,32 @@ impl<T: Config> Pallet<T> {
 		crate::merkle::MerkleTreeService::get_merkle_path::<T>(leaf_index)
 	}
 
+	/// Forest summary: (active_root, global_size, depth, current_tree_id,
+	/// sealed_tree_count).
+	pub fn get_forest_info() -> (Hash, u32, u32, u32, u32) {
+		let root = crate::storage::MerkleRepository::get_poseidon_root::<T>();
+		let size = crate::storage::MerkleRepository::get_tree_size::<T>();
+		let cap = T::MaxLeavesPerTree::get();
+		(root, size, T::MaxTreeDepth::get(), size / cap, size / cap)
+	}
+
+	/// Root the leaf's tree anchors to: sealed trees resolve to their
+	/// permanent final root, the active tree to the live PoseidonRoot.
+	pub fn get_root_for_leaf(leaf_index: u32) -> Option<(Hash, u32)> {
+		let size = crate::storage::MerkleRepository::get_tree_size::<T>();
+		if leaf_index >= size {
+			return None;
+		}
+		let cap = T::MaxLeavesPerTree::get();
+		let tree_id = leaf_index / cap;
+		let root = if tree_id == size / cap {
+			crate::storage::MerkleRepository::get_poseidon_root::<T>()
+		} else {
+			crate::storage::MerkleRepository::get_sealed_root::<T>(tree_id)?
+		};
+		Some((root, tree_id))
+	}
+
 	/// Get Merkle proof for a given commitment.
 	///
 	/// O(1) reverse-index lookup plus an O(depth) sibling-path read from
@@ -112,6 +138,52 @@ mod tests {
 				[0x03u8; 32]
 			)));
 			assert!(crate::Pallet::<Test>::get_merkle_proof(99).is_none());
+		});
+	}
+
+	#[test]
+	fn get_root_for_leaf_distinguishes_sealed_and_active_trees() {
+		new_test_ext().execute_with(|| {
+			// Fill tree 0 (mock cap = 8) and put one leaf in tree 1.
+			for i in 0..9u8 {
+				assert_ok!(crate::Pallet::<Test>::insert_leaf(Commitment::new(
+					[i + 1; 32]
+				)));
+			}
+			let sealed = crate::storage::MerkleRepository::get_sealed_root::<Test>(0).unwrap();
+			let active = crate::storage::MerkleRepository::get_poseidon_root::<Test>();
+
+			assert_eq!(
+				crate::Pallet::<Test>::get_root_for_leaf(0),
+				Some((sealed, 0))
+			);
+			assert_eq!(
+				crate::Pallet::<Test>::get_root_for_leaf(7),
+				Some((sealed, 0))
+			);
+			assert_eq!(
+				crate::Pallet::<Test>::get_root_for_leaf(8),
+				Some((active, 1))
+			);
+			assert_eq!(crate::Pallet::<Test>::get_root_for_leaf(9), None);
+		});
+	}
+
+	#[test]
+	fn get_forest_info_counts_sealed_trees() {
+		new_test_ext().execute_with(|| {
+			for i in 0..9u8 {
+				assert_ok!(crate::Pallet::<Test>::insert_leaf(Commitment::new(
+					[i + 1; 32]
+				)));
+			}
+			let (root, size, depth, current_tree_id, sealed_count) =
+				crate::Pallet::<Test>::get_forest_info();
+			assert_eq!(
+				root,
+				crate::storage::MerkleRepository::get_poseidon_root::<Test>()
+			);
+			assert_eq!((size, depth, current_tree_id, sealed_count), (9, 20, 1, 1));
 		});
 	}
 

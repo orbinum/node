@@ -98,6 +98,34 @@ pub mod v1 {
 	}
 }
 
+pub mod v2 {
+	use super::*;
+
+	/// Storage v1 -> v2: multi-tree forest. `SealedTreeRoots` and
+	/// `SealedRootIndex` start empty (tree 0 has never filled), so this is a
+	/// version-only bump — the rollover logic activates with the runtime code.
+	pub struct MigrateToV2<T>(core::marker::PhantomData<T>);
+
+	impl<T: Config> OnRuntimeUpgrade for MigrateToV2<T> {
+		fn on_runtime_upgrade() -> Weight {
+			if Pallet::<T>::on_chain_storage_version() >= 2 {
+				return T::DbWeight::get().reads(1);
+			}
+			StorageVersion::new(2).put::<Pallet<T>>();
+			T::DbWeight::get().reads_writes(1, 1)
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn post_upgrade(_state: Vec<u8>) -> Result<(), sp_runtime::TryRuntimeError> {
+			frame_support::ensure!(
+				Pallet::<T>::on_chain_storage_version() >= 2,
+				sp_runtime::TryRuntimeError::Other("storage version not bumped to 2")
+			);
+			Ok(())
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::v1::MigrateToV1;
@@ -119,7 +147,9 @@ mod tests {
 	#[test]
 	fn backfill_rebuilds_nodes_and_proofs_verify() {
 		new_test_ext().execute_with(|| {
-			insert_leaves(37);
+			// A v0-era chain only ever had a single tree; stay below the mock
+			// per-tree cap so the backfill precondition holds.
+			insert_leaves(7);
 			let root = MerkleRepository::get_poseidon_root::<Test>();
 
 			// Simulate a v0 chain: leaves exist but internal nodes were never stored.
@@ -129,7 +159,7 @@ mod tests {
 			MigrateToV1::<Test>::on_runtime_upgrade();
 
 			assert_eq!(Pallet::<Test>::on_chain_storage_version(), 1);
-			for i in 0..37u32 {
+			for i in 0..7u32 {
 				let leaf = MerkleRepository::get_leaf::<Test>(i).unwrap();
 				let path = MerkleTreeService::get_merkle_path::<Test>(i).unwrap();
 				assert!(

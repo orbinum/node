@@ -7,8 +7,8 @@ use crate::{
 	pallet::{
 		Assets, BalanceOf, CommitmentMemos, CommitmentToLeafIndex, Config, HistoricPoseidonRoots,
 		HistoricRootsOrder, MerkleLeaves, MerkleNodes, MerkleTreeFrontier, MerkleTreeSize,
-		NextAssetId, NullifierSet, PoolBalancePerAsset, PoseidonRoot, TotalCommitmentsInserted,
-		TotalNullifiersSpent,
+		NextAssetId, NullifierSet, PoolBalancePerAsset, PoseidonRoot, SealedRootIndex,
+		SealedTreeRoots, TotalCommitmentsInserted, TotalNullifiersSpent,
 	},
 	types::{AssetMetadata, Commitment, EncryptedMemo, Hash},
 };
@@ -104,7 +104,14 @@ impl MerkleRepository {
 		HistoricPoseidonRoots::<T>::get(root)
 	}
 	pub fn is_known_root<T: Config>(root: &Hash) -> bool {
-		Self::is_known_poseidon_root::<T>(root)
+		Self::is_known_poseidon_root::<T>(root) || SealedRootIndex::<T>::contains_key(root)
+	}
+	pub fn insert_sealed_root<T: Config>(tree_id: u32, root: Hash) {
+		SealedTreeRoots::<T>::insert(tree_id, root);
+		SealedRootIndex::<T>::insert(root, tree_id);
+	}
+	pub fn get_sealed_root<T: Config>(tree_id: u32) -> Option<Hash> {
+		SealedTreeRoots::<T>::get(tree_id)
 	}
 	pub fn add_historic_poseidon_root<T: Config>(root: Hash) {
 		HistoricPoseidonRoots::<T>::insert(root, true);

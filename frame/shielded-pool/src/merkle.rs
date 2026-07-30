@@ -314,21 +314,24 @@ impl MerkleTreeService {
 	/// replacing the former O(n) full recomputation from all leaves.
 	pub fn insert_leaf<T: Config>(commitment: Commitment) -> Result<u32, DispatchError> {
 		let index = MerkleRepository::get_tree_size::<T>();
-		let max_leaves = 2u32.saturating_pow(crate::types::MAX_TREE_DEPTH);
-		ensure!(index < max_leaves, Error::<T>::MerkleTreeFull);
+		// Absolute forest ceiling: the global u32 leaf index must stay
+		// representable (4096 trees at depth 20). Per-tree fullness rolls
+		// over to a fresh tree below instead of erroring.
+		ensure!(index < u32::MAX, Error::<T>::MerkleTreeFull);
 		ensure!(
 			!CommitmentMemos::<T>::contains_key(commitment),
 			Error::<T>::CommitmentAlreadyExists
 		);
 
+		let cap = T::MaxLeavesPerTree::get();
+		let tree_id = index / cap;
+		let local = index % cap;
+
 		// Load frontier from storage and run one incremental update.
 		// Depth is always DEFAULT_TREE_DEPTH (20) — matches the fixed-size frontier array.
 		let mut frontier = MerkleRepository::get_frontier::<T>();
 		let mut current_hash = commitment.0;
-		let mut current_index = index;
-		// tree_id is 0 while the pool runs a single tree (index < 2^MAX_TREE_DEPTH
-		// is enforced above); MerkleNodes is keyed by tree_id for forest readiness.
-		let tree_id = index >> crate::types::MAX_TREE_DEPTH;
+		let mut current_index = local;
 
 		for (level, frontier_slot) in frontier.iter_mut().enumerate() {
 			if current_index % 2 == 0 {
@@ -364,12 +367,40 @@ impl MerkleTreeService {
 		MerkleRepository::set_poseidon_root::<T>(new_poseidon_root);
 		Self::add_poseidon_historic_root::<T>(new_poseidon_root);
 
+		// The freshly inserted leaf belongs to `new_poseidon_root`, so this
+		// event fires before any seal resets the active root.
 		Pallet::<T>::deposit_event(Event::MerkleRootUpdated {
 			old_root: old_poseidon_root,
 			new_root: new_poseidon_root,
 			tree_size: index.saturating_add(1),
 		});
+
+		if local + 1 == cap {
+			Self::seal_tree::<T>(tree_id, new_poseidon_root, cap);
+		}
 		Ok(index)
+	}
+
+	/// Seal a full tree and open a fresh one, eagerly in the same insert.
+	///
+	/// The final root becomes a permanent anchor (`SealedTreeRoots` /
+	/// `SealedRootIndex`) — unlike the historic ring it never expires, so
+	/// notes in sealed trees stay spendable forever. The active tree resets
+	/// to the empty state; the empty root joins the historic ring to keep
+	/// the `PoseidonRoot ∈ known roots` invariant.
+	fn seal_tree<T: Config>(tree_id: u32, final_root: Hash, cap: u32) {
+		MerkleRepository::insert_sealed_root::<T>(tree_id, final_root);
+		MerkleRepository::set_frontier::<T>([[0u8; 32]; crate::types::DEFAULT_TREE_DEPTH]);
+		let empty_root = get_zero_hash_cached(crate::types::DEFAULT_TREE_DEPTH);
+		MerkleRepository::set_poseidon_root::<T>(empty_root);
+		Self::add_poseidon_historic_root::<T>(empty_root);
+
+		Pallet::<T>::deposit_event(Event::TreeSealed {
+			tree_id,
+			final_root,
+			first_leaf_index: tree_id.saturating_mul(cap),
+			leaf_count: cap,
+		});
 	}
 
 	pub(crate) fn add_poseidon_historic_root<T: Config>(poseidon_root: Hash) {
@@ -404,16 +435,20 @@ impl MerkleTreeService {
 		}
 
 		let depth = crate::types::DEFAULT_TREE_DEPTH;
-		let tree_id = leaf_index >> crate::types::MAX_TREE_DEPTH;
+		let cap = T::MaxLeavesPerTree::get();
+		let tree_id = leaf_index / cap;
+		let local = leaf_index % cap;
 		let mut siblings = [[0u8; 32]; crate::types::DEFAULT_TREE_DEPTH];
 		let mut indices = [0u8; crate::types::DEFAULT_TREE_DEPTH];
 
 		for level in 0..depth {
-			let node_index = leaf_index >> level;
+			let node_index = local >> level;
 			indices[level] = (node_index & 1) as u8;
 			let sibling_index = node_index ^ 1;
 			let sibling = if level == 0 {
-				MerkleRepository::get_leaf::<T>(sibling_index).map(|c| c.0)
+				// Level-0 nodes are the leaves; map the tree-local sibling
+				// back to its global MerkleLeaves index.
+				MerkleRepository::get_leaf::<T>(tree_id * cap + sibling_index).map(|c| c.0)
 			} else {
 				MerkleRepository::get_node::<T>(tree_id, level as u8, sibling_index)
 			};
@@ -823,8 +858,9 @@ mod tests {
 	#[test]
 	fn stored_node_paths_match_recomputed_reference_for_every_leaf() {
 		new_test_ext().execute_with(|| {
-			// 37 leaves: odd count exercises zero-hash padding at several levels.
-			let leaves: Vec<[u8; 32]> = (0..37u8).map(|i| [i + 1; 32]).collect();
+			// 7 leaves (< MaxLeavesPerTree): odd count exercises zero-hash
+			// padding without sealing the tree.
+			let leaves: Vec<[u8; 32]> = (0..7u8).map(|i| [i + 1; 32]).collect();
 			for leaf in &leaves {
 				MerkleTreeService::insert_leaf::<Test>(Commitment::new(*leaf)).unwrap();
 			}
@@ -848,12 +884,12 @@ mod tests {
 	#[test]
 	fn first_and_last_leaf_paths_verify() {
 		new_test_ext().execute_with(|| {
-			let leaves: Vec<[u8; 32]> = (0..8u8).map(|i| [0xA0 + i; 32]).collect();
+			let leaves: Vec<[u8; 32]> = (0..6u8).map(|i| [0xA0 + i; 32]).collect();
 			for leaf in &leaves {
 				MerkleTreeService::insert_leaf::<Test>(Commitment::new(*leaf)).unwrap();
 			}
 			let root = crate::storage::MerkleRepository::get_poseidon_root::<Test>();
-			for i in [0u32, 7] {
+			for i in [0u32, 5] {
 				let path = MerkleTreeService::get_merkle_path::<Test>(i).unwrap();
 				assert!(MerkleTreeService::verify_merkle_proof(
 					&root,
@@ -1037,15 +1073,197 @@ mod tests {
 		});
 	}
 
-	/// The capacity guard is bound by the real tree depth, not the config, so it
-	/// fires at exactly 2^MAX_TREE_DEPTH regardless of MaxTreeDepth.
+	/// The per-tree capacity must divide the fixed depth-20 leaf space so the
+	/// forest's global u32 index spans whole trees.
 	#[test]
-	fn capacity_guard_uses_fixed_depth() {
+	fn per_tree_capacity_fits_fixed_depth() {
 		use crate::types::MAX_TREE_DEPTH;
 		assert_eq!(MAX_TREE_DEPTH, 20);
-		// insert_leaf's max_leaves is 2^MAX_TREE_DEPTH; confirm the constant the
-		// guard reads matches the frontier depth (20 levels).
-		assert_eq!(2u32.saturating_pow(MAX_TREE_DEPTH), 1 << 20);
+		let cap = <Test as crate::Config>::MaxLeavesPerTree::get();
+		assert!(cap.is_power_of_two() && cap <= 1 << MAX_TREE_DEPTH);
+	}
+
+	// ── Multi-tree forest: sealing and rollover ──────────────────────────────
+
+	fn fill_leaves(from: u8, count: u8) {
+		for i in 0..count {
+			MerkleTreeService::insert_leaf::<Test>(Commitment::new([from + i; 32])).unwrap();
+		}
+	}
+
+	#[test]
+	fn filling_insert_seals_tree_and_resets_active_state() {
+		use crate::storage::MerkleRepository;
+		new_test_ext().execute_with(|| {
+			frame_system::Pallet::<Test>::set_block_number(1);
+			fill_leaves(1, 7);
+			let last = MerkleTreeService::insert_leaf::<Test>(Commitment::new([8u8; 32])).unwrap();
+			assert_eq!(last, 7, "filling insert still returns its global index");
+
+			let sealed = MerkleRepository::get_sealed_root::<Test>(0).expect("tree 0 sealed");
+			assert!(MerkleRepository::is_known_root::<Test>(&sealed));
+			// Active tree reset: empty frontier, empty root, empty root known.
+			assert_eq!(MerkleRepository::get_frontier::<Test>(), [[0u8; 32]; 20]);
+			let empty_root = get_zero_hash_cached(20);
+			assert_eq!(MerkleRepository::get_poseidon_root::<Test>(), empty_root);
+			assert!(MerkleRepository::is_known_root::<Test>(&empty_root));
+
+			// Event order: MerkleRootUpdated carries the FINAL root (the new
+			// leaf belongs to it), then TreeSealed.
+			let events: sp_std::vec::Vec<_> = frame_system::Pallet::<Test>::events()
+				.into_iter()
+				.map(|r| r.event)
+				.collect();
+			let root_pos = events
+				.iter()
+				.position(|e| {
+					matches!(e, crate::mock::RuntimeEvent::ShieldedPool(
+						Event::MerkleRootUpdated { new_root, tree_size: 8, .. }
+					) if *new_root == sealed)
+				})
+				.expect("MerkleRootUpdated with final root");
+			let seal_pos = events
+				.iter()
+				.position(|e| {
+					matches!(e, crate::mock::RuntimeEvent::ShieldedPool(
+						Event::TreeSealed { tree_id: 0, final_root, first_leaf_index: 0, leaf_count: 8 }
+					) if *final_root == sealed)
+				})
+				.expect("TreeSealed event");
+			assert!(root_pos < seal_pos);
+		});
+	}
+
+	/// The single most important forest test: a sealed tree's final root must
+	/// survive unbounded activity in later trees — eviction would freeze the
+	/// funds of every unspent note in the sealed tree.
+	#[test]
+	fn sealed_root_survives_historic_ring_eviction() {
+		use crate::storage::MerkleRepository;
+		new_test_ext().execute_with(|| {
+			fill_leaves(1, 8); // seal tree 0
+			let sealed = MerkleRepository::get_sealed_root::<Test>(0).unwrap();
+			let leaf0 = MerkleRepository::get_leaf::<Test>(0).unwrap().0;
+			let path0 = MerkleTreeService::get_merkle_path::<Test>(0).unwrap();
+
+			// MaxHistoricRoots = 100: push far past the window (also sealing
+			// more trees along the way).
+			for i in 0..120u32 {
+				let mut leaf = [0u8; 32];
+				leaf[..4].copy_from_slice(&i.to_le_bytes());
+				leaf[31] = 0xAA;
+				MerkleTreeService::insert_leaf::<Test>(Commitment::new(leaf)).unwrap();
+			}
+
+			assert!(
+				MerkleTreeService::is_known_root::<Test>(&sealed),
+				"sealed root must never expire"
+			);
+			assert!(
+				MerkleTreeService::verify_merkle_proof(&sealed, &leaf0, &path0),
+				"tree-0 note must still prove against its sealed root"
+			);
+		});
+	}
+
+	#[test]
+	fn straddling_inserts_land_in_consecutive_trees() {
+		use crate::storage::MerkleRepository;
+		new_test_ext().execute_with(|| {
+			fill_leaves(1, 7);
+			let a = MerkleTreeService::insert_leaf::<Test>(Commitment::new([0xE1; 32])).unwrap();
+			let b = MerkleTreeService::insert_leaf::<Test>(Commitment::new([0xE2; 32])).unwrap();
+			assert_eq!(
+				(a, b),
+				(7, 8),
+				"global index keeps counting across the seal"
+			);
+
+			// b is local leaf 0 of tree 1: its root evolved from the empty tree.
+			let root = MerkleRepository::get_poseidon_root::<Test>();
+			let path_b = MerkleTreeService::get_merkle_path::<Test>(8).unwrap();
+			assert!(MerkleTreeService::verify_merkle_proof(
+				&root,
+				&[0xE2; 32],
+				&path_b
+			));
+			assert_eq!(path_b.indices, [0u8; 20], "local index 0 is all left turns");
+
+			// a still proves against tree 0's sealed root.
+			let sealed = MerkleRepository::get_sealed_root::<Test>(0).unwrap();
+			let path_a = MerkleTreeService::get_merkle_path::<Test>(7).unwrap();
+			assert!(MerkleTreeService::verify_merkle_proof(
+				&sealed,
+				&[0xE1; 32],
+				&path_a
+			));
+		});
+	}
+
+	#[test]
+	fn duplicate_commitment_rejected_across_trees() {
+		new_test_ext().execute_with(|| {
+			let dup = Commitment::new([0xD7; 32]);
+			MerkleTreeService::insert_leaf::<Test>(dup).unwrap();
+			use crate::storage::CommitmentRepository;
+			use crate::types::{EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE};
+			CommitmentRepository::store_memo::<Test>(
+				dup,
+				EncryptedMemo::from_bytes(&[0x01u8; MAX_ENCRYPTED_MEMO_SIZE as usize]).unwrap(),
+			);
+			fill_leaves(1, 7); // seals tree 0; now in tree 1
+			assert!(
+				MerkleTreeService::insert_leaf::<Test>(dup).is_err(),
+				"same commitment in a later tree would alias the nullifier"
+			);
+		});
+	}
+
+	/// try_state invariants must hold before, across, and after a seal.
+	/// Runs only with `--features try-runtime` (the hook is feature-gated).
+	#[cfg(feature = "try-runtime")]
+	#[test]
+	fn try_state_holds_across_seal() {
+		use frame_support::traits::Hooks;
+		new_test_ext().execute_with(|| {
+			let try_state = || {
+				<crate::Pallet<Test> as Hooks<
+					frame_system::pallet_prelude::BlockNumberFor<Test>,
+				>>::try_state(0)
+			};
+			assert!(try_state().is_ok(), "empty forest");
+			fill_leaves(1, 7);
+			assert!(try_state().is_ok(), "partially filled tree 0");
+			fill_leaves(8, 2); // seals tree 0, opens tree 1
+			assert!(try_state().is_ok(), "across the seal");
+		});
+	}
+
+	#[test]
+	fn multiple_rollovers_keep_every_tree_provable() {
+		use crate::storage::MerkleRepository;
+		new_test_ext().execute_with(|| {
+			// Fill trees 0 and 1, half-fill tree 2 (cap = 8).
+			for i in 0..20u8 {
+				MerkleTreeService::insert_leaf::<Test>(Commitment::new([i + 1; 32])).unwrap();
+			}
+			let roots = [
+				MerkleRepository::get_sealed_root::<Test>(0).expect("tree 0 sealed"),
+				MerkleRepository::get_sealed_root::<Test>(1).expect("tree 1 sealed"),
+				MerkleRepository::get_poseidon_root::<Test>(),
+			];
+			assert!(MerkleRepository::get_sealed_root::<Test>(2).is_none());
+
+			for i in 0..20u32 {
+				let leaf = [(i + 1) as u8; 32];
+				let path = MerkleTreeService::get_merkle_path::<Test>(i).unwrap();
+				let root = roots[(i / 8) as usize];
+				assert!(
+					MerkleTreeService::verify_merkle_proof(&root, &leaf, &path),
+					"leaf {i} must prove against its tree's root"
+				);
+			}
+		});
 	}
 
 	// ── historic-root window ──────────────────────────────────────────────────
