@@ -2,6 +2,48 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.11.0] - 2026-07-30
+
+### Added
+- **`MerkleNodes` storage: internal tree nodes persisted on insert.** The
+  frontier walk in `insert_leaf` already computed every node along the
+  insertion path and discarded them; they are now written to
+  `MerkleNodes: StorageNMap<(tree_id, level, index), Hash>` (levels 1..=19 —
+  level 0 is `MerkleLeaves`, level 20 is `PoseidonRoot`). The key includes
+  `tree_id` (fixed at 0 on the current single tree) so the planned multi-tree
+  forest needs no storage remapping.
+- **`MigrateToV1`** (`src/migrations.rs`): one-shot backfill of `MerkleNodes`
+  from existing leaves, idempotent, guarded by the new pallet
+  `STORAGE_VERSION(1)`. try-runtime `post_upgrade` verifies the backfilled
+  level-19 nodes derive `PoseidonRoot`. Rehearsed against a live testnet
+  snapshot (~block 202k): migration weight is ~3s of ref_time at ~90k leaves —
+  the upgrade block runs overweight once; re-evaluate (or move to MBM) if
+  deployed above ~150k leaves.
+
+### Changed
+- **`get_merkle_path` is O(depth): 20 point reads, zero hashing** — it
+  previously loaded *every* leaf and rebuilt all 20 levels per call (O(n)
+  reads + O(n) Poseidon hashes). Missing siblings resolve to the canonical
+  zero hash. `MerkleRepository::get_all_leaves` removed with it.
+- **Weights regenerated** on the reference host (`ubuntu-32gb-hel1-1`, AMD
+  EPYC-Genoa, `--steps=50 --repeat=20`): every leaf-inserting extrinsic pays
+  the node writes (`shield` 13 → 32 writes; batched inserts dedupe shared
+  ancestors, e.g. 20-leaf `shield_batch` touches ~35 distinct node keys, not
+  19×20). Known pre-existing gap: the `unshield` benchmark exercises the
+  no-change-note path.
+- Consensus-affecting (new storage writes on every insert): requires a
+  runtime `spec_version` bump at release. `transaction_version` unchanged —
+  no extrinsic signature changes.
+
+### Related (outside this crate)
+- `privacy_getMerkleProof` / `privacy_getMerkleProofByCommitment` (fc-rpc-v2)
+  now route through the runtime API: O(1) index lookup via
+  `CommitmentToLeafIndex` instead of a linear leaf scan, and the
+  `MAX_RPC_LEAVES = 100_000` cap is removed. Response shape unchanged.
+- The runtime now implements the `TryRuntime` API, and its `build.rs` skips
+  the Poseidon host-function feature on try-runtime builds so the stock
+  try-runtime CLI can execute the wasm.
+
 ## [0.10.1] - 2026-07-17
 
 ### Fixed

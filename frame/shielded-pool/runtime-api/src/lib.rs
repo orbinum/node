@@ -33,8 +33,8 @@ sp_api::decl_runtime_apis! {
 		/// Get the Merkle proof for a given leaf index
 		fn get_merkle_proof(leaf_index: u32) -> Option<DefaultMerklePath>;
 
-		/// Get the Merkle proof for a given commitment
-		/// (This requires scanning the leaves in the runtime, which is expensive but convenient)
+		/// Get the Merkle proof for a given commitment.
+		/// O(1) index lookup plus O(depth) sibling reads from stored nodes.
 		fn get_merkle_proof_for_commitment(commitment: Hash) -> Option<(u32, DefaultMerklePath)>;
 
 		/// Return relay configuration sourced from the runtime.

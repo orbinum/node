@@ -44,6 +44,7 @@ frame-support = { workspace = true, features = ["experimental"] }
 frame-system = { workspace = true }
 frame-system-benchmarking = { workspace = true, optional = true }
 frame-system-rpc-runtime-api = { workspace = true }
+frame-try-runtime = { workspace = true, optional = true }
 pallet-account-mapping = { workspace = true }
 pallet-account-mapping-runtime-api = { workspace = true }
 pallet-aura = { workspace = true }
@@ -128,6 +129,7 @@ std = [
 	"frame-executive/std",
 	"frame-metadata-hash-extension/std",
 	"frame-support/std",
+	"frame-try-runtime?/std",
 	"frame-system/std",
 	"frame-system-rpc-runtime-api/std",
 	"frame-system-benchmarking?/std",
@@ -167,7 +169,6 @@ std = [
 	"pallet-relayer/std",
 	"pallet-relayer-runtime-api/std",
 	"pallet-shielded-pool/std",
-	"pallet-shielded-pool/poseidon-native",
 	"pallet-shielded-pool-runtime-api/std",
 	"pallet-zk-verifier-runtime-api/std",
 	# Polkadot
@@ -202,6 +203,7 @@ skip-proof-verification = [
 ]
 
 try-runtime = [
+	"frame-try-runtime/try-runtime",
 	"cumulus-pallet-weight-reclaim/try-runtime",
 	"fp-self-contained/try-runtime",
 	"frame-executive/try-runtime",

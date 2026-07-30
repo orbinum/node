@@ -11,13 +11,12 @@ use jsonrpsee::{
 	proc_macros::rpc,
 	types::error::{ErrorCode, ErrorObject},
 };
-use pallet_shielded_pool::{
-	merkle::{get_zero_hash_cached, hash_pair_poseidon},
-	DEFAULT_TREE_DEPTH,
-};
+use pallet_shielded_pool::DEFAULT_TREE_DEPTH;
+use pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi;
 use sc_client_api::StorageProvider as ScStorageProvider;
 use scale_codec::Decode;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use sp_api::ProvideRuntimeApi;
 
 /// `u128` serde helper: serialises as a decimal string so JavaScript clients
 /// can parse values larger than `Number.MAX_SAFE_INTEGER` without precision loss.
@@ -48,12 +47,6 @@ use std::{marker::PhantomData, sync::Arc};
 // ============================================================================
 
 const PALLET: &[u8] = b"ShieldedPool";
-
-/// Maximum number of Merkle leaves the RPC will load per request.
-/// Prevents DoS via unbounded O(n) storage reads on deep trees.
-/// At tree depth 20 the theoretical maximum is 2^20 ≈ 1M leaves;
-/// we cap far below that to keep RPC latency bounded.
-const MAX_RPC_LEAVES: u32 = 100_000;
 
 /// Builds `twox_128(pallet) ++ twox_128(item)` (32 bytes — `StorageValue` key).
 fn value_key(item: &[u8]) -> Vec<u8> {
@@ -133,7 +126,8 @@ pub trait PrivacyApi {
 	fn get_merkle_proof(&self, leaf_index: u32) -> RpcResult<MerkleProofResponse>;
 
 	/// Returns a Merkle sibling-path proof for the given commitment (`0x`-prefixed hex, 32 bytes).
-	/// Scans `MerkleLeaves` linearly to resolve the leaf index.
+	/// Resolves the leaf index via the on-chain reverse index (O(1)) and reads the
+	/// stored sibling path (O(depth)). Root and path come from the same block.
 	/// Returns an error if the commitment is not found in the tree.
 	#[method(name = "privacy_getMerkleProofByCommitment")]
 	fn get_merkle_proof_by_commitment(&self, commitment: String) -> RpcResult<MerkleProofResponse>;
@@ -202,17 +196,6 @@ fn pool_is_empty() -> ErrorObject<'static> {
 	)
 }
 
-fn too_many_leaves(size: u32) -> ErrorObject<'static> {
-	ErrorObject::owned(
-		ErrorCode::InternalError.code(),
-		format!(
-			"tree_size {size} exceeds RPC limit {MAX_RPC_LEAVES}; \
-				use an archive node or paginated access"
-		),
-		None::<()>,
-	)
-}
-
 // ============================================================================
 // Storage helper — shared across all handler methods
 // ============================================================================
@@ -228,55 +211,13 @@ fn read_storage<B: BlockT, C: ScStorageProvider<B, BE>, BE: sc_client_api::Backe
 }
 
 // ============================================================================
-// Pure Merkle path builder — extracted for testability
-//
-// Mirrors `IncrementalMerkleTree::generate_proof` in the pallet exactly.
-// Returns a `DEFAULT_TREE_DEPTH`-element sibling path (raw bytes).
-// ============================================================================
-
-fn build_merkle_path(leaves: &[[u8; 32]], leaf_index: usize) -> Vec<[u8; 32]> {
-	let mut current_level = leaves.to_vec();
-	let mut path = Vec::with_capacity(DEFAULT_TREE_DEPTH);
-	let mut target = leaf_index;
-
-	for level in 0..DEFAULT_TREE_DEPTH {
-		// Pad odd levels with the canonical zero hash for this level.
-		if current_level.len() % 2 != 0 {
-			current_level.push(get_zero_hash_cached(level));
-		}
-
-		let sibling_idx = target ^ 1;
-		let sibling = if sibling_idx < current_level.len() {
-			current_level[sibling_idx]
-		} else {
-			get_zero_hash_cached(level)
-		};
-		path.push(sibling);
-
-		// Compute the parent level.
-		let mut next: Vec<[u8; 32]> = Vec::with_capacity(current_level.len().div_ceil(2));
-		for chunk in current_level.chunks(2) {
-			let left = chunk[0];
-			let right = chunk
-				.get(1)
-				.copied()
-				.unwrap_or_else(|| get_zero_hash_cached(level));
-			next.push(hash_pair_poseidon(&left, &right));
-		}
-		current_level = next;
-		target /= 2;
-	}
-
-	path
-}
-
-// ============================================================================
 // PrivacyApiServer implementation
 // ============================================================================
 
 impl<C, B, BE> PrivacyApiServer for PrivacyRpc<C, B, BE>
 where
-	C: HeaderBackend<B> + ScStorageProvider<B, BE> + Send + Sync + 'static,
+	C: HeaderBackend<B> + ScStorageProvider<B, BE> + ProvideRuntimeApi<B> + Send + Sync + 'static,
+	C::Api: ShieldedPoolRuntimeApi<B>,
 	B: BlockT,
 	BE: sc_client_api::Backend<B> + Send + Sync + 'static,
 {
@@ -291,18 +232,17 @@ where
 	}
 
 	fn get_merkle_proof(&self, leaf_index: u32) -> RpcResult<MerkleProofResponse> {
+		// Both runtime-API calls execute at the same block, so root and path
+		// can never mismatch.
 		let best_hash = self.client.info().best_hash;
+		let api = self.client.runtime_api();
 
-		// Tree size
-		let size_data = read_storage(&*self.client, best_hash, value_key(b"MerkleTreeSize"))?
-			.ok_or_else(pool_not_initialized)?;
-		let tree_size = u32::decode(&mut &size_data[..]).map_err(internal_error)?;
+		let (root, tree_size, tree_depth) = api
+			.get_merkle_tree_info(best_hash)
+			.map_err(internal_error)?;
 
 		if tree_size == 0 {
 			return Err(pool_is_empty());
-		}
-		if tree_size > MAX_RPC_LEAVES {
-			return Err(too_many_leaves(tree_size));
 		}
 		if leaf_index >= tree_size {
 			return Err(invalid_params(format!(
@@ -310,42 +250,26 @@ where
 			)));
 		}
 
-		// Load all leaves
-		let current_level: Vec<[u8; 32]> = (0..tree_size)
-			.map(|i| {
-				let data = read_storage(
-					&*self.client,
-					best_hash,
-					map_key(b"MerkleLeaves", &i.to_le_bytes()),
-				)?
-				.ok_or_else(|| internal_error(format!("leaf {i} missing from storage")))?;
-				let h256 = H256::decode(&mut &data[..]).map_err(internal_error)?;
-				Ok::<[u8; 32], ErrorObject<'static>>(h256.into())
-			})
-			.collect::<Result<_, _>>()?;
-
-		// Read root from same block (atomic — no root/path mismatch)
-		let root_data = read_storage(&*self.client, best_hash, value_key(b"PoseidonRoot"))?
-			.ok_or_else(pool_not_initialized)?;
-		let root = H256::decode(&mut &root_data[..]).map_err(internal_error)?;
-
-		// Build sibling path using the shared pure function.
-		let raw_path = build_merkle_path(&current_level, leaf_index as usize);
-		let path: Vec<String> = raw_path
-			.iter()
-			.map(|s| format!("0x{}", hex::encode(s)))
-			.collect();
+		let proof = api
+			.get_merkle_proof(best_hash, leaf_index)
+			.map_err(internal_error)?
+			.ok_or_else(|| internal_error(format!("no proof for leaf_index {leaf_index}")))?;
 
 		Ok(MerkleProofResponse {
-			root: format!("0x{}", hex::encode(root.as_bytes())),
-			path,
+			root: format!("0x{}", hex::encode(root)),
+			path: proof
+				.siblings
+				.iter()
+				.map(|s| format!("0x{}", hex::encode(s)))
+				.collect(),
 			leaf_index,
-			tree_depth: DEFAULT_TREE_DEPTH as u32,
+			tree_depth,
 		})
 	}
 
 	fn get_merkle_proof_by_commitment(&self, commitment: String) -> RpcResult<MerkleProofResponse> {
 		let best_hash = self.client.info().best_hash;
+		let api = self.client.runtime_api();
 
 		// Parse commitment hex
 		let hex_str = commitment.trim_start_matches("0x");
@@ -358,58 +282,32 @@ where
 		}
 		let target = H256::from_slice(&bytes);
 
-		// Tree size
-		let size_data = read_storage(&*self.client, best_hash, value_key(b"MerkleTreeSize"))?
-			.ok_or_else(pool_not_initialized)?;
-		let tree_size = u32::decode(&mut &size_data[..]).map_err(internal_error)?;
+		let (root, tree_size, tree_depth) = api
+			.get_merkle_tree_info(best_hash)
+			.map_err(internal_error)?;
 
 		if tree_size == 0 {
 			return Err(pool_is_empty());
 		}
-		if tree_size > MAX_RPC_LEAVES {
-			return Err(too_many_leaves(tree_size));
-		}
 
-		// Load all leaves; find the matching commitment
-		let mut leaf_index: Option<u32> = None;
-		let mut current_level: Vec<[u8; 32]> = Vec::with_capacity(tree_size as usize);
-
-		for i in 0..tree_size {
-			let data = read_storage(
-				&*self.client,
-				best_hash,
-				map_key(b"MerkleLeaves", &i.to_le_bytes()),
-			)?
-			.ok_or_else(|| internal_error(format!("leaf {i} missing from storage")))?;
-			let h256 = H256::decode(&mut &data[..]).map_err(internal_error)?;
-			if leaf_index.is_none() && h256 == target {
-				leaf_index = Some(i);
-			}
-			current_level.push(h256.into());
-		}
-
-		let leaf_index = leaf_index.ok_or_else(|| {
-			invalid_params(format!(
-				"commitment 0x{hex_str} not found in the Merkle tree"
-			))
-		})?;
-
-		// Read root from same block (atomic — no root/path mismatch)
-		let root_data = read_storage(&*self.client, best_hash, value_key(b"PoseidonRoot"))?
-			.ok_or_else(pool_not_initialized)?;
-		let root = H256::decode(&mut &root_data[..]).map_err(internal_error)?;
-
-		let raw_path = build_merkle_path(&current_level, leaf_index as usize);
-		let path: Vec<String> = raw_path
-			.iter()
-			.map(|s| format!("0x{}", hex::encode(s)))
-			.collect();
+		let (leaf_index, proof) = api
+			.get_merkle_proof_for_commitment(best_hash, target.into())
+			.map_err(internal_error)?
+			.ok_or_else(|| {
+				invalid_params(format!(
+					"commitment 0x{hex_str} not found in the Merkle tree"
+				))
+			})?;
 
 		Ok(MerkleProofResponse {
-			root: format!("0x{}", hex::encode(root.as_bytes())),
-			path,
+			root: format!("0x{}", hex::encode(root)),
+			path: proof
+				.siblings
+				.iter()
+				.map(|s| format!("0x{}", hex::encode(s)))
+				.collect(),
 			leaf_index,
-			tree_depth: DEFAULT_TREE_DEPTH as u32,
+			tree_depth,
 		})
 	}
 
@@ -507,7 +405,6 @@ where
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use pallet_shielded_pool::merkle::{get_zero_hash_cached, hash_pair_poseidon};
 	use sp_core::hashing::twox_128;
 
 	// -------------------------------------------------------------------------
@@ -578,95 +475,6 @@ mod tests {
 			let key = map_key(b"MerkleLeaves", &raw);
 			// Last 4 bytes must be the original LE-encoded key
 			assert_eq!(&key[key.len() - 4..], &raw);
-		}
-	}
-
-	// -------------------------------------------------------------------------
-	// build_merkle_path algorithm
-	// -------------------------------------------------------------------------
-
-	mod merkle_path {
-		use super::*;
-
-		fn leaf(byte: u8) -> [u8; 32] {
-			let mut arr = [0u8; 32];
-			arr[0] = byte;
-			arr
-		}
-
-		#[test]
-		fn path_is_always_tree_depth_elements() {
-			for n in [1u32, 2, 3, 5, 10, 20] {
-				let leaves: Vec<[u8; 32]> = (0..n).map(|i| leaf(i as u8)).collect();
-				let path = build_merkle_path(&leaves, 0);
-				assert_eq!(
-					path.len(),
-					DEFAULT_TREE_DEPTH,
-					"path len must be {DEFAULT_TREE_DEPTH} for n={n}"
-				);
-			}
-		}
-
-		#[test]
-		fn single_leaf_sibling_at_level0_is_zero_hash() {
-			let path = build_merkle_path(&[leaf(0xAA)], 0);
-			assert_eq!(path[0], get_zero_hash_cached(0));
-		}
-
-		#[test]
-		fn two_leaves_sibling_is_the_other_leaf() {
-			let l0 = leaf(0xAA);
-			let l1 = leaf(0xBB);
-			let path0 = build_merkle_path(&[l0, l1], 0);
-			let path1 = build_merkle_path(&[l0, l1], 1);
-			assert_eq!(path0[0], l1, "sibling of l0 must be l1");
-			assert_eq!(path1[0], l0, "sibling of l1 must be l0");
-		}
-
-		#[test]
-		fn last_leaf_in_odd_tree_gets_zero_hash_sibling() {
-			// Tree of 3: leaf index 2 is paired with a padded zero hash.
-			let leaves = vec![leaf(1), leaf(2), leaf(3)];
-			let path = build_merkle_path(&leaves, 2);
-			assert_eq!(path[0], get_zero_hash_cached(0));
-		}
-
-		#[test]
-		fn two_leaves_in_same_pair_share_upper_path() {
-			let l0 = leaf(0x11);
-			let l1 = leaf(0x22);
-			let path0 = build_merkle_path(&[l0, l1], 0);
-			let path1 = build_merkle_path(&[l0, l1], 1);
-			// Both leaves produce the same parent node, so levels 1..DEPTH must match.
-			assert_eq!(&path0[1..], &path1[1..]);
-		}
-
-		#[test]
-		fn level1_sibling_is_hash_of_sibling_pair() {
-			let l = [leaf(0x11), leaf(0x22), leaf(0x33), leaf(0x44)];
-			let path0 = build_merkle_path(&l, 0);
-			// l0 is in pair (l0, l1). The sibling at level 1 is hash(l2, l3).
-			assert_eq!(path0[0], l[1]);
-			assert_eq!(path0[1], hash_pair_poseidon(&l[2], &l[3]));
-		}
-
-		#[test]
-		fn leaf_index_1_in_4_leaf_tree_correct_siblings() {
-			let l = [leaf(0x11), leaf(0x22), leaf(0x33), leaf(0x44)];
-			let path1 = build_merkle_path(&l, 1);
-			assert_eq!(path1[0], l[0]);
-			assert_eq!(path1[1], hash_pair_poseidon(&l[2], &l[3]));
-		}
-
-		#[test]
-		fn upper_path_levels_use_progressive_zero_hashes_for_single_leaf() {
-			let path = build_merkle_path(&[leaf(0xFF)], 0);
-			// After level 0 the single leaf is hashed with zero_hash[0] to form the
-			// level-1 node. The sibling at level 1 must be zero_hash[1], and so on.
-			#[allow(clippy::needless_range_loop)]
-			for level in 1..DEFAULT_TREE_DEPTH {
-				assert_eq!(path[level], get_zero_hash_cached(level));
-			}
 		}
 	}
 
@@ -947,54 +755,6 @@ mod tests {
 			let uninit = pool_not_initialized();
 			// Must produce distinct messages so callers can distinguish the two states.
 			assert_ne!(empty.message(), uninit.message());
-		}
-
-		#[test]
-		fn too_many_leaves_includes_tree_size_in_message() {
-			let e = too_many_leaves(999_999);
-			assert!(
-				e.message().contains("999999"),
-				"message must contain the tree_size"
-			);
-		}
-
-		#[test]
-		fn too_many_leaves_includes_limit_in_message() {
-			let e = too_many_leaves(1);
-			assert!(
-				e.message().contains(&MAX_RPC_LEAVES.to_string()),
-				"message must contain MAX_RPC_LEAVES"
-			);
-		}
-
-		#[test]
-		fn too_many_leaves_uses_internal_error_code() {
-			let e = too_many_leaves(1);
-			assert_eq!(e.code(), ErrorCode::InternalError.code());
-		}
-	}
-
-	// -------------------------------------------------------------------------
-	// MAX_RPC_LEAVES constant sanity
-	// -------------------------------------------------------------------------
-
-	mod rpc_leaf_cap {
-		use super::*;
-
-		#[test]
-		fn max_rpc_leaves_is_below_tree_capacity() {
-			// Tree capacity = 2^DEFAULT_TREE_DEPTH. Cap must be strictly less
-			// to provide meaningful DoS protection.
-			let capacity: u64 = 1u64 << DEFAULT_TREE_DEPTH;
-			assert!(
-				(MAX_RPC_LEAVES as u64) < capacity,
-				"MAX_RPC_LEAVES {MAX_RPC_LEAVES} must be < tree capacity {capacity}"
-			);
-		}
-
-		#[test]
-		fn max_rpc_leaves_is_nonzero() {
-			const _: () = assert!(MAX_RPC_LEAVES > 0);
 		}
 	}
 }
