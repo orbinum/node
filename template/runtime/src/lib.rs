@@ -201,7 +201,6 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: Cow::Borrowed("orbinum"),
 	impl_name: Cow::Borrowed("orbinum"),
 	authoring_version: 1,
-	// 4: shielded-pool 0.11.0 — MerkleNodes storage + MigrateToV1 backfill
 	spec_version: 4,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
