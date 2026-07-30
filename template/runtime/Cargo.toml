@@ -41,10 +41,10 @@ frame-benchmarking = { workspace = true, optional = true }
 frame-executive = { workspace = true }
 frame-metadata-hash-extension = { workspace = true }
 frame-support = { workspace = true, features = ["experimental"] }
-frame-try-runtime = { workspace = true, optional = true }
 frame-system = { workspace = true }
 frame-system-benchmarking = { workspace = true, optional = true }
 frame-system-rpc-runtime-api = { workspace = true }
+frame-try-runtime = { workspace = true, optional = true }
 pallet-account-mapping = { workspace = true }
 pallet-account-mapping-runtime-api = { workspace = true }
 pallet-aura = { workspace = true }
