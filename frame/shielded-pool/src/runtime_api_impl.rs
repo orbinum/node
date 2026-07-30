@@ -30,13 +30,10 @@ impl<T: Config> Pallet<T> {
 		crate::merkle::MerkleTreeService::get_merkle_path::<T>(leaf_index)
 	}
 
-	/// Get Merkle proof for a given commitment
+	/// Get Merkle proof for a given commitment.
 	///
-	/// This scans all leaves in the tree to find the commitment.
-	/// Returns (leaf_index, proof) if found, None otherwise.
-	///
-	/// Note: This is expensive as it requires scanning all leaves.
-	/// Should be used sparingly or cached off-chain.
+	/// O(1) reverse-index lookup plus an O(depth) sibling-path read from
+	/// `MerkleNodes`. Returns (leaf_index, proof) if found, None otherwise.
 	pub fn get_merkle_proof_for_commitment(commitment: Hash) -> Option<(u32, DefaultMerklePath)> {
 		let commitment_wrapped = Commitment(commitment);
 

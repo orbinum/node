@@ -13,6 +13,7 @@ targets = ["x86_64-unknown-linux-gnu"]
 [dependencies]
 # Substrate
 sc-client-api = { workspace = true }
+sp-api = { workspace = true, features = ["std"] }
 sp-blockchain = { workspace = true }
 sp-core = { workspace = true, features = ["default"] }
 sp-runtime = { workspace = true, features = ["default"] }
@@ -29,6 +30,7 @@ serde = { workspace = true }
 
 # Orbinum Primitives
 pallet-shielded-pool = { workspace = true, features = ["std"] }
+pallet-shielded-pool-runtime-api = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }

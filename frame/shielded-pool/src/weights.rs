@@ -93,7 +93,7 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		// Minimum execution time: 748_837_000 picoseconds.
 		Weight::from_parts(763_347_000, 4687)
 			.saturating_add(T::DbWeight::get().reads(14_u64))
-			.saturating_add(T::DbWeight::get().writes(13_u64))
+			.saturating_add(T::DbWeight::get().writes(32_u64))
 	}
 	/// Storage: `ShieldedPool::Assets` (r:1 w:0)
 	/// Proof: `ShieldedPool::Assets` (`max_values`: None, `max_size`: Some(166), added: 2641, mode: `MaxEncodedLen`)
@@ -141,7 +141,7 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(13_u64))
 			.saturating_add(T::DbWeight::get().reads((1_u64).saturating_mul(n.into())))
 			.saturating_add(T::DbWeight::get().writes(9_u64))
-			.saturating_add(T::DbWeight::get().writes((4_u64).saturating_mul(n.into())))
+			.saturating_add(T::DbWeight::get().writes((23_u64).saturating_mul(n.into())))
 			.saturating_add(Weight::from_parts(0, 2705).saturating_mul(n.into()))
 	}
 	/// Storage: `ShieldedPool::Assets` (r:1 w:0)
@@ -194,7 +194,7 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(15_u64))
 			.saturating_add(T::DbWeight::get().reads((2_u64).saturating_mul(n.into())))
 			.saturating_add(T::DbWeight::get().writes(9_u64))
-			.saturating_add(T::DbWeight::get().writes((5_u64).saturating_mul(n.into())))
+			.saturating_add(T::DbWeight::get().writes((24_u64).saturating_mul(n.into())))
 			.saturating_add(Weight::from_parts(0, 2705).saturating_mul(n.into()))
 	}
 	/// Storage: `ShieldedPool::Assets` (r:1 w:0)
@@ -232,7 +232,7 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		// Minimum execution time: 101_489_000 picoseconds.
 		Weight::from_parts(104_063_000, 6196)
 			.saturating_add(T::DbWeight::get().reads(15_u64))
-			.saturating_add(T::DbWeight::get().writes(8_u64))
+			.saturating_add(T::DbWeight::get().writes(27_u64))
 	}
 	/// Storage: `ShieldedPool::NextAssetId` (r:1 w:1)
 	/// Proof: `ShieldedPool::NextAssetId` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
@@ -330,7 +330,7 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		// Minimum execution time: 740_796_000 picoseconds.
 		Weight::from_parts(745_853_000, 4687)
 			.saturating_add(T::DbWeight::get().reads(12_u64))
-			.saturating_add(T::DbWeight::get().writes(12_u64))
+			.saturating_add(T::DbWeight::get().writes(31_u64))
 	}
 }
 
@@ -377,7 +377,7 @@ impl WeightInfo for () {
 		// Minimum execution time: 748_837_000 picoseconds.
 		Weight::from_parts(763_347_000, 4687)
 			.saturating_add(RocksDbWeight::get().reads(14_u64))
-			.saturating_add(RocksDbWeight::get().writes(13_u64))
+			.saturating_add(RocksDbWeight::get().writes(32_u64))
 	}
 	/// Storage: `ShieldedPool::Assets` (r:1 w:0)
 	/// Proof: `ShieldedPool::Assets` (`max_values`: None, `max_size`: Some(166), added: 2641, mode: `MaxEncodedLen`)
@@ -425,7 +425,7 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(13_u64))
 			.saturating_add(RocksDbWeight::get().reads((1_u64).saturating_mul(n.into())))
 			.saturating_add(RocksDbWeight::get().writes(9_u64))
-			.saturating_add(RocksDbWeight::get().writes((4_u64).saturating_mul(n.into())))
+			.saturating_add(RocksDbWeight::get().writes((23_u64).saturating_mul(n.into())))
 			.saturating_add(Weight::from_parts(0, 2705).saturating_mul(n.into()))
 	}
 	/// Storage: `ShieldedPool::Assets` (r:1 w:0)
@@ -478,7 +478,7 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(15_u64))
 			.saturating_add(RocksDbWeight::get().reads((2_u64).saturating_mul(n.into())))
 			.saturating_add(RocksDbWeight::get().writes(9_u64))
-			.saturating_add(RocksDbWeight::get().writes((5_u64).saturating_mul(n.into())))
+			.saturating_add(RocksDbWeight::get().writes((24_u64).saturating_mul(n.into())))
 			.saturating_add(Weight::from_parts(0, 2705).saturating_mul(n.into()))
 	}
 	/// Storage: `ShieldedPool::Assets` (r:1 w:0)
@@ -516,7 +516,7 @@ impl WeightInfo for () {
 		// Minimum execution time: 101_489_000 picoseconds.
 		Weight::from_parts(104_063_000, 6196)
 			.saturating_add(RocksDbWeight::get().reads(15_u64))
-			.saturating_add(RocksDbWeight::get().writes(8_u64))
+			.saturating_add(RocksDbWeight::get().writes(27_u64))
 	}
 	/// Storage: `ShieldedPool::NextAssetId` (r:1 w:1)
 	/// Proof: `ShieldedPool::NextAssetId` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
@@ -614,6 +614,6 @@ impl WeightInfo for () {
 		// Minimum execution time: 740_796_000 picoseconds.
 		Weight::from_parts(745_853_000, 4687)
 			.saturating_add(RocksDbWeight::get().reads(12_u64))
-			.saturating_add(RocksDbWeight::get().writes(12_u64))
+			.saturating_add(RocksDbWeight::get().writes(31_u64))
 	}
 }

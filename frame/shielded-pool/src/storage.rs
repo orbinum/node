@@ -6,8 +6,8 @@
 use crate::{
 	pallet::{
 		Assets, BalanceOf, CommitmentMemos, CommitmentToLeafIndex, Config, HistoricPoseidonRoots,
-		HistoricRootsOrder, MerkleLeaves, MerkleTreeFrontier, MerkleTreeSize, NextAssetId,
-		NullifierSet, PoolBalancePerAsset, PoseidonRoot, TotalCommitmentsInserted,
+		HistoricRootsOrder, MerkleLeaves, MerkleNodes, MerkleTreeFrontier, MerkleTreeSize,
+		NextAssetId, NullifierSet, PoolBalancePerAsset, PoseidonRoot, TotalCommitmentsInserted,
 		TotalNullifiersSpent,
 	},
 	types::{AssetMetadata, Commitment, EncryptedMemo, Hash},
@@ -133,11 +133,11 @@ impl MerkleRepository {
 	pub fn find_leaf_index<T: Config>(commitment: &Commitment) -> Option<u32> {
 		Self::get_commitment_leaf_index::<T>(commitment)
 	}
-	pub fn get_all_leaves<T: Config>() -> sp_std::vec::Vec<Hash> {
-		let size = Self::get_tree_size::<T>();
-		(0..size)
-			.filter_map(|i| Self::get_leaf::<T>(i).map(|c| c.0))
-			.collect()
+	pub fn get_node<T: Config>(tree_id: u32, level: u8, index: u32) -> Option<Hash> {
+		MerkleNodes::<T>::get((tree_id, level, index))
+	}
+	pub fn set_node<T: Config>(tree_id: u32, level: u8, index: u32, node: Hash) {
+		MerkleNodes::<T>::insert((tree_id, level, index), node);
 	}
 }
 
@@ -443,17 +443,16 @@ mod tests {
 	}
 
 	#[test]
-	fn merkle_repo_get_all_leaves_returns_all() {
+	fn merkle_repo_node_get_set_and_missing() {
 		new_test_ext().execute_with(|| {
-			let c0 = test_commitment(0xB1);
-			let c1 = test_commitment(0xB2);
-			MerkleRepository::insert_leaf::<Test>(0, c0);
-			MerkleRepository::insert_leaf::<Test>(1, c1);
-			MerkleRepository::set_tree_size::<Test>(2);
-			let leaves = MerkleRepository::get_all_leaves::<Test>();
-			assert_eq!(leaves.len(), 2);
-			assert!(leaves.contains(&c0.0));
-			assert!(leaves.contains(&c1.0));
+			assert_eq!(MerkleRepository::get_node::<Test>(0, 1, 0), None);
+			let node = [0xB1u8; 32];
+			MerkleRepository::set_node::<Test>(0, 1, 0, node);
+			assert_eq!(MerkleRepository::get_node::<Test>(0, 1, 0), Some(node));
+			// Distinct coordinates are independent
+			assert_eq!(MerkleRepository::get_node::<Test>(0, 1, 1), None);
+			assert_eq!(MerkleRepository::get_node::<Test>(0, 2, 0), None);
+			assert_eq!(MerkleRepository::get_node::<Test>(1, 1, 0), None);
 		});
 	}
 

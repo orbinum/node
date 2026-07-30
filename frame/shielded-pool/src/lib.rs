@@ -65,6 +65,7 @@ mod benchmarking;
 pub mod genesis;
 pub mod helpers;
 pub mod merkle;
+pub mod migrations;
 pub mod operations;
 pub mod storage;
 pub mod types;
@@ -101,7 +102,12 @@ pub mod pallet {
 	pub type BalanceOf<T> =
 		<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
+	/// Storage version. v1 adds `MerkleNodes` (internal Merkle tree nodes),
+	/// backfilled from `MerkleLeaves` by `migrations::v1::MigrateToV1`.
+	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+
 	#[pallet::pallet]
+	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
 
 	/// Configuration trait for the pallet
@@ -173,6 +179,28 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type CommitmentToLeafIndex<T> =
 		StorageMap<_, Blake2_128Concat, Commitment, u32, OptionQuery>;
+
+	/// Internal Merkle tree nodes: `(tree_id, level, index) -> node hash`.
+	///
+	/// Written during the frontier walk of `insert_leaf` (the values were already
+	/// computed there and formerly discarded). Turns Merkle proof generation into
+	/// O(depth) point reads instead of an O(n) recomputation from all leaves.
+	///
+	/// Levels run 1..=19: level 0 is `MerkleLeaves`, level 20 is `PoseidonRoot`.
+	/// A missing entry means the subtree below it is empty (zero hash).
+	/// `tree_id` is fixed at 0 while the pool runs a single tree; the key shape
+	/// is `(tree_id, level, index)` so a multi-tree forest needs no remapping.
+	#[pallet::storage]
+	pub type MerkleNodes<T> = StorageNMap<
+		_,
+		(
+			NMapKey<Twox64Concat, u32>, // tree_id
+			NMapKey<Twox64Concat, u8>,  // level (1..=19)
+			NMapKey<Twox64Concat, u32>, // node index within the level
+		),
+		Hash,
+		OptionQuery,
+	>;
 
 	/// Set of used nullifiers (nullifier -> block number when used)
 	#[pallet::storage]

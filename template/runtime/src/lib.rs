@@ -152,6 +152,9 @@ pub type CheckedExtrinsic =
 /// The payload being signed in transactions.
 pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 
+/// Storage migrations run on runtime upgrade, oldest first.
+pub type Migrations = (pallet_shielded_pool::migrations::v1::MigrateToV1<Runtime>,);
+
 /// Executive: handles dispatch to the various modules.
 pub type Executive = frame_executive::Executive<
 	Runtime,
@@ -159,6 +162,7 @@ pub type Executive = frame_executive::Executive<
 	frame_system::ChainContext<Runtime>,
 	Runtime,
 	AllPalletsWithSystem,
+	Migrations,
 >;
 
 // Time is measured by number of blocks.
@@ -917,6 +921,25 @@ impl_runtime_apis! {
 	impl sp_offchain::OffchainWorkerApi<Block> for Runtime {
 		fn offchain_worker(header: &<Block as BlockT>::Header) {
 			Executive::offchain_worker(header)
+		}
+	}
+
+	#[cfg(feature = "try-runtime")]
+	impl frame_try_runtime::TryRuntime<Block> for Runtime {
+		fn on_runtime_upgrade(checks: frame_try_runtime::UpgradeCheckSelect) -> (Weight, Weight) {
+			let weight = Executive::try_runtime_upgrade(checks)
+				.expect("try_runtime_upgrade must not fail");
+			(weight, BlockWeights::get().max_block)
+		}
+
+		fn execute_block(
+			block: <Block as BlockT>::LazyBlock,
+			state_root_check: bool,
+			signature_check: bool,
+			select: frame_try_runtime::TryStateSelect,
+		) -> Weight {
+			Executive::try_execute_block(block, state_root_check, signature_check, select)
+				.expect("try_execute_block must not fail")
 		}
 	}
 

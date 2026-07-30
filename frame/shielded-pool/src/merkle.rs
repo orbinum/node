@@ -326,6 +326,9 @@ impl MerkleTreeService {
 		let mut frontier = MerkleRepository::get_frontier::<T>();
 		let mut current_hash = commitment.0;
 		let mut current_index = index;
+		// tree_id is 0 while the pool runs a single tree (index < 2^MAX_TREE_DEPTH
+		// is enforced above); MerkleNodes is keyed by tree_id for forest readiness.
+		let tree_id = index >> crate::types::MAX_TREE_DEPTH;
 
 		for (level, frontier_slot) in frontier.iter_mut().enumerate() {
 			if current_index % 2 == 0 {
@@ -338,6 +341,16 @@ impl MerkleTreeService {
 				current_hash = hash_pair(frontier_slot, &current_hash);
 			}
 			current_index /= 2;
+			// current_hash is now the node at (level + 1, current_index). Persist
+			// levels 1..=19 so proof reads are O(depth); level 20 is PoseidonRoot.
+			if level + 1 < crate::types::DEFAULT_TREE_DEPTH {
+				MerkleRepository::set_node::<T>(
+					tree_id,
+					(level + 1) as u8,
+					current_index,
+					current_hash,
+				);
+			}
 		}
 
 		let new_poseidon_root = current_hash;
@@ -379,49 +392,32 @@ impl MerkleTreeService {
 		MerkleRepository::is_known_root::<T>(root)
 	}
 
+	/// Build the sibling path for `leaf_index` from stored nodes.
+	///
+	/// O(depth) point reads: level-0 siblings come from `MerkleLeaves`, upper
+	/// siblings from `MerkleNodes`. A missing entry means an empty subtree, so
+	/// the canonical zero hash for that level is used.
 	pub fn get_merkle_path<T: Config>(leaf_index: u32) -> Option<DefaultMerklePath> {
 		let size = MerkleRepository::get_tree_size::<T>();
 		if leaf_index >= size {
 			return None;
 		}
-		let leaves = MerkleRepository::get_all_leaves::<T>();
-		if leaves.is_empty() {
-			return None;
-		}
 
-		let mut siblings = [[0u8; 32]; 20];
-		let mut indices = [0u8; 20];
-		let mut current_level: sp_std::vec::Vec<Hash> = leaves;
-		let mut target_index = leaf_index as usize;
+		let depth = crate::types::DEFAULT_TREE_DEPTH;
+		let tree_id = leaf_index >> crate::types::MAX_TREE_DEPTH;
+		let mut siblings = [[0u8; 32]; crate::types::DEFAULT_TREE_DEPTH];
+		let mut indices = [0u8; crate::types::DEFAULT_TREE_DEPTH];
 
-		for level in 0..20 {
-			if current_level.len() % 2 != 0 {
-				current_level.push(zero_hash_at_level(level));
-			}
-			let sibling_index = if target_index % 2 == 0 {
-				indices[level] = 0;
-				target_index + 1
+		for level in 0..depth {
+			let node_index = leaf_index >> level;
+			indices[level] = (node_index & 1) as u8;
+			let sibling_index = node_index ^ 1;
+			let sibling = if level == 0 {
+				MerkleRepository::get_leaf::<T>(sibling_index).map(|c| c.0)
 			} else {
-				indices[level] = 1;
-				target_index - 1
+				MerkleRepository::get_node::<T>(tree_id, level as u8, sibling_index)
 			};
-			siblings[level] = if sibling_index < current_level.len() {
-				current_level[sibling_index]
-			} else {
-				zero_hash_at_level(level)
-			};
-			let mut next_level = sp_std::vec::Vec::new();
-			for i in (0..current_level.len()).step_by(2) {
-				let left = current_level[i];
-				let right = if i + 1 < current_level.len() {
-					current_level[i + 1]
-				} else {
-					zero_hash_at_level(level)
-				};
-				next_level.push(hash_pair_poseidon(&left, &right));
-			}
-			current_level = next_level;
-			target_index /= 2;
+			siblings[level] = sibling.unwrap_or_else(|| get_zero_hash_cached(level));
 		}
 		Some(DefaultMerklePath { siblings, indices })
 	}
@@ -788,6 +784,114 @@ mod tests {
 			assert_eq!(
 				PoolStatsRepository::get_total_commitments_inserted::<Test>(),
 				3
+			);
+		});
+	}
+
+	// ── Stored-node path reads vs recomputed reference ───────────────────────
+
+	/// Reference sibling-path builder: recomputes every level from the full
+	/// leaf set. Oracle for the O(depth) stored-node read path.
+	fn reference_path(leaves: &[[u8; 32]], leaf_index: usize) -> Vec<[u8; 32]> {
+		let mut current_level = leaves.to_vec();
+		let mut path = Vec::with_capacity(20);
+		let mut target = leaf_index;
+		for level in 0..20 {
+			if current_level.len() % 2 != 0 {
+				current_level.push(get_zero_hash_cached(level));
+			}
+			let sibling_idx = target ^ 1;
+			path.push(if sibling_idx < current_level.len() {
+				current_level[sibling_idx]
+			} else {
+				get_zero_hash_cached(level)
+			});
+			let mut next = Vec::with_capacity(current_level.len().div_ceil(2));
+			for chunk in current_level.chunks(2) {
+				let right = chunk
+					.get(1)
+					.copied()
+					.unwrap_or_else(|| get_zero_hash_cached(level));
+				next.push(hash_pair_poseidon(&chunk[0], &right));
+			}
+			current_level = next;
+			target /= 2;
+		}
+		path
+	}
+
+	#[test]
+	fn stored_node_paths_match_recomputed_reference_for_every_leaf() {
+		new_test_ext().execute_with(|| {
+			// 37 leaves: odd count exercises zero-hash padding at several levels.
+			let leaves: Vec<[u8; 32]> = (0..37u8).map(|i| [i + 1; 32]).collect();
+			for leaf in &leaves {
+				MerkleTreeService::insert_leaf::<Test>(Commitment::new(*leaf)).unwrap();
+			}
+			let root = crate::storage::MerkleRepository::get_poseidon_root::<Test>();
+			for (i, leaf) in leaves.iter().enumerate() {
+				let path = MerkleTreeService::get_merkle_path::<Test>(i as u32).unwrap();
+				let expected = reference_path(&leaves, i);
+				assert_eq!(
+					path.siblings.to_vec(),
+					expected,
+					"stored-node path for leaf {i} must equal recomputed path"
+				);
+				assert!(
+					MerkleTreeService::verify_merkle_proof(&root, leaf, &path),
+					"leaf {i} proof must verify against the current root"
+				);
+			}
+		});
+	}
+
+	#[test]
+	fn first_and_last_leaf_paths_verify() {
+		new_test_ext().execute_with(|| {
+			let leaves: Vec<[u8; 32]> = (0..8u8).map(|i| [0xA0 + i; 32]).collect();
+			for leaf in &leaves {
+				MerkleTreeService::insert_leaf::<Test>(Commitment::new(*leaf)).unwrap();
+			}
+			let root = crate::storage::MerkleRepository::get_poseidon_root::<Test>();
+			for i in [0u32, 7] {
+				let path = MerkleTreeService::get_merkle_path::<Test>(i).unwrap();
+				assert!(MerkleTreeService::verify_merkle_proof(
+					&root,
+					&leaves[i as usize],
+					&path
+				));
+			}
+		});
+	}
+
+	#[test]
+	fn single_leaf_tree_path_is_all_zero_hashes() {
+		new_test_ext().execute_with(|| {
+			let leaf = [0x77u8; 32];
+			MerkleTreeService::insert_leaf::<Test>(Commitment::new(leaf)).unwrap();
+			let path = MerkleTreeService::get_merkle_path::<Test>(0).unwrap();
+			for (level, sibling) in path.siblings.iter().enumerate() {
+				assert_eq!(*sibling, get_zero_hash_cached(level));
+			}
+			let root = crate::storage::MerkleRepository::get_poseidon_root::<Test>();
+			assert!(MerkleTreeService::verify_merkle_proof(&root, &leaf, &path));
+		});
+	}
+
+	#[test]
+	fn stored_top_nodes_derive_poseidon_root() {
+		use crate::storage::MerkleRepository;
+		new_test_ext().execute_with(|| {
+			for i in 0..5u8 {
+				MerkleTreeService::insert_leaf::<Test>(Commitment::new([i + 1; 32])).unwrap();
+			}
+			let left = MerkleRepository::get_node::<Test>(0, 19, 0).expect("top-left node stored");
+			let right = MerkleRepository::get_node::<Test>(0, 19, 1)
+				.unwrap_or_else(|| get_zero_hash_cached(19));
+			assert_eq!(
+				hash_pair_poseidon(&left, &right),
+				MerkleRepository::get_poseidon_root::<Test>(),
+				"level-19 nodes must hash to the stored root"
 			);
 		});
 	}
