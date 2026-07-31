@@ -102,9 +102,12 @@ pub mod pallet {
 	pub type BalanceOf<T> =
 		<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
-	/// Storage version. v1 adds `MerkleNodes` (internal Merkle tree nodes),
-	/// backfilled from `MerkleLeaves` by `migrations::v1::MigrateToV1`.
-	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+	/// Storage version history:
+	/// - v1: `MerkleNodes` (internal Merkle tree nodes), backfilled by
+	///   `migrations::v1::MigrateToV1`.
+	/// - v2: multi-tree forest — `SealedTreeRoots` / `SealedRootIndex`
+	///   (start empty; version-only bump in `migrations::v2::MigrateToV2`).
+	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(2);
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
@@ -132,6 +135,13 @@ pub mod pallet {
 		/// Maximum depth of the Merkle tree (2^depth leaves)
 		#[pallet::constant]
 		type MaxTreeDepth: Get<u32>;
+
+		/// Leaves per tree before it seals and the forest rolls over to a new
+		/// tree. Must be a power of two ≤ 2^MaxTreeDepth. Production pins
+		/// 2^20; changing it on a live chain would re-map every note's
+		/// tree_id and is forbidden (see `integrity_test`).
+		#[pallet::constant]
+		type MaxLeavesPerTree: Get<u32>;
 
 		/// Maximum number of historic roots to keep
 		#[pallet::constant]
@@ -206,6 +216,18 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type NullifierSet<T: Config> =
 		StorageMap<_, Blake2_128Concat, Nullifier, BlockNumberFor<T>, OptionQuery>;
+
+	/// Final root of each sealed tree, keyed by tree_id. Permanent — a sealed
+	/// tree is immutable forever, so its root must never expire or every note
+	/// still inside it would become unspendable. Bounded by tree count
+	/// (max 4096), not by activity.
+	#[pallet::storage]
+	pub type SealedTreeRoots<T> = StorageMap<_, Twox64Concat, u32, Hash, OptionQuery>;
+
+	/// Reverse index of `SealedTreeRoots`: sealed root -> tree_id. Gives
+	/// `is_known_root` an O(1) membership check alongside the historic ring.
+	#[pallet::storage]
+	pub type SealedRootIndex<T> = StorageMap<_, Blake2_128Concat, Hash, u32, OptionQuery>;
 
 	/// Historic Poseidon Merkle roots (for proving against recent states)
 	#[pallet::storage]
@@ -321,6 +343,14 @@ pub mod pallet {
 				"MaxHistoricRoots must be non-zero, otherwise the historic-root map \
 				 grows unbounded and the root window never evicts"
 			);
+
+			let cap = T::MaxLeavesPerTree::get();
+			assert!(
+				cap.is_power_of_two() && cap <= (1u32 << crate::types::MAX_TREE_DEPTH),
+				"MaxLeavesPerTree must be a power of two <= 2^MAX_TREE_DEPTH; \
+				 clients derive tree_id from the global leaf index using this \
+				 constant, so it must never change on a live chain"
+			);
 		}
 
 		/// Ledger-solvency invariant: the tracked native-asset pool balance must
@@ -339,6 +369,26 @@ pub mod pallet {
 					"shielded-pool native ledger drifted from physical pool balance"
 				)
 			);
+
+			// Forest invariants: the active root must always be provable
+			// against; one sealed root per completed tree; the sealed maps
+			// are a bijection.
+			use crate::storage::MerkleRepository;
+			frame_support::ensure!(
+				MerkleRepository::is_known_root::<T>(&MerkleRepository::get_poseidon_root::<T>()),
+				sp_runtime::TryRuntimeError::Other("PoseidonRoot not in known-roots set")
+			);
+			let sealed = SealedTreeRoots::<T>::iter().count() as u32;
+			frame_support::ensure!(
+				sealed == MerkleRepository::get_tree_size::<T>() / T::MaxLeavesPerTree::get(),
+				sp_runtime::TryRuntimeError::Other("sealed-tree count != tree_size / cap")
+			);
+			for (tree_id, root) in SealedTreeRoots::<T>::iter() {
+				frame_support::ensure!(
+					SealedRootIndex::<T>::get(root) == Some(tree_id),
+					sp_runtime::TryRuntimeError::Other("SealedRootIndex out of sync")
+				);
+			}
 			Ok(())
 		}
 	}
@@ -404,8 +454,25 @@ pub mod pallet {
 			old_root: Hash,
 			/// New root
 			new_root: Hash,
-			/// New tree size
+			/// Total leaves ever inserted, global across the whole forest —
+			/// never per-tree. Indexer chunking and wallet scan cursors rely
+			/// on this being dense and monotonic; per-tree size is derivable
+			/// as `tree_size % MaxLeavesPerTree`.
 			tree_size: u32,
+		},
+
+		/// A tree reached `MaxLeavesPerTree` and was sealed; inserts continue
+		/// in a fresh tree. The final root stays valid forever via
+		/// `SealedTreeRoots`.
+		TreeSealed {
+			/// Id of the sealed tree (global_leaf_index >> log2(MaxLeavesPerTree))
+			tree_id: u32,
+			/// Final root of the sealed tree — permanently spendable anchor
+			final_root: Hash,
+			/// Global index of the sealed tree's first leaf
+			first_leaf_index: u32,
+			/// Leaves in the sealed tree (always MaxLeavesPerTree)
+			leaf_count: u32,
 		},
 
 		/// Asset was registered in the registry
@@ -453,7 +520,8 @@ pub mod pallet {
 		NullifierAlreadyUsed,
 		/// The Merkle root is not recognized
 		UnknownMerkleRoot,
-		/// The Merkle tree is full
+		/// Absolute forest capacity reached (u32 leaf-index space exhausted:
+		/// 4096 trees × MaxLeavesPerTree). Practically unreachable.
 		MerkleTreeFull,
 		/// The ZK proof is invalid
 		InvalidProof,

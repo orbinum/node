@@ -153,7 +153,10 @@ pub type CheckedExtrinsic =
 pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 
 /// Storage migrations run on runtime upgrade, oldest first.
-pub type Migrations = (pallet_shielded_pool::migrations::v1::MigrateToV1<Runtime>,);
+pub type Migrations = (
+	pallet_shielded_pool::migrations::v1::MigrateToV1<Runtime>,
+	pallet_shielded_pool::migrations::v2::MigrateToV2<Runtime>,
+);
 
 /// Executive: handles dispatch to the various modules.
 pub type Executive = frame_executive::Executive<
@@ -201,7 +204,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: Cow::Borrowed("orbinum"),
 	impl_name: Cow::Borrowed("orbinum"),
 	authoring_version: 1,
-	spec_version: 4,
+	spec_version: 5,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -678,6 +681,8 @@ impl pallet_shielded_pool::Config for Runtime {
 	type MaxTreeDepth = ConstU32<20>;
 	/// Historic roots: allows proofs against past states (30s window)
 	type MaxHistoricRoots = ConstU32<100>;
+	// Pinned to 2^20: clients derive tree_id = leaf_index >> 20 from this.
+	type MaxLeavesPerTree = ConstU32<1_048_576>;
 	/// Minimum shield amount: prevents spam, 1 ORB = 1e18 wei
 	type MinShieldAmount = ConstU128<1_000_000_000_000_000_000>;
 	type WeightInfo = pallet_shielded_pool::weights::SubstrateWeight<Runtime>;
@@ -1317,6 +1322,14 @@ impl_runtime_apis! {
 
 		fn get_merkle_proof(leaf_index: u32) -> Option<pallet_shielded_pool::DefaultMerklePath> {
 			ShieldedPool::get_merkle_proof(leaf_index)
+		}
+
+		fn get_forest_info() -> ([u8; 32], u32, u32, u32, u32) {
+			ShieldedPool::get_forest_info()
+		}
+
+		fn get_root_for_leaf(leaf_index: u32) -> Option<([u8; 32], u32)> {
+			ShieldedPool::get_root_for_leaf(leaf_index)
 		}
 
 		fn get_merkle_proof_for_commitment(

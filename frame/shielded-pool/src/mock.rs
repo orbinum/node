@@ -47,6 +47,7 @@ parameter_types! {
 	pub const ShieldedPoolPalletId: PalletId = PalletId(*b"shldpool");
 	pub const MaxTreeDepth: u32 = 20;
 	pub const MaxHistoricRoots: u32 = 100;
+	pub const MaxLeavesPerTree: u32 = 8;
 	pub const MinShieldAmount: u128 = 100;
 	pub const MaxProofSize: u32 = 256;
 	pub const MaxPublicInputs: u32 = 10;
@@ -165,6 +166,7 @@ impl pallet_shielded_pool::Config for Test {
 	type PalletId = ShieldedPoolPalletId;
 	type MaxTreeDepth = MaxTreeDepth;
 	type MaxHistoricRoots = MaxHistoricRoots;
+	type MaxLeavesPerTree = MaxLeavesPerTree;
 	type MinShieldAmount = MinShieldAmount;
 	type WeightInfo = ();
 	type Relayer = pallet_relayer::Pallet<Test>;

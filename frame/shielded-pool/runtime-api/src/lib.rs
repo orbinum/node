@@ -26,6 +26,7 @@ pub struct RelayConfig {
 }
 
 sp_api::decl_runtime_apis! {
+	#[api_version(2)]
 	pub trait ShieldedPoolRuntimeApi {
 		/// Get the Merkle tree information (root, size, depth)
 		fn get_merkle_tree_info() -> (Hash, u32, u32);
@@ -36,6 +37,15 @@ sp_api::decl_runtime_apis! {
 		/// Get the Merkle proof for a given commitment.
 		/// O(1) index lookup plus O(depth) sibling reads from stored nodes.
 		fn get_merkle_proof_for_commitment(commitment: Hash) -> Option<(u32, DefaultMerklePath)>;
+
+		/// Forest summary: (active_root, global_size, depth, current_tree_id,
+		/// sealed_tree_count).
+		fn get_forest_info() -> (Hash, u32, u32, u32, u32);
+
+		/// Root the given leaf's tree anchors to, plus its tree_id: the
+		/// permanent sealed root for completed trees, the live PoseidonRoot
+		/// for the active tree. None if the leaf does not exist.
+		fn get_root_for_leaf(leaf_index: u32) -> Option<(Hash, u32)>;
 
 		/// Return relay configuration sourced from the runtime.
 		///
