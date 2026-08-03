@@ -50,7 +50,7 @@ if [[ ! -f "$NODE" ]]; then
 fi
 
 mkdir -p "$SCRATCH_DIR"
-mkdir -p ./frame/account-mapping/src ./frame/zk-verifier/src ./frame/shielded-pool/src ./frame/relayer/src
+mkdir -p ./frame/zk-verifier/src ./frame/shielded-pool/src ./frame/relayer/src
 
 run_bench() {
     local pallet="$1"
@@ -79,7 +79,6 @@ echo ""
 echo "[2/3] Running benchmarks for full runtime set..."
 
 # Pallets con archivo de weights propio en el repo
-run_bench "pallet_account_mapping" "./frame/account-mapping/src/weights.rs"
 run_bench "pallet_zk_verifier" "./frame/zk-verifier/src/weights.rs"
 run_bench "pallet_shielded_pool" "./frame/shielded-pool/src/weights.rs"
 run_bench "pallet_relayer" "./frame/relayer/src/weights.rs"

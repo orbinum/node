@@ -5,11 +5,10 @@ set -euo pipefail
 # scripts/vk/workflows/setup-dev.sh
 # DEV setup for on-chain VKs (main entrypoint for developers)
 #
-# Registers + activates ONLY these 4 circuits:
+# Registers + activates ONLY these 3 circuits:
 #   1 transfer
 #   2 unshield
 #   6 value_proof
-#   5 private_link
 #
 # VK artifacts are resolved from the @orbinum/circuits npm package via unpkg:
 #   1. Fetches manifest.json to determine the latest package_version
@@ -123,16 +122,15 @@ log "RPC: $RPC_WS | Circuit version: $VERSION"
 VK_TRANSFER=$(resolve_vk "transfer")
 VK_UNSHIELD=$(resolve_vk "unshield")
 VK_VALUE_PROOF=$(resolve_vk "value_proof")
-VK_PRIVATE_LINK=$(resolve_vk "private_link")
 
-log "Circuits: transfer(1), unshield(2), value_proof(6), private_link(5)"
+log "Circuits: transfer(1), unshield(2), value_proof(6)"
 
 # ─── Register + activate ─────────────────────────────────────────────────────
 
-log "Batch registering + activating all 4 circuits (v$VERSION) in a single tx..."
+log "Batch registering + activating all 3 circuits (v$VERSION) in a single tx..."
 bash "$VK_REGISTRY_SCRIPT" batch-register \
   "$VERSION" 1 \
-  "$VK_TRANSFER" "$VK_UNSHIELD" "$VK_VALUE_PROOF" "$VK_PRIVATE_LINK" \
+  "$VK_TRANSFER" "$VK_UNSHIELD" "$VK_VALUE_PROOF" \
   "$RPC_WS" "$SUDO_SEED"
 
 # ─── Cleanup ─────────────────────────────────────────────────────────────────
@@ -144,7 +142,7 @@ fi
 
 # Remove any .bin files produced from local artifacts (they are generated
 # artefacts and are excluded from version control via .gitignore)
-for circuit in transfer unshield value_proof private_link; do
+for circuit in transfer unshield value_proof; do
   rm -f "$ARTIFACTS_DIR/verification_key_${circuit}.bin"
 done
 

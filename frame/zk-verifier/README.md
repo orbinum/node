@@ -21,7 +21,6 @@ MVP in active development. Production runtime verifies Groth16 proofs on BN254. 
 | `1` | transfer (2-in / 2-out UTXO) |
 | `2` | unshield (pool withdrawal) |
 | `3` | shield (reserved) |
-| `5` | private_link |
 | `6` | value_proof (relay fee claiming) |
 
 ## Storage
@@ -73,13 +72,6 @@ pub trait ZkVerifierPort {
     fn verify_value_proof(
         proof: &[u8],
         public_signals: &[u8],  // exactly 76 bytes: commitment[0..32] | value[32..40] | asset_id[40..44] | owner_hash[44..76]
-        version: Option<u32>,
-    ) -> Result<bool, DispatchError>;
-
-    fn verify_private_link_proof(
-        proof: &[u8],
-        commitment: &[u8; 32],
-        link_nullifier: &[u8; 32],
         version: Option<u32>,
     ) -> Result<bool, DispatchError>;
 }

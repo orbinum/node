@@ -117,20 +117,6 @@ impl ZkVerifierPort for MockZkVerifier {
 		Ok(true)
 	}
 
-	fn verify_private_link_proof(
-		proof: &[u8],
-		_commitment: &[u8; 32],
-		_call_hash_fe: &[u8; 32],
-		_version: Option<u32>,
-	) -> Result<bool, sp_runtime::DispatchError> {
-		// Validate basic format
-		if proof.is_empty() {
-			return Err(sp_runtime::DispatchError::Other("Empty proof"));
-		}
-		// Always return true for testing (bypass ZK verification)
-		Ok(true)
-	}
-
 	fn is_supported_version(_circuit_id: u32, version: u32) -> bool {
 		version != 0
 	}

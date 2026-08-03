@@ -5,7 +5,7 @@ set -euo pipefail
 # scripts/vk/policy/verify-window-dev.sh
 # Verifies VK version-window policy for fixed DEV circuits.
 #
-# Verified circuits: 1 (transfer), 2 (unshield), 6 (value_proof), 5 (private_link)
+# Verified circuits: 1 (transfer), 2 (unshield), 6 (value_proof)
 #
 # USAGE:
 #   bash scripts/vk/policy/verify-window-dev.sh <expected_active> [rpc_http] [required_versions_csv] [strict]
@@ -41,7 +41,7 @@ log() {
 [[ "$EXPECTED_ACTIVE" =~ ^[0-9]+$ ]] || err "expected_active must be an integer >= 0"
 [[ "$STRICT" == "true" || "$STRICT" == "false" ]] || err "strict must be true|false"
 
-CIRCUITS=(1 2 6 5)
+CIRCUITS=(1 2 6)
 
 log "Verifying VK window"
 log "RPC: $RPC_HTTP"
@@ -97,4 +97,4 @@ PY
 
 done
 
-log "✅ VK window is valid for all 4 circuits"
+log "✅ VK window is valid for all 3 circuits"

@@ -45,8 +45,6 @@ frame-system = { workspace = true }
 frame-system-benchmarking = { workspace = true, optional = true }
 frame-system-rpc-runtime-api = { workspace = true }
 frame-try-runtime = { workspace = true, optional = true }
-pallet-account-mapping = { workspace = true }
-pallet-account-mapping-runtime-api = { workspace = true }
 pallet-aura = { workspace = true }
 pallet-authorship = { workspace = true }
 pallet-balances = { workspace = true, features = ["insecure_zero_ed"] }
@@ -68,7 +66,6 @@ pallet-dynamic-fee = { workspace = true }
 pallet-ethereum = { workspace = true }
 pallet-evm = { workspace = true }
 pallet-evm-chain-id = { workspace = true }
-pallet-evm-precompile-account-mapping = { workspace = true }
 pallet-evm-precompile-balances = { workspace = true }
 pallet-evm-precompile-curve25519 = { workspace = true }
 pallet-evm-precompile-curve25519-benchmarking = { workspace = true }
@@ -135,8 +132,6 @@ std = [
 	"frame-system-benchmarking?/std",
 	"pallet-aura/std",
 	"pallet-authorship/std",
-	"pallet-account-mapping/std",
-	"pallet-account-mapping-runtime-api/std",
 	"pallet-balances/std",
 	"pallet-grandpa/std",
 	"pallet-session/std",
@@ -161,7 +156,6 @@ std = [
 	"pallet-evm-precompile-simple/std",
 	"pallet-evm-precompile-curve25519/std",
 	"pallet-evm-precompile-curve25519-benchmarking/std",
-	"pallet-evm-precompile-account-mapping/std",
 	"pallet-evm-precompile-balances/std",
 	"pallet-evm-precompile-shielded-pool/std",
 	# Orbinum Privacy
@@ -181,7 +175,6 @@ runtime-benchmarks = [
 	"frame-benchmarking/runtime-benchmarks",
 	"frame-system-benchmarking/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
-	"pallet-account-mapping/runtime-benchmarks",
 	"pallet-balances/runtime-benchmarks",
 	"pallet-grandpa/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",

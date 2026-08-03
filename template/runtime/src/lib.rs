@@ -11,7 +11,7 @@ extern crate alloc;
 // Required for WASM side effects; suppress unused_crate_dependencies warning.
 use sp_io as _;
 
-mod account_mapping_runtime;
+mod evm_account;
 mod genesis_config_preset;
 mod orbinum_signature;
 mod precompiles;
@@ -72,13 +72,10 @@ pub use frame_system::Call as SystemCall;
 pub use pallet_balances::Call as BalancesCall;
 pub use pallet_timestamp::Call as TimestampCall;
 
-pub use account_mapping_runtime::{
+pub use evm_account::{
 	evm_bytes_to_account_id_bytes, evm_h160_to_account_id, evm_h160_to_account_id_bytes,
 };
-use account_mapping_runtime::{
-	try_evm_h160_from_account_id, AccountIdToEvmAddress, EeSuffixAddressMapping,
-	EnsureAddressMatches,
-};
+use evm_account::{EeSuffixAddressMapping, EnsureAddressMatches};
 use precompiles::FrontierPrecompiles;
 
 /// Type of block number.
@@ -485,51 +482,6 @@ parameter_types! {
 	pub WeightPerGas: Weight = Weight::from_parts(weight_per_gas(BLOCK_GAS_LIMIT, NORMAL_DISPATCH_RATIO, WEIGHT_MILLISECS_PER_BLOCK), 0);
 }
 
-parameter_types! {
-	pub const AliasDeposit: Balance = 5 * 1_000_000_000_000_000_000u128;
-	pub const MaxAliasLength: u32 = 32;
-}
-pub struct PrivateLinkZkAdapter;
-
-impl pallet_account_mapping::PrivateLinkVerifierPort for PrivateLinkZkAdapter {
-	fn verify(commitment: &[u8; 32], call_hash: &[u8; 32], proof: &[u8]) -> bool {
-		// In benchmark builds accept any non-empty proof so the extrinsic setup/dispatch
-		// overhead is measured without ZK cost. The pairing computation is captured
-		// separately by `pallet_zk_verifier::verify_proof`.
-		#[cfg(feature = "runtime-benchmarks")]
-		{
-			let _ = (commitment, call_hash);
-			!proof.is_empty()
-		}
-
-		#[cfg(not(feature = "runtime-benchmarks"))]
-		{
-			use pallet_zk_verifier::ZkVerifierPort;
-			pallet_zk_verifier::Pallet::<Runtime>::verify_private_link_proof(
-				proof, commitment, call_hash, None,
-			)
-			.unwrap_or(false)
-		}
-	}
-}
-
-impl pallet_account_mapping::Config for Runtime {
-	type Currency = Balances;
-	type AccountIdToEvmAddress = AccountIdToEvmAddress;
-	type AliasDeposit = AliasDeposit;
-	type MaxAliasLength = MaxAliasLength;
-	type NativeEvmChainId = ConstU32<2700>;
-	type WeightInfo = pallet_account_mapping::weights::SubstrateWeight<Runtime>;
-	type RuntimeCall = RuntimeCall;
-	type PrivateLinkVerifier = PrivateLinkZkAdapter;
-
-	/// Secp256k1 accounts (OrbinumSignature Phase 3) have AccountId32 = [H160 | 0x00×12].
-	/// Their EVM mapping is always derivable — no storage entry needed in map_account.
-	fn is_implicit_evm_account(account: &AccountId) -> bool {
-		try_evm_h160_from_account_id(account).is_some()
-	}
-}
-
 impl pallet_evm::Config for Runtime {
 	type AccountProvider = pallet_evm::FrameSystemAccountProvider<Self>;
 	type FeeCalculator = BaseFee;
@@ -747,8 +699,8 @@ mod runtime {
 	#[runtime::pallet_index(13)]
 	pub type ShieldedPool = pallet_shielded_pool;
 
-	#[runtime::pallet_index(14)]
-	pub type AccountMapping = pallet_account_mapping;
+	// Index 14 is retired. Do not reassign: a new pallet here would make
+	// previously encoded calls decode as a different extrinsic.
 
 	#[runtime::pallet_index(15)]
 	pub type Authorship = pallet_authorship;
@@ -857,7 +809,6 @@ mod benches {
 		[pallet_evm_precompile_sha3fips, EVMPrecompileSha3FIPSBench::<Runtime>]
 		[pallet_zk_verifier, ZkVerifier]
 		[pallet_shielded_pool, ShieldedPool]
-		[pallet_account_mapping, AccountMapping]
 		[pallet_relayer, Relayer]
 		[pallet_validator_set, ValidatorSet]
 	);
@@ -1398,114 +1349,6 @@ impl_runtime_apis! {
 						.collect(),
 				})
 				.collect()
-		}
-	}
-
-	impl pallet_account_mapping_runtime_api::AccountMappingRuntimeApi<Block, AccountId, Balance> for Runtime {
-		fn get_mapped_account(address: H160) -> Option<AccountId> {
-			AccountMapping::mapped_account(address)
-		}
-
-		fn get_mapped_address(account: AccountId) -> Option<H160> {
-			AccountMapping::mapped_address(account)
-		}
-
-		fn get_fallback_address(account: AccountId) -> Option<H160> {
-			try_evm_h160_from_account_id(&account)
-		}
-
-		fn resolve_alias(alias: alloc::vec::Vec<u8>) -> Option<pallet_account_mapping_runtime_api::AliasInfo<AccountId>> {
-			let record = pallet_account_mapping::Pallet::<Runtime>::runtime_api_resolve_alias(&alias)?;
-			Some(pallet_account_mapping_runtime_api::AliasInfo {
-				owner: record.owner,
-				evm_address: record.evm_address,
-				chain_links_count: record.chain_links.len() as u32,
-			})
-		}
-
-		fn get_alias_of(account: AccountId) -> Option<alloc::vec::Vec<u8>> {
-			pallet_account_mapping::Pallet::<Runtime>::runtime_api_get_alias_of(account)
-		}
-
-		fn get_listing_info(alias: alloc::vec::Vec<u8>) -> Option<pallet_account_mapping_runtime_api::ListingInfo<Balance>> {
-			pallet_account_mapping::utils::validate_alias(&alias).ok()?;
-			let bounded: pallet_account_mapping::pallet::AliasOf<Runtime> =
-				alias.try_into().ok()?;
-			let listing = pallet_account_mapping::AliasListings::<Runtime>::get(&bounded)?;
-			Some(pallet_account_mapping_runtime_api::ListingInfo {
-				price: listing.price,
-				private: listing.allowed_buyers.is_some(),
-				whitelist_count: listing.allowed_buyers.as_ref().map(|v| v.len() as u32).unwrap_or(0),
-			})
-		}
-
-		fn get_account_listing(account: AccountId) -> Option<(alloc::vec::Vec<u8>, pallet_account_mapping_runtime_api::ListingInfo<Balance>)> {
-			let alias = pallet_account_mapping::AccountAliases::<Runtime>::get(&account)?;
-			let listing = pallet_account_mapping::AliasListings::<Runtime>::get(&alias)?;
-			let info = pallet_account_mapping_runtime_api::ListingInfo {
-				price: listing.price,
-				private: listing.allowed_buyers.is_some(),
-				whitelist_count: listing.allowed_buyers.as_ref().map(|v| v.len() as u32).unwrap_or(0),
-			};
-			Some((alias.into_inner(), info))
-		}
-
-		fn can_buy(alias: alloc::vec::Vec<u8>, buyer: AccountId) -> bool {
-			pallet_account_mapping::Pallet::<Runtime>::runtime_api_can_buy(alias, buyer)
-		}
-
-		fn get_full_identity(alias: alloc::vec::Vec<u8>) -> Option<pallet_account_mapping_runtime_api::FullIdentityInfo<AccountId>> {
-			let record = pallet_account_mapping::Pallet::<Runtime>::runtime_api_resolve_alias(&alias)?;
-			let metadata = pallet_account_mapping::AccountMetadatas::<Runtime>::get(&record.owner);
-
-			Some(pallet_account_mapping_runtime_api::FullIdentityInfo {
-				owner: record.owner,
-				evm_address: record.evm_address,
-				chain_links: record.chain_links.into_iter().map(|l| {
-					pallet_account_mapping_runtime_api::ChainLink {
-						chain_id: l.chain_id,
-						address: l.address.into_inner(),
-					}
-				}).collect(),
-				metadata: metadata.map(|m| {
-					pallet_account_mapping_runtime_api::AccountMetadata {
-						display_name: m.display_name.map(|v| v.into_inner()),
-						bio: m.bio.map(|v| v.into_inner()),
-						avatar: m.avatar.map(|v| v.into_inner()),
-					}
-				}),
-			})
-		}
-
-		fn get_account_metadata(account: AccountId) -> Option<pallet_account_mapping_runtime_api::AccountMetadata> {
-			let m = pallet_account_mapping::AccountMetadatas::<Runtime>::get(&account)?;
-			Some(pallet_account_mapping_runtime_api::AccountMetadata {
-				display_name: m.display_name.map(|v| v.into_inner()),
-				bio: m.bio.map(|v| v.into_inner()),
-				avatar: m.avatar.map(|v| v.into_inner()),
-			})
-		}
-
-		fn get_link_owner(chain_id: u32, address: alloc::vec::Vec<u8>) -> Option<AccountId> {
-			pallet_account_mapping::Pallet::<Runtime>::runtime_api_get_link_owner(chain_id, address)
-		}
-
-		fn get_supported_chains() -> alloc::vec::Vec<(u32, pallet_account_mapping_runtime_api::SignatureScheme)> {
-			pallet_account_mapping::Pallet::<Runtime>::get_supported_chains()
-		}
-
-		fn get_private_links(alias: alloc::vec::Vec<u8>) -> Option<alloc::vec::Vec<pallet_account_mapping_runtime_api::PrivateLink>> {
-			pallet_account_mapping::Pallet::<Runtime>::runtime_api_get_private_links(alias)
-				.map(|links| links.into_iter()
-					.map(|l| pallet_account_mapping_runtime_api::PrivateLink {
-						chain_id: l.chain_id,
-						commitment: l.commitment,
-					})
-					.collect())
-		}
-
-		fn has_private_link(alias: alloc::vec::Vec<u8>, commitment: [u8; 32]) -> bool {
-			pallet_account_mapping::Pallet::<Runtime>::runtime_api_has_private_link(alias, commitment)
 		}
 	}
 

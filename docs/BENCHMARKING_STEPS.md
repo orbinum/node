@@ -80,7 +80,6 @@ This overwrites the four committed `weights.rs` files:
 
 | Pallet | Output |
 |--------|--------|
-| `pallet_account_mapping` | `frame/account-mapping/src/weights.rs` |
 | `pallet_zk_verifier` | `frame/zk-verifier/src/weights.rs` |
 | `pallet_shielded_pool` | `frame/shielded-pool/src/weights.rs` |
 | `pallet_relayer` | `frame/relayer/src/weights.rs` |

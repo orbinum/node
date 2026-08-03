@@ -247,7 +247,6 @@ mod tests {
 			for cid in [
 				CircuitId::TRANSFER,
 				CircuitId::UNSHIELD,
-				CircuitId::PRIVATE_LINK,
 				CircuitId::VALUE_PROOF,
 			] {
 				insert_vk(cid, 1);

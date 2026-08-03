@@ -1,7 +1,7 @@
 //! [`ZkVerifierPort`] — public interface for cross-pallet ZK proof verification.
 //!
-//! Other pallets (e.g. `pallet-shielded-pool`, `pallet-account-mapping`) depend
-//! only on this trait, never on the concrete pallet internals.
+//! Other pallets (e.g. `pallet-shielded-pool`) depend only on this trait, never
+//! on the concrete pallet internals.
 //!
 //! Each method delegates public-input encoding to [`crate::encoding`] and the
 //! cryptographic work to [`crate::verifier::verify`].
@@ -47,14 +47,6 @@ pub trait ZkVerifierPort {
 	fn verify_value_proof(
 		proof: &[u8],
 		public_signals: &[u8],
-		version: Option<u32>,
-	) -> Result<bool, sp_runtime::DispatchError>;
-
-	/// Verify a private-link dispatch proof.
-	fn verify_private_link_proof(
-		proof: &[u8],
-		commitment: &[u8; 32],
-		call_hash_fe: &[u8; 32],
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError>;
 
@@ -124,16 +116,6 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 			.map_err(|_| sp_runtime::DispatchError::Other("value proof signals slice error"))?;
 		let raw = encoding::encode_value_proof(signals);
 		verifier::verify::<T>(CircuitId::VALUE_PROOF, version, proof, raw).map(|(ok, _)| ok)
-	}
-
-	fn verify_private_link_proof(
-		proof: &[u8],
-		commitment: &[u8; 32],
-		call_hash_fe: &[u8; 32],
-		version: Option<u32>,
-	) -> Result<bool, sp_runtime::DispatchError> {
-		let raw = encoding::encode_private_link(commitment, call_hash_fe);
-		verifier::verify::<T>(CircuitId::PRIVATE_LINK, version, proof, raw).map(|(ok, _)| ok)
 	}
 
 	fn is_supported_version(circuit_id: u32, version: u32) -> bool {
@@ -489,86 +471,6 @@ mod tests {
 				10,
 				&[0u8; 32],
 				None,
-			)
-			.unwrap();
-			assert!(ok);
-		});
-	}
-
-	// ── verify_private_link_proof ──────────────────────────────────────────────
-
-	#[test]
-	fn private_link_empty_proof_is_rejected() {
-		new_test_ext().execute_with(|| {
-			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::verify_private_link_proof(
-					&[],
-					&commitment(),
-					&[0u8; 32],
-					Some(1),
-				),
-				Error::<Test>::EmptyProof
-			);
-		});
-	}
-
-	#[test]
-	fn private_link_no_active_version_returns_circuit_not_found() {
-		new_test_ext().execute_with(|| {
-			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::verify_private_link_proof(
-					&proof(),
-					&commitment(),
-					&[0u8; 32],
-					None,
-				),
-				Error::<Test>::CircuitNotFound
-			);
-		});
-	}
-
-	#[test]
-	fn private_link_explicit_unsupported_version_rejected() {
-		new_test_ext().execute_with(|| {
-			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::verify_private_link_proof(
-					&proof(),
-					&commitment(),
-					&[0u8; 32],
-					Some(99),
-				),
-				Error::<Test>::UnsupportedCircuitVersion
-			);
-		});
-	}
-
-	#[test]
-	fn private_link_happy_path_returns_true() {
-		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::PRIVATE_LINK, 1);
-			activate(CircuitId::PRIVATE_LINK, 1);
-			let ok = <Pallet<Test> as ZkVerifierPort>::verify_private_link_proof(
-				&proof(),
-				&commitment(),
-				&[0xFFu8; 32],
-				None,
-			)
-			.unwrap();
-			assert!(ok);
-		});
-	}
-
-	#[test]
-	fn private_link_explicit_version_overrides_active() {
-		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::PRIVATE_LINK, 1);
-			insert_vk(CircuitId::PRIVATE_LINK, 2);
-			activate(CircuitId::PRIVATE_LINK, 1);
-			let ok = <Pallet<Test> as ZkVerifierPort>::verify_private_link_proof(
-				&proof(),
-				&commitment(),
-				&[0u8; 32],
-				Some(2),
 			)
 			.unwrap();
 			assert!(ok);

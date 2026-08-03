@@ -69,13 +69,6 @@ pub fn encode_unshield(
 	]
 }
 
-/// Encode private-link dispatch public inputs.
-///
-/// Order: `commitment | call_hash_fe`
-pub fn encode_private_link(commitment: &[u8; 32], call_hash_fe: &[u8; 32]) -> Vec<[u8; 32]> {
-	alloc::vec![*commitment, *call_hash_fe]
-}
-
 /// Encode value proof public inputs (CircuitId 6).
 ///
 /// Expands the compact 76-byte on-chain layout into 4 BN254 field elements:
@@ -141,12 +134,6 @@ mod tests {
 		let raw = encode_unshield(&[0u8; 32], &[0u8; 32], 0, &recipient, 0, 0, &[0u8; 32]);
 		// recipient is passed as-is (LE format), so last byte should be 0xFF
 		assert_eq!(raw[3][31], 0xFF);
-	}
-
-	#[test]
-	fn encode_private_link_correct_length() {
-		let raw = encode_private_link(&[1u8; 32], &[2u8; 32]);
-		assert_eq!(raw.len(), 2);
 	}
 
 	#[test]

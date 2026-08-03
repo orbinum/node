@@ -29,7 +29,7 @@ use scale_info::TypeInfo;
 use sp_core::{ecdsa, ed25519, sr25519, H160};
 use sp_runtime::traits::{IdentifyAccount, Lazy, Verify};
 
-use crate::account_mapping_runtime::evm_bytes_to_account_id_bytes;
+use crate::evm_account::evm_bytes_to_account_id_bytes;
 
 /// The account ID type used by this runtime.
 pub type AccountId = sp_runtime::AccountId32;

@@ -20,8 +20,6 @@ pub const CIRCUIT_ID_TRANSFER: u8 = 1;
 pub const CIRCUIT_ID_UNSHIELD: u8 = 2;
 /// Circuit identifier for value proof operations (proves note commitment encodes declared value).
 pub const CIRCUIT_ID_VALUE_PROOF: u8 = 6;
-/// Circuit identifier for private link dispatch operations.
-pub const CIRCUIT_ID_PRIVATE_LINK: u8 = 5;
 
 /// Number of public inputs for the transfer circuit.
 /// Public inputs: [merkle_root, nullifier1, nullifier2, commitment1, commitment2, asset_id, fee]
@@ -32,9 +30,6 @@ pub const UNSHIELD_PUBLIC_INPUTS: usize = 7;
 /// Number of public signals for the value proof circuit.
 /// Signals: [commitment(32B), value(8B), asset_id(4B), owner_hash(32B)] = 4 field elements.
 pub const VALUE_PROOF_PUBLIC_INPUTS: usize = 4;
-/// Number of public inputs for the private link circuit.
-/// Public inputs: [commitment(32B LE field element), call_hash_fe(32B LE field element)]
-pub const PRIVATE_LINK_PUBLIC_INPUTS: usize = 2;
 
 /// Base cost for Groth16 verification (pairing operations).
 pub const BASE_VERIFICATION_COST: u64 = 100_000;
@@ -49,7 +44,6 @@ pub const fn expected_public_inputs(circuit_id: u8) -> Option<usize> {
 	match circuit_id {
 		CIRCUIT_ID_TRANSFER => Some(TRANSFER_PUBLIC_INPUTS),
 		CIRCUIT_ID_UNSHIELD => Some(UNSHIELD_PUBLIC_INPUTS),
-		CIRCUIT_ID_PRIVATE_LINK => Some(PRIVATE_LINK_PUBLIC_INPUTS),
 		CIRCUIT_ID_VALUE_PROOF => Some(VALUE_PROOF_PUBLIC_INPUTS),
 		_ => None,
 	}
@@ -305,7 +299,6 @@ mod tests {
 		assert_eq!(CIRCUIT_ID_TRANSFER, 1);
 		assert_eq!(CIRCUIT_ID_UNSHIELD, 2);
 		assert_eq!(CIRCUIT_ID_VALUE_PROOF, 6);
-		assert_eq!(CIRCUIT_ID_PRIVATE_LINK, 5);
 	}
 
 	#[test]
@@ -313,17 +306,18 @@ mod tests {
 		assert_eq!(TRANSFER_PUBLIC_INPUTS, 7);
 		assert_eq!(UNSHIELD_PUBLIC_INPUTS, 7);
 		assert_eq!(VALUE_PROOF_PUBLIC_INPUTS, 4);
-		assert_eq!(PRIVATE_LINK_PUBLIC_INPUTS, 2);
 	}
 
 	#[test]
 	fn expected_public_inputs_maps_known_circuits() {
 		assert_eq!(expected_public_inputs(CIRCUIT_ID_TRANSFER), Some(7));
 		assert_eq!(expected_public_inputs(CIRCUIT_ID_UNSHIELD), Some(7));
-		assert_eq!(expected_public_inputs(CIRCUIT_ID_PRIVATE_LINK), Some(2));
 		assert_eq!(expected_public_inputs(CIRCUIT_ID_VALUE_PROOF), Some(4));
 		// Unknown / unmapped circuit ids (e.g. shield=3) return None.
 		assert_eq!(expected_public_inputs(3), None);
+		// Circuit 5 (retired private-link) is no longer a known circuit: a VK
+		// registered under that id would skip arity validation entirely.
+		assert_eq!(expected_public_inputs(5), None);
 		assert_eq!(expected_public_inputs(0), None);
 		assert_eq!(expected_public_inputs(99), None);
 	}

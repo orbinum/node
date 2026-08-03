@@ -3,13 +3,13 @@ set -euo pipefail
 
 # ============================================================================
 # scripts/vk/workflows/rotate-dev.sh
-# DEV on-chain VK rotation for the 4 supported circuits.
+# DEV on-chain VK rotation for the 3 supported circuits.
 #
 # Flow:
-#   1) register NEW_VERSION on 1,2,6,5
-#   2) set-active NEW_VERSION on 1,2,6,5
+#   1) register NEW_VERSION on 1,2,6
+#   2) set-active NEW_VERSION on 1,2,6
 #   3) RPC validation per circuit
-#   4) optional: remove OLD_VERSION on 1,2,6,5 (if --remove-old)
+#   4) optional: remove OLD_VERSION on 1,2,6 (if --remove-old)
 #
 # USAGE:
 #   bash scripts/vk/workflows/rotate-dev.sh <new_version> [rpc_ws] [sudo_seed] [old_version]
@@ -80,7 +80,6 @@ convert_vk() {
 VK_TRANSFER_BIN=$(convert_vk "$ARTIFACTS_DIR/verification_key_transfer.json")
 VK_UNSHIELD_BIN=$(convert_vk "$ARTIFACTS_DIR/verification_key_unshield.json")
 VK_VALUE_PROOF_BIN=$(convert_vk "$ARTIFACTS_DIR/verification_key_value_proof.json")
-VK_PRIVATE_LINK_BIN=$(convert_vk "$ARTIFACTS_DIR/verification_key_private_link.json")
 
 validate_rpc() {
   local circuit_id="$1"
@@ -112,17 +111,16 @@ log "old_version: $OLD_VERSION"
 log "new_version: $NEW_VERSION"
 log "remove_old: $REMOVE_OLD"
 
-# Register and activate all 4 circuits in ONE atomic transaction
-log "Batch registering + activating all 4 circuits (v$NEW_VERSION) in a single tx..."
+# Register and activate all 3 circuits in ONE atomic transaction
+log "Batch registering + activating all 3 circuits (v$NEW_VERSION) in a single tx..."
 bash "$VK_REGISTRY_SCRIPT" batch-register \
   "$NEW_VERSION" 1 \
-  "$VK_TRANSFER_BIN" "$VK_UNSHIELD_BIN" "$VK_VALUE_PROOF_BIN" "$VK_PRIVATE_LINK_BIN" \
+  "$VK_TRANSFER_BIN" "$VK_UNSHIELD_BIN" "$VK_VALUE_PROOF_BIN" \
   "$RPC_WS" "$SUDO_SEED"
 
 validate_rpc 1 "transfer"
 validate_rpc 2 "unshield"
 validate_rpc 6 "value_proof"
-validate_rpc 5 "private_link"
 
 if [[ "$REMOVE_OLD" == true ]]; then
   log "Checking pre-remove window (required=[${OLD_VERSION},${NEW_VERSION}])"
@@ -131,15 +129,14 @@ if [[ "$REMOVE_OLD" == true ]]; then
   remove_old 1 "transfer"
   remove_old 2 "unshield"
   remove_old 6 "value_proof"
-  remove_old 5 "private_link"
 
   log "Checking post-remove state (required=[${NEW_VERSION}])"
   bash "$VERIFY_WINDOW_SCRIPT" "$NEW_VERSION" "$RPC_HTTP" "${NEW_VERSION}" false
 
-  log "old_version v$OLD_VERSION removed from all 4 circuits"
+  log "old_version v$OLD_VERSION removed from all 3 circuits"
 fi
 
 # Remove generated .bin files — they are build artefacts excluded from git
-rm -f "$VK_TRANSFER_BIN" "$VK_UNSHIELD_BIN" "$VK_VALUE_PROOF_BIN" "$VK_PRIVATE_LINK_BIN"
+rm -f "$VK_TRANSFER_BIN" "$VK_UNSHIELD_BIN" "$VK_VALUE_PROOF_BIN"
 
 log "✅ VK rotation completed"

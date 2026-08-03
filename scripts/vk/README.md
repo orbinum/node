@@ -10,7 +10,7 @@ This folder centralizes all Verification Key (VK) operations for development and
     - `set-active`
     - `remove`
 - `workflows/setup-dev.sh`
-  - DEV bootstrap for fixed circuits `1,2,6,5`.
+  - DEV bootstrap for fixed circuits `1,2,6`.
 - `workflows/rotate-dev.sh`
   - Version rotation `old -> new` with RPC validation and optional `--remove-old`.
 - `policy/verify-window-dev.sh`
