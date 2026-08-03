@@ -1239,6 +1239,30 @@ mod tests {
 		});
 	}
 
+	/// Mirrors the sealed-tree spend E2E: a note in tree 0 must still verify
+	/// against the sealed root after enough later inserts to rotate the whole
+	/// historic ring.
+	#[test]
+	fn sealed_tree_leaf_verifies_after_ring_rotation() {
+		use crate::storage::MerkleRepository;
+		new_test_ext().execute_with(|| {
+			let target = Commitment::new([0x9Au8; 32]);
+			MerkleTreeService::insert_leaf::<Test>(target).unwrap();
+			for i in 0..120u32 {
+				let mut leaf = [0u8; 32];
+				leaf[..4].copy_from_slice(&i.to_le_bytes());
+				leaf[31] = 0x5A;
+				MerkleTreeService::insert_leaf::<Test>(Commitment::new(leaf)).unwrap();
+			}
+			let sealed = MerkleRepository::get_sealed_root::<Test>(0).expect("tree 0 sealed");
+			let path = MerkleTreeService::get_merkle_path::<Test>(0).expect("path for leaf 0");
+			assert!(
+				MerkleTreeService::verify_merkle_proof(&sealed, &target.0, &path),
+				"tree-0 leaf must verify against the sealed root after 120 later inserts"
+			);
+		});
+	}
+
 	#[test]
 	fn multiple_rollovers_keep_every_tree_provable() {
 		use crate::storage::MerkleRepository;
