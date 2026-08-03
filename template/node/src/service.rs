@@ -337,8 +337,6 @@ where
 	RA: ConstructRuntimeApi<B, FullClient<B, RA, HF>>,
 	RA: Send + Sync + 'static,
 	RA::RuntimeApi: RuntimeApiCollection<B, AuraId, AccountId, Nonce, Balance>,
-	RA::RuntimeApi:
-		pallet_account_mapping_runtime_api::AccountMappingRuntimeApi<B, AccountId, u128>,
 	RA::RuntimeApi: pallet_zk_verifier_runtime_api::ZkVerifierRuntimeApi<B>,
 	RA::RuntimeApi: pallet_relayer_runtime_api::RelayerRuntimeApi<B>,
 	HF: HostFunctionsT + 'static,

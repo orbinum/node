@@ -1,5 +1,5 @@
 use crate::{
-	account_mapping_runtime::EeSuffixAddressMapping,
+	evm_account::EeSuffixAddressMapping,
 	orbinum_signature::{OrbinumSignature, OrbinumSigner},
 	AccountId, Runtime, WeightPerGas,
 };

@@ -27,6 +27,7 @@ ignore = [
     "RUSTSEC-2026-0020",  # guest-controlled resource exhaustion in WASI implementations
     "RUSTSEC-2026-0021",  # panic adding excessive fields to wasi:http/types.fields
     "RUSTSEC-2026-0085",  # panic when lifting flags component value
+    "RUSTSEC-2026-0222",  # stores can mix up type indices between engines
 
     # tracing-subscriber 0.2.25 — pinned by ark-relations (ZK crates), no upgrade path
     "RUSTSEC-2025-0055",

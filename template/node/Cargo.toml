@@ -56,8 +56,6 @@ sp-timestamp = { workspace = true, features = ["default"] }
 sp-transaction-pool = { workspace = true, features = ["default"] }
 # These dependencies are used for RPC
 frame-system-rpc-runtime-api = { workspace = true }
-pallet-account-mapping-rpc = { workspace = true }
-pallet-account-mapping-runtime-api = { workspace = true }
 pallet-relayer-rpc = { workspace = true }
 pallet-relayer-runtime-api = { workspace = true }
 pallet-shielded-pool-rpc = { workspace = true }

@@ -10,10 +10,11 @@ set -euo pipefail
 #   bash scripts/vk/lib/registry.sh register <circuit_id> <version> <vk_file> <rpc_ws_url> <sudo_seed>
 #   bash scripts/vk/lib/registry.sh set-active <circuit_id> <version> <rpc_ws_url> <sudo_seed>
 #   bash scripts/vk/lib/registry.sh remove <circuit_id> <version> <rpc_ws_url> <sudo_seed>
+#   bash scripts/vk/lib/registry.sh purge <circuit_id> <rpc_ws_url> <sudo_seed>
 #
-#   # Register and activate all 4 circuits in ONE atomic transaction:
+#   # Register and activate all 3 circuits in ONE atomic transaction:
 #   bash scripts/vk/lib/registry.sh batch-register <version> <set_active:1|0> \
-#     <vk_transfer> <vk_unshield> <vk_value_proof> <vk_private_link> \
+#     <vk_transfer> <vk_unshield> <vk_value_proof> \
 #     <rpc_ws_url> <sudo_seed>
 #
 # EXAMPLES:
@@ -24,7 +25,6 @@ set -euo pipefail
 #     ./artifacts/verification_key_transfer.json \
 #     ./artifacts/verification_key_unshield.json \
 #     ./artifacts/verification_key_value_proof.json \
-#     ./artifacts/verification_key_private_link.json \
 #     ws://127.0.0.1:9944 "//Alice"
 # =============================================================================
 
@@ -41,9 +41,10 @@ log() {
   echo "[$(date '+%H:%M:%S')] $*"
 }
 
-[[ -n "$ACTION" ]] || err "Missing action: register | set-active | remove | batch-register"
+[[ -n "$ACTION" ]] || err "Missing action: register | set-active | remove | purge | batch-register"
 [[ -n "$CIRCUIT_ID" ]] || err "Missing circuit_id (or <version> for batch-register)"
-[[ -n "$VERSION" ]] || err "Missing version"
+# `purge` targets a whole circuit, so it takes no <version>: its $3 is the RPC URL.
+[[ "$ACTION" == "purge" || -n "$VERSION" ]] || err "Missing version"
 
 # Initialize all optional variables to avoid unbound variable errors with set -u
 VK_FILE=""
@@ -52,7 +53,6 @@ BATCH_SET_ACTIVE=""
 BATCH_VK_TRANSFER=""
 BATCH_VK_UNSHIELD=""
 BATCH_VK_VALUE_PROOF=""
-BATCH_VK_PRIVATE_LINK=""
 RPC_WS=""
 SUDO_SEED=""
 
@@ -68,26 +68,32 @@ case "$ACTION" in
     SUDO_SEED="${5:-}"
     VK_FILE=""
     ;;
+  purge)
+    # purge takes no <version>: $2=circuit_id $3=rpc $4=seed
+    RPC_WS="${3:-}"
+    SUDO_SEED="${4:-}"
+    VK_FILE=""
+    VERSION="0" # unused by the call; keeps the log line below well-formed
+    ;;
   batch-register)
-    # For batch-register the positional args shift: $2=version $3=set_active $4..7=vk_files $8=rpc $9=seed
+    # For batch-register the positional args shift: $2=version $3=set_active $4..6=vk_files $7=rpc $8=seed
     # Re-read with cleaner names to avoid confusion with CIRCUIT_ID/VERSION used by other actions
     BATCH_VERSION="${2:-}"
     BATCH_SET_ACTIVE="${3:-1}"
     BATCH_VK_TRANSFER="${4:-}"
     BATCH_VK_UNSHIELD="${5:-}"
     BATCH_VK_VALUE_PROOF="${6:-}"
-    BATCH_VK_PRIVATE_LINK="${7:-}"
-    RPC_WS="${8:-}"
-    SUDO_SEED="${9:-}"
+    RPC_WS="${7:-}"
+    SUDO_SEED="${8:-}"
     [[ -n "$BATCH_VERSION" ]] || err "batch-register: missing <version>"
     [[ "$BATCH_VERSION" =~ ^[0-9]+$ ]] || err "batch-register: version must be an integer >= 0"
     [[ "$BATCH_SET_ACTIVE" =~ ^[01]$ ]] || err "batch-register: set_active must be 0 or 1"
-    for _f in "$BATCH_VK_TRANSFER" "$BATCH_VK_UNSHIELD" "$BATCH_VK_VALUE_PROOF" "$BATCH_VK_PRIVATE_LINK"; do
+    for _f in "$BATCH_VK_TRANSFER" "$BATCH_VK_UNSHIELD" "$BATCH_VK_VALUE_PROOF"; do
       [[ -f "$_f" ]] || err "VK file not found: $_f"
     done
     ;;
   *)
-    err "Invalid action: $ACTION (use register | set-active | remove | batch-register)"
+    err "Invalid action: $ACTION (use register | set-active | remove | purge | batch-register)"
     ;;
 esac
 
@@ -113,7 +119,7 @@ log "RPC: $RPC_WS"
 
 node - "$ACTION" "$CIRCUIT_ID" "$VERSION" "$VK_FILE" "$RPC_WS" "$SUDO_SEED" \
       "$BATCH_VERSION" "$BATCH_SET_ACTIVE" \
-      "$BATCH_VK_TRANSFER" "$BATCH_VK_UNSHIELD" "$BATCH_VK_VALUE_PROOF" "$BATCH_VK_PRIVATE_LINK" << 'JS'
+      "$BATCH_VK_TRANSFER" "$BATCH_VK_UNSHIELD" "$BATCH_VK_VALUE_PROOF" << 'JS'
 const fs = require('fs');
 const path = require('path');
 const { ApiPromise, WsProvider } = require('@polkadot/api');
@@ -121,7 +127,7 @@ const { Keyring } = require('@polkadot/keyring');
 
 const [,, action, circuitIdRaw, versionRaw, vkFile, rpcWs, sudoSeed,
        batchVersion, batchSetActive,
-       batchVkTransfer, batchVkUnshield, batchVkValueProof, batchVkPrivateLink] = process.argv;
+       batchVkTransfer, batchVkUnshield, batchVkValueProof] = process.argv;
 
 function assertNumber(name, value) {
   if (!Number.isInteger(value) || value < 0) {
@@ -160,8 +166,12 @@ function assertNumber(name, value) {
     innerCall = api.tx.zkVerifier.setActiveVersion(circuitId, version);
   } else if (action === 'remove') {
     innerCall = api.tx.zkVerifier.removeVerificationKey(circuitId, version);
+  } else if (action === 'purge') {
+    // Wipes every version of a circuit the runtime no longer implements.
+    // The pallet rejects ids it still knows (transfer/unshield/value_proof).
+    innerCall = api.tx.zkVerifier.purgeCircuit(circuitId);
   } else if (action === 'batch-register') {
-    // circuit IDs: transfer=1, unshield=2, value_proof=6, private_link=5
+    // circuit IDs: transfer=1, unshield=2, value_proof=6
     const ver      = Number(batchVersion);
     const setActive = batchSetActive === '1';
     assertNumber('batch_version', ver);
@@ -170,7 +180,6 @@ function assertNumber(name, value) {
       { circuitId: 1, file: batchVkTransfer      },
       { circuitId: 2, file: batchVkUnshield       },
       { circuitId: 6, file: batchVkValueProof      },
-      { circuitId: 5, file: batchVkPrivateLink     },
     ];
 
     const entries = vkFiles.map(({ circuitId: cid, file }) => {

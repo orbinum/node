@@ -10,7 +10,7 @@ This folder centralizes all Verification Key (VK) operations for development and
     - `set-active`
     - `remove`
 - `workflows/setup-dev.sh`
-  - DEV bootstrap for fixed circuits `1,2,6,5`.
+  - DEV bootstrap for fixed circuits `1,2,6`.
 - `workflows/rotate-dev.sh`
   - Version rotation `old -> new` with RPC validation and optional `--remove-old`.
 - `policy/verify-window-dev.sh`
@@ -33,6 +33,29 @@ This folder centralizes all Verification Key (VK) operations for development and
   - `bash scripts/vk/workflows/rotate-dev.sh 2 ws://127.0.0.1:9944 "//Alice" 1 --remove-old`
 - Verify window:
   - `bash scripts/vk/policy/verify-window-dev.sh 2 http://127.0.0.1:9944 "1,2" true`
+- Purge a retired circuit:
+  - `bash scripts/vk/lib/registry.sh purge 5 ws://127.0.0.1:9944 "//Alice"`
+
+## Retiring a whole circuit
+
+`remove` and `retire` both refuse to touch a circuit's active version — the guard
+that stops a live circuit from ending up with no key to verify against. A circuit
+with a single registered version is therefore unreachable by either call, so
+retiring one as a whole needs `purge`.
+
+`purge_circuit` clears all five maps (`VerificationKeys`, `VkHashes`,
+`VerificationStats`, `RetiredVersions`, `ActiveCircuitVersion`) and accepts a
+circuit **only** when the runtime no longer implements it, i.e. when
+`expected_public_inputs` returns `None`. Transfer (1), unshield (2) and
+value_proof (6) are rejected with `CircuitStillInUse` for as long as they remain
+compiled in — storage contents cannot override that.
+
+Order matters: deploy the runtime that drops the circuit **first**, then purge.
+Purging against a runtime that still knows the id just fails.
+
+For the `private_link` circuit (id 5) no manual call is needed —
+`pallet_zk_verifier::migrations::v1::MigrateToV1` clears it during the runtime
+upgrade.
 
 ## Security
 
