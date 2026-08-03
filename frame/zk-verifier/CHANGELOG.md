@@ -4,6 +4,76 @@ All notable changes to this pallet are documented here.
 
 ---
 
+## [Unreleased]
+
+---
+
+## [0.10.0] - 2026-08-03
+
+### Added
+
+- **`purge_circuit(circuit_id)`** (call index 7, Root) — erases every version of a
+  circuit the runtime no longer implements, clearing all five maps:
+  `VerificationKeys`, `VkHashes`, `VerificationStats`, `RetiredVersions` and
+  `ActiveCircuitVersion`.
+
+  It fills a gap the other calls could not: `remove_verification_key` and
+  `retire_version` both refuse to touch a circuit's active version, which is what
+  keeps a live circuit from ending up with no key to verify against. That same
+  guard makes them unable to retire a circuit as a whole, since its last version
+  is by construction the active one.
+
+  The guard here is inverted rather than removed: a circuit is purgeable **only**
+  when `expected_public_inputs` returns `None` for its id. Transfer (1), unshield
+  (2) and value_proof (6) are rejected with `CircuitStillInUse` for as long as
+  they remain compiled in, regardless of storage contents. Ids above `u8::MAX`
+  are rejected outright rather than truncated into that lookup, so a circuit
+  numbered past 255 cannot alias onto a live id.
+
+  The call clears `ActiveCircuitVersion` instead of requiring it to be empty.
+  Requiring it would make the extrinsic unreachable: the first
+  `register_verification_key` for a circuit activates the version it registers,
+  and no extrinsic ever clears that entry — `set_active_version` only overwrites,
+  and `retire_version` and `remove_verification_key` both refuse the active
+  version. An id the runtime no longer knows has no verification route whatever
+  that entry says.
+
+  New errors: `CircuitStillInUse`, `CircuitHasNoStorage`. New event:
+  `CircuitPurged { circuit_id, removed }`, where `removed` counts storage entries
+  across every map — not versions — so an indexer reconciling against its own
+  view gets the real figure even when the maps hold different version sets. The
+  weight is still charged per version, which is what the benchmark measures.
+
+- **`STORAGE_VERSION`** and a `migrations` module — the pallet had neither.
+
+- **`migrations::v1::MigrateToV1`** — drops the retired `private_link` circuit
+  (id 5) during the runtime upgrade, so chains carrying its key from an earlier
+  runtime need no manual call. The id is hardcoded rather than derived: this runs
+  once, only on chains still at storage v0, where 5 can only mean `private_link`.
+
+  Without this the key would linger and stay visible — `get_all_circuit_versions`
+  iterates storage keys with no allowlist, so explorers kept listing a circuit
+  the runtime could not serve.
+
+### Fixed
+
+- **`remove_verification_key` no longer strands satellite entries.** It cleared
+  `VerificationKeys` and `RetiredVersions` but left `VkHashes` and
+  `VerificationStats` behind, so a removed version kept a hash and a stats row no
+  call could reach. That also skewed the version count `store_vk` uses to enforce
+  `MAX_VERSIONS_PER_CIRCUIT`. All four maps are now cleared together.
+
+### Note
+
+`weights.rs` was regenerated for the whole pallet on reference hardware
+(Hetzner CCX33, AMD EPYC-Genoa, steps 50 / repeat 20), so `purge_circuit` is
+measured under the same conditions as every other extrinsic in the file rather
+than extrapolated. Model: `59.5µs + 10.75µs * v`, 9 + 4v reads, 3 + 4v writes.
+At the 64-version cap the call stays well under 10% of a 2000ms block, asserted
+by `purge_circuit_at_the_cap_fits_in_a_block`.
+
+---
+
 ## [0.9.0] - 2026-07-09
 
 ### Added
