@@ -10,6 +10,7 @@ set -euo pipefail
 #   bash scripts/vk/lib/registry.sh register <circuit_id> <version> <vk_file> <rpc_ws_url> <sudo_seed>
 #   bash scripts/vk/lib/registry.sh set-active <circuit_id> <version> <rpc_ws_url> <sudo_seed>
 #   bash scripts/vk/lib/registry.sh remove <circuit_id> <version> <rpc_ws_url> <sudo_seed>
+#   bash scripts/vk/lib/registry.sh purge <circuit_id> <rpc_ws_url> <sudo_seed>
 #
 #   # Register and activate all 3 circuits in ONE atomic transaction:
 #   bash scripts/vk/lib/registry.sh batch-register <version> <set_active:1|0> \
@@ -40,9 +41,10 @@ log() {
   echo "[$(date '+%H:%M:%S')] $*"
 }
 
-[[ -n "$ACTION" ]] || err "Missing action: register | set-active | remove | batch-register"
+[[ -n "$ACTION" ]] || err "Missing action: register | set-active | remove | purge | batch-register"
 [[ -n "$CIRCUIT_ID" ]] || err "Missing circuit_id (or <version> for batch-register)"
-[[ -n "$VERSION" ]] || err "Missing version"
+# `purge` targets a whole circuit, so it takes no <version>: its $3 is the RPC URL.
+[[ "$ACTION" == "purge" || -n "$VERSION" ]] || err "Missing version"
 
 # Initialize all optional variables to avoid unbound variable errors with set -u
 VK_FILE=""
@@ -66,6 +68,13 @@ case "$ACTION" in
     SUDO_SEED="${5:-}"
     VK_FILE=""
     ;;
+  purge)
+    # purge takes no <version>: $2=circuit_id $3=rpc $4=seed
+    RPC_WS="${3:-}"
+    SUDO_SEED="${4:-}"
+    VK_FILE=""
+    VERSION="0" # unused by the call; keeps the log line below well-formed
+    ;;
   batch-register)
     # For batch-register the positional args shift: $2=version $3=set_active $4..6=vk_files $7=rpc $8=seed
     # Re-read with cleaner names to avoid confusion with CIRCUIT_ID/VERSION used by other actions
@@ -84,7 +93,7 @@ case "$ACTION" in
     done
     ;;
   *)
-    err "Invalid action: $ACTION (use register | set-active | remove | batch-register)"
+    err "Invalid action: $ACTION (use register | set-active | remove | purge | batch-register)"
     ;;
 esac
 
@@ -157,6 +166,10 @@ function assertNumber(name, value) {
     innerCall = api.tx.zkVerifier.setActiveVersion(circuitId, version);
   } else if (action === 'remove') {
     innerCall = api.tx.zkVerifier.removeVerificationKey(circuitId, version);
+  } else if (action === 'purge') {
+    // Wipes every version of a circuit the runtime no longer implements.
+    // The pallet rejects ids it still knows (transfer/unshield/value_proof).
+    innerCall = api.tx.zkVerifier.purgeCircuit(circuitId);
   } else if (action === 'batch-register') {
     // circuit IDs: transfer=1, unshield=2, value_proof=6
     const ver      = Number(batchVersion);

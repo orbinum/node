@@ -153,6 +153,7 @@ pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 pub type Migrations = (
 	pallet_shielded_pool::migrations::v1::MigrateToV1<Runtime>,
 	pallet_shielded_pool::migrations::v2::MigrateToV2<Runtime>,
+	pallet_zk_verifier::migrations::v1::MigrateToV1<Runtime>,
 );
 
 /// Executive: handles dispatch to the various modules.

@@ -22,6 +22,7 @@ extern crate alloc;
 pub use pallet::*;
 
 mod encoding;
+pub mod migrations;
 mod port;
 mod runtime_api;
 mod types;
@@ -50,7 +51,13 @@ pub mod pallet {
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
 
+	/// Storage version history:
+	/// - v1: drop the retired `private_link` circuit (id 5), cleared by
+	///   `migrations::v1::MigrateToV1`.
+	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+
 	#[pallet::pallet]
+	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
 
 	#[pallet::config]
@@ -178,14 +185,42 @@ pub mod pallet {
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
-		VerificationKeyRegistered { circuit_id: CircuitId, version: u32 },
-		ActiveVersionSet { circuit_id: CircuitId, version: u32 },
-		VerificationKeyRemoved { circuit_id: CircuitId, version: u32 },
-		VersionRetired { circuit_id: CircuitId, version: u32 },
-		VersionUnretired { circuit_id: CircuitId, version: u32 },
-		ProofVerified { circuit_id: CircuitId, version: u32 },
-		ProofVerificationFailed { circuit_id: CircuitId, version: u32 },
-		BatchVerificationKeysRegistered { count: u32 },
+		VerificationKeyRegistered {
+			circuit_id: CircuitId,
+			version: u32,
+		},
+		ActiveVersionSet {
+			circuit_id: CircuitId,
+			version: u32,
+		},
+		VerificationKeyRemoved {
+			circuit_id: CircuitId,
+			version: u32,
+		},
+		VersionRetired {
+			circuit_id: CircuitId,
+			version: u32,
+		},
+		VersionUnretired {
+			circuit_id: CircuitId,
+			version: u32,
+		},
+		ProofVerified {
+			circuit_id: CircuitId,
+			version: u32,
+		},
+		ProofVerificationFailed {
+			circuit_id: CircuitId,
+			version: u32,
+		},
+		BatchVerificationKeysRegistered {
+			count: u32,
+		},
+		/// Every version of a retired circuit was purged from storage.
+		CircuitPurged {
+			circuit_id: CircuitId,
+			removed: u32,
+		},
 	}
 
 	// ── Errors ────────────────────────────────────────────────────────────────
@@ -225,6 +260,9 @@ pub mod pallet {
 		InvalidBatchSize,
 		BatchLengthMismatch,
 		BatchVerificationFailed,
+		// Purge
+		CircuitStillInUse,
+		CircuitHasNoStorage,
 	}
 
 	// ── Extrinsics ────────────────────────────────────────────────────────────
@@ -326,6 +364,8 @@ pub mod pallet {
 
 			VerificationKeys::<T>::remove(circuit_id, version);
 			RetiredVersions::<T>::remove(circuit_id, version);
+			VkHashes::<T>::remove(circuit_id, version);
+			VerificationStats::<T>::remove(circuit_id, version);
 			Self::deposit_event(Event::VerificationKeyRemoved {
 				circuit_id,
 				version,
@@ -475,6 +515,98 @@ pub mod pallet {
 				version,
 			});
 			Ok(())
+		}
+
+		/// Erase every trace of a circuit the runtime no longer implements.
+		///
+		/// `remove_verification_key` and `retire_version` both refuse to touch the
+		/// active version, which is what keeps a live circuit from ending up with
+		/// no key to verify against. That guard also makes them unable to retire a
+		/// circuit as a whole: its last version is, by construction, the active one.
+		/// This call covers that gap — and only that gap.
+		///
+		/// The one guard: the runtime must no longer know the id —
+		/// `expected_public_inputs` returns `None`. An id above `u8::MAX` is
+		/// rejected outright rather than truncated into that lookup, so a future
+		/// circuit numbered past 255 cannot alias its way past this check.
+		///
+		/// `ActiveCircuitVersion` is cleared here rather than required to be empty
+		/// beforehand. Requiring it would make the call unreachable: the first
+		/// `register_verification_key` for a circuit activates the version it
+		/// registers, and no extrinsic ever clears that entry — `set_active_version`
+		/// only overwrites, and both `retire_version` and `remove_verification_key`
+		/// refuse to touch whichever version is active. An unknown id has no
+		/// verification route regardless of what the entry says, so it carries no
+		/// authority worth guarding.
+		///
+		/// Clears all five maps by prefix — `VerificationKeys`, `VkHashes`,
+		/// `VerificationStats`, `RetiredVersions`, `ActiveCircuitVersion` — rather
+		/// than iterating one map's versions, so entries orphaned in the satellite
+		/// maps by an earlier `remove_verification_key` are collected too.
+		#[pallet::call_index(7)]
+		#[pallet::weight(T::WeightInfo::purge_circuit(Pallet::<T>::MAX_VERSIONS_PER_CIRCUIT))]
+		pub fn purge_circuit(
+			origin: OriginFor<T>,
+			circuit_id: CircuitId,
+		) -> DispatchResultWithPostInfo {
+			ensure_root(origin)?;
+
+			// Fail closed on ids that do not fit the lookup: `as u8` would alias
+			// e.g. 257 onto 1, so an id past 255 must never reach the table.
+			let id = u8::try_from(circuit_id.0).map_err(|_| Error::<T>::CircuitStillInUse)?;
+			ensure!(
+				orbinum_zk_verifier::expected_public_inputs(id).is_none(),
+				Error::<T>::CircuitStillInUse
+			);
+
+			// Counted by iterating rather than from `clear_prefix`'s result: its
+			// counters only report keys committed to the backend, and everything
+			// written earlier in the same block still lives in the overlay.
+			//
+			// Each map is counted on its own and the totals summed, not maxed: the
+			// four normally share a version set, but nothing in the type system says
+			// they must, and the sum is what the clear below actually pays for.
+			let per_map = [
+				VerificationKeys::<T>::iter_key_prefix(circuit_id).count(),
+				VkHashes::<T>::iter_key_prefix(circuit_id).count(),
+				VerificationStats::<T>::iter_key_prefix(circuit_id).count(),
+				RetiredVersions::<T>::iter_key_prefix(circuit_id).count(),
+			];
+			// A stale `ActiveCircuitVersion` with no versions behind it is still an
+			// entry to clear, so it belongs in the total the event reports.
+			let active_entries = usize::from(ActiveCircuitVersion::<T>::contains_key(circuit_id));
+			let entries = per_map.iter().sum::<usize>().saturating_add(active_entries);
+
+			ensure!(entries > 0, Error::<T>::CircuitHasNoStorage);
+			// The cap bounds versions per map, so the clear is bounded by the widest
+			// map, not by the total. More than that means storage was built outside
+			// `store_vk`; bail rather than clear part of it — the extrinsic reverts
+			// as a whole, so nothing is left half-done.
+			let widest = per_map.iter().copied().max().unwrap_or(0);
+			ensure!(
+				widest <= Self::MAX_VERSIONS_PER_CIRCUIT as usize,
+				Error::<T>::TooManyVersions
+			);
+
+			// `u32::MAX` as the limit: the count above already proved the prefix
+			// fits within the cap, so this only has to clear everything in one pass.
+			let _ = VerificationKeys::<T>::clear_prefix(circuit_id, u32::MAX, None);
+			let _ = VkHashes::<T>::clear_prefix(circuit_id, u32::MAX, None);
+			let _ = VerificationStats::<T>::clear_prefix(circuit_id, u32::MAX, None);
+			let _ = RetiredVersions::<T>::clear_prefix(circuit_id, u32::MAX, None);
+			ActiveCircuitVersion::<T>::remove(circuit_id);
+
+			// Reports entries cleared across every map, not versions: an indexer
+			// reconciling against its own view needs the real figure, and a stale
+			// active pointer with no versions behind it still cleared something.
+			Self::deposit_event(Event::CircuitPurged {
+				circuit_id,
+				removed: entries as u32,
+			});
+			// Weighed by versions, not entries: the benchmark's linear component
+			// charges one read and four writes per version, so it is already the
+			// per-version cost of clearing all four maps.
+			Ok(Some(T::WeightInfo::purge_circuit(widest as u32)).into())
 		}
 	}
 
@@ -1620,5 +1752,292 @@ mod tests {
 	fn integrity_test_panics_when_verification_disabled() {
 		use frame_support::traits::Hooks;
 		<ZkVerifier as Hooks<frame_system::pallet_prelude::BlockNumberFor<Test>>>::integrity_test();
+	}
+
+	// ── purge_circuit ─────────────────────────────────────────────────────────
+
+	/// Seeds every map for `(circuit_id, version)` and marks the version active.
+	/// Callers that then purge must clear `ActiveCircuitVersion` first — the
+	/// extrinsic refuses circuits that still have one.
+	fn seed_circuit(circuit_id: CircuitId, version: u32, arity: usize) {
+		VerificationKeys::<Test>::insert(
+			circuit_id,
+			version,
+			VerificationKeyInfo {
+				key_data: real_vk(arity),
+				system: ProofSystem::Groth16,
+				registered_at: 0u64,
+			},
+		);
+		crate::pallet::VkHashes::<Test>::insert(circuit_id, version, [0x11u8; 32]);
+		ActiveCircuitVersion::<Test>::insert(circuit_id, version);
+	}
+
+	#[test]
+	fn purge_circuit_clears_every_map() {
+		new_test_ext().execute_with(|| {
+			let retired = CircuitId(5);
+			seed_circuit(retired, 1, 2);
+			RetiredVersions::<Test>::insert(retired, 1, ());
+
+			assert_ok!(ZkVerifier::purge_circuit(root().into(), retired));
+
+			assert!(VerificationKeys::<Test>::get(retired, 1).is_none());
+			assert!(crate::pallet::VkHashes::<Test>::get(retired, 1).is_none());
+			assert!(!crate::pallet::VerificationStats::<Test>::contains_key(
+				retired, 1
+			));
+			assert!(!RetiredVersions::<Test>::contains_key(retired, 1));
+			assert!(ActiveCircuitVersion::<Test>::get(retired).is_none());
+		});
+	}
+
+	/// The guard that makes this call safe: a circuit the runtime still
+	/// implements can never be purged, no matter what storage holds.
+	#[test]
+	fn purge_circuit_rejects_live_circuits() {
+		new_test_ext().execute_with(|| {
+			for cid in [
+				CircuitId::TRANSFER,
+				CircuitId::UNSHIELD,
+				CircuitId::VALUE_PROOF,
+			] {
+				seed_circuit(cid, 1, TRANSFER_PUBLIC_INPUTS);
+				assert_noop!(
+					ZkVerifier::purge_circuit(root().into(), cid),
+					Error::<Test>::CircuitStillInUse
+				);
+				assert!(VerificationKeys::<Test>::get(cid, 1).is_some());
+			}
+		});
+	}
+
+	/// `circuit_id.0 as u8` would alias 257 onto TRANSFER(1). Ids past `u8::MAX`
+	/// must be rejected outright rather than truncated into the lookup.
+	#[test]
+	fn purge_circuit_rejects_ids_above_u8_max() {
+		new_test_ext().execute_with(|| {
+			for id in [256u32, 257, 261, 262, u32::MAX] {
+				let cid = CircuitId(id);
+				seed_circuit(cid, 1, 2);
+				assert_noop!(
+					ZkVerifier::purge_circuit(root().into(), cid),
+					Error::<Test>::CircuitStillInUse
+				);
+				assert!(VerificationKeys::<Test>::get(cid, 1).is_some());
+			}
+		});
+	}
+
+	/// Purging must work on a circuit reached the only way an operator can reach
+	/// one: through the extrinsics. `register_verification_key` activates the
+	/// first version it stores and nothing else ever clears that pointer, so a
+	/// call that required `ActiveCircuitVersion` to be empty could never fire.
+	#[test]
+	fn purge_circuit_works_on_a_circuit_built_through_extrinsics() {
+		new_test_ext().execute_with(|| {
+			let retired = CircuitId(5);
+			assert_ok!(ZkVerifier::register_verification_key(
+				root().into(),
+				retired,
+				1,
+				real_vk(2)
+			));
+			// The registration activated version 1, and no extrinsic can undo that:
+			// `retire_version` and `remove_verification_key` both refuse the active
+			// version, and `set_active_version` only ever overwrites.
+			assert_eq!(ActiveCircuitVersion::<Test>::get(retired), Some(1));
+			assert_noop!(
+				ZkVerifier::retire_version(root().into(), retired, 1),
+				Error::<Test>::CannotRetireActiveVersion
+			);
+			assert_noop!(
+				ZkVerifier::remove_verification_key(root().into(), retired, 1),
+				Error::<Test>::CannotRemoveActiveVersion
+			);
+
+			assert_ok!(ZkVerifier::purge_circuit(root().into(), retired));
+
+			assert!(VerificationKeys::<Test>::get(retired, 1).is_none());
+			assert!(ActiveCircuitVersion::<Test>::get(retired).is_none());
+		});
+	}
+
+	#[test]
+	fn purge_circuit_requires_root() {
+		new_test_ext().execute_with(|| {
+			let retired = CircuitId(5);
+			seed_circuit(retired, 1, 2);
+			assert_err!(
+				ZkVerifier::purge_circuit(signed().into(), retired),
+				sp_runtime::DispatchError::BadOrigin
+			);
+			assert!(VerificationKeys::<Test>::get(retired, 1).is_some());
+		});
+	}
+
+	#[test]
+	fn purge_circuit_fails_when_nothing_stored() {
+		new_test_ext().execute_with(|| {
+			assert_noop!(
+				ZkVerifier::purge_circuit(root().into(), CircuitId(5)),
+				Error::<Test>::CircuitHasNoStorage
+			);
+		});
+	}
+
+	/// The declared weight is charged upfront, so a purge at the version cap must
+	/// leave room for the rest of the block. The runtime allows 2s of compute and
+	/// this call currently costs ~33ms of it; the 10% bound is loose enough not to
+	/// break on a re-benchmark but tight enough to catch a coefficient that grows
+	/// by an order of magnitude.
+	#[test]
+	fn purge_circuit_at_the_cap_fits_in_a_block() {
+		use crate::weights::WeightInfo;
+		use frame_support::weights::constants::WEIGHT_REF_TIME_PER_MILLIS;
+
+		let worst =
+			<Test as Config>::WeightInfo::purge_circuit(Pallet::<Test>::MAX_VERSIONS_PER_CIRCUIT);
+		// Matches MAXIMUM_BLOCK_WEIGHT in the runtime.
+		let block = 2_000u64 * WEIGHT_REF_TIME_PER_MILLIS;
+		assert!(
+			worst.ref_time() < block / 10,
+			"purge_circuit at the cap costs {}ms of a 2000ms block",
+			worst.ref_time() / WEIGHT_REF_TIME_PER_MILLIS
+		);
+	}
+
+	/// An active pointer with no versions behind it is the one thing left to
+	/// clear, so the "nothing stored" guard must not treat it as nothing — and
+	/// the event must not report it as having cleared nothing either.
+	#[test]
+	fn purge_circuit_clears_a_stranded_active_pointer() {
+		new_test_ext().execute_with(|| {
+			let retired = CircuitId(5);
+			ActiveCircuitVersion::<Test>::insert(retired, 1);
+
+			assert_ok!(ZkVerifier::purge_circuit(root().into(), retired));
+
+			assert!(ActiveCircuitVersion::<Test>::get(retired).is_none());
+			assert!(has_event(Event::CircuitPurged {
+				circuit_id: retired,
+				removed: 1
+			}));
+		});
+	}
+
+	/// `removed` counts entries across every map, not versions. Maps whose
+	/// version sets differ would under-report if the count were a max, leaving an
+	/// indexer reconciling against a figure smaller than what actually went away.
+	#[test]
+	fn purge_circuit_reports_entries_not_versions() {
+		new_test_ext().execute_with(|| {
+			let retired = CircuitId(5);
+			// One version with a key + hash, plus an orphan hash at another version
+			// and a retired marker at a third: 2 + 1 + 1 entries, spread over three
+			// distinct versions, none of which is a max of the per-map counts.
+			seed_circuit(retired, 1, 2);
+			crate::pallet::VkHashes::<Test>::insert(retired, 2, [0x22u8; 32]);
+			RetiredVersions::<Test>::insert(retired, 3, ());
+
+			assert_ok!(ZkVerifier::purge_circuit(root().into(), retired));
+
+			// keys(1) + hashes(2) + stats(0) + retired(1) + active pointer(1)
+			assert!(has_event(Event::CircuitPurged {
+				circuit_id: retired,
+				removed: 5
+			}));
+		});
+	}
+
+	#[test]
+	fn purge_circuit_removes_every_version() {
+		new_test_ext().execute_with(|| {
+			let retired = CircuitId(5);
+			for version in 1..=3u32 {
+				seed_circuit(retired, version, 2);
+			}
+
+			assert_ok!(ZkVerifier::purge_circuit(root().into(), retired));
+
+			assert!(
+				VerificationKeys::<Test>::iter_key_prefix(retired)
+					.next()
+					.is_none()
+			);
+		});
+	}
+
+	/// An earlier `remove_verification_key` used to strand hashes and stats with
+	/// no `VerificationKeys` row to enumerate them. Clearing by prefix collects
+	/// them; iterating one map's versions would not.
+	#[test]
+	fn purge_circuit_clears_orphaned_satellite_entries() {
+		new_test_ext().execute_with(|| {
+			let retired = CircuitId(5);
+			crate::pallet::VkHashes::<Test>::insert(retired, 1, [0x11u8; 32]);
+			crate::pallet::VerificationStats::<Test>::insert(
+				retired,
+				1,
+				crate::types::VerificationStatistics::default(),
+			);
+			RetiredVersions::<Test>::insert(retired, 1, ());
+			// Deliberately no VerificationKeys entry.
+
+			assert_ok!(ZkVerifier::purge_circuit(root().into(), retired));
+
+			assert!(crate::pallet::VkHashes::<Test>::get(retired, 1).is_none());
+			assert!(!crate::pallet::VerificationStats::<Test>::contains_key(
+				retired, 1
+			));
+			assert!(!RetiredVersions::<Test>::contains_key(retired, 1));
+		});
+	}
+
+	/// After a purge the circuit must be invisible to the runtime API, which is
+	/// what keeps explorers from listing a circuit the runtime cannot serve.
+	#[test]
+	fn purged_circuit_disappears_from_runtime_api() {
+		new_test_ext().execute_with(|| {
+			let retired = CircuitId(5);
+			seed_circuit(retired, 1, 2);
+			seed_circuit(CircuitId::TRANSFER, 1, TRANSFER_PUBLIC_INPUTS);
+
+			assert_ok!(ZkVerifier::purge_circuit(root().into(), retired));
+
+			let ids: Vec<u32> = ZkVerifier::runtime_api_get_all_circuit_versions()
+				.into_iter()
+				.map(|info| info.circuit_id)
+				.collect();
+			assert!(!ids.contains(&5));
+			assert!(ids.contains(&CircuitId::TRANSFER.0));
+		});
+	}
+
+	/// `remove_verification_key` must not strand the satellite maps either —
+	/// that stranding is what made the orphan case above possible.
+	#[test]
+	fn remove_vk_also_clears_hash_and_stats() {
+		new_test_ext().execute_with(|| {
+			let cid = CircuitId::TRANSFER;
+			seed_circuit(cid, 1, TRANSFER_PUBLIC_INPUTS);
+			seed_circuit(cid, 2, TRANSFER_PUBLIC_INPUTS);
+			ActiveCircuitVersion::<Test>::insert(cid, 1u32);
+			crate::pallet::VerificationStats::<Test>::insert(
+				cid,
+				2,
+				crate::types::VerificationStatistics::default(),
+			);
+
+			assert_ok!(ZkVerifier::remove_verification_key(root().into(), cid, 2));
+
+			assert!(crate::pallet::VkHashes::<Test>::get(cid, 2).is_none());
+			assert!(!crate::pallet::VerificationStats::<Test>::contains_key(
+				cid, 2
+			));
+			// The active version is untouched.
+			assert!(VerificationKeys::<Test>::get(cid, 1).is_some());
+			assert!(crate::pallet::VkHashes::<Test>::get(cid, 1).is_some());
+		});
 	}
 }

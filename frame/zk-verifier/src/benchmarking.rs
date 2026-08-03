@@ -243,6 +243,61 @@ mod benchmarks {
 		assert!(!RetiredVersions::<T>::contains_key(circuit_id, retired));
 	}
 
+	/// Uses circuit id 99 rather than the retired 5: the extrinsic only accepts
+	/// ids the runtime does not implement, and 99 stays unknown even if 5 is
+	/// ever reassigned.
+	///
+	/// All four maps are seeded for every version, not just the two that
+	/// `register_verification_key` writes. The extrinsic iterates and clears each
+	/// one by prefix, so leaving `VerificationStats` and `RetiredVersions` empty
+	/// would measure half the work the weight has to cover.
+	#[benchmark]
+	fn purge_circuit(v: Linear<1, 64>) {
+		let circuit_id = CircuitId(99);
+		let registered_at = frame_system::Pallet::<T>::block_number();
+
+		for version in 1..=v {
+			VerificationKeys::<T>::insert(
+				circuit_id,
+				version,
+				VerificationKeyInfo {
+					key_data: sample_verification_key().try_into().unwrap(),
+					system: ProofSystem::Groth16,
+					registered_at,
+				},
+			);
+			VkHashes::<T>::insert(circuit_id, version, [0u8; 32]);
+			VerificationStats::<T>::insert(
+				circuit_id,
+				version,
+				crate::types::VerificationStatistics::default(),
+			);
+			RetiredVersions::<T>::insert(circuit_id, version, ());
+		}
+		ActiveCircuitVersion::<T>::insert(circuit_id, 1u32);
+
+		#[extrinsic_call]
+		_(RawOrigin::Root, circuit_id);
+
+		assert!(
+			VerificationKeys::<T>::iter_key_prefix(circuit_id)
+				.next()
+				.is_none()
+		);
+		assert!(VkHashes::<T>::iter_key_prefix(circuit_id).next().is_none());
+		assert!(
+			VerificationStats::<T>::iter_key_prefix(circuit_id)
+				.next()
+				.is_none()
+		);
+		assert!(
+			RetiredVersions::<T>::iter_key_prefix(circuit_id)
+				.next()
+				.is_none()
+		);
+		assert!(ActiveCircuitVersion::<T>::get(circuit_id).is_none());
+	}
+
 	#[benchmark]
 	fn batch_register_verification_keys(n: Linear<1, 10>) {
 		let vk_bytes = sample_verification_key();

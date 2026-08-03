@@ -46,6 +46,7 @@ pub trait WeightInfo {
 	fn retire_version() -> Weight;
 	fn unretire_version() -> Weight;
 	fn batch_register_verification_keys(n: u32, ) -> Weight;
+	fn purge_circuit(v: u32, ) -> Weight;
 }
 
 /// Weights for pallet_zk_verifier using the Substrate node and recommended hardware.
@@ -218,6 +219,44 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().writes((3_u64).saturating_mul(n.into())))
 			.saturating_add(Weight::from_parts(0, 21428).saturating_mul(n.into()))
 	}
+	/// Storage: `ZkVerifier::VerificationKeys` (r:65 w:64)
+	/// Proof: `ZkVerifier::VerificationKeys` (`max_values`: None, `max_size`: Some(8239), added: 10714, mode: `MaxEncodedLen`)
+	/// Storage: `ZkVerifier::VkHashes` (r:65 w:64)
+	/// Proof: `ZkVerifier::VkHashes` (`max_values`: None, `max_size`: Some(72), added: 2547, mode: `MaxEncodedLen`)
+	/// Storage: `ZkVerifier::VerificationStats` (r:65 w:64)
+	/// Proof: `ZkVerifier::VerificationStats` (`max_values`: None, `max_size`: Some(64), added: 2539, mode: `MaxEncodedLen`)
+	/// Storage: `ZkVerifier::RetiredVersions` (r:65 w:64)
+	/// Proof: `ZkVerifier::RetiredVersions` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
+	/// Storage: `ZkVerifier::ActiveCircuitVersion` (r:1 w:1)
+	/// Proof: `ZkVerifier::ActiveCircuitVersion` (`max_values`: None, `max_size`: Some(24), added: 2499, mode: `MaxEncodedLen`)
+	/// Storage: `System::Number` (r:1 w:0)
+	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `System::ExecutionPhase` (r:1 w:0)
+	/// Proof: `System::ExecutionPhase` (`max_values`: Some(1), `max_size`: Some(5), added: 500, mode: `MaxEncodedLen`)
+	/// Storage: `System::EventCount` (r:1 w:1)
+	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `System::Events` (r:1 w:1)
+	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
+	///
+	/// Measured on an Apple M-series dev machine, NOT the reference hardware the
+	/// rest of this file was generated on (AMD EPYC-Genoa, see the header). Steps
+	/// 20 / repeat 5 rather than 50 / 20. Re-run with the others before a release
+	/// tag so every weight in this file comes from one machine and one config.
+	/// The range of component `v` is `[1, 64]`.
+	fn purge_circuit(v: u32, ) -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `394 + v * (184 ±0)`
+		//  Estimated: `11704 + v * (10714 ±0)`
+		// Minimum execution time: 38_000_000 picoseconds.
+		Weight::from_parts(36_844_644, 11704)
+			// Standard Error: 244_885
+			.saturating_add(Weight::from_parts(8_168_653, 0).saturating_mul(v.into()))
+			.saturating_add(T::DbWeight::get().reads(9_u64))
+			.saturating_add(T::DbWeight::get().reads((4_u64).saturating_mul(v.into())))
+			.saturating_add(T::DbWeight::get().writes(3_u64))
+			.saturating_add(T::DbWeight::get().writes((4_u64).saturating_mul(v.into())))
+			.saturating_add(Weight::from_parts(0, 10714).saturating_mul(v.into()))
+	}
 }
 
 // For backwards compatibility and tests
@@ -388,5 +427,41 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().writes(2_u64))
 			.saturating_add(RocksDbWeight::get().writes((3_u64).saturating_mul(n.into())))
 			.saturating_add(Weight::from_parts(0, 21428).saturating_mul(n.into()))
+	}
+	/// Storage: `ZkVerifier::VerificationKeys` (r:65 w:64)
+	/// Proof: `ZkVerifier::VerificationKeys` (`max_values`: None, `max_size`: Some(8239), added: 10714, mode: `MaxEncodedLen`)
+	/// Storage: `ZkVerifier::VkHashes` (r:65 w:64)
+	/// Proof: `ZkVerifier::VkHashes` (`max_values`: None, `max_size`: Some(72), added: 2547, mode: `MaxEncodedLen`)
+	/// Storage: `ZkVerifier::VerificationStats` (r:65 w:64)
+	/// Proof: `ZkVerifier::VerificationStats` (`max_values`: None, `max_size`: Some(64), added: 2539, mode: `MaxEncodedLen`)
+	/// Storage: `ZkVerifier::RetiredVersions` (r:65 w:64)
+	/// Proof: `ZkVerifier::RetiredVersions` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
+	/// Storage: `ZkVerifier::ActiveCircuitVersion` (r:1 w:1)
+	/// Proof: `ZkVerifier::ActiveCircuitVersion` (`max_values`: None, `max_size`: Some(24), added: 2499, mode: `MaxEncodedLen`)
+	/// Storage: `System::Number` (r:1 w:0)
+	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `System::ExecutionPhase` (r:1 w:0)
+	/// Proof: `System::ExecutionPhase` (`max_values`: Some(1), `max_size`: Some(5), added: 500, mode: `MaxEncodedLen`)
+	/// Storage: `System::EventCount` (r:1 w:1)
+	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `System::Events` (r:1 w:1)
+	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
+	///
+	/// Measured on a dev machine, not the reference hardware — see the
+	/// `SubstrateWeight` impl above.
+	/// The range of component `v` is `[1, 64]`.
+	fn purge_circuit(v: u32, ) -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `394 + v * (184 ±0)`
+		//  Estimated: `11704 + v * (10714 ±0)`
+		// Minimum execution time: 38_000_000 picoseconds.
+		Weight::from_parts(36_844_644, 11704)
+			// Standard Error: 244_885
+			.saturating_add(Weight::from_parts(8_168_653, 0).saturating_mul(v.into()))
+			.saturating_add(RocksDbWeight::get().reads(9_u64))
+			.saturating_add(RocksDbWeight::get().reads((4_u64).saturating_mul(v.into())))
+			.saturating_add(RocksDbWeight::get().writes(3_u64))
+			.saturating_add(RocksDbWeight::get().writes((4_u64).saturating_mul(v.into())))
+			.saturating_add(Weight::from_parts(0, 10714).saturating_mul(v.into()))
 	}
 }
