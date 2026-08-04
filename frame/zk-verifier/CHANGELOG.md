@@ -4,7 +4,16 @@ All notable changes to this pallet are documented here.
 
 ---
 
-## [Unreleased]
+## [0.11.0] - 2026-08-04
+
+### Removed
+- **`migrations` module.** Every live chain is at storage version v1 (verified
+  on-chain against testnet at block 283941) and a fresh chain starts there via
+  genesis, so `MigrateToV1` was a no-op guarded by its version check. Removed
+  alongside the shielded-pool migrations. Storage version history stays
+  documented on `STORAGE_VERSION`; see git history if an old chain ever needs
+  the code. `STORAGE_VERSION` itself is unchanged (still v1) — this removes the
+  upgrade path, not the on-chain layout.
 
 ---
 

@@ -2,6 +2,23 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.13.0] - 2026-08-04
+
+### Removed
+- **`migrations` module.** Every live chain is at storage version v2 (verified
+  on-chain against testnet at block 283941), and a fresh chain starts there via
+  genesis, so `MigrateToV1`/`MigrateToV2` were no-ops guarded by their version
+  checks. Keeping `MigrateToV1` was a liability rather than a safety net: it
+  rebuilds the entire Merkle tree inside a single `on_runtime_upgrade`, which
+  cannot be split across blocks. At the testnet's 134201 leaves that is already
+  a ~4 MB `Vec` and ~270k writes in one block; at the 2^20 tree cap it would
+  exhaust the Wasm heap and produce a block no validator can import. Storage
+  version history stays documented on `STORAGE_VERSION`; see git history if an
+  old chain ever needs the code. The runtime's `Migrations` tuple is now empty.
+  `try-runtime` features are unaffected — they back `try_state`, not migrations.
+  `STORAGE_VERSION` itself is unchanged (still v2) — this removes the upgrade
+  path, not the on-chain layout.
+
 ## [0.12.0] - 2026-07-30
 
 ### Added
