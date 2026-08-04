@@ -150,11 +150,7 @@ pub type CheckedExtrinsic =
 pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 
 /// Storage migrations run on runtime upgrade, oldest first.
-pub type Migrations = (
-	pallet_shielded_pool::migrations::v1::MigrateToV1<Runtime>,
-	pallet_shielded_pool::migrations::v2::MigrateToV2<Runtime>,
-	pallet_zk_verifier::migrations::v1::MigrateToV1<Runtime>,
-);
+pub type Migrations = ();
 
 /// Executive: handles dispatch to the various modules.
 pub type Executive = frame_executive::Executive<

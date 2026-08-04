@@ -22,7 +22,6 @@ extern crate alloc;
 pub use pallet::*;
 
 mod encoding;
-pub mod migrations;
 mod port;
 mod runtime_api;
 mod types;
@@ -52,8 +51,10 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 
 	/// Storage version history:
-	/// - v1: drop the retired `private_link` circuit (id 5), cleared by
-	///   `migrations::v1::MigrateToV1`.
+	/// - v1: drop the retired `private_link` circuit (id 5).
+	///
+	/// The v1 migration code was removed once every live chain reached v1; a new chain
+	/// starts here via genesis. See git history if an old chain ever needs it.
 	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
 
 	#[pallet::pallet]

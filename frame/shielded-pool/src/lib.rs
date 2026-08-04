@@ -65,7 +65,6 @@ mod benchmarking;
 pub mod genesis;
 pub mod helpers;
 pub mod merkle;
-pub mod migrations;
 pub mod operations;
 pub mod storage;
 pub mod types;
@@ -103,10 +102,11 @@ pub mod pallet {
 		<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
 	/// Storage version history:
-	/// - v1: `MerkleNodes` (internal Merkle tree nodes), backfilled by
-	///   `migrations::v1::MigrateToV1`.
-	/// - v2: multi-tree forest — `SealedTreeRoots` / `SealedRootIndex`
-	///   (start empty; version-only bump in `migrations::v2::MigrateToV2`).
+	/// - v1: `MerkleNodes` (internal Merkle tree nodes), backfilled from `MerkleLeaves`.
+	/// - v2: multi-tree forest — `SealedTreeRoots` / `SealedRootIndex` (start empty).
+	///
+	/// The v1/v2 migration code was removed once every live chain reached v2; a new
+	/// chain starts here via genesis. See git history if an old chain ever needs it.
 	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(2);
 
 	#[pallet::pallet]
