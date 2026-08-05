@@ -120,6 +120,7 @@ parameter_types! {
 	pub const ShieldedPoolPalletId: PalletId = PalletId(*b"shldpool");
 	pub const MaxTreeDepth: u32 = 20;
 	pub const MaxHistoricRoots: u32 = 100;
+	pub const RootRetentionBlocks: u64 = 128;
 	pub const MaxLeavesPerTree: u32 = 8;
 	pub const MinShieldAmount: u128 = 100;
 }
@@ -245,6 +246,7 @@ impl pallet_shielded_pool::Config for Test {
 	type PalletId = ShieldedPoolPalletId;
 	type MaxTreeDepth = MaxTreeDepth;
 	type MaxHistoricRoots = MaxHistoricRoots;
+	type RootRetentionBlocks = RootRetentionBlocks;
 	type MaxLeavesPerTree = MaxLeavesPerTree;
 	type MinShieldAmount = MinShieldAmount;
 	type WeightInfo = ();

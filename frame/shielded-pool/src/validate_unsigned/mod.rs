@@ -1,153 +1,55 @@
 //! Unsigned transaction validation for `private_transfer` and `unshield`.
 //!
-//! These are lightweight anti-spam checks that run before the transaction
-//! enters the pool.  Full ZK proof verification happens inside each extrinsic.
+//! These are lightweight anti-spam checks that run before a transaction enters
+//! the pool. Full ZK proof verification happens inside each extrinsic — doing it
+//! here would let anyone burn a node's CPU for free, since unsigned submissions
+//! cost nothing to make.
 //!
-//! Splitting this out of `lib.rs` makes the validation logic independently
-//! testable without needing the full pallet mock environment.
+//! Every check here is also re-done in the dispatchable. That is deliberate: a
+//! check performed only at admission could be skipped by a malicious block
+//! author, so admission may reject more than execution but never less.
+//!
+//! - [`codes`] — named pool-rejection codes shared by both validators.
+//! - [`transfer`] — admission for `private_transfer`.
+//! - [`unshield`] — admission for `unshield`.
 
-use crate::{
-	pallet::{BalanceOf, Config, NullifierSet, PoolBalancePerAsset},
-	storage::MerkleRepository,
-	types::{Hash, Nullifier},
-};
-use frame_support::pallet_prelude::*;
-use pallet_relayer::RelayerInterface as _;
-use pallet_zk_verifier::ZkVerifierPort as _;
-use parity_scale_codec::Encode;
-use sp_runtime::{
-	SaturatedConversion,
-	transaction_validity::{InvalidTransaction, TransactionValidity, ValidTransaction},
-};
+pub mod codes;
+pub mod transfer;
+pub mod unshield;
 
-/// On-chain circuit ids used for the version guard (mirror the zk-verifier's
-/// `CircuitId` constants: TRANSFER = 1, UNSHIELD = 2).
-const CIRCUIT_TRANSFER: u32 = 1;
-const CIRCUIT_UNSHIELD: u32 = 2;
+pub use transfer::validate_private_transfer;
+pub use unshield::validate_unshield;
 
 /// How long an unsigned transaction stays valid in the pool, in blocks. Bounded
 /// so a transaction that never gets included does not linger indefinitely.
-const TX_LONGEVITY: u64 = 64;
-
-/// Validate an incoming `private_transfer` unsigned transaction.
-pub fn validate_private_transfer<T: Config>(
-	merkle_root: &Hash,
-	nullifiers: &BoundedVec<Nullifier, ConstU32<2>>,
-	fee: &BalanceOf<T>,
-	relayer: &Option<sp_core::H160>,
-	circuit_version: u32,
-) -> TransactionValidity {
-	// Anti-spam: reject an unsupported circuit version before pool admission.
-	if !T::ZkVerifier::is_supported_version(CIRCUIT_TRANSFER, circuit_version) {
-		return InvalidTransaction::Custom(10).into();
-	}
-
-	// Anti-spam: fee must meet minimum relay fee
-	let min_fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
-	if *fee < min_fee {
-		return InvalidTransaction::Payment.into();
-	}
-
-	// Reject unknown Merkle roots
-	if !MerkleRepository::is_known_root::<T>(merkle_root) {
-		return InvalidTransaction::Custom(1).into();
-	}
-
-	// Reject already-spent nullifiers (skip dummy nullifiers — value zero, forced by circuit)
-	for nullifier in nullifiers.iter() {
-		if nullifier.0 == [0u8; 32] {
-			continue; // dummy input — never inserted in the set, cannot be stale
-		}
-		if NullifierSet::<T>::contains_key(nullifier) {
-			return InvalidTransaction::Stale.into();
-		}
-	}
-
-	// Reject transactions where all nullifiers are dummy (both inputs value=0).
-	// This prevents free Merkle tree spam (2 commitments inserted at zero cost).
-	if nullifiers.iter().all(|n| n.0 == [0u8; 32]) {
-		return InvalidTransaction::Custom(2).into();
-	}
-
-	// Exclude dummy nullifiers (zero) from provides — they carry no identity.
-	// Bind the fee recipient (`relayer`) into the tag so a variant differing only
-	// in `relayer` is a distinct pool entry and cannot silently replace the honest
-	// tx. The shared nullifier tag already makes same-nullifier variants mutually
-	// exclusive (first-seen wins at equal fee); this hardens that boundary.
-	let mut provides: alloc::vec::Vec<alloc::vec::Vec<u8>> = nullifiers
-		.iter()
-		.filter(|n| n.0 != [0u8; 32])
-		.map(|n| n.encode())
-		.collect();
-	provides.push(relayer.encode());
-
-	ValidTransaction::with_tag_prefix("ShieldedPoolTransfer")
-		.priority((*fee).saturated_into())
-		.longevity(TX_LONGEVITY)
-		.and_provides(provides)
-		.propagate(true)
-		.build()
-}
-
-/// Validate an incoming `unshield` unsigned transaction.
-pub fn validate_unshield<T: Config>(
-	merkle_root: &Hash,
-	nullifier: &Nullifier,
-	asset_id: &u32,
-	amount: &BalanceOf<T>,
-	fee: &BalanceOf<T>,
-	relayer: &Option<sp_core::H160>,
-	circuit_version: u32,
-) -> TransactionValidity {
-	// Anti-spam: reject an unsupported circuit version before pool admission.
-	if !T::ZkVerifier::is_supported_version(CIRCUIT_UNSHIELD, circuit_version) {
-		return InvalidTransaction::Custom(10).into();
-	}
-
-	// Anti-spam: fee must meet minimum relay fee
-	let min_fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
-	if *fee < min_fee {
-		return InvalidTransaction::Payment.into();
-	}
-
-	// Reject unknown Merkle roots
-	if !MerkleRepository::is_known_root::<T>(merkle_root) {
-		return InvalidTransaction::Custom(1).into();
-	}
-
-	// Reject already-spent nullifier
-	if NullifierSet::<T>::contains_key(nullifier) {
-		return InvalidTransaction::Stale.into();
-	}
-
-	// Reject if pool balance is insufficient
-	let total = amount
-		.checked_add(fee)
-		.ok_or(InvalidTransaction::Custom(2))?;
-	if PoolBalancePerAsset::<T>::get(asset_id) < total {
-		return InvalidTransaction::Custom(3).into();
-	}
-
-	// Bind `relayer` into the tag alongside the nullifier: a variant differing only
-	// in the fee recipient is a distinct pool entry, so it cannot silently replace
-	// the honest tx. Same-nullifier variants stay mutually exclusive (first-seen
-	// wins at equal fee).
-	ValidTransaction::with_tag_prefix("ShieldedPoolUnshield")
-		.priority((*fee).saturated_into())
-		.longevity(TX_LONGEVITY)
-		.and_provides([nullifier.encode(), relayer.encode()])
-		.propagate(true)
-		.build()
-}
+///
+/// `Config::RootRetentionBlocks` must exceed this (checked in `integrity_test`):
+/// a root has to outlive every transaction admitted against it, or a spend can
+/// pass admission, propagate, and only then revert with `UnknownMerkleRoot`.
+pub(crate) const TX_LONGEVITY: u64 = 64;
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+	use super::{TX_LONGEVITY, validate_private_transfer, validate_unshield};
 	use crate::{
 		mock::{Test, new_test_ext},
 		storage::{MerkleRepository, NullifierRepository, PoolBalanceRepository},
 		types::Nullifier,
 	};
+	use frame_support::{BoundedVec, pallet_prelude::ConstU32};
+
+	/// Rejection codes reach wallets and relayers as bare `Custom(N)`, so they are
+	/// part of the observable interface: pin them here, and retire a number rather
+	/// than reuse it for a new meaning.
+	#[test]
+	fn rejection_codes_are_stable() {
+		use super::codes;
+		assert_eq!(codes::UNKNOWN_ROOT, 1);
+		assert_eq!(codes::ALL_INPUTS_DUMMY, 2);
+		assert_eq!(codes::INSUFFICIENT_POOL_BALANCE, 3);
+		assert_eq!(codes::AMOUNT_OVERFLOW, 4);
+		assert_eq!(codes::UNSUPPORTED_CIRCUIT_VERSION, 10);
+	}
 
 	const KNOWN_ROOT: [u8; 32] = [0x11u8; 32];
 

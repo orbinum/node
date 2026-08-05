@@ -46,7 +46,13 @@ impl pallet_balances::Config for Test {
 parameter_types! {
 	pub const ShieldedPoolPalletId: PalletId = PalletId(*b"shldpool");
 	pub const MaxTreeDepth: u32 = 20;
-	pub const MaxHistoricRoots: u32 = 100;
+	/// Safety cap on queue length, not the retention window. Sized well above
+	/// what a test inserts within one window so the cap branch stays the
+	/// exceptional path here, as it is in production.
+	pub const MaxHistoricRoots: u32 = 4096;
+	/// Above `TX_LONGEVITY` (64), as `integrity_test` requires. Small enough that
+	/// a test can advance past it to exercise expiry.
+	pub const RootRetentionBlocks: u64 = 128;
 	pub const MaxLeavesPerTree: u32 = 8;
 	pub const MinShieldAmount: u128 = 100;
 	pub const MaxProofSize: u32 = 256;
@@ -152,6 +158,7 @@ impl pallet_shielded_pool::Config for Test {
 	type PalletId = ShieldedPoolPalletId;
 	type MaxTreeDepth = MaxTreeDepth;
 	type MaxHistoricRoots = MaxHistoricRoots;
+	type RootRetentionBlocks = RootRetentionBlocks;
 	type MaxLeavesPerTree = MaxLeavesPerTree;
 	type MinShieldAmount = MinShieldAmount;
 	type WeightInfo = ();

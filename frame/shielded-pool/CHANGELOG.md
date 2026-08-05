@@ -2,6 +2,101 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.14.0] - 2026-08-05
+
+### Changed
+- **Historic-root window is now measured in blocks, not in inserts.** The window
+  was bounded by `MaxHistoricRoots` (100) counted in *leaf insertions*, while an
+  unsigned transaction stays valid in the pool for `TX_LONGEVITY` (64) *blocks*.
+  A `private_transfer` inserts up to 2 commitments, so ~50 transfers rotated the
+  whole window: under load an honest spend passed `validate_unsigned`, gossiped
+  across the network, and only then reverted with `UnknownMerkleRoot`, with its
+  nullifier still unspent. No attacker was required — ordinary throughput did it,
+  and an attacker could force it cheaply with valid transfers.
+- New Config constant **`RootRetentionBlocks`** (production 300 blocks, ~30 min at
+  6s) sets the window. `integrity_test` asserts it exceeds `TX_LONGEVITY`, so a
+  runtime that misaligns the two units refuses to build.
+- **`MaxHistoricRoots` changed meaning**: it is no longer the window but a safety
+  cap on queue length (production 16384, sized for ~54 sustained inserts/block).
+  Reaching it logs a warning rather than silently shortening the window.
+- `HistoricPoseidonRoots` value type `bool` → `BlockNumberFor<T>` (the block at
+  which a root stops being accepted), `OptionQuery`.
+- `HistoricRootsOrder` (a single `BoundedVec`) replaced by a slot-indexed queue:
+  `HistoricRootsQueue: StorageMap<u64, (Hash, expiry)>` plus `HistoricRootsHead`
+  and `HistoricRootsTail`. A `StorageValue` would be read and rewritten in full on
+  every leaf insert — hundreds of KiB on the hottest path once the window holds
+  thousands of roots. The map touches one entry plus the few it prunes.
+- Pruning is lazy and capped at `MAX_ROOTS_PRUNED_PER_INSERT` (4) per insert, so
+  one extrinsic never pays for a backlog it did not create. Leftovers drain on
+  subsequent inserts; a stale queue slot is harmless because spendability is
+  decided by the expiry stored per root, never by queue membership.
+- **Weights re-benchmarked against the v3 layout.** The recorded storage access
+  now covers `HistoricRootsQueue` / `HistoricRootsHead` / `HistoricRootsTail` and
+  drops the `HistoricRootsOrder` entry, which no longer exists. The measurement
+  exercises a queue with expired entries, so the per-insert pruning is charged
+  rather than free: `shield` 17r/34w, `unshield` 16r/8w, and per-`n` components
+  on `shield_batch` (2r/6w) and `private_transfer` (3r/6w).
+- **Pool-rejection code for `amount + fee` overflow moved from `Custom(2)` to
+  `Custom(4)`.** Code 2 previously meant two different things depending on which
+  validator rejected the transaction — "all inputs are dummy" in
+  `private_transfer`, "amount overflow" in `unshield` — so a `Custom error: 2` in
+  a node log was ambiguous. The other codes keep their values. Codes are part of
+  the observable interface, so a test now pins them.
+- `is_known_root` now accepts the **active root unconditionally**. Expiries are
+  only refreshed by a leaf insert and the pallet has no hooks, so on a chain idle
+  for a full window the current root — the one every wallet proves against —
+  would expire and wedge the pool: `private_transfer` and `unshield` both need a
+  known root, and only a funded `shield` could mint a new one.
+
+### Added
+- `migrations::v3::MigrateToV3` (`STORAGE_VERSION` 2 → 3). Both value types
+  changed, so v2 entries cannot be decoded by the new definitions and are
+  rewritten here. Every existing root is kept and granted a full window from the
+  upgrade block rather than dropped: a root on chain backs proofs wallets may be
+  about to submit. The old map is enumerated by **raw key** rather than
+  `translate`, which does not delete an entry whose value fails to decode — it
+  logs, skips, and leaves the bytes in place, which for a 1-byte `bool` under a
+  4-byte slot would leave an unreadable, unprunable residue. Map and queue are
+  written in the same loop so the two can never diverge.
+
+### Fixed
+- Honest spends no longer revert with `UnknownMerkleRoot` after passing pool
+  admission: a root now outlives every transaction admitted against it.
+- Map and queue can no longer diverge, which previously left roots reachable by
+  neither the pruner nor an eviction path — permanently spendable and impossible
+  to remove.
+- The cap path no longer drops a root whose window has not elapsed; a live root
+  is re-queued instead of being forgotten.
+- Reaching the queue cap logs a warning instead of using `defensive!`, which
+  expands to `debug_assert!(false)` and would halt a validator running a
+  debug-assertions build on a reachable operational state.
+
+### Refactored
+- The four largest modules were split into directories, one file per
+  responsibility. No behaviour change: every type and function keeps its path
+  through re-exports, so no caller outside the pallet was touched.
+  - `merkle.rs` (1642 lines) → `merkle/` — `hashing`, `tree`, `batch`, `service`.
+    The split isolates the only storage-touching layer (`service`) from the pure
+    maths; `batch` now states in its own docs that it is O(n) and used off-chain
+    only, which the single file left implicit.
+  - `storage.rs` (658 lines) → `storage/` — one module per repository: `asset`,
+    `commitment`, `merkle`, `nullifier`, `stats`, `balance`.
+  - `validate_unsigned.rs` (683 lines) → `validate_unsigned/` — `transfer`,
+    `unshield`, and a new `codes` module holding the named rejection codes that
+    were previously bare literals duplicated across both validators.
+  - `types.rs` (719 lines) → `types/` — `ids`, `note`, `merkle`, `memo`, `asset`.
+
+### Verification
+298 pallet tests, 65 precompile tests, and 78 end-to-end checks against a running
+dev node covering `shield_batch`, same-block bursts, idle chains, the steady-state
+plateau (299 → 301 slots after +30 inserts), orphan detection in both directions,
+and a spend against a root the chain has churned past.
+
+### Notes
+- `spec_version` moves 6 → 7 in this release: the storage layout changes and a
+  migration is back in the tuple. `transaction_version` stays — no call
+  signature changed.
+
 ## [0.13.0] - 2026-08-04
 
 ### Removed

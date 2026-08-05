@@ -2,13 +2,13 @@
 
 use crate::{
 	pallet::{
-		Assets, Config, HistoricPoseidonRoots, HistoricRootsOrder, MerkleTreeFrontier, NextAssetId,
-		PoseidonRoot,
+		Assets, Config, HistoricPoseidonRoots, HistoricRootsHead, HistoricRootsQueue,
+		HistoricRootsTail, MerkleTreeFrontier, NextAssetId, PoseidonRoot,
 	},
 	types::AssetMetadata,
 	types::Hash,
 };
-use frame_support::{pallet_prelude::*, traits::Get};
+use frame_support::traits::Get;
 use sp_runtime::traits::AccountIdConversion;
 
 /// Helper function to initialize genesis state
@@ -22,13 +22,13 @@ pub fn initialize_genesis<T: Config>(initial_root: Hash) {
 	// starts from the correct baseline.
 	MerkleTreeFrontier::<T>::put([[0u8; 32]; 20]);
 
-	// Add genesis root to historic roots
-	HistoricPoseidonRoots::<T>::insert(initial_root, true);
-
-	// Initialize the order list with the genesis root
-	let mut order = BoundedVec::new();
-	let _ = order.try_push(initial_root);
-	HistoricRootsOrder::<T>::put(order);
+	// Seed the historic-root window with the genesis root, expiring one full
+	// retention window from block zero like any other root.
+	let expires_at = T::RootRetentionBlocks::get();
+	HistoricPoseidonRoots::<T>::insert(initial_root, expires_at);
+	HistoricRootsQueue::<T>::insert(0u64, (initial_root, expires_at));
+	HistoricRootsHead::<T>::put(1u64);
+	HistoricRootsTail::<T>::put(0u64);
 
 	// Register native asset (asset_id = 0) at genesis
 	let native_asset = AssetMetadata {
@@ -83,7 +83,7 @@ mod tests {
 		new_test_ext().execute_with(|| {
 			let root = PoseidonRoot::<Test>::get();
 			assert!(
-				HistoricPoseidonRoots::<Test>::get(root),
+				HistoricPoseidonRoots::<Test>::get(root).is_some(),
 				"Genesis root must be in historic roots"
 			);
 		});
@@ -104,7 +104,7 @@ mod tests {
 			let custom_root = [0xCDu8; 32];
 			super::initialize_genesis::<Test>(custom_root);
 			assert!(
-				HistoricPoseidonRoots::<Test>::get(custom_root),
+				HistoricPoseidonRoots::<Test>::get(custom_root).is_some(),
 				"Custom root must be in historic roots"
 			);
 		});

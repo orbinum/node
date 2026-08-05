@@ -1,477 +1,52 @@
-//! Merkle tree — data structures, Poseidon hashing, and tree service.
+//! Merkle tree — hashing, the incremental structure, and the on-chain service.
 //!
-//! Merges the former `infrastructure/merkle_tree.rs` (IncrementalMerkleTree,
-//! hash functions) with `infrastructure/services/merkle_tree_service.rs`
-//! (on-chain tree management using repositories).
+//! Split by responsibility so the storage-touching code is separable from the
+//! pure maths:
+//!
+//! - [`hashing`] — Poseidon over field elements, plus the zero-hash ladder.
+//! - [`tree`] — `IncrementalMerkleTree`, the in-memory frontier structure.
+//! - [`batch`] — whole-tree root computation, off-chain and test use only.
+//! - [`service`] — `MerkleTreeService`: leaf insertion, sealing, and the
+//!   historic-root window. The only module here that reads or writes storage.
 
-use crate::{
-	pallet::{CommitmentMemos, Config, Error, Event, Pallet},
-	storage::{MerkleRepository, PoolStatsRepository},
-	types::{Commitment, DefaultMerklePath, Hash, MerklePath},
-};
-use alloc::boxed::Box;
-use ark_ff::BigInteger;
-use frame_support::{ensure, pallet_prelude::*, traits::Get};
-use sp_std::vec::Vec;
+pub mod batch;
+pub mod hashing;
+pub mod service;
+pub mod tree;
 
-// ════════════════════════════════════════════════════════════════════════════
-// Hash helpers
-// ════════════════════════════════════════════════════════════════════════════
+pub use batch::{compute_root_from_leaves, compute_root_from_leaves_poseidon};
+pub use hashing::{get_zero_hash_cached, hash_pair, hash_pair_poseidon, zero_hash_at_level};
+pub use service::MerkleTreeService;
+pub use tree::IncrementalMerkleTree;
 
-/// Default hash for empty nodes at each level.
-pub fn zero_hash_at_level(level: usize) -> [u8; 32] {
-	if level == 0 {
-		return [0u8; 32];
-	}
-	let prev = zero_hash_at_level(level - 1);
-	hash_pair(&prev, &prev)
-}
-
-/// Cached zero hashes for Poseidon (lazy-initialized, thread-safe).
-static ZERO_HASHES_POSEIDON: once_cell::race::OnceBox<[[u8; 32]; 21]> =
-	once_cell::race::OnceBox::new();
-
-/// Get precomputed zero hash at level (optimized with cache).
-#[inline]
-pub fn get_zero_hash_cached(level: usize) -> [u8; 32] {
-	if level < 21 {
-		let cache = ZERO_HASHES_POSEIDON.get_or_init(|| {
-			let mut hashes = [[0u8; 32]; 21];
-			hashes[0] = [0u8; 32];
-			for i in 1..21 {
-				hashes[i] = hash_pair_poseidon(&hashes[i - 1], &hashes[i - 1]);
-			}
-			Box::new(hashes)
-		});
-		return cache[level];
-	}
-	zero_hash_at_level(level)
-}
-
-/// Hash two nodes together using Poseidon (ZK-friendly, ~300 constraints).
-#[inline]
-pub fn hash_pair_poseidon(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
-	use ark_bn254::Fr as Bn254Fr;
-	use ark_ff::PrimeField;
-	use orbinum_zk_core::{FieldElement, PoseidonHasher};
-
-	let left_fr = Bn254Fr::from_le_bytes_mod_order(left);
-	let right_fr = Bn254Fr::from_le_bytes_mod_order(right);
-
-	#[cfg(feature = "poseidon-native")]
-	let hasher = orbinum_zk_core::NativePoseidonHasher;
-	#[cfg(not(feature = "poseidon-native"))]
-	let hasher = orbinum_zk_core::LightPoseidonHasher;
-
-	let hash_fr = hasher.hash_2([FieldElement::new(left_fr), FieldElement::new(right_fr)]);
-
-	let mut hash_bytes = [0u8; 32];
-	let bigint = hash_fr.inner().into_bigint();
-	let bytes = bigint.to_bytes_le();
-	hash_bytes.copy_from_slice(&bytes[..32]);
-	hash_bytes
-}
-
-/// Hash pair — always uses Poseidon.
-pub fn hash_pair(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
-	hash_pair_poseidon(left, right)
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// IncrementalMerkleTree (data structure, no storage access)
-// ════════════════════════════════════════════════════════════════════════════
-
-#[derive(Clone, Encode, Decode, TypeInfo, MaxEncodedLen, Debug)]
-pub struct IncrementalMerkleTree<const DEPTH: usize> {
-	pub frontier: [[u8; 32]; DEPTH],
-	pub next_index: u32,
-	pub root: [u8; 32],
-}
-
-impl<const DEPTH: usize> Default for IncrementalMerkleTree<DEPTH> {
-	fn default() -> Self {
-		Self::new()
-	}
-}
-
-impl<const DEPTH: usize> IncrementalMerkleTree<DEPTH> {
-	pub fn new() -> Self {
-		let root = Self::compute_empty_root();
-		Self {
-			frontier: [[0u8; 32]; DEPTH],
-			next_index: 0,
-			root,
-		}
-	}
-
-	fn compute_empty_root() -> [u8; 32] {
-		let mut current = [0u8; 32];
-		for _ in 0..DEPTH {
-			current = hash_pair(&current, &current);
-		}
-		current
-	}
-
-	fn zero_hash(level: usize) -> [u8; 32] {
-		get_zero_hash_cached(level)
-	}
-
-	pub fn capacity(&self) -> u32 {
-		1u32 << DEPTH
-	}
-	pub fn is_full(&self) -> bool {
-		self.next_index >= self.capacity()
-	}
-
-	pub fn insert(&mut self, leaf: [u8; 32]) -> Result<u32, &'static str> {
-		if self.is_full() {
-			return Err("Merkle tree is full");
-		}
-		let index = self.next_index;
-		let mut current_hash = leaf;
-		let mut current_index = index;
-
-		for level in 0..DEPTH {
-			if current_index % 2 == 0 {
-				self.frontier[level] = current_hash;
-				let zero = Self::zero_hash(level);
-				current_hash = hash_pair(&current_hash, &zero);
-			} else {
-				current_hash = hash_pair(&self.frontier[level], &current_hash);
-			}
-			current_index /= 2;
-		}
-
-		self.root = current_hash;
-		self.next_index += 1;
-		Ok(index)
-	}
-
-	pub fn root(&self) -> [u8; 32] {
-		self.root
-	}
-	pub fn size(&self) -> u32 {
-		self.next_index
-	}
-
-	pub fn generate_proof(
-		&self,
-		leaf_index: u32,
-		leaves: &[[u8; 32]],
-	) -> Result<MerklePath<DEPTH>, &'static str> {
-		if leaf_index >= self.next_index {
-			return Err("Leaf index out of bounds");
-		}
-		if leaves.len() != self.next_index as usize {
-			return Err("Leaves count mismatch");
-		}
-
-		let mut siblings = [[0u8; 32]; DEPTH];
-		let mut indices = [0u8; DEPTH];
-		let mut current_level = leaves.to_vec();
-		let mut target_index = leaf_index as usize;
-
-		for level in 0..DEPTH {
-			if current_level.len() % 2 != 0 {
-				current_level.push(Self::zero_hash(level));
-			}
-			let sibling_index = if target_index % 2 == 0 {
-				indices[level] = 0;
-				target_index + 1
-			} else {
-				indices[level] = 1;
-				target_index - 1
-			};
-			siblings[level] = if sibling_index < current_level.len() {
-				current_level[sibling_index]
-			} else {
-				Self::zero_hash(level)
-			};
-			let mut next_level = Vec::new();
-			for chunk in current_level.chunks(2) {
-				let left = chunk[0];
-				let right = if chunk.len() > 1 {
-					chunk[1]
-				} else {
-					Self::zero_hash(level)
-				};
-				next_level.push(hash_pair(&left, &right));
-			}
-			current_level = next_level;
-			target_index /= 2;
-		}
-		Ok(MerklePath { siblings, indices })
-	}
-
-	pub fn verify_proof(root: &[u8; 32], leaf: &[u8; 32], path: &MerklePath<DEPTH>) -> bool {
-		let mut current = *leaf;
-		for level in 0..DEPTH {
-			let sibling = &path.siblings[level];
-			current = if path.indices[level] == 0 {
-				hash_pair(&current, sibling)
-			} else {
-				hash_pair(sibling, &current)
-			};
-		}
-		&current == root
-	}
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// Root computation helpers
-// ════════════════════════════════════════════════════════════════════════════
-
-pub fn compute_root_from_leaves_poseidon<const DEPTH: usize>(leaves: &[Hash]) -> Hash {
-	if leaves.is_empty() {
-		return [0u8; 32];
-	}
-
-	let mut zero_hashes = [[0u8; 32]; 21];
-	zero_hashes[0] = [0u8; 32];
-	for i in 1..=20 {
-		zero_hashes[i] = hash_pair_poseidon(&zero_hashes[i - 1], &zero_hashes[i - 1]);
-	}
-
-	let mut current_level: Vec<Hash> = leaves.to_vec();
-
-	for level in 0..DEPTH {
-		if current_level.len() % 2 != 0 {
-			current_level.push(zero_hashes[level]);
-		}
-		let mut next_level = Vec::new();
-		for i in (0..current_level.len()).step_by(2) {
-			next_level.push(hash_pair_poseidon(&current_level[i], &current_level[i + 1]));
-		}
-		current_level = next_level;
-		if current_level.len() == 1 && level + 1 < DEPTH {
-			let mut root = current_level[0];
-			for zero_hash in zero_hashes.iter().skip(level + 1).take(DEPTH - level - 1) {
-				root = hash_pair_poseidon(&root, zero_hash);
-			}
-			return root;
-		}
-	}
-	current_level.first().copied().unwrap_or([0u8; 32])
-}
-
-pub fn compute_root_from_leaves<const DEPTH: usize>(leaves: &[Hash]) -> Hash {
-	if leaves.is_empty() {
-		let mut current = [0u8; 32];
-		for _ in 0..DEPTH {
-			current = hash_pair(&current, &current);
-		}
-		return current;
-	}
-	let mut current_level: Vec<Hash> = leaves.to_vec();
-	for level in 0..DEPTH {
-		if current_level.len() % 2 != 0 {
-			let mut zero = [0u8; 32];
-			for _ in 0..level {
-				zero = hash_pair(&zero, &zero);
-			}
-			current_level.push(zero);
-		}
-		let mut next_level = Vec::new();
-		for chunk in current_level.chunks(2) {
-			let left = chunk[0];
-			let right = if chunk.len() > 1 {
-				chunk[1]
-			} else {
-				let mut zero = [0u8; 32];
-				for _ in 0..level {
-					zero = hash_pair(&zero, &zero);
-				}
-				zero
-			};
-			next_level.push(hash_pair(&left, &right));
-		}
-		current_level = next_level;
-		if current_level.len() == 1 && level + 1 < DEPTH {
-			let mut zero = [0u8; 32];
-			for _ in 0..=level {
-				zero = hash_pair(&zero, &zero);
-			}
-			for _ in (level + 1)..DEPTH {
-				current_level[0] = hash_pair(&current_level[0], &zero);
-				zero = hash_pair(&zero, &zero);
-			}
-			break;
-		}
-	}
-	current_level.first().copied().unwrap_or([0u8; 32])
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// MerkleTreeService (on-chain tree management, uses repositories)
-// ════════════════════════════════════════════════════════════════════════════
-
-pub struct MerkleTreeService;
-
-impl MerkleTreeService {
-	/// Insert a new leaf into the Merkle tree.
-	///
-	/// Uses an incremental frontier algorithm: O(depth) hashes per insert,
-	/// replacing the former O(n) full recomputation from all leaves.
-	pub fn insert_leaf<T: Config>(commitment: Commitment) -> Result<u32, DispatchError> {
-		let index = MerkleRepository::get_tree_size::<T>();
-		// Absolute forest ceiling: the global u32 leaf index must stay
-		// representable (4096 trees at depth 20). Per-tree fullness rolls
-		// over to a fresh tree below instead of erroring.
-		ensure!(index < u32::MAX, Error::<T>::MerkleTreeFull);
-		ensure!(
-			!CommitmentMemos::<T>::contains_key(commitment),
-			Error::<T>::CommitmentAlreadyExists
-		);
-
-		let cap = T::MaxLeavesPerTree::get();
-		let tree_id = index / cap;
-		let local = index % cap;
-
-		// Load frontier from storage and run one incremental update.
-		// Depth is always DEFAULT_TREE_DEPTH (20) — matches the fixed-size frontier array.
-		let mut frontier = MerkleRepository::get_frontier::<T>();
-		let mut current_hash = commitment.0;
-		let mut current_index = local;
-
-		for (level, frontier_slot) in frontier.iter_mut().enumerate() {
-			if current_index % 2 == 0 {
-				// Left node: save in frontier, pair with zero-sibling
-				*frontier_slot = current_hash;
-				let zero = get_zero_hash_cached(level);
-				current_hash = hash_pair(&current_hash, &zero);
-			} else {
-				// Right node: combine with stored left sibling
-				current_hash = hash_pair(frontier_slot, &current_hash);
-			}
-			current_index /= 2;
-			// current_hash is now the node at (level + 1, current_index). Persist
-			// levels 1..=19 so proof reads are O(depth); level 20 is PoseidonRoot.
-			if level + 1 < crate::types::DEFAULT_TREE_DEPTH {
-				MerkleRepository::set_node::<T>(
-					tree_id,
-					(level + 1) as u8,
-					current_index,
-					current_hash,
-				);
-			}
-		}
-
-		let new_poseidon_root = current_hash;
-		let old_poseidon_root = MerkleRepository::get_poseidon_root::<T>();
-
-		MerkleRepository::insert_leaf::<T>(index, commitment);
-		MerkleRepository::set_commitment_leaf_index::<T>(commitment, index);
-		MerkleRepository::set_tree_size::<T>(index.saturating_add(1));
-		PoolStatsRepository::increment_commitments_inserted::<T>();
-		MerkleRepository::set_frontier::<T>(frontier);
-		MerkleRepository::set_poseidon_root::<T>(new_poseidon_root);
-		Self::add_poseidon_historic_root::<T>(new_poseidon_root);
-
-		// The freshly inserted leaf belongs to `new_poseidon_root`, so this
-		// event fires before any seal resets the active root.
-		Pallet::<T>::deposit_event(Event::MerkleRootUpdated {
-			old_root: old_poseidon_root,
-			new_root: new_poseidon_root,
-			tree_size: index.saturating_add(1),
-		});
-
-		if local + 1 == cap {
-			Self::seal_tree::<T>(tree_id, new_poseidon_root, cap);
-		}
-		Ok(index)
-	}
-
-	/// Seal a full tree and open a fresh one, eagerly in the same insert.
-	///
-	/// The final root becomes a permanent anchor (`SealedTreeRoots` /
-	/// `SealedRootIndex`) — unlike the historic ring it never expires, so
-	/// notes in sealed trees stay spendable forever. The active tree resets
-	/// to the empty state; the empty root joins the historic ring to keep
-	/// the `PoseidonRoot ∈ known roots` invariant.
-	fn seal_tree<T: Config>(tree_id: u32, final_root: Hash, cap: u32) {
-		MerkleRepository::insert_sealed_root::<T>(tree_id, final_root);
-		MerkleRepository::set_frontier::<T>([[0u8; 32]; crate::types::DEFAULT_TREE_DEPTH]);
-		let empty_root = get_zero_hash_cached(crate::types::DEFAULT_TREE_DEPTH);
-		MerkleRepository::set_poseidon_root::<T>(empty_root);
-		Self::add_poseidon_historic_root::<T>(empty_root);
-
-		Pallet::<T>::deposit_event(Event::TreeSealed {
-			tree_id,
-			final_root,
-			first_leaf_index: tree_id.saturating_mul(cap),
-			leaf_count: cap,
-		});
-	}
-
-	pub(crate) fn add_poseidon_historic_root<T: Config>(poseidon_root: Hash) {
-		let mut order = MerkleRepository::get_historic_roots_order::<T>();
-		if order.len() >= T::MaxHistoricRoots::get() as usize {
-			if let Some(oldest_root) = order.first().copied() {
-				order.remove(0);
-				if !order.contains(&oldest_root) {
-					MerkleRepository::remove_poseidon_historic_root::<T>(&oldest_root);
-				}
-			}
-		}
-		if order.try_push(poseidon_root).is_ok() {
-			MerkleRepository::add_historic_poseidon_root::<T>(poseidon_root);
-			MerkleRepository::set_historic_roots_order::<T>(order);
-		}
-	}
-
-	pub fn is_known_root<T: Config>(root: &Hash) -> bool {
-		MerkleRepository::is_known_root::<T>(root)
-	}
-
-	/// Build the sibling path for `leaf_index` from stored nodes.
-	///
-	/// O(depth) point reads: level-0 siblings come from `MerkleLeaves`, upper
-	/// siblings from `MerkleNodes`. A missing entry means an empty subtree, so
-	/// the canonical zero hash for that level is used.
-	pub fn get_merkle_path<T: Config>(leaf_index: u32) -> Option<DefaultMerklePath> {
-		let size = MerkleRepository::get_tree_size::<T>();
-		if leaf_index >= size {
-			return None;
-		}
-
-		let depth = crate::types::DEFAULT_TREE_DEPTH;
-		let cap = T::MaxLeavesPerTree::get();
-		let tree_id = leaf_index / cap;
-		let local = leaf_index % cap;
-		let mut siblings = [[0u8; 32]; crate::types::DEFAULT_TREE_DEPTH];
-		let mut indices = [0u8; crate::types::DEFAULT_TREE_DEPTH];
-
-		for level in 0..depth {
-			let node_index = local >> level;
-			indices[level] = (node_index & 1) as u8;
-			let sibling_index = node_index ^ 1;
-			let sibling = if level == 0 {
-				// Level-0 nodes are the leaves; map the tree-local sibling
-				// back to its global MerkleLeaves index.
-				MerkleRepository::get_leaf::<T>(tree_id * cap + sibling_index).map(|c| c.0)
-			} else {
-				MerkleRepository::get_node::<T>(tree_id, level as u8, sibling_index)
-			};
-			siblings[level] = sibling.unwrap_or_else(|| get_zero_hash_cached(level));
-		}
-		Some(DefaultMerklePath { siblings, indices })
-	}
-
-	pub fn verify_merkle_proof(root: &Hash, leaf: &Hash, path: &DefaultMerklePath) -> bool {
-		IncrementalMerkleTree::<20>::verify_proof(root, leaf, path)
-	}
-
-	pub fn find_leaf_index<T: Config>(commitment: &Commitment) -> Option<u32> {
-		MerkleRepository::find_leaf_index::<T>(commitment)
-	}
-}
+/// Most expired historic roots a single leaf insert may prune.
+///
+/// Pruning is amortised across inserts so one extrinsic never pays for a backlog
+/// it did not create: after a long idle stretch the whole queue can be expired
+/// at once, and clearing it in one call would be storage work outside the
+/// benchmarked weight. Leftovers are cleaned by the following inserts, and an
+/// expired entry lingering in the queue is harmless — spendability is decided by
+/// the expiry stored per root, never by queue membership.
+///
+/// Each pruned slot costs at most 2 reads and 2 writes (the queue slot and the
+/// map entry), so this bounds the extra work per insert at 8 reads and 8 writes
+/// on top of the benchmarked cost.
+pub(crate) const MAX_ROOTS_PRUNED_PER_INSERT: usize = 4;
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+	use super::{
+		MAX_ROOTS_PRUNED_PER_INSERT,
+		batch::compute_root_from_leaves_poseidon,
+		hashing::{get_zero_hash_cached, hash_pair, hash_pair_poseidon, zero_hash_at_level},
+		service::MerkleTreeService,
+		tree::IncrementalMerkleTree,
+	};
 	use crate::{
-		mock::{Test, new_test_ext},
-		types::Commitment,
+		mock::{System, Test, new_test_ext},
+		pallet::Event,
+		storage::MerkleRepository,
+		types::{Commitment, Hash},
 	};
 
 	// ── hash functions ──────────────────────────────────────────────────────
@@ -1303,63 +878,249 @@ mod tests {
 		});
 	}
 
-	/// Once the window is full, the oldest root is evicted from both the order
-	/// vector and the known-root map, and the map/order stay in sync (SP-15).
+	fn retention() -> u64 {
+		<Test as crate::Config>::RootRetentionBlocks::get()
+	}
+
+	/// Distinct test root. The last byte is set so `root_numbered(0)` can never
+	/// collide with the all-zero genesis root, which `is_known_root` accepts
+	/// unconditionally as the active root and would mask a real expiry.
+	fn root_numbered(i: u32) -> Hash {
+		let mut root = [0u8; 32];
+		root[..4].copy_from_slice(&i.to_le_bytes());
+		root[31] = 0xAA;
+		root
+	}
+
+	/// SP-20: activity alone must never expire a root. Inserting far more roots
+	/// than `MaxHistoricRoots` within one retention window leaves the oldest
+	/// spendable — under the old insert-counted window it was evicted after
+	/// `MaxHistoricRoots` inserts regardless of how little time had passed.
 	#[test]
-	fn historic_root_window_evicts_oldest() {
+	fn historic_root_survives_heavy_activity_within_window() {
 		new_test_ext().execute_with(|| {
+			let oldest = root_numbered(0);
+			MerkleTreeService::add_poseidon_historic_root::<Test>(oldest);
+
+			// Far more inserts than the cap, all in the same block.
 			let cap = <Test as crate::Config>::MaxHistoricRoots::get();
-			// Fill the window with `cap` distinct roots.
-			for i in 0..cap {
-				let mut root = [0u8; 32];
-				root[..4].copy_from_slice(&i.to_le_bytes());
-				MerkleTreeService::add_poseidon_historic_root::<Test>(root);
+			for i in 1..(cap * 2) {
+				MerkleTreeService::add_poseidon_historic_root::<Test>(root_numbered(i));
 			}
-			let mut oldest = [0u8; 32];
-			oldest[..4].copy_from_slice(&0u32.to_le_bytes());
-			assert!(MerkleTreeService::is_known_root::<Test>(&oldest));
-
-			// One more root evicts the oldest.
-			let mut newest = [0u8; 32];
-			newest[..4].copy_from_slice(&cap.to_le_bytes());
-			MerkleTreeService::add_poseidon_historic_root::<Test>(newest);
 
 			assert!(
-				!MerkleTreeService::is_known_root::<Test>(&oldest),
-				"oldest must be evicted"
-			);
-			assert!(
-				MerkleTreeService::is_known_root::<Test>(&newest),
-				"newest must be known"
-			);
-			// Order vector holds exactly `cap` entries — no unbounded growth.
-			assert_eq!(
-				MerkleRepository::get_historic_roots_order::<Test>().len(),
-				cap as usize
+				MerkleTreeService::is_known_root::<Test>(&oldest),
+				"a root must not expire from activity alone, only from elapsed blocks"
 			);
 		});
 	}
 
-	/// A duplicate root value is not removed from the map while another copy of it
-	/// still sits in the window (guards the map/order multiplicity mismatch).
+	/// The active root must stay spendable no matter how long the chain idles.
+	///
+	/// Expiries are only refreshed by a leaf insert, so on a quiet chain the
+	/// current root's window elapses while it is still the root every wallet
+	/// proves against. Without the active-root exemption the pool wedges: every
+	/// spend reverts with `UnknownMerkleRoot`, and only a funded `shield` could
+	/// mint a new root to escape.
+	#[test]
+	fn active_root_never_expires_on_an_idle_chain() {
+		new_test_ext().execute_with(|| {
+			let start = System::block_number();
+			let active = MerkleRepository::get_poseidon_root::<Test>();
+
+			// Idle well past a full retention window — no inserts at all.
+			System::set_block_number(start + retention() * 4);
+
+			assert!(
+				MerkleTreeService::is_known_root::<Test>(&active),
+				"the active root must stay provable on an idle chain"
+			);
+		});
+	}
+
+	/// A root stays spendable for the whole retention window and stops being
+	/// accepted once it has elapsed.
+	#[test]
+	fn historic_root_expires_only_after_retention_blocks() {
+		new_test_ext().execute_with(|| {
+			let start = System::block_number();
+			let root = root_numbered(0xAA);
+			MerkleTreeService::add_poseidon_historic_root::<Test>(root);
+
+			// Last block of the window: still spendable.
+			System::set_block_number(start + retention());
+			assert!(
+				MerkleTreeService::is_known_root::<Test>(&root),
+				"root must stay spendable through the final block of its window"
+			);
+
+			// One block past the window: gone.
+			System::set_block_number(start + retention() + 1);
+			assert!(
+				!MerkleTreeService::is_known_root::<Test>(&root),
+				"root must stop being accepted once its window has elapsed"
+			);
+		});
+	}
+
+	/// SP-20 end to end: a root must outlive the mempool longevity a transaction
+	/// was admitted with, even while the chain keeps inserting commitments.
+	#[test]
+	fn root_outlives_tx_longevity_under_load() {
+		new_test_ext().execute_with(|| {
+			let start = System::block_number();
+			let anchor = root_numbered(0xBB);
+			MerkleTreeService::add_poseidon_historic_root::<Test>(anchor);
+
+			// Simulate the chain filling blocks for the whole longevity window,
+			// two commitments per block, as `private_transfer` does.
+			for block in 1..=crate::validate_unsigned::TX_LONGEVITY {
+				System::set_block_number(start + block);
+				MerkleTreeService::add_poseidon_historic_root::<Test>(root_numbered(
+					block as u32 * 2,
+				));
+				MerkleTreeService::add_poseidon_historic_root::<Test>(root_numbered(
+					block as u32 * 2 + 1,
+				));
+			}
+
+			assert!(
+				MerkleTreeService::is_known_root::<Test>(&anchor),
+				"a transaction still valid in the pool must find its root on chain"
+			);
+		});
+	}
+
+	/// Expired entries drain from the queue as inserts happen, so it does not
+	/// grow without bound.
+	#[test]
+	fn expired_roots_are_pruned_from_the_queue() {
+		new_test_ext().execute_with(|| {
+			let start = System::block_number();
+			// Genesis seeds one entry; add four more.
+			let queued_before = MerkleRepository::historic_roots_queued::<Test>();
+			for i in 0..4u32 {
+				MerkleTreeService::add_poseidon_historic_root::<Test>(root_numbered(i));
+			}
+			assert_eq!(
+				MerkleRepository::historic_roots_queued::<Test>(),
+				queued_before + 4
+			);
+
+			// Past the window every prior entry is expired; one insert drains up
+			// to MAX_ROOTS_PRUNED_PER_INSERT of them and appends itself.
+			System::set_block_number(start + retention() + 1);
+			MerkleTreeService::add_poseidon_historic_root::<Test>(root_numbered(999));
+
+			// Genesis seeds one entry, so the backlog is 5 against a cap of 4:
+			// one insert drains the cap and appends itself.
+			assert_eq!(
+				MerkleRepository::historic_roots_queued::<Test>(),
+				queued_before + 4 - MAX_ROOTS_PRUNED_PER_INSERT as u64 + 1,
+				"one insert drains exactly the cap and appends itself"
+			);
+			for i in 0..4u32 {
+				assert!(
+					!MerkleTreeService::is_known_root::<Test>(&root_numbered(i)),
+					"expired roots must no longer be spendable"
+				);
+			}
+			assert!(MerkleTreeService::is_known_root::<Test>(&root_numbered(
+				999
+			)));
+		});
+	}
+
+	/// Draining is capped per insert so one extrinsic never pays for a whole
+	/// backlog; the leftovers clear on subsequent inserts.
+	#[test]
+	fn queue_drain_is_capped_per_insert() {
+		new_test_ext().execute_with(|| {
+			let start = System::block_number();
+			let backlog = (MAX_ROOTS_PRUNED_PER_INSERT * 3) as u32;
+			for i in 0..backlog {
+				MerkleTreeService::add_poseidon_historic_root::<Test>(root_numbered(i));
+			}
+
+			System::set_block_number(start + retention() + 1);
+			let before = MerkleRepository::historic_roots_queued::<Test>();
+			MerkleTreeService::add_poseidon_historic_root::<Test>(root_numbered(9001));
+
+			// Drained at most the cap, then appended one — so the queue shrank by
+			// strictly less than the whole backlog.
+			let after = MerkleRepository::historic_roots_queued::<Test>();
+			assert_eq!(
+				after,
+				before - MAX_ROOTS_PRUNED_PER_INSERT as u64 + 1,
+				"one insert drains exactly the cap and appends itself"
+			);
+
+			// Enough further inserts clear the rest.
+			for i in 0..backlog {
+				MerkleTreeService::add_poseidon_historic_root::<Test>(root_numbered(20_000 + i));
+			}
+			assert!(
+				MerkleRepository::historic_roots_queued::<Test>() <= backlog as u64 + 2,
+				"the backlog must not accumulate once inserts keep coming"
+			);
+		});
+	}
+
+	/// Head and tail only ever move forward, and the queue never reports a
+	/// negative or oversized length.
+	#[test]
+	fn queue_head_and_tail_stay_monotonic() {
+		new_test_ext().execute_with(|| {
+			let start = System::block_number();
+			let mut last_head = MerkleRepository::get_historic_roots_head::<Test>();
+			let mut last_tail = MerkleRepository::get_historic_roots_tail::<Test>();
+
+			for i in 0..40u32 {
+				// Advance past the window every so often so draining kicks in.
+				if i % 10 == 0 {
+					System::set_block_number(start + retention() * (i as u64 / 10 + 1));
+				}
+				MerkleTreeService::add_poseidon_historic_root::<Test>(root_numbered(i));
+
+				let head = MerkleRepository::get_historic_roots_head::<Test>();
+				let tail = MerkleRepository::get_historic_roots_tail::<Test>();
+				assert!(head >= last_head, "head must never move backwards");
+				assert!(tail >= last_tail, "tail must never move backwards");
+				assert!(head >= tail, "tail must never overtake head");
+				last_head = head;
+				last_tail = tail;
+			}
+		});
+	}
+
+	/// A duplicate root value stays known while any live copy remains, and its
+	/// expiry is extended rather than shortened by the later insert.
 	#[test]
 	fn historic_root_duplicate_survives_partial_eviction() {
 		new_test_ext().execute_with(|| {
+			let start = System::block_number();
 			let dup = [0x77u8; 32];
-			// Two copies of `dup` plus fillers spanning the window.
+
+			// First copy at `start`, second one block later — the later insert
+			// extends the expiry.
 			MerkleTreeService::add_poseidon_historic_root::<Test>(dup);
+			System::set_block_number(start + 1);
 			MerkleTreeService::add_poseidon_historic_root::<Test>(dup);
-			let cap = <Test as crate::Config>::MaxHistoricRoots::get();
-			for i in 0..(cap - 1) {
-				let mut root = [0u8; 32];
-				root[..4].copy_from_slice(&i.to_le_bytes());
-				root[31] = 1; // distinct namespace from `dup`
-				MerkleTreeService::add_poseidon_historic_root::<Test>(root);
-			}
-			// The first `dup` was evicted, but the second copy keeps it known.
+
+			// Past the first copy's expiry but inside the second's.
+			System::set_block_number(start + retention() + 1);
+			MerkleTreeService::add_poseidon_historic_root::<Test>(root_numbered(1));
 			assert!(
 				MerkleTreeService::is_known_root::<Test>(&dup),
-				"duplicate root must stay known while a copy remains in the window"
+				"duplicate root must stay known while a live copy remains"
+			);
+
+			// Past the second copy's expiry too.
+			System::set_block_number(start + retention() + 2);
+			MerkleTreeService::add_poseidon_historic_root::<Test>(root_numbered(2));
+			assert!(
+				!MerkleTreeService::is_known_root::<Test>(&dup),
+				"duplicate root must expire once every copy has elapsed"
 			);
 		});
 	}

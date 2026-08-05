@@ -150,7 +150,10 @@ pub type CheckedExtrinsic =
 pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 
 /// Storage migrations run on runtime upgrade, oldest first.
-pub type Migrations = ();
+///
+/// Drop an entry once every live chain has passed its version — a migration
+/// that can no longer run is dead weight that could be re-armed by mistake.
+pub type Migrations = (pallet_shielded_pool::migrations::v3::MigrateToV3<Runtime>,);
 
 /// Executive: handles dispatch to the various modules.
 pub type Executive = frame_executive::Executive<
@@ -198,7 +201,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: Cow::Borrowed("orbinum"),
 	impl_name: Cow::Borrowed("orbinum"),
 	authoring_version: 1,
-	spec_version: 6,
+	spec_version: 7,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 2,
@@ -629,7 +632,17 @@ impl pallet_shielded_pool::Config for Runtime {
 	/// Merkle tree depth: 2^20 = 1M notes max (see MERKLE_TREE_SCALABILITY.md)
 	type MaxTreeDepth = ConstU32<20>;
 	/// Historic roots: allows proofs against past states (30s window)
-	type MaxHistoricRoots = ConstU32<100>;
+	/// Safety cap on the historic-root queue, not the retention window. A root
+	/// expires by elapsed blocks; this only bounds worst-case storage.
+	///
+	/// Steady state is `RootRetentionBlocks × commitments-per-block`: 1200 at a
+	/// sustained 2 transfers/block, 6000 at 10. Sized for ~27 transfers/block
+	/// sustained across a full window, well past the ~127 proof verifications a
+	/// block can fit, so the window — never this bound — is what expires a root.
+	type MaxHistoricRoots = ConstU32<16384>;
+	/// Roots stay spendable for 300 blocks (~30 min at 6s), comfortably above
+	/// the 64-block mempool longevity of an unsigned transaction.
+	type RootRetentionBlocks = ConstU32<300>;
 	// Pinned to 2^20: clients derive tree_id = leaf_index >> 20 from this.
 	type MaxLeavesPerTree = ConstU32<1_048_576>;
 	/// Minimum shield amount: prevents spam, 1 ORB = 1e18 wei
