@@ -120,12 +120,6 @@ impl MerkleTreeService {
 	/// Retention is measured in blocks (`RootRetentionBlocks`), so the window
 	/// always outlives the mempool longevity a transaction was admitted with.
 	/// `MaxHistoricRoots` is only a safety cap on queue length.
-	///
-	/// TODO(weights): `weights.rs` still records the pre-v3 window — it declares
-	/// `HistoricRootsOrder`, which no longer exists, and omits
-	/// `HistoricRootsQueue` / `HistoricRootsHead` / `HistoricRootsTail`. The
-	/// per-insert pruning below is therefore uncharged. Re-benchmark
-	/// `shield` / `shield_batch` / `private_transfer` / `unshield` before deploying.
 	pub(crate) fn add_poseidon_historic_root<T: Config>(poseidon_root: Hash) {
 		let now = frame_system::Pallet::<T>::block_number();
 		let expires_at = now.saturating_add(T::RootRetentionBlocks::get());
