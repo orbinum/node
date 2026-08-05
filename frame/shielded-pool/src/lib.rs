@@ -65,6 +65,7 @@ mod benchmarking;
 pub mod genesis;
 pub mod helpers;
 pub mod merkle;
+pub mod migrations;
 pub mod operations;
 pub mod storage;
 pub mod types;
@@ -103,11 +104,12 @@ pub mod pallet {
 
 	/// Storage version history:
 	/// - v1: `MerkleNodes` (internal Merkle tree nodes), backfilled from `MerkleLeaves`.
+	///   Migration removed once every live chain reached v2 — see git history.
 	/// - v2: multi-tree forest — `SealedTreeRoots` / `SealedRootIndex` (start empty).
-	///
-	/// The v1/v2 migration code was removed once every live chain reached v2; a new
-	/// chain starts here via genesis. See git history if an old chain ever needs it.
-	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(2);
+	///   Migration removed once every live chain reached v2 — see git history.
+	/// - v3: historic-root window re-anchored from insert counts to block numbers
+	///   (`migrations::v3::MigrateToV3`); both historic-root items carry an expiry.
+	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(3);
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
@@ -143,9 +145,23 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxLeavesPerTree: Get<u32>;
 
-		/// Maximum number of historic roots to keep
+		/// Safety cap on the historic-root queue: the most roots kept at once,
+		/// and the most a single insert may prune. This bounds worst-case work
+		/// and storage — the retention *window* is [`Self::RootRetentionBlocks`].
+		/// Size it above the roots produced in one window, or it becomes the
+		/// binding constraint and the window silently shortens.
 		#[pallet::constant]
 		type MaxHistoricRoots: Get<u32>;
+
+		/// How long a historic root stays spendable, in blocks.
+		///
+		/// Must exceed the mempool longevity of an unsigned transaction
+		/// (`TX_LONGEVITY`), otherwise a transaction can be admitted against a
+		/// root that expires before it is included — it would propagate, reach a
+		/// block, and only then revert with `UnknownMerkleRoot`. Enforced by
+		/// `integrity_test`.
+		#[pallet::constant]
+		type RootRetentionBlocks: Get<BlockNumberFor<Self>>;
 
 		/// Minimum amount that can be shielded
 		#[pallet::constant]
@@ -229,15 +245,44 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type SealedRootIndex<T> = StorageMap<_, Blake2_128Concat, Hash, u32, OptionQuery>;
 
-	/// Historic Poseidon Merkle roots (for proving against recent states)
+	/// Historic Poseidon Merkle roots (for proving against recent states),
+	/// mapped to the block at which each stops being accepted.
+	///
+	/// Expiry is measured in **blocks**, not in insertions, so the window
+	/// always outlives the mempool longevity a transaction was admitted with.
+	/// Counting insertions instead made the window rotate faster than
+	/// transactions expire under load, so honest spends reverted with
+	/// `UnknownMerkleRoot` after propagating.
 	#[pallet::storage]
-	pub type HistoricPoseidonRoots<T> = StorageMap<_, Blake2_128Concat, Hash, bool, ValueQuery>;
+	pub type HistoricPoseidonRoots<T: Config> =
+		StorageMap<_, Blake2_128Concat, Hash, BlockNumberFor<T>, OptionQuery>;
 
-	/// Order of historic roots (FIFO queue for pruning)
-	/// Stores roots in insertion order, oldest first
+	/// Expiry queue for historic roots: monotonic slot -> `(root, expires_at)`.
+	///
+	/// A map rather than one vector on purpose. The window has to hold a full
+	/// `RootRetentionBlocks` worth of roots — thousands under load — and a
+	/// `StorageValue` would be read and rewritten in full on every single leaf
+	/// insert, turning a hot path into hundreds of KiB of I/O. Keyed by slot,
+	/// each insert touches exactly one entry plus the few it prunes.
+	///
+	/// Slots are handed out by [`HistoricRootsHead`] and consumed from
+	/// [`HistoricRootsTail`], so the queue drains in insertion order, which is
+	/// also expiry order (every insert stores `now + retention` with a
+	/// non-decreasing `now`).
 	#[pallet::storage]
-	pub type HistoricRootsOrder<T: Config> =
-		StorageValue<_, BoundedVec<Hash, T::MaxHistoricRoots>, ValueQuery>;
+	pub type HistoricRootsQueue<T: Config> =
+		StorageMap<_, Twox64Concat, u64, (Hash, BlockNumberFor<T>), OptionQuery>;
+
+	/// Next slot to write in [`HistoricRootsQueue`]. Monotonic; never reset.
+	#[pallet::storage]
+	pub type HistoricRootsHead<T> = StorageValue<_, u64, ValueQuery>;
+
+	/// Oldest slot still queued in [`HistoricRootsQueue`]. Monotonic; never reset.
+	///
+	/// `head - tail` is the number of live entries, bounded in practice by the
+	/// retention window and hard-capped by `MaxHistoricRoots`.
+	#[pallet::storage]
+	pub type HistoricRootsTail<T> = StorageValue<_, u64, ValueQuery>;
 
 	/// Encrypted memos for commitments
 	///
@@ -340,8 +385,20 @@ pub mod pallet {
 
 			assert!(
 				T::MaxHistoricRoots::get() > 0,
-				"MaxHistoricRoots must be non-zero, otherwise the historic-root map \
-				 grows unbounded and the root window never evicts"
+				"MaxHistoricRoots must be non-zero, otherwise no root can ever be stored"
+			);
+
+			// The retention window must outlive the mempool longevity an unsigned
+			// transaction is admitted with, or a spend can pass validation, get
+			// gossiped, and only revert once included — the failure SP-20 fixed.
+			let retention: u64 =
+				sp_runtime::traits::UniqueSaturatedInto::<u64>::unique_saturated_into(
+					T::RootRetentionBlocks::get(),
+				);
+			assert!(
+				retention > crate::validate_unsigned::TX_LONGEVITY,
+				"RootRetentionBlocks must exceed TX_LONGEVITY, otherwise a root can \
+				 expire while a transaction admitted against it is still valid in the pool"
 			);
 
 			let cap = T::MaxLeavesPerTree::get();

@@ -27,7 +27,10 @@ const CIRCUIT_UNSHIELD: u32 = 2;
 
 /// How long an unsigned transaction stays valid in the pool, in blocks. Bounded
 /// so a transaction that never gets included does not linger indefinitely.
-const TX_LONGEVITY: u64 = 64;
+///
+/// `Config::RootRetentionBlocks` must exceed this (checked in `integrity_test`):
+/// a root has to outlive every transaction admitted against it.
+pub(crate) const TX_LONGEVITY: u64 = 64;
 
 /// Validate an incoming `private_transfer` unsigned transaction.
 pub fn validate_private_transfer<T: Config>(

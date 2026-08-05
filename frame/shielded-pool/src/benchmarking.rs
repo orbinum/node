@@ -23,7 +23,7 @@ use alloc::vec;
 mod benchmarks {
 	use super::*;
 	use crate::FrameEncryptedMemo;
-	use crate::pallet::{Assets, HistoricPoseidonRoots, NextAssetId, PoolBalancePerAsset};
+	use crate::pallet::{Assets, NextAssetId, PoolBalancePerAsset};
 	use pallet_relayer::RelayerInterface;
 	use sp_core::H160;
 	use sp_std::vec::Vec;
@@ -107,7 +107,7 @@ mod benchmarks {
 		let merkle_root = [1u8; 32];
 
 		// Setup valid root in storage
-		HistoricPoseidonRoots::<T>::insert(merkle_root, true);
+		crate::storage::MerkleRepository::add_historic_poseidon_root::<T>(merkle_root);
 
 		let proof: BoundedVec<u8, ConstU32<512>> = vec![0u8; 128].try_into().unwrap();
 
@@ -154,7 +154,7 @@ mod benchmarks {
 		let amount: BalanceOf<T> = T::MinShieldAmount::get() * 10u32.into();
 
 		// Setup valid state: root and pool balance
-		HistoricPoseidonRoots::<T>::insert(merkle_root, true);
+		crate::storage::MerkleRepository::add_historic_poseidon_root::<T>(merkle_root);
 		PoolBalancePerAsset::<T>::insert(asset_id, amount * 2u32.into());
 		// Fund pool account too for actual transfer
 		let _ = <T::Currency as Currency<T::AccountId>>::make_free_balance_be(

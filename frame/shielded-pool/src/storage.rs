@@ -6,9 +6,10 @@
 use crate::{
 	pallet::{
 		Assets, BalanceOf, CommitmentMemos, CommitmentToLeafIndex, Config, HistoricPoseidonRoots,
-		HistoricRootsOrder, MerkleLeaves, MerkleNodes, MerkleTreeFrontier, MerkleTreeSize,
-		NextAssetId, NullifierSet, PoolBalancePerAsset, PoseidonRoot, SealedRootIndex,
-		SealedTreeRoots, TotalCommitmentsInserted, TotalNullifiersSpent,
+		HistoricRootsHead, HistoricRootsQueue, HistoricRootsTail, MerkleLeaves, MerkleNodes,
+		MerkleTreeFrontier, MerkleTreeSize, NextAssetId, NullifierSet, PoolBalancePerAsset,
+		PoseidonRoot, SealedRootIndex, SealedTreeRoots, TotalCommitmentsInserted,
+		TotalNullifiersSpent,
 	},
 	types::{AssetMetadata, Commitment, EncryptedMemo, Hash},
 };
@@ -100,11 +101,31 @@ impl MerkleRepository {
 	pub fn insert_leaf<T: Config>(index: u32, commitment: Commitment) {
 		MerkleLeaves::<T>::insert(index, commitment);
 	}
+	/// A historic root is spendable until its expiry block, inclusive.
+	///
+	/// Checked against the expiry stored at insert time rather than pruned
+	/// eagerly: pruning is lazy (see `MerkleTreeService::add_poseidon_historic_root`),
+	/// so an expired entry can outlive its window in storage. Reading the
+	/// expiry here makes that harmless.
 	pub fn is_known_poseidon_root<T: Config>(root: &Hash) -> bool {
-		HistoricPoseidonRoots::<T>::get(root)
+		match HistoricPoseidonRoots::<T>::get(root) {
+			Some(expires_at) => frame_system::Pallet::<T>::block_number() <= expires_at,
+			None => false,
+		}
 	}
+	/// A root is spendable if it is the active root, is still inside its
+	/// retention window, or anchors a sealed tree.
+	///
+	/// The active root is accepted unconditionally. Expiries are only refreshed
+	/// by a leaf insert, so on a chain that goes quiet for a full retention
+	/// window the current root would otherwise expire while still being the one
+	/// every wallet proves against — wedging the pool, since `private_transfer`
+	/// and `unshield` both need a known root and only a funded `shield` could
+	/// mint a new one.
 	pub fn is_known_root<T: Config>(root: &Hash) -> bool {
-		Self::is_known_poseidon_root::<T>(root) || SealedRootIndex::<T>::contains_key(root)
+		*root == PoseidonRoot::<T>::get()
+			|| Self::is_known_poseidon_root::<T>(root)
+			|| SealedRootIndex::<T>::contains_key(root)
 	}
 	pub fn insert_sealed_root<T: Config>(tree_id: u32, root: Hash) {
 		SealedTreeRoots::<T>::insert(tree_id, root);
@@ -113,17 +134,54 @@ impl MerkleRepository {
 	pub fn get_sealed_root<T: Config>(tree_id: u32) -> Option<Hash> {
 		SealedTreeRoots::<T>::get(tree_id)
 	}
+	/// Record `root` as spendable for one full retention window from now.
 	pub fn add_historic_poseidon_root<T: Config>(root: Hash) {
-		HistoricPoseidonRoots::<T>::insert(root, true);
+		let expires_at =
+			frame_system::Pallet::<T>::block_number().saturating_add(T::RootRetentionBlocks::get());
+		Self::add_historic_poseidon_root_until::<T>(root, expires_at);
+	}
+
+	/// Record `root` as spendable until `expires_at` (inclusive).
+	///
+	/// A root re-inserted at a later block extends its expiry; it never shortens
+	/// it, so a duplicate root cannot cut short the window of the earlier entry.
+	pub fn add_historic_poseidon_root_until<T: Config>(root: Hash, expires_at: BlockNumberFor<T>) {
+		HistoricPoseidonRoots::<T>::mutate(root, |slot| match slot {
+			Some(current) if *current >= expires_at => {}
+			_ => *slot = Some(expires_at),
+		});
 	}
 	pub fn remove_poseidon_historic_root<T: Config>(root: &Hash) {
 		HistoricPoseidonRoots::<T>::remove(root);
 	}
-	pub fn get_historic_roots_order<T: Config>() -> BoundedVec<Hash, T::MaxHistoricRoots> {
-		HistoricRootsOrder::<T>::get()
+	pub fn get_historic_root_expiry<T: Config>(root: &Hash) -> Option<BlockNumberFor<T>> {
+		HistoricPoseidonRoots::<T>::get(root)
 	}
-	pub fn set_historic_roots_order<T: Config>(order: BoundedVec<Hash, T::MaxHistoricRoots>) {
-		HistoricRootsOrder::<T>::put(order);
+	pub fn get_historic_root_slot<T: Config>(slot: u64) -> Option<(Hash, BlockNumberFor<T>)> {
+		HistoricRootsQueue::<T>::get(slot)
+	}
+	pub fn set_historic_root_slot<T: Config>(slot: u64, root: Hash, expires_at: BlockNumberFor<T>) {
+		HistoricRootsQueue::<T>::insert(slot, (root, expires_at));
+	}
+	pub fn remove_historic_root_slot<T: Config>(slot: u64) {
+		HistoricRootsQueue::<T>::remove(slot);
+	}
+	pub fn get_historic_roots_head<T: Config>() -> u64 {
+		HistoricRootsHead::<T>::get()
+	}
+	pub fn set_historic_roots_head<T: Config>(head: u64) {
+		HistoricRootsHead::<T>::put(head);
+	}
+	pub fn get_historic_roots_tail<T: Config>() -> u64 {
+		HistoricRootsTail::<T>::get()
+	}
+	pub fn set_historic_roots_tail<T: Config>(tail: u64) {
+		HistoricRootsTail::<T>::put(tail);
+	}
+	/// Number of slots still queued. Bounded by the retention window in practice
+	/// and hard-capped by `MaxHistoricRoots`.
+	pub fn historic_roots_queued<T: Config>() -> u64 {
+		HistoricRootsHead::<T>::get().saturating_sub(HistoricRootsTail::<T>::get())
 	}
 	pub fn get_frontier<T: Config>() -> [[u8; 32]; 20] {
 		MerkleTreeFrontier::<T>::get()
