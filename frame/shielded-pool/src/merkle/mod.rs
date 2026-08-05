@@ -37,7 +37,7 @@ pub(crate) const MAX_ROOTS_PRUNED_PER_INSERT: usize = 4;
 mod tests {
 	use super::{
 		MAX_ROOTS_PRUNED_PER_INSERT,
-		batch::{compute_root_from_leaves, compute_root_from_leaves_poseidon},
+		batch::compute_root_from_leaves_poseidon,
 		hashing::{get_zero_hash_cached, hash_pair, hash_pair_poseidon, zero_hash_at_level},
 		service::MerkleTreeService,
 		tree::IncrementalMerkleTree,
@@ -48,7 +48,6 @@ mod tests {
 		storage::MerkleRepository,
 		types::{Commitment, Hash},
 	};
-	use frame_support::traits::Hooks;
 
 	// ── hash functions ──────────────────────────────────────────────────────
 
