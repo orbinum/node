@@ -86,7 +86,6 @@ where
 	CT: fp_rpc::ConvertTransaction<<B as BlockT>::Extrinsic> + Send + Sync + 'static,
 {
 	use pallet_relayer_rpc::{Relayer, RelayerApiServer};
-	use pallet_shielded_pool_rpc::{ShieldedPool, ShieldedPoolApiServer};
 	use pallet_transaction_payment_rpc::{TransactionPayment, TransactionPaymentApiServer};
 	use pallet_zk_verifier_rpc::{ZkVerifier, ZkVerifierApiServer};
 	use sc_consensus_manual_seal::rpc::{ManualSeal, ManualSealApiServer};
@@ -106,12 +105,10 @@ where
 
 	io.merge(System::new(client.clone(), pool.clone()).into_rpc())?;
 	io.merge(TransactionPayment::new(client.clone()).into_rpc())?;
-	io.merge(ShieldedPool::new(client.clone()).into_rpc())?;
 	io.merge(ZkVerifier::new(client.clone()).into_rpc())?;
 	io.merge(Relayer::new(client.clone()).into_rpc())?;
 	io.merge(RelayerAuthor::new(keystore).into_rpc())?;
 
-	// Orbinum Privacy + Chain RPC
 	io.merge(PrivacyRpc::new(client.clone()).into_rpc())?;
 	io.merge(ChainRpc::new(client.clone()).into_rpc())?;
 

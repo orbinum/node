@@ -7270,7 +7270,6 @@ dependencies = [
  "orbinum-zk-core",
  "pallet-relayer-rpc",
  "pallet-relayer-runtime-api",
- "pallet-shielded-pool-rpc",
  "pallet-shielded-pool-runtime-api",
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc",
@@ -8123,22 +8122,6 @@ dependencies = [
  "sp-io",
  "sp-runtime",
  "sp-std",
-]
-
-[[package]]
-name = "pallet-shielded-pool-rpc"
-version = "0.1.0"
-dependencies = [
- "hex",
- "jsonrpsee",
- "pallet-shielded-pool",
- "pallet-shielded-pool-runtime-api",
- "parity-scale-codec",
- "serde",
- "sp-api",
- "sp-blockchain",
- "sp-core",
- "sp-runtime",
 ]
 
 [[package]]
