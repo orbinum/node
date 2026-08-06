@@ -248,7 +248,6 @@ pallet-relayer = { path = "frame/relayer", default-features = false }
 pallet-relayer-rpc = { path = "frame/relayer/rpc" }
 pallet-relayer-runtime-api = { path = "frame/relayer/runtime-api", default-features = false }
 pallet-shielded-pool = { path = "frame/shielded-pool", default-features = false }
-pallet-shielded-pool-rpc = { path = "frame/shielded-pool/rpc" }
 pallet-shielded-pool-runtime-api = { path = "frame/shielded-pool/runtime-api", default-features = false }
 pallet-validator-set = { path = "frame/validator-set", default-features = false }
 pallet-zk-verifier = { path = "frame/zk-verifier", default-features = false }
