@@ -23,6 +23,19 @@ impl<const DEPTH: usize> Default for IncrementalMerkleTree<DEPTH> {
 }
 
 impl<const DEPTH: usize> IncrementalMerkleTree<DEPTH> {
+	/// `capacity()` shifts into a `u32`, so a depth of 32 or more is undefined:
+	/// debug builds panic, release builds wrap to 1 and the tree reports itself
+	/// full after a single leaf.
+	///
+	/// The bound belongs on the type rather than in the runtime config. The
+	/// pallet's `integrity_test` pins `MaxTreeDepth` to 20, but this struct is
+	/// `pub` and generic, so nothing stopped a downstream caller from picking
+	/// its own depth. Instantiating past the limit now fails to compile.
+	const _DEPTH_FITS_IN_U32: () = assert!(
+		DEPTH < 32,
+		"IncrementalMerkleTree DEPTH must be below 32: capacity() shifts into a u32"
+	);
+
 	pub fn new() -> Self {
 		let root = Self::compute_empty_root();
 		Self {
@@ -45,6 +58,7 @@ impl<const DEPTH: usize> IncrementalMerkleTree<DEPTH> {
 	}
 
 	pub fn capacity(&self) -> u32 {
+		let () = Self::_DEPTH_FITS_IN_U32;
 		1u32 << DEPTH
 	}
 	pub fn is_full(&self) -> bool {

@@ -7,13 +7,20 @@
 use alloc::boxed::Box;
 use ark_ff::BigInteger;
 
-/// Default hash for empty nodes at each level.
+/// Digest of an empty subtree rooted at `level`.
+///
+/// Iterative rather than recursive. The recursion this replaces spent one stack
+/// frame per level, and `get_zero_hash_cached` falls through to here for any
+/// level past its 21-entry table — with `usize` being 32 bits under Wasm, a
+/// caller passing a large level would exhaust the runtime's fixed 1 MB stack.
+/// A stack overflow there takes the node down rather than failing a call, while
+/// a loop just runs long: slow is recoverable, overflowing is not.
 pub fn zero_hash_at_level(level: usize) -> [u8; 32] {
-	if level == 0 {
-		return [0u8; 32];
+	let mut current = [0u8; 32];
+	for _ in 0..level {
+		current = hash_pair(&current, &current);
 	}
-	let prev = zero_hash_at_level(level - 1);
-	hash_pair(&prev, &prev)
+	current
 }
 
 /// Cached zero hashes for Poseidon (lazy-initialized, thread-safe).
