@@ -517,7 +517,7 @@ fn private_transfer_rejects_mismatched_nullifier_commitment_count() {
 			&[0x01],
 			root,
 			&[[0x11; 32], [0x22; 32]], // 2 nullifiers
-			&[canon(0x33)],             // 1 commitment
+			&[canon(0x33)],            // 1 commitment
 			&[vec![0xAA; 180]],        // 1 memo
 			0,
 			0,
@@ -537,9 +537,9 @@ fn private_transfer_rejects_mismatched_commitment_memo_count() {
 		let input = encode_private_transfer(
 			&[0x01],
 			root,
-			&[[0x11; 32], [0x22; 32]], // 2 nullifiers
+			&[[0x11; 32], [0x22; 32]],   // 2 nullifiers
 			&[canon(0x33), canon(0x44)], // 2 commitments
-			&[vec![0xAA; 180]],        // 1 memo — mismatch
+			&[vec![0xAA; 180]],          // 1 memo — mismatch
 			0,
 			0,
 			1,
