@@ -1323,8 +1323,14 @@ mod prune_tests {
 	}
 
 	/// The per-block ceiling has to be a real bound, not a placeholder.
-	#[test]
-	fn per_block_cap_is_bounded() {
-		assert!(MAX_PRUNED_NODES_PER_BLOCK > 0 && MAX_PRUNED_NODES_PER_BLOCK <= 4096);
-	}
+	///
+	/// A `const` block rather than a runtime assert: both operands are constants,
+	/// so the compiler would fold an `assert!` away and the check would never run.
+	/// This one fails the build instead.
+	const _: () = assert!(
+		MAX_PRUNED_NODES_PER_BLOCK > 0 && MAX_PRUNED_NODES_PER_BLOCK <= 4096,
+		"MAX_PRUNED_NODES_PER_BLOCK must bound the sweep: zero disables pruning, \
+		 and a value this far above the benchmarked batch would let one block \
+		 absorb work it cannot pay for"
+	);
 }
