@@ -79,11 +79,24 @@ mod benchmarks {
 		if scaled > floor { scaled } else { floor }
 	}
 
+	/// A distinct, canonical 32-byte field value for `seed`.
+	///
+	/// Commitments and nullifiers are checked against the BN254 modulus, and a
+	/// repeated byte at or above 0x30 exceeds it — `p` starts at 0x30. Real
+	/// values come out of Poseidon and are always canonical, so a filler that is
+	/// not would benchmark a call the chain would reject.
+	fn canonical_bytes(seed: u8) -> [u8; 32] {
+		let mut b = [0u8; 32];
+		b[0] = seed;
+		b[1] = 0xA5;
+		b
+	}
+
 	#[benchmark]
 	fn shield() {
 		let (caller, asset_id) = setup_benchmark_env::<T>();
 		let amount: BalanceOf<T> = bench_amount::<T>();
-		let commitment = Commitment([1u8; 32]);
+		let commitment = Commitment(canonical_bytes(1));
 		// Memo must be exactly 180 bytes (MAX_ENCRYPTED_MEMO_SIZE): nonce(12) + data(120) + MAC(16) + ephPk(32)
 		let memo_bytes = vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
 		let encrypted_memo = FrameEncryptedMemo(memo_bytes.try_into().unwrap());
@@ -105,7 +118,7 @@ mod benchmarks {
 
 		let mut operations = Vec::new();
 		for i in 0..n {
-			let commitment = Commitment([i as u8; 32]);
+			let commitment = Commitment(canonical_bytes(i as u8));
 			let memo_bytes = vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
 			let encrypted_memo = FrameEncryptedMemo(memo_bytes.try_into().unwrap());
 			operations.push((asset_id, amount, commitment, encrypted_memo));
@@ -131,8 +144,8 @@ mod benchmarks {
 		let mut comms = Vec::new();
 		let mut memos = Vec::new();
 		for i in 0..n {
-			nulls.push(Nullifier([(0x20 + i) as u8; 32]));
-			comms.push(Commitment([(0x30 + i) as u8; 32]));
+			nulls.push(Nullifier(canonical_bytes((0x20 + i) as u8)));
+			comms.push(Commitment(canonical_bytes((0x30 + i) as u8)));
 			let memo_bytes = vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
 			memos.push(FrameEncryptedMemo(memo_bytes.try_into().unwrap()));
 		}
@@ -178,7 +191,7 @@ mod benchmarks {
 		);
 
 		let proof: BoundedVec<u8, ConstU32<512>> = vec![0u8; 128].try_into().unwrap();
-		let nullifier = Nullifier([4u8; 32]);
+		let nullifier = Nullifier(canonical_bytes(4));
 
 		// Must be >= T::Relayer::min_relay_fee() to pass the FeeTooLow check.
 		let fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
@@ -243,7 +256,7 @@ mod benchmarks {
 		// Accumulate relay fees for the validator.
 		T::Relayer::accumulate_relay_fee(&caller, asset_id, amount_u128);
 
-		let commitment = Commitment([0x11u8; 32]);
+		let commitment = Commitment(canonical_bytes(0x11));
 
 		// public_signals layout (76 bytes): commitment(32) | value_le(8) | asset_id_le(4) | owner_hash(32)
 		let mut public_signals = vec![0u8; 76];
