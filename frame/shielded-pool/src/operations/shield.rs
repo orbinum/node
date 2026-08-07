@@ -28,6 +28,8 @@ impl ShieldOperation {
 			encrypted_memo.0.len() == MAX_ENCRYPTED_MEMO_SIZE as usize,
 			Error::<T>::InvalidMemoSize
 		);
+		ensure!(commitment.is_canonical(), Error::<T>::InvalidPublicSignals);
+		ensure!(commitment.is_valid(), Error::<T>::InvalidPublicSignals);
 
 		ensure!(
 			!CommitmentRepository::exists::<T>(&commitment),
@@ -103,8 +105,17 @@ mod tests {
 		EncryptedMemo::new(vec![0x01u8; 32]).unwrap()
 	}
 
+	/// A distinct, canonical 32-byte commitment for `seed`.
+	///
+	/// The seed goes in the low byte rather than filling all 32: a repeated high
+	/// byte puts the value above the BN254 modulus (`p` starts at 0x30), which
+	/// the canonicity guard refuses. Real commitments come out of Poseidon and
+	/// are always canonical.
 	fn commitment(seed: u8) -> Commitment {
-		Commitment::new([seed; 32])
+		let mut b = [0u8; 32];
+		b[0] = seed;
+		b[1] = 0xA5;
+		Commitment::new(b)
 	}
 
 	// ── execute ───────────────────────────────────────────────────────────────
@@ -153,6 +164,78 @@ mod tests {
 			assert_noop!(
 				ShieldOperation::execute::<Test>(acc(1), id, 500u128, commitment(1), memo_valid()),
 				crate::pallet::Error::<Test>::AssetNotVerified
+			);
+		});
+	}
+
+	/// A zero commitment is refused even though zero is a canonical field value.
+	///
+	/// The tree represents an absent leaf with `[0u8; 32]`, so a stored zero is
+	/// indistinguishable from an empty slot when `subtree_root` rebuilds a pruned
+	/// level — and nobody can prove a preimage for it, so it would sit in the
+	/// tree forever as dead weight. The canonicity check alone lets it through;
+	/// this needs its own guard, which a dev-node probe caught missing.
+	#[test]
+	fn execute_zero_commitment_fails() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let zero = Commitment::new([0u8; 32]);
+			assert!(zero.is_canonical(), "zero is canonical — that is the trap");
+
+			assert_noop!(
+				ShieldOperation::execute::<Test>(acc(1), asset_id, 500u128, zero, memo_valid()),
+				crate::pallet::Error::<Test>::InvalidPublicSignals
+			);
+		});
+	}
+
+	/// The modular twin of a value must not be storable alongside it: both reduce
+	/// to the same field element, so accepting each would give one note two
+	/// identities in the tree and in the reverse index.
+	#[test]
+	fn execute_non_canonical_commitment_fails() {
+		new_test_ext().execute_with(|| {
+			use ark_bn254::Fr;
+			use ark_ff::{BigInteger, PrimeField};
+
+			let asset_id = setup_asset();
+
+			let mut canonical = [0u8; 32];
+			canonical[0] = 7;
+
+			// n + p: same field element, different bytes.
+			let p_minus_1 = (-Fr::from(1u64)).into_bigint().to_bytes_le();
+			let mut twin = [0u8; 32];
+			twin[..p_minus_1.len()].copy_from_slice(&p_minus_1);
+			let mut carry = 1u16 + 7;
+			for b in twin.iter_mut() {
+				let v = *b as u16 + carry;
+				*b = (v & 0xff) as u8;
+				carry = v >> 8;
+			}
+
+			assert_eq!(
+				Fr::from_le_bytes_mod_order(&canonical),
+				Fr::from_le_bytes_mod_order(&twin),
+				"the pair must reduce to one element, or this proves nothing"
+			);
+
+			assert_ok!(ShieldOperation::execute::<Test>(
+				acc(1),
+				asset_id,
+				500u128,
+				Commitment::new(canonical),
+				memo_valid(),
+			));
+			assert_noop!(
+				ShieldOperation::execute::<Test>(
+					acc(1),
+					asset_id,
+					500u128,
+					Commitment::new(twin),
+					memo_valid()
+				),
+				crate::pallet::Error::<Test>::InvalidPublicSignals
 			);
 		});
 	}

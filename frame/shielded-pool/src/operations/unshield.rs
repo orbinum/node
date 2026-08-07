@@ -71,6 +71,7 @@ impl UnshieldOperation {
 			MerkleRepository::is_known_root::<T>(&merkle_root),
 			Error::<T>::UnknownMerkleRoot
 		);
+		ensure!(nullifier.is_canonical(), Error::<T>::InvalidPublicSignals);
 		ensure!(
 			!NullifierRepository::is_used::<T>(&nullifier),
 			Error::<T>::NullifierAlreadyUsed
@@ -80,6 +81,7 @@ impl UnshieldOperation {
 		let has_change = change_commitment != [0u8; 32];
 		if has_change {
 			let change_comm = Commitment::new(change_commitment);
+			ensure!(change_comm.is_canonical(), Error::<T>::InvalidPublicSignals);
 			ensure!(
 				!CommitmentRepository::exists::<T>(&change_comm),
 				Error::<T>::CommitmentAlreadyExists
@@ -273,6 +275,19 @@ mod tests {
 
 	const KNOWN_ROOT: [u8; 32] = [0xAAu8; 32];
 
+	/// A distinct, canonical 32-byte field value for `seed`.
+	///
+	/// The seed goes in the low byte rather than filling all 32: a repeated high
+	/// byte puts the value above the BN254 modulus (`p` starts at 0x30), which
+	/// the canonicity guard refuses. Real nullifiers and commitments come out of
+	/// Poseidon and are always canonical.
+	fn canonical_bytes(seed: u8) -> [u8; 32] {
+		let mut b = [0u8; 32];
+		b[0] = seed;
+		b[1] = 0xA5;
+		b
+	}
+
 	fn setup_asset() -> u32 {
 		let name = frame_support::BoundedVec::try_from(b"Orbinum".to_vec()).unwrap();
 		let symbol = frame_support::BoundedVec::try_from(b"ORB".to_vec()).unwrap();
@@ -291,7 +306,7 @@ mod tests {
 	}
 
 	fn nullifier(seed: u8) -> Nullifier {
-		Nullifier::new([seed; 32])
+		Nullifier::new(canonical_bytes(seed))
 	}
 
 	fn proof() -> &'static [u8] {
@@ -678,7 +693,7 @@ mod tests {
 			fund_pool(asset_id, 1_000u128);
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 
-			let change_comm_bytes = [0xCCu8; 32];
+			let change_comm_bytes = canonical_bytes(0xCC);
 			let amount = 600u128;
 
 			assert_ok!(UnshieldOperation::execute::<Test>(
@@ -788,7 +803,7 @@ mod tests {
 			fund_pool(asset_id, 2_000u128);
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 
-			let change_comm_bytes = [0xDDu8; 32];
+			let change_comm_bytes = canonical_bytes(0xDD);
 			let change_comm = Commitment::new(change_comm_bytes);
 
 			// Mark commitment as already existing in the pool.
@@ -950,7 +965,7 @@ mod tests {
 				depositor,
 				asset_id,
 				1000u128,
-				Commitment::new([0x31u8; 32]),
+				Commitment::new(canonical_bytes(0x31)),
 				FrameEncryptedMemo::from_bytes(&[0u8; 180]).unwrap(),
 			));
 			assert_eq!(tracked(asset_id), pool_physical());
