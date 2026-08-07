@@ -38,6 +38,28 @@ pub const PER_INPUT_COST: u64 = 10_000;
 /// Maximum number of public inputs supported.
 pub const MAX_PUBLIC_INPUTS: usize = 32;
 
+/// Largest verifying key this crate will attempt to deserialize.
+///
+/// `ark-serialize` reads a `Vec` by taking an 8-byte length prefix and calling
+/// `Vec::with_capacity` on it **before** reading a single element, so a key
+/// declaring 2^40 points asks the allocator for tens of gigabytes on nothing but
+/// attacker-supplied bytes. Rejecting oversized input up front keeps that
+/// allocation from ever being attempted.
+///
+/// A real BN254 key is ~488 bytes; the on-chain extrinsics bound their argument
+/// at 8 KiB. This matches that bound so the crate is not the narrower gate, but
+/// unlike the extrinsic bound it also covers callers that never pass through a
+/// dispatchable.
+pub const MAX_VK_BYTES: usize = 8192;
+
+/// Largest proof this crate will attempt to deserialize.
+///
+/// A compressed Groth16 proof over BN254 is three curve points — 128 bytes,
+/// fixed. The margin is for encoding variations, not for growth: anything an
+/// order of magnitude past this is malformed, and letting it through only gives
+/// the deserializer a length prefix to act on.
+pub const MAX_PROOF_BYTES: usize = 1024;
+
 /// Expected public-input count for a known circuit id, or `None` if unknown.
 /// A VK for the circuit must have `gamma_abc_g1.len() == expected + 1`.
 pub const fn expected_public_inputs(circuit_id: u8) -> Option<usize> {
@@ -118,6 +140,9 @@ impl Proof {
 	}
 
 	pub fn to_ark_proof(&self) -> Result<ArkProof<Bn254>, VerifierError> {
+		if self.bytes.len() > MAX_PROOF_BYTES {
+			return Err(VerifierError::InvalidProof);
+		}
 		ArkProof::<Bn254>::deserialize_compressed(&self.bytes[..])
 			.map_err(|_| VerifierError::InvalidProof)
 	}
@@ -150,6 +175,9 @@ impl VerifyingKey {
 	}
 
 	pub fn to_ark_vk(&self) -> Result<ArkVK<Bn254>, VerifierError> {
+		if self.bytes.len() > MAX_VK_BYTES {
+			return Err(VerifierError::InvalidVerifyingKey);
+		}
 		ArkVK::<Bn254>::deserialize_compressed(&self.bytes[..])
 			.map_err(|_| VerifierError::InvalidVerifyingKey)
 	}
@@ -199,6 +227,9 @@ impl PublicInputs {
 
 	pub fn to_field_elements(&self) -> Result<Vec<Bn254Fr>, VerifierError> {
 		use ark_ff::{BigInteger, PrimeField};
+		if self.inputs.len() > MAX_PUBLIC_INPUTS {
+			return Err(VerifierError::InvalidPublicInput);
+		}
 		self.inputs
 			.iter()
 			.map(|bytes| {
@@ -533,4 +564,164 @@ mod tests {
 			assert_eq!(orig, conv, "Mismatch at index {i}");
 		}
 	}
+
+	// ─── Deserialization bounds ───────────────────────────────────────────────
+
+	/// Build a genuine BN254 verifying key with `arity` public inputs.
+	///
+	/// Real, not random bytes: the point of the size guard is to reject input
+	/// that *would* deserialize, so a test built on garbage would pass whether
+	/// or not the guard exists.
+	#[cfg(test)]
+	fn well_formed_vk(arity: usize) -> Vec<u8> {
+		use ark_bn254::{G1Affine, G2Affine};
+		use ark_ec::AffineRepr;
+
+		let vk = ArkVK::<Bn254> {
+			alpha_g1: G1Affine::generator(),
+			beta_g2: G2Affine::generator(),
+			gamma_g2: G2Affine::generator(),
+			delta_g2: G2Affine::generator(),
+			gamma_abc_g1: (0..=arity).map(|_| G1Affine::generator()).collect(),
+		};
+		VerifyingKey::from_ark_vk(&vk).expect("serializes").bytes
+	}
+
+	/// `ark-serialize` sizes a `Vec` from an 8-byte length prefix and calls
+	/// `Vec::with_capacity` before reading a single element, so a key declaring
+	/// 2^40 points asks the allocator for tens of gigabytes on attacker-supplied
+	/// bytes alone. The length has to be checked first.
+	///
+	/// The key here is well-formed and would deserialize — only its size makes it
+	/// unacceptable. That is what separates this from a malformed-input test.
+	#[test]
+	fn oversized_but_valid_vk_is_rejected_on_size() {
+		// Each G1 point is 32 bytes compressed, so this clears 8 KiB comfortably.
+		let bytes = well_formed_vk(400);
+		assert!(
+			bytes.len() > MAX_VK_BYTES,
+			"fixture must exceed the bound to test it: {} bytes",
+			bytes.len()
+		);
+
+		assert_eq!(
+			VerifyingKey::new(bytes).to_ark_vk(),
+			Err(VerifierError::InvalidVerifyingKey)
+		);
+	}
+
+	/// The same key just inside the bound must still work, or the guard would be
+	/// rejecting legitimate input.
+	#[test]
+	fn valid_vk_within_the_bound_is_accepted() {
+		let bytes = well_formed_vk(7);
+		assert!(bytes.len() <= MAX_VK_BYTES);
+		assert!(VerifyingKey::new(bytes).to_ark_vk().is_ok());
+	}
+
+	/// The guard covers every entry point, not just the one that deserializes:
+	/// `prepare` and `num_public_inputs` both route through `to_ark_vk`.
+	#[test]
+	fn oversized_vk_is_rejected_on_every_path() {
+		let vk = VerifyingKey::new(well_formed_vk(400));
+
+		assert!(vk.prepare().is_err());
+		assert!(vk.num_public_inputs().is_err());
+	}
+
+	/// A proof past the bound is refused on size alone.
+	///
+	/// `deserialize_compressed` ignores trailing bytes, so a real proof padded
+	/// out still deserializes — which makes it a fixture the guard is the only
+	/// thing rejecting.
+	#[test]
+	fn oversized_proof_is_rejected_on_size() {
+		use ark_bn254::{G1Affine, G2Affine};
+		use ark_ec::AffineRepr;
+
+		let proof = ArkProof::<Bn254> {
+			a: G1Affine::generator(),
+			b: G2Affine::generator(),
+			c: G1Affine::generator(),
+		};
+		let mut bytes = Proof::from_ark_proof(&proof).expect("serializes").bytes;
+		assert!(
+			Proof::new(bytes.clone()).to_ark_proof().is_ok(),
+			"fixture must be valid first"
+		);
+
+		bytes.resize(MAX_PROOF_BYTES + 1, 0u8);
+		assert_eq!(
+			Proof::new(bytes).to_ark_proof(),
+			Err(VerifierError::InvalidProof)
+		);
+	}
+
+	/// The limits must not shadow real input: a genuine BN254 key is ~488 bytes
+	/// and a compressed proof 128, both far below their bound.
+	#[test]
+	fn bounds_leave_room_for_real_artifacts() {
+		use ark_bn254::{G1Affine, G2Affine};
+		use ark_ec::AffineRepr;
+
+		assert!(
+			well_formed_vk(7).len() * 4 < MAX_VK_BYTES,
+			"VK bound too tight"
+		);
+
+		// Measured, not hardcoded: a literal here would drift from the real
+		// encoding the moment it changed, which is exactly what this guards.
+		let proof = ArkProof::<Bn254> {
+			a: G1Affine::generator(),
+			b: G2Affine::generator(),
+			c: G1Affine::generator(),
+		};
+		let real = Proof::from_ark_proof(&proof)
+			.expect("serializes")
+			.bytes
+			.len();
+		assert!(
+			real * 4 < MAX_PROOF_BYTES,
+			"proof bound too tight: {real} bytes"
+		);
+	}
+
+	/// `MAX_PUBLIC_INPUTS` was declared but never applied: the pallet bounds its
+	/// extrinsic argument, yet the `ZkVerifierPort` path does not go through it.
+	#[test]
+	fn too_many_public_inputs_are_rejected() {
+		let inputs = alloc::vec![[0u8; 32]; MAX_PUBLIC_INPUTS + 1];
+		assert_eq!(
+			PublicInputs::new(inputs).to_field_elements(),
+			Err(VerifierError::InvalidPublicInput)
+		);
+	}
+
+	/// Exactly at the limit still works — the check is `>`, not `>=`.
+	#[test]
+	fn public_inputs_at_the_limit_are_accepted() {
+		let inputs = alloc::vec![[0u8; 32]; MAX_PUBLIC_INPUTS];
+		assert!(PublicInputs::new(inputs).to_field_elements().is_ok());
+	}
+
+	/// Every circuit in use sits far below the cap, so enforcing it cannot break
+	/// a real verification.
+	///
+	/// A `const` block rather than a `#[test]`: these are all constants, so the
+	/// comparison is decided at compile time either way — this way raising a
+	/// circuit's arity past the cap fails the build instead of a test run.
+	const _: () = {
+		assert!(
+			TRANSFER_PUBLIC_INPUTS * 4 < MAX_PUBLIC_INPUTS,
+			"transfer arity is too close to MAX_PUBLIC_INPUTS"
+		);
+		assert!(
+			UNSHIELD_PUBLIC_INPUTS * 4 < MAX_PUBLIC_INPUTS,
+			"unshield arity is too close to MAX_PUBLIC_INPUTS"
+		);
+		assert!(
+			VALUE_PROOF_PUBLIC_INPUTS * 4 < MAX_PUBLIC_INPUTS,
+			"value-proof arity is too close to MAX_PUBLIC_INPUTS"
+		);
+	};
 }

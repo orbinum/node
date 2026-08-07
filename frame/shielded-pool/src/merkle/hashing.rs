@@ -54,10 +54,15 @@ pub fn hash_pair_poseidon(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
 
 	let hash_fr = hasher.hash_2([FieldElement::new(left_fr), FieldElement::new(right_fr)]);
 
+	// BN254 `Fr` always yields 32 bytes, so the clamp never binds today. It is
+	// here because this runs on the block-import path, where slicing past the
+	// end would panic the node rather than fail a call — the same reason
+	// `recipient_to_field` is written this way.
 	let mut hash_bytes = [0u8; 32];
 	let bigint = hash_fr.inner().into_bigint();
 	let bytes = bigint.to_bytes_le();
-	hash_bytes.copy_from_slice(&bytes[..32]);
+	let n = bytes.len().min(32);
+	hash_bytes[..n].copy_from_slice(&bytes[..n]);
 	hash_bytes
 }
 

@@ -29,6 +29,13 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
   is immutable so the result is byte-identical to what was stored. The active
   tree is untouched: still 20 point reads and zero hashes.
 
+### Fixed
+- `hash_pair_poseidon` clamps its output copy instead of slicing `&bytes[..32]`
+  raw. BN254 `Fr` always yields 32 bytes, so the clamp never binds today — but
+  this runs on the block-import path, where slicing past the end panics the node
+  rather than failing a call. `recipient_to_field` was already written this way;
+  the two now match.
+
 ### Removed
 - **Minimum shield amount.** The `MinShieldAmount` Config constant (1 ORB in the
   runtime) and the `AmountTooSmall` error are gone. `shield` now accepts any
