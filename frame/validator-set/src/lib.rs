@@ -1,32 +1,31 @@
 //! # Pallet Validator Set
 //!
-//! Two-phase validator registration for Orbinum: self-registration with a bond deposit,
+//! Two-phase validator registration for Orbinum: permissionless self-registration,
 //! followed by explicit governance approval before the node joins the active set.
 //!
 //! ## Registration Flow
 //!
-//! 1. The candidate account holds **> 1 001 ORB** (1 000 bond + fees buffer).
-//! 2. The candidate calls [`register_validator`][Pallet::register_validator], which locks
-//!    `T::ValidatorBond` (1 000 ORB) and places the account in the **pending** queue.
+//! 1. The candidate registers session keys (`session.setKeys`) and an EVM relay address
+//!    (`relayer.register_relayer`).
+//! 2. The candidate calls [`register_validator`][Pallet::register_validator], which places
+//!    the account in the **pending** queue.
 //! 3. `AddRemoveOrigin` (sudo / governance) reviews and calls
 //!    [`approve_validator`][Pallet::approve_validator] → account moves to the **approved** set
 //!    and becomes an active block-producer at the next session rotation.
-//! 4. To leave voluntarily, the validator calls [`deregister_validator`][Pallet::deregister_validator];
-//!    the bond is returned immediately (whether still pending or already approved).
+//! 4. To leave voluntarily, the validator calls [`deregister_validator`][Pallet::deregister_validator].
 //!
 //! ## Sudo Paths
 //!
-//! - [`add_validator`][Pallet::add_validator] — Directly add a trusted node (no bond).
-//! - [`remove_validator`][Pallet::remove_validator] — Force-remove from pending or approved; bond returned.
+//! - [`add_validator`][Pallet::add_validator] — Directly add a trusted node.
+//! - [`remove_validator`][Pallet::remove_validator] — Force-remove from pending or approved.
 //! - [`approve_validator`][Pallet::approve_validator] — Approve a pending registration.
-//! - [`reject_validator`][Pallet::reject_validator] — Reject a pending registration; bond returned.
+//! - [`reject_validator`][Pallet::reject_validator] — Reject a pending registration.
 //!
 //! ## Security
 //!
 //! - A non-approved account **never** enters the active validator set.
-//! - The bond incentivises legitimate registrations and deters spam.
-//! - Bond is always returned (approve → stay in set; reject/remove → immediate release;
-//!   deregister → immediate release).
+//! - Spam is bounded by `MaxPendingValidators` and by the session-key and relayer
+//!   prerequisites, both of which cost a transaction to satisfy.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -64,10 +63,7 @@ pub trait ValidatorPrerequisites<AccountId> {
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
-	use frame_support::{
-		pallet_prelude::*,
-		traits::{Currency, EnsureOrigin, ReservableCurrency},
-	};
+	use frame_support::{pallet_prelude::*, traits::EnsureOrigin};
 	use frame_system::pallet_prelude::*;
 	use pallet_session::SessionManager;
 
@@ -79,9 +75,6 @@ pub mod pallet {
 		/// Origin allowed to add/remove/approve/reject validators. Use `EnsureRoot` for sudo.
 		type AddRemoveOrigin: EnsureOrigin<Self::RuntimeOrigin>;
 
-		/// Currency used to reserve the validator bond on self-registration.
-		type Currency: ReservableCurrency<Self::AccountId>;
-
 		/// Maximum number of validators in the **approved** (active) set.
 		#[pallet::constant]
 		type MaxValidators: Get<u32>;
@@ -90,24 +83,15 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxPendingValidators: Get<u32>;
 
-		/// Bond (in native tokens) locked when a candidate calls `register_validator`.
-		/// With 18 decimals: `1_000 * 10^18` = 1 000 ORB.
-		#[pallet::constant]
-		type ValidatorBond: Get<BalanceOf<Self>>;
-
 		/// Prerequisite gate checked on every `register_validator` call.
 		///
 		/// The caller must have both session keys and an EVM relayer registered
-		/// before they are allowed to lock the bond and enter the pending queue.
+		/// before they are allowed to enter the pending queue.
 		type Prerequisites: crate::ValidatorPrerequisites<Self::AccountId>;
 
 		/// Weight information for the pallet's dispatchables.
 		type WeightInfo: crate::WeightInfo;
 	}
-
-	/// Shorthand for the currency balance type.
-	pub type BalanceOf<T> =
-		<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
 	/// The approved (active) set of validator account IDs.
 	///
@@ -127,36 +111,19 @@ pub mod pallet {
 	pub type PendingValidators<T: Config> =
 		StorageValue<_, BoundedVec<T::AccountId, T::MaxPendingValidators>, ValueQuery>;
 
-	/// Bond amount reserved at the time of self-registration (`register_validator`).
-	/// Stored per-account so the exact amount is returned even if `T::ValidatorBond` changes.
-	/// Validators added via sudo `add_validator` have no entry here.
-	#[pallet::storage]
-	pub type ValidatorBondOf<T: Config> =
-		StorageMap<_, Blake2_128Concat, T::AccountId, BalanceOf<T>, OptionQuery>;
-
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// A validator was directly added by sudo. Takes effect next session.
 		ValidatorAdded { validator: T::AccountId },
-		/// A validator was removed (approved or pending). Bond returned if held.
+		/// A validator was removed (approved or pending).
 		ValidatorRemoved { validator: T::AccountId },
 		/// A self-registration was submitted; awaiting governance approval.
 		ValidatorRegistrationRequested { validator: T::AccountId },
 		/// A pending registration was approved. Takes effect next session.
 		ValidatorApproved { validator: T::AccountId },
-		/// A pending registration was rejected; bond returned.
+		/// A pending registration was rejected.
 		ValidatorRejected { validator: T::AccountId },
-		/// Bond reserved when a candidate self-registered.
-		ValidatorBondReserved {
-			validator: T::AccountId,
-			amount: BalanceOf<T>,
-		},
-		/// Bond released on deregistration, removal, or rejection.
-		ValidatorBondReleased {
-			validator: T::AccountId,
-			amount: BalanceOf<T>,
-		},
 	}
 
 	#[pallet::error]
@@ -173,8 +140,6 @@ pub mod pallet {
 		TooManyValidators,
 		/// The pending queue is full (`MaxPendingValidators` reached).
 		TooManyPending,
-		/// Account does not have enough free balance to cover `ValidatorBond`.
-		InsufficientBond,
 		/// Session keys (Aura + GRANDPA) not yet registered via `session.setKeys`.
 		NoSessionKeys,
 		/// EVM relay address not yet registered via `relayer.register_relayer`.
@@ -204,7 +169,7 @@ pub mod pallet {
 	impl<T: Config> Pallet<T> {
 		// ── Sudo paths ───────────────────────────────────────────────────────────────────
 
-		/// Directly add a trusted account to the approved set (no bond required).
+		/// Directly add a trusted account to the approved set.
 		///
 		/// Requires `AddRemoveOrigin`. The account must not be in the pending queue.
 		/// Takes effect at the next session rotation.
@@ -232,8 +197,8 @@ pub mod pallet {
 
 		/// Force-remove an account from the approved set or the pending queue.
 		///
-		/// Requires `AddRemoveOrigin`. If the account had a bond, it is returned.
-		/// Takes effect at the next session rotation (for approved validators).
+		/// Requires `AddRemoveOrigin`. Takes effect at the next session rotation
+		/// (for approved validators).
 		#[pallet::call_index(1)]
 		#[pallet::weight(T::WeightInfo::remove_validator())]
 		pub fn remove_validator(origin: OriginFor<T>, validator: T::AccountId) -> DispatchResult {
@@ -264,7 +229,6 @@ pub mod pallet {
 			};
 
 			ensure!(in_approved || in_pending, Error::<T>::NotValidator);
-			Self::release_bond(&validator);
 			Self::deposit_event(Event::ValidatorRemoved { validator });
 			Ok(())
 		}
@@ -272,7 +236,7 @@ pub mod pallet {
 		/// Approve a pending validator registration.
 		///
 		/// Requires `AddRemoveOrigin`. Moves the account from the pending queue to the
-		/// approved set. The bond remains locked. Takes effect at the next session rotation.
+		/// approved set. Takes effect at the next session rotation.
 		#[pallet::call_index(4)]
 		#[pallet::weight(T::WeightInfo::add_validator())]
 		pub fn approve_validator(origin: OriginFor<T>, validator: T::AccountId) -> DispatchResult {
@@ -303,10 +267,9 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Reject a pending validator registration and return the bond.
+		/// Reject a pending validator registration.
 		///
-		/// Requires `AddRemoveOrigin`. The applicant is removed from the pending queue
-		/// and their `ValidatorBond` is unreserved in full.
+		/// Requires `AddRemoveOrigin`. The applicant is removed from the pending queue.
 		#[pallet::call_index(5)]
 		#[pallet::weight(T::WeightInfo::remove_validator())]
 		pub fn reject_validator(origin: OriginFor<T>, validator: T::AccountId) -> DispatchResult {
@@ -321,26 +284,20 @@ pub mod pallet {
 				Ok(())
 			})?;
 
-			Self::release_bond(&validator);
 			Self::deposit_event(Event::ValidatorRejected { validator });
 			Ok(())
 		}
 
 		// ── Self-service paths ────────────────────────────────────────────────────
 
-		/// Submit a validator registration request by locking `T::ValidatorBond` tokens.
+		/// Submit a validator registration request.
 		///
 		/// The caller is placed in the **pending** queue — they do NOT become an active
-		/// validator until `AddRemoveOrigin` calls `approve_validator`. The bond is held
-		/// until the account is approved, rejected, or calls `deregister_validator`.
-		///
-		/// The caller must have **> `ValidatorBond`** free balance to also cover
-		/// any subsequent transaction fees (e.g., registering the EVM relay address).
+		/// validator until `AddRemoveOrigin` calls `approve_validator`.
 		#[pallet::call_index(2)]
 		#[pallet::weight(T::WeightInfo::add_validator())]
 		pub fn register_validator(origin: OriginFor<T>) -> DispatchResult {
 			let who = ensure_signed(origin)?;
-			let bond = T::ValidatorBond::get();
 
 			// Reject if already active or already pending.
 			ensure!(
@@ -357,26 +314,19 @@ pub mod pallet {
 
 			PendingValidators::<T>::try_mutate(|pending| {
 				ensure!(!pending.contains(&who), Error::<T>::AlreadyPending);
-				T::Currency::reserve(&who, bond).map_err(|_| Error::<T>::InsufficientBond)?;
-				ValidatorBondOf::<T>::insert(&who, bond);
 				pending
 					.try_push(who.clone())
 					.map_err(|_| Error::<T>::TooManyPending)
 			})?;
 
-			Self::deposit_event(Event::ValidatorBondReserved {
-				validator: who.clone(),
-				amount: bond,
-			});
 			Self::deposit_event(Event::ValidatorRegistrationRequested { validator: who });
 			Ok(())
 		}
 
 		/// Cancel a pending registration or self-remove from the approved set.
 		///
-		/// Works from both the **pending** queue and the **approved** set. The bond
-		/// (if held) is returned immediately. Removal from the approved set takes effect
-		/// at the next session rotation.
+		/// Works from both the **pending** queue and the **approved** set. Removal from
+		/// the approved set takes effect at the next session rotation.
 		#[pallet::call_index(3)]
 		#[pallet::weight(T::WeightInfo::remove_validator())]
 		pub fn deregister_validator(origin: OriginFor<T>) -> DispatchResult {
@@ -404,22 +354,8 @@ pub mod pallet {
 				})?;
 			}
 
-			Self::release_bond(&who);
 			Self::deposit_event(Event::ValidatorRemoved { validator: who });
 			Ok(())
-		}
-	}
-
-	impl<T: Config> Pallet<T> {
-		/// Unreserve the bond held for `who` (if any) and emit `ValidatorBondReleased`.
-		fn release_bond(who: &T::AccountId) {
-			if let Some(bond) = ValidatorBondOf::<T>::take(who) {
-				T::Currency::unreserve(who, bond);
-				Self::deposit_event(Event::ValidatorBondReleased {
-					validator: who.clone(),
-					amount: bond,
-				});
-			}
 		}
 	}
 

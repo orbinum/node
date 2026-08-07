@@ -2,6 +2,7 @@ use frame_support::{
 	pallet_prelude::*,
 	traits::{Currency, ExistenceRequirement},
 };
+use sp_runtime::traits::Zero;
 
 use crate::{
 	merkle::MerkleTreeService,
@@ -22,10 +23,7 @@ impl ShieldOperation {
 	) -> DispatchResult {
 		let asset = AssetRepository::get_asset::<T>(asset_id).ok_or(Error::<T>::InvalidAssetId)?;
 		ensure!(asset.is_verified, Error::<T>::AssetNotVerified);
-		ensure!(
-			amount >= T::MinShieldAmount::get(),
-			Error::<T>::AmountTooSmall
-		);
+		ensure!(!amount.is_zero(), Error::<T>::InvalidAmount);
 		ensure!(
 			encrypted_memo.0.len() == MAX_ENCRYPTED_MEMO_SIZE as usize,
 			Error::<T>::InvalidMemoSize
@@ -160,20 +158,34 @@ mod tests {
 	}
 
 	#[test]
-	fn execute_amount_too_small_fails() {
+	fn execute_zero_amount_fails() {
 		new_test_ext().execute_with(|| {
 			let asset_id = setup_asset();
-			// MinShieldAmount = 100; amount = 50 < 100
 			assert_noop!(
 				ShieldOperation::execute::<Test>(
 					acc(1),
 					asset_id,
-					50u128,
+					0u128,
 					commitment(1),
 					memo_valid()
 				),
-				crate::pallet::Error::<Test>::AmountTooSmall
+				crate::pallet::Error::<Test>::InvalidAmount
 			);
+		});
+	}
+
+	/// There is no minimum: a 1-unit shield is accepted.
+	#[test]
+	fn execute_accepts_smallest_non_zero_amount() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			assert_ok!(ShieldOperation::execute::<Test>(
+				acc(1),
+				asset_id,
+				1u128,
+				commitment(1),
+				memo_valid(),
+			));
 		});
 	}
 

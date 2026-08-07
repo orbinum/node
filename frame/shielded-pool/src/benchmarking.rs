@@ -58,7 +58,7 @@ mod benchmarks {
 		}
 
 		// 2. Fund caller
-		let amount: BalanceOf<T> = T::MinShieldAmount::get() * 1000u32.into();
+		let amount: BalanceOf<T> = 1_000_000u32.into();
 		let _ = <T::Currency as Currency<T::AccountId>>::make_free_balance_be(&caller, amount);
 
 		(caller, asset_id)
@@ -67,7 +67,7 @@ mod benchmarks {
 	#[benchmark]
 	fn shield() {
 		let (caller, asset_id) = setup_benchmark_env::<T>();
-		let amount: BalanceOf<T> = T::MinShieldAmount::get() * 10u32.into();
+		let amount: BalanceOf<T> = 10_000u32.into();
 		let commitment = Commitment([1u8; 32]);
 		// Memo must be exactly 180 bytes (MAX_ENCRYPTED_MEMO_SIZE): nonce(12) + data(120) + MAC(16) + ephPk(32)
 		let memo_bytes = vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
@@ -86,7 +86,7 @@ mod benchmarks {
 	#[benchmark]
 	fn shield_batch(n: Linear<1, 20>) {
 		let (caller, asset_id) = setup_benchmark_env::<T>();
-		let amount: BalanceOf<T> = T::MinShieldAmount::get() * 10u32.into();
+		let amount: BalanceOf<T> = 10_000u32.into();
 
 		let mut operations = Vec::new();
 		for i in 0..n {
@@ -151,7 +151,7 @@ mod benchmarks {
 		let (_caller, asset_id) = setup_benchmark_env::<T>();
 		let recipient: T::AccountId = account("recipient", 0, 0);
 		let merkle_root = [1u8; 32];
-		let amount: BalanceOf<T> = T::MinShieldAmount::get() * 10u32.into();
+		let amount: BalanceOf<T> = 10_000u32.into();
 
 		// Setup valid state: root and pool balance
 		crate::storage::MerkleRepository::add_historic_poseidon_root::<T>(merkle_root);
@@ -222,7 +222,7 @@ mod benchmarks {
 	#[benchmark]
 	fn claim_shielded_fees() {
 		let (caller, asset_id) = setup_benchmark_env::<T>();
-		let amount: BalanceOf<T> = T::MinShieldAmount::get() * 10u32.into();
+		let amount: BalanceOf<T> = 10_000u32.into();
 		let amount_u128: u128 = amount.saturated_into();
 
 		// Accumulate relay fees for the validator.

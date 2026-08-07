@@ -122,7 +122,6 @@ parameter_types! {
 	pub const MaxHistoricRoots: u32 = 100;
 	pub const RootRetentionBlocks: u64 = 128;
 	pub const MaxLeavesPerTree: u32 = 8;
-	pub const MinShieldAmount: u128 = 100;
 }
 
 pub struct MockZkVerifier;
@@ -248,7 +247,6 @@ impl pallet_shielded_pool::Config for Test {
 	type MaxHistoricRoots = MaxHistoricRoots;
 	type RootRetentionBlocks = RootRetentionBlocks;
 	type MaxLeavesPerTree = MaxLeavesPerTree;
-	type MinShieldAmount = MinShieldAmount;
 	type WeightInfo = ();
 	type Relayer = MockRelayer;
 }

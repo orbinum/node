@@ -7894,7 +7894,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-evm-precompile-shielded-pool"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "fp-evm",
  "frame-support",
@@ -8281,7 +8281,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-validator-set"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "frame-benchmarking",
  "frame-support",

@@ -64,16 +64,12 @@ impl pallet_balances::Config for Test {
 parameter_types! {
 	pub const MaxValidators: u32 = 10;
 	pub const MaxPendingValidators: u32 = 10;
-	/// 1 000 test units — mirrors the 1 000 ORB requirement on mainnet.
-	pub const ValidatorBond: u64 = 1_000;
 }
 
 impl pallet_validator_set::Config for Test {
 	type AddRemoveOrigin = frame_system::EnsureRoot<AccountId>;
-	type Currency = Balances;
 	type MaxValidators = MaxValidators;
 	type MaxPendingValidators = MaxPendingValidators;
-	type ValidatorBond = ValidatorBond;
 	type Prerequisites = MockPrerequisites;
 	type WeightInfo = ();
 }
@@ -109,7 +105,7 @@ impl ExtBuilder {
 		.assimilate_storage(&mut storage)
 		.unwrap();
 
-		// Pre-fund well-known test accounts with enough balance to cover ValidatorBond.
+		// Pre-fund well-known test accounts so they exist and can dispatch.
 		pallet_balances::GenesisConfig::<Test> {
 			balances: vec![
 				(10u64, 10_000),
