@@ -76,15 +76,10 @@ impl pallet_validator_set::ValidatorPrerequisites<AccountId> for ValidatorPrereq
 impl pallet_validator_set::Config for Runtime {
 	/// Only sudo (EnsureRoot) can add/remove/approve/reject validators.
 	type AddRemoveOrigin = frame_system::EnsureRoot<AccountId>;
-	/// Native currency (ORB) used to lock the validator bond.
-	type Currency = Balances;
 	/// Maximum 32 validators in the approved (active) set.
 	type MaxValidators = ConstU32<32>;
 	/// Maximum 32 registrations awaiting governance approval.
 	type MaxPendingValidators = ConstU32<32>;
-	/// Validator bond: 1 000 ORB (18 decimals) locked on self-registration.
-	/// Returned in full on deregistration, rejection, or force-removal.
-	type ValidatorBond = ConstU128<1_000_000_000_000_000_000_000>;
 	/// Prerequisite gate: verifies session keys and EVM relayer before accepting registration.
 	type Prerequisites = ValidatorPrerequisiteChecker;
 	type WeightInfo = pallet_validator_set::weights::SubstrateWeight<Runtime>;

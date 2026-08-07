@@ -1,6 +1,6 @@
 use frame_support::{assert_noop, assert_ok};
 
-use crate::{ApprovedValidators, Error, Event, PendingValidators, ValidatorBondOf, mock::*};
+use crate::{ApprovedValidators, Error, Event, PendingValidators, mock::*};
 use pallet_session::SessionManager;
 
 // ── Genesis ──────────────────────────────────────────────────────────────────
@@ -161,39 +161,33 @@ fn remove_validator_requires_root() {
 
 #[test]
 fn remove_validator_can_cancel_pending_registration() {
-	// Sudo can force-cancel a pending applicant and their bond is returned.
+	// Sudo can force-cancel a pending applicant.
 	ExtBuilder::default()
 		.validators(vec![1])
 		.build()
 		.execute_with(|| {
 			assert_ok!(ValidatorSet::register_validator(RuntimeOrigin::signed(42)));
 			assert!(PendingValidators::<Test>::get().contains(&42));
-			assert_eq!(Balances::reserved_balance(42u64), 1_000);
 
 			assert_ok!(ValidatorSet::remove_validator(RuntimeOrigin::root(), 42));
 
 			assert!(!PendingValidators::<Test>::get().contains(&42));
 			assert!(!ApprovedValidators::<Test>::get().contains(&42));
-			assert_eq!(Balances::reserved_balance(42u64), 0);
-			assert_eq!(ValidatorBondOf::<Test>::get(42u64), None);
 		});
 }
 
 #[test]
-fn remove_validator_releases_bond_of_approved_self_registered() {
-	// Sudo removes an approved self-registered validator; bond is returned.
+fn remove_validator_drops_approved_self_registered() {
 	ExtBuilder::default()
 		.validators(vec![1])
 		.build()
 		.execute_with(|| {
 			assert_ok!(ValidatorSet::register_validator(RuntimeOrigin::signed(42)));
 			assert_ok!(ValidatorSet::approve_validator(RuntimeOrigin::root(), 42));
-			assert_eq!(Balances::reserved_balance(42u64), 1_000);
 
 			assert_ok!(ValidatorSet::remove_validator(RuntimeOrigin::root(), 42));
 
-			assert_eq!(Balances::reserved_balance(42u64), 0);
-			assert_eq!(ValidatorBondOf::<Test>::get(42u64), None);
+			assert!(!ApprovedValidators::<Test>::get().contains(&42));
 		});
 }
 
@@ -214,37 +208,41 @@ fn register_validator_goes_to_pending_not_approved() {
 }
 
 #[test]
-fn register_validator_reserves_bond() {
+fn register_validator_emits_event() {
 	ExtBuilder::default()
 		.validators(vec![1])
 		.build()
 		.execute_with(|| {
 			assert_ok!(ValidatorSet::register_validator(RuntimeOrigin::signed(42)));
-			assert_eq!(Balances::reserved_balance(42u64), 1_000);
-			assert_eq!(Balances::free_balance(42u64), 10_000 - 1_000);
-			assert_eq!(ValidatorBondOf::<Test>::get(42u64), Some(1_000));
+			System::assert_last_event(
+				Event::ValidatorRegistrationRequested { validator: 42 }.into(),
+			);
 		});
 }
 
 #[test]
-fn register_validator_emits_events() {
+fn register_validator_does_not_touch_balances() {
+	// Registration is free: no reserve, no transfer, no fee taken by the pallet.
 	ExtBuilder::default()
 		.validators(vec![1])
 		.build()
 		.execute_with(|| {
 			assert_ok!(ValidatorSet::register_validator(RuntimeOrigin::signed(42)));
-			let events = System::events();
-			assert!(events.iter().any(|r| matches!(
-				&r.event,
-				RuntimeEvent::ValidatorSet(Event::ValidatorBondReserved {
-					validator: 42,
-					amount: 1_000,
-				})
-			)));
-			assert!(events.iter().any(|r| matches!(
-				&r.event,
-				RuntimeEvent::ValidatorSet(Event::ValidatorRegistrationRequested { validator: 42 })
-			)));
+			assert_eq!(Balances::reserved_balance(42u64), 0);
+			assert_eq!(Balances::free_balance(42u64), 10_000);
+		});
+}
+
+#[test]
+fn register_validator_works_for_account_with_no_balance() {
+	// Account 999 has no pre-funded balance — registration must still succeed
+	// now that there is no bond to reserve.
+	ExtBuilder::default()
+		.validators(vec![1])
+		.build()
+		.execute_with(|| {
+			assert_ok!(ValidatorSet::register_validator(RuntimeOrigin::signed(999)));
+			assert!(PendingValidators::<Test>::get().contains(&999));
 		});
 }
 
@@ -306,41 +304,19 @@ fn register_validator_fails_if_no_relayer() {
 }
 
 #[test]
-fn register_validator_fails_if_insufficient_balance() {
-	ExtBuilder::default()
-		.validators(vec![1])
-		.build()
-		.execute_with(|| {
-			// Account 999 has no pre-funded balance.
-			assert_noop!(
-				ValidatorSet::register_validator(RuntimeOrigin::signed(999)),
-				Error::<Test>::InsufficientBond
-			);
-		});
-}
-
-#[test]
 fn register_validator_fails_when_pending_queue_is_full() {
 	// MaxPendingValidators = 10. Fill the pending queue then try one more.
 	ExtBuilder::default()
-		.validators(vec![]) // empty approved set so genesis accounts can register
+		.validators(vec![]) // empty approved set so any account can register
 		.build()
 		.execute_with(|| {
-			// 7 funded accounts from ExtBuilder (10,20,30,42,99,100,200).
-			for acc in [10u64, 20, 30, 42, 99, 100, 200] {
-				assert_ok!(ValidatorSet::register_validator(RuntimeOrigin::signed(acc)));
-			}
-			// Top up 3 more accounts inline.
-			use frame_support::traits::fungible::Mutate;
-			for acc in [201u64, 202, 203] {
-				Balances::set_balance(&acc, 10_000);
+			for acc in 1u64..=10 {
 				assert_ok!(ValidatorSet::register_validator(RuntimeOrigin::signed(acc)));
 			}
 			assert_eq!(PendingValidators::<Test>::get().len(), 10);
 
-			Balances::set_balance(&999u64, 10_000);
 			assert_noop!(
-				ValidatorSet::register_validator(RuntimeOrigin::signed(999)),
+				ValidatorSet::register_validator(RuntimeOrigin::signed(11)),
 				Error::<Test>::TooManyPending
 			);
 		});
@@ -359,21 +335,6 @@ fn approve_validator_moves_pending_to_approved() {
 
 			assert!(!PendingValidators::<Test>::get().contains(&42));
 			assert!(ApprovedValidators::<Test>::get().contains(&42));
-		});
-}
-
-#[test]
-fn approve_validator_does_not_release_bond() {
-	// Bond stays locked after approval; the validator is active.
-	ExtBuilder::default()
-		.validators(vec![1])
-		.build()
-		.execute_with(|| {
-			assert_ok!(ValidatorSet::register_validator(RuntimeOrigin::signed(42)));
-			assert_ok!(ValidatorSet::approve_validator(RuntimeOrigin::root(), 42));
-
-			assert_eq!(Balances::reserved_balance(42u64), 1_000);
-			assert_eq!(ValidatorBondOf::<Test>::get(42u64), Some(1_000));
 		});
 }
 
@@ -415,9 +376,8 @@ fn approve_validator_fails_when_approved_set_is_full() {
 				ValidatorSet::approve_validator(RuntimeOrigin::root(), 42),
 				Error::<Test>::TooManyValidators
 			);
-			// Applicant remains pending, bond not lost.
+			// Applicant remains pending.
 			assert!(PendingValidators::<Test>::get().contains(&42));
-			assert_eq!(Balances::reserved_balance(42u64), 1_000);
 		});
 }
 
@@ -438,44 +398,29 @@ fn approve_validator_requires_root() {
 // ── reject_validator (sudo) ───────────────────────────────────────────────────
 
 #[test]
-fn reject_validator_removes_from_pending_and_releases_bond() {
+fn reject_validator_removes_from_pending() {
 	ExtBuilder::default()
 		.validators(vec![1])
 		.build()
 		.execute_with(|| {
 			assert_ok!(ValidatorSet::register_validator(RuntimeOrigin::signed(42)));
-			assert_eq!(Balances::reserved_balance(42u64), 1_000);
 
 			assert_ok!(ValidatorSet::reject_validator(RuntimeOrigin::root(), 42));
 
 			assert!(!PendingValidators::<Test>::get().contains(&42));
 			assert!(!ApprovedValidators::<Test>::get().contains(&42));
-			assert_eq!(Balances::reserved_balance(42u64), 0);
-			assert_eq!(Balances::free_balance(42u64), 10_000);
-			assert_eq!(ValidatorBondOf::<Test>::get(42u64), None);
 		});
 }
 
 #[test]
-fn reject_validator_emits_events() {
+fn reject_validator_emits_event() {
 	ExtBuilder::default()
 		.validators(vec![1])
 		.build()
 		.execute_with(|| {
 			assert_ok!(ValidatorSet::register_validator(RuntimeOrigin::signed(42)));
 			assert_ok!(ValidatorSet::reject_validator(RuntimeOrigin::root(), 42));
-			let events = System::events();
-			assert!(events.iter().any(|r| matches!(
-				&r.event,
-				RuntimeEvent::ValidatorSet(Event::ValidatorBondReleased {
-					validator: 42,
-					amount: 1_000,
-				})
-			)));
-			assert!(events.iter().any(|r| matches!(
-				&r.event,
-				RuntimeEvent::ValidatorSet(Event::ValidatorRejected { validator: 42 })
-			)));
+			System::assert_last_event(Event::ValidatorRejected { validator: 42 }.into());
 		});
 }
 
@@ -509,36 +454,31 @@ fn reject_validator_requires_root() {
 // ── deregister_validator (signed) ─────────────────────────────────────────────
 
 #[test]
-fn deregister_from_approved_removes_and_releases_bond() {
+fn deregister_from_approved_removes_account() {
 	ExtBuilder::default()
 		.validators(vec![1])
 		.build()
 		.execute_with(|| {
 			assert_ok!(ValidatorSet::register_validator(RuntimeOrigin::signed(42)));
 			assert_ok!(ValidatorSet::approve_validator(RuntimeOrigin::root(), 42));
-			let free_after_register = Balances::free_balance(42u64);
 
 			assert_ok!(ValidatorSet::deregister_validator(RuntimeOrigin::signed(
 				42
 			)));
 
 			assert!(!ApprovedValidators::<Test>::get().contains(&42));
-			assert_eq!(Balances::reserved_balance(42u64), 0);
-			assert_eq!(Balances::free_balance(42u64), free_after_register + 1_000);
-			assert_eq!(ValidatorBondOf::<Test>::get(42u64), None);
 		});
 }
 
 #[test]
-fn deregister_from_pending_removes_and_releases_bond() {
-	// Candidate changes their mind before approval — bond must be returned.
+fn deregister_from_pending_removes_account() {
+	// Candidate changes their mind before approval.
 	ExtBuilder::default()
 		.validators(vec![1])
 		.build()
 		.execute_with(|| {
 			assert_ok!(ValidatorSet::register_validator(RuntimeOrigin::signed(42)));
 			assert!(PendingValidators::<Test>::get().contains(&42));
-			assert_eq!(Balances::reserved_balance(42u64), 1_000);
 
 			assert_ok!(ValidatorSet::deregister_validator(RuntimeOrigin::signed(
 				42
@@ -546,14 +486,11 @@ fn deregister_from_pending_removes_and_releases_bond() {
 
 			assert!(!PendingValidators::<Test>::get().contains(&42));
 			assert!(!ApprovedValidators::<Test>::get().contains(&42));
-			assert_eq!(Balances::reserved_balance(42u64), 0);
-			assert_eq!(Balances::free_balance(42u64), 10_000);
-			assert_eq!(ValidatorBondOf::<Test>::get(42u64), None);
 		});
 }
 
 #[test]
-fn deregister_emits_events() {
+fn deregister_emits_event() {
 	ExtBuilder::default()
 		.validators(vec![1])
 		.build()
@@ -563,18 +500,7 @@ fn deregister_emits_events() {
 			assert_ok!(ValidatorSet::deregister_validator(RuntimeOrigin::signed(
 				42
 			)));
-			let events = System::events();
-			assert!(events.iter().any(|r| matches!(
-				&r.event,
-				RuntimeEvent::ValidatorSet(Event::ValidatorBondReleased {
-					validator: 42,
-					amount: 1_000,
-				})
-			)));
-			assert!(events.iter().any(|r| matches!(
-				&r.event,
-				RuntimeEvent::ValidatorSet(Event::ValidatorRemoved { validator: 42 })
-			)));
+			System::assert_last_event(Event::ValidatorRemoved { validator: 42 }.into());
 		});
 }
 
@@ -592,8 +518,7 @@ fn deregister_fails_if_not_in_pending_or_approved() {
 }
 
 #[test]
-fn deregister_no_bond_if_added_via_sudo() {
-	// Validators added via sudo have no bond — deregister should still work cleanly.
+fn deregister_works_for_validator_added_via_sudo() {
 	ExtBuilder::default()
 		.validators(vec![42])
 		.build()
@@ -602,7 +527,6 @@ fn deregister_no_bond_if_added_via_sudo() {
 				42
 			)));
 			assert!(!ApprovedValidators::<Test>::get().contains(&42));
-			assert_eq!(Balances::reserved_balance(42u64), 0);
 		});
 }
 
@@ -712,22 +636,22 @@ fn register_approve_deregister_full_flow() {
 		.validators(vec![1])
 		.build()
 		.execute_with(|| {
-			// 1. Register → pending, bond locked.
+			// 1. Register → pending.
 			assert_ok!(ValidatorSet::register_validator(RuntimeOrigin::signed(42)));
 			assert!(PendingValidators::<Test>::get().contains(&42));
-			assert_eq!(Balances::reserved_balance(42u64), 1_000);
 
-			// 2. Approve → approved, bond still locked.
+			// 2. Approve → approved.
 			assert_ok!(ValidatorSet::approve_validator(RuntimeOrigin::root(), 42));
 			assert!(!PendingValidators::<Test>::get().contains(&42));
 			assert!(ApprovedValidators::<Test>::get().contains(&42));
-			assert_eq!(Balances::reserved_balance(42u64), 1_000);
 
-			// 3. Deregister → removed, bond returned.
+			// 3. Deregister → removed.
 			assert_ok!(ValidatorSet::deregister_validator(RuntimeOrigin::signed(
 				42
 			)));
 			assert!(!ApprovedValidators::<Test>::get().contains(&42));
+
+			// Balances untouched throughout.
 			assert_eq!(Balances::reserved_balance(42u64), 0);
 			assert_eq!(Balances::free_balance(42u64), 10_000);
 		});
@@ -741,7 +665,7 @@ fn register_reject_then_re_register_works() {
 		.execute_with(|| {
 			assert_ok!(ValidatorSet::register_validator(RuntimeOrigin::signed(42)));
 			assert_ok!(ValidatorSet::reject_validator(RuntimeOrigin::root(), 42));
-			// Bond returned — can register again.
+			// Rejection is not a ban — the account can apply again.
 			assert_ok!(ValidatorSet::register_validator(RuntimeOrigin::signed(42)));
 			assert!(PendingValidators::<Test>::get().contains(&42));
 		});
@@ -758,7 +682,7 @@ fn can_re_register_after_deregister_from_approved() {
 			assert_ok!(ValidatorSet::deregister_validator(RuntimeOrigin::signed(
 				42
 			)));
-			// Bond was released — can register again immediately.
+			// Leaving the set does not block re-application.
 			assert_ok!(ValidatorSet::register_validator(RuntimeOrigin::signed(42)));
 			assert!(PendingValidators::<Test>::get().contains(&42));
 		});
