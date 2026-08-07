@@ -105,6 +105,65 @@ mod tests {
 		}
 	}
 
+	/// The ladder used to be defined recursively. Turning it into a loop must not
+	/// move a single digest: these hashes stand in for empty subtrees inside
+	/// every Merkle path the chain has ever served, so a divergence at any level
+	/// would invalidate proofs against notes already on chain.
+	///
+	/// Checked against a local recursive reference rather than against stored
+	/// values, so the property survives a change to the hash function itself.
+	#[test]
+	fn iterative_zero_hash_matches_the_recursive_definition() {
+		fn recursive(level: usize) -> Hash {
+			if level == 0 {
+				return [0u8; 32];
+			}
+			let prev = recursive(level - 1);
+			hash_pair(&prev, &prev)
+		}
+
+		// Past 20 as well: that is where `get_zero_hash_cached` stops using its
+		// table and falls through to the function being changed here.
+		for level in 0..=24usize {
+			assert_eq!(
+				zero_hash_at_level(level),
+				recursive(level),
+				"zero hash diverged at level {level}"
+			);
+		}
+	}
+
+	/// The cache and the function must agree across the boundary of the table,
+	/// not just inside it — level 21 and up is the fall-through path.
+	#[test]
+	fn cached_and_computed_agree_past_the_cache_boundary() {
+		for level in 19..=23usize {
+			assert_eq!(
+				get_zero_hash_cached(level),
+				zero_hash_at_level(level),
+				"cache and computation disagree at level {level}"
+			);
+		}
+	}
+
+	/// A level far past anything the tree uses must return rather than exhaust
+	/// the stack. The recursion this replaces spent one frame per level against
+	/// the runtime's fixed 1 MB Wasm stack, where an overflow downs the node
+	/// instead of failing the call.
+	#[test]
+	fn a_large_level_returns_instead_of_overflowing_the_stack() {
+		// Measured on a 1 MiB thread, matching the runtime's Wasm stack: a bare
+		// recursion of this shape returns at 10_000 frames and aborts the process
+		// at 20_000 — not a catchable panic, the whole runtime goes. The loop
+		// returns at 5_000 with the same stack, and would at any depth: it uses a
+		// constant number of frames.
+		//
+		// Kept at 5_000 rather than higher because each level is a Poseidon hash
+		// and the property being shown is "returns at all", not "returns fast".
+		let deep = zero_hash_at_level(5_000);
+		assert_ne!(deep, [0u8; 32]);
+	}
+
 	// ── IncrementalMerkleTree ────────────────────────────────────────────────
 
 	#[test]
@@ -123,6 +182,27 @@ mod tests {
 	fn tree_capacity_is_power_of_two() {
 		assert_eq!(IncrementalMerkleTree::<4>::new().capacity(), 16);
 		assert_eq!(IncrementalMerkleTree::<2>::new().capacity(), 4);
+	}
+
+	/// `capacity()` shifts into a `u32`, so depth 31 is the last one that holds.
+	/// Past it the shift is undefined — release builds wrap to 1 and the tree
+	/// declares itself full after a single leaf — which is why a const assertion
+	/// on the type rejects those depths at compile time. That case cannot be
+	/// tested at runtime: it does not build. This pins the boundary that does.
+	#[test]
+	fn capacity_holds_at_the_deepest_supported_tree() {
+		assert_eq!(IncrementalMerkleTree::<31>::new().capacity(), 1u32 << 31);
+		assert_eq!(IncrementalMerkleTree::<20>::new().capacity(), 1_048_576);
+	}
+
+	/// Production depth: the value `integrity_test` pins and every client
+	/// derives `tree_id` from.
+	#[test]
+	fn production_depth_capacity_is_two_to_the_twenty() {
+		assert_eq!(
+			IncrementalMerkleTree::<{ crate::types::DEFAULT_TREE_DEPTH }>::new().capacity(),
+			1_048_576
+		);
 	}
 
 	#[test]

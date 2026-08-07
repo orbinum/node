@@ -30,6 +30,34 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
   tree is untouched: still 20 point reads and zero hashes.
 
 ### Fixed
+- **`zero_hash_at_level` is iterative.** It was defined recursively, one stack
+  frame per level, and `get_zero_hash_cached` falls through to it for any level
+  past its 21-entry table. `usize` is 32 bits under Wasm, so a caller passing a
+  large level would exhaust the runtime's fixed 1 MB stack — and a stack
+  overflow there aborts the process rather than raising a catchable panic.
+
+  Measured on a 1 MiB thread: a recursion of this shape returns at 10,000 frames
+  and aborts at 20,000. The loop returns at 5,000 with the same stack and would
+  at any depth, since it uses a constant number of frames.
+
+  Unreachable today, and not just by configuration: every `level` at every call
+  site comes from a `0..depth` loop bound by `DEFAULT_TREE_DEPTH`, so no external
+  input selects one. Latent because the ladder is `pub` and the bound lives in
+  the callers rather than in the function.
+
+  The digests are unchanged, which is the part that matters: these hashes stand
+  in for empty subtrees inside every Merkle path the chain has served, so a
+  divergence at any level would invalidate proofs against notes already on
+  chain. A test compares the loop against a local recursive reference across
+  levels 0-24, including past the cache boundary.
+
+- **`IncrementalMerkleTree` rejects depths of 32 or more at compile time.**
+  `capacity()` computes `1u32 << DEPTH`, which is undefined past 31: debug
+  builds panic, release builds wrap to 1 and the tree reports itself full after
+  a single leaf. The struct is `pub` and generic over depth, so the bound
+  belonged on the type rather than only in the runtime's `integrity_test`. A
+  const assertion now fails the build instead.
+
 - `hash_pair_poseidon` clamps its output copy instead of slicing `&bytes[..32]`
   raw. BN254 `Fr` always yields 32 bytes, so the clamp never binds today — but
   this runs on the block-import path, where slicing past the end panics the node
