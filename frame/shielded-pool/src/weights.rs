@@ -47,6 +47,12 @@ pub trait WeightInfo {
 	fn verify_asset() -> Weight;
 	fn unverify_asset() -> Weight;
 	fn claim_shielded_fees() -> Weight;
+	/// Weight of one `on_idle` sealed-tree sweep that removes `n` nodes.
+	///
+	/// Both impls below are PLACEHOLDERS derived from storage-access counts, not
+	/// measured. Replace with generated weights before a chain seals its first
+	/// tree; until then nothing is pruned, so the estimate goes unused.
+	fn prune_sealed_nodes(n: u32) -> Weight;
 }
 
 /// Weights for pallet_shielded_pool using the Substrate node and recommended hardware.
@@ -358,6 +364,12 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(15_u64))
 			.saturating_add(T::DbWeight::get().writes(33_u64))
 	}
+	/// PLACEHOLDER: cursor read, then one keyed read plus one removal per node.
+	fn prune_sealed_nodes(n: u32) -> Weight {
+		Weight::from_parts(5_000_000, 0)
+			.saturating_add(T::DbWeight::get().reads(1_u64))
+			.saturating_add(T::DbWeight::get().reads_writes(1_u64, 1_u64).saturating_mul(n.into()))
+	}
 }
 
 // For backwards compatibility and tests
@@ -667,5 +679,11 @@ impl WeightInfo for () {
 		Weight::from_parts(851_813_000, 3695)
 			.saturating_add(RocksDbWeight::get().reads(15_u64))
 			.saturating_add(RocksDbWeight::get().writes(33_u64))
+	}
+	/// PLACEHOLDER: cursor read, then one keyed read plus one removal per node.
+	fn prune_sealed_nodes(n: u32) -> Weight {
+		Weight::from_parts(5_000_000, 0)
+			.saturating_add(RocksDbWeight::get().reads(1_u64))
+			.saturating_add(RocksDbWeight::get().reads_writes(1_u64, 1_u64).saturating_mul(n.into()))
 	}
 }

@@ -146,4 +146,12 @@ impl MerkleRepository {
 	pub fn set_node<T: Config>(tree_id: u32, level: u8, index: u32, node: Hash) {
 		MerkleNodes::<T>::insert((tree_id, level, index), node);
 	}
+
+	/// Drop a stored internal node.
+	///
+	/// Only used by the sealed-tree sweep: the node is recomputed from the leaves
+	/// when a path needs it, so removing it loses no information.
+	pub fn remove_node<T: Config>(tree_id: u32, level: u8, index: u32) {
+		MerkleNodes::<T>::remove((tree_id, level, index));
+	}
 }

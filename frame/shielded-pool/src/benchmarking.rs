@@ -253,5 +253,46 @@ mod benchmarks {
 		);
 	}
 
+	/// Cost of one `on_idle` sweep that removes `n` sealed-tree nodes.
+	///
+	/// Not an extrinsic: the sweep runs in `on_idle` with whatever weight the
+	/// block has left. It still needs measuring, because the hook must return the
+	/// weight it actually consumed — declaring less would let a block overrun.
+	///
+	/// The setup seals a tree and populates its prunable levels directly rather
+	/// than inserting 2^20 leaves, which no benchmark could run. What matters for
+	/// the measurement is the trie shape: `MerkleNodes` is a three-key `StorageNMap`,
+	/// so the per-node cost is a keyed lookup plus a removal, exactly as in
+	/// production.
+	#[benchmark]
+	fn prune_sealed_nodes(n: Linear<0, 512>) {
+		let cap = T::MaxLeavesPerTree::get();
+		let cut = T::SealedTreePrunedBelowLevel::get();
+
+		// Seal tree 0 by parking the size past its capacity, then give it a
+		// permanent anchor as `seal_tree` would.
+		crate::storage::MerkleRepository::set_tree_size::<T>(cap);
+		crate::storage::MerkleRepository::insert_sealed_root::<T>(0, [0xABu8; 32]);
+
+		// Fill the prunable levels with `n` nodes for the sweep to find.
+		let mut placed = 0u32;
+		'outer: for level in 1..cut {
+			for index in 0..(cap >> level) {
+				if placed >= n {
+					break 'outer;
+				}
+				let mut node = [0u8; 32];
+				node[..4].copy_from_slice(&placed.to_le_bytes());
+				crate::storage::MerkleRepository::set_node::<T>(0, level, index, node);
+				placed = placed.saturating_add(1);
+			}
+		}
+
+		#[block]
+		{
+			crate::merkle::MerkleTreeService::prune_sealed_nodes::<T>(n);
+		}
+	}
+
 	impl_benchmark_test_suite!(Pallet, crate::mock::new_test_ext(), crate::mock::Test,);
 }
