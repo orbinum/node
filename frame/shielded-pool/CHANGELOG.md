@@ -55,8 +55,12 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
   `MAX_PRUNED_NODES_PER_BLOCK` (512), which caps trie churn on an idle chain. It
   charges every probe rather than only removals, so a level that is already clean
   cannot scan for free. Progress is parked in `SealedPruneCursor`.
-- **`on_idle` needs its own benchmark before deploying.** Its weight is currently
-  derived from read/write counts, not measured.
+- **`on_idle` is benchmarked**, at 12.68 µs per node plus a 0.25 µs base. The
+  512-node ceiling therefore costs ~6.5 ms, about 0.3% of a 2s block, and a full
+  sealed tree (1,046,528 prunable nodes) drains in ~2,044 blocks — around 3.4
+  hours at 6s. The placeholder it replaces charged nothing for execution and
+  leaned entirely on `DbWeight`, so it over-declared the per-node cost by ~10x:
+  the sweep would have run, just far below the batch size the block could afford.
 
 ### Verification
 308 pallet tests (11 new) and 65 precompile tests; runtime, `try-runtime` and
