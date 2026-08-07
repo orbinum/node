@@ -1,6 +1,6 @@
 [package]
 name = "pallet-evm-precompile-shielded-pool"
-version = "0.3.0"
+version = "0.4.0"
 authors = { workspace = true }
 edition = "2021"
 description = "EVM Precompile for Orbinum Shielded Pool Pallet."

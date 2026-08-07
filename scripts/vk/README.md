@@ -53,10 +53,6 @@ compiled in — storage contents cannot override that.
 Order matters: deploy the runtime that drops the circuit **first**, then purge.
 Purging against a runtime that still knows the id just fails.
 
-For the `private_link` circuit (id 5) no manual call is needed —
-`pallet_zk_verifier::migrations::v1::MigrateToV1` clears it during the runtime
-upgrade.
-
 ## Security
 
 ### Who can modify VKs?

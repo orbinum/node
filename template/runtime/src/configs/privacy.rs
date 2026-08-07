@@ -67,9 +67,12 @@ impl pallet_shielded_pool::Config for Runtime {
 	/// Roots stay spendable for 300 blocks (~30 min at 6s), comfortably above
 	/// the 64-block mempool longevity of an unsigned transaction.
 	type RootRetentionBlocks = ConstU32<300>;
+	/// Prune sealed trees below level 10: drops 99.8% of their internal nodes
+	/// (1_048_574 -> 2_046 each) while a Merkle path costs 2^10 leaf reads and
+	/// 1_023 Poseidon hashes — ~60ms native, ~180ms in Wasm. Level 12 would free
+	/// only 0.15% more for four times the work. Active trees are never pruned.
+	type SealedTreePrunedBelowLevel = ConstU8<10>;
 	// Pinned to 2^20: clients derive tree_id = leaf_index >> 20 from this.
 	type MaxLeavesPerTree = ConstU32<1_048_576>;
 	type WeightInfo = pallet_shielded_pool::weights::SubstrateWeight<Runtime>;
 }
-
-// Create the runtime by composing the FRAME pallets that were previously configured.

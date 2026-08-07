@@ -2,6 +2,81 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.15.0] - 2026-08-06
+
+### Added
+- New Config constant **`SealedTreePrunedBelowLevel`** (production 10) and an
+  `on_idle` hook that reclaims internal Merkle nodes from **sealed** trees.
+
+  A sealed tree kept ~1,048,574 `MerkleNodes` entries forever — roughly 72 MiB
+  each, growing without bound across up to 4096 trees, and every full node had to
+  retain all of it. That storage serves exactly one purpose: handing Merkle paths
+  to wallets so they can build a spend proof. No dispatchable reads it, so
+  dropping it cannot affect whether a note is spendable.
+
+  Nodes concentrate at the bottom of the tree: level 1 holds half of them, level
+  10 holds 0.1%. Cutting at level 10 therefore frees **99.8%** (1,048,574 → 2,046
+  per tree) while a path costs 2^10 leaf reads and 1,023 Poseidon hashes —
+  measured at 58.1 µs/hash, so ~60 ms native and ~180 ms in Wasm. Level 12 would
+  free only 0.15% more for four times the work.
+
+  The level is configurable rather than fixed because the recompute cost tracks
+  validator hardware. `integrity_test` rejects a cut outside `1..tree_depth`.
+
+### Changed
+- `get_merkle_path` rebuilds pruned siblings from `MerkleLeaves` on demand. Only
+  the sibling subtree is recomputed, never the whole tree, and a **sealed** tree
+  is immutable so the result is byte-identical to what was stored. The active
+  tree is untouched: still 20 point reads and zero hashes.
+
+### Removed
+- **Minimum shield amount.** The `MinShieldAmount` Config constant (1 ORB in the
+  runtime) and the `AmountTooSmall` error are gone. `shield` now accepts any
+  non-zero amount.
+
+  The floor kept small deposits out of the pool without buying much: it does not
+  bound storage, since one leaf costs the same at 1 planck as at 1 ORB, and the
+  transaction fee already prices the write. What it did do is force a user with
+  a fractional balance to leave it unshielded.
+
+  Zero is still rejected, now via the existing `InvalidAmount` — a zero-value
+  note occupies a leaf and a memo slot while carrying nothing.
+
+  **Breaking:** `AmountTooSmall` no longer exists, which shifts the numeric index
+  of every `Error` variant declared after it. Clients that match on the error
+  *name* (the usual case) are unaffected; anything decoding by index must be
+  rebuilt against the new metadata.
+
+### Notes
+- Nothing is pruned until a tree seals, which takes 2^20 leaves. No live chain
+  has reached that, so no migration is needed — the sweep reaches already-sealed
+  trees on its own.
+- The sweep is bounded twice: by the block's leftover weight and by
+  `MAX_PRUNED_NODES_PER_BLOCK` (512), which caps trie churn on an idle chain. It
+  charges every probe rather than only removals, so a level that is already clean
+  cannot scan for free. Progress is parked in `SealedPruneCursor`.
+- **`on_idle` is benchmarked**, at 12.68 µs per node plus a 0.25 µs base. The
+  512-node ceiling therefore costs ~6.5 ms, about 0.3% of a 2s block, and a full
+  sealed tree (1,046,528 prunable nodes) drains in ~2,044 blocks — around 3.4
+  hours at 6s. The placeholder it replaces charged nothing for execution and
+  leaned entirely on `DbWeight`, so it over-declared the per-node cost by ~10x:
+  the sweep would have run, just far below the batch size the block could afford.
+
+### Verification
+308 pallet tests (11 new) and 65 precompile tests; runtime, `try-runtime` and
+`runtime-benchmarks` all compile. The decisive unit test captures the Merkle path
+of every leaf in a sealed tree, prunes, and asserts byte-for-byte equality — a
+single diverging hash would invalidate every proof against that tree. A dev-node
+E2E (`ts-tests/sealed-tree-pruning.test.cjs`, 14/14) covers the config wiring, that
+the active tree keeps every level, and that the sweep stays idle while nothing has
+sealed. It cannot seal a tree itself: `MaxLeavesPerTree` is a compile-time
+constant, so sealing on-chain would need 2^20 shields.
+
+A second dev-node E2E (`ts-tests/no-bond-no-min-shield.test.cjs`, 11/11) covers the
+removed minimum: `MinShieldAmount` and `AmountTooSmall` are absent from metadata, a
+1-planck shield lands in the pool balance, and zero is still refused with
+`InvalidAmount`.
+
 ## [0.14.0] - 2026-08-05
 
 ### Changed

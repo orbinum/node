@@ -121,6 +121,8 @@ parameter_types! {
 	pub const MaxTreeDepth: u32 = 20;
 	pub const MaxHistoricRoots: u32 = 100;
 	pub const RootRetentionBlocks: u64 = 128;
+	/// Matches the pallet's own mock so both exercise the same cut.
+	pub const SealedTreePrunedBelowLevel: u8 = 2;
 	pub const MaxLeavesPerTree: u32 = 8;
 }
 
@@ -246,6 +248,7 @@ impl pallet_shielded_pool::Config for Test {
 	type MaxTreeDepth = MaxTreeDepth;
 	type MaxHistoricRoots = MaxHistoricRoots;
 	type RootRetentionBlocks = RootRetentionBlocks;
+	type SealedTreePrunedBelowLevel = SealedTreePrunedBelowLevel;
 	type MaxLeavesPerTree = MaxLeavesPerTree;
 	type WeightInfo = ();
 	type Relayer = MockRelayer;

@@ -16,6 +16,7 @@ use crate::{
 };
 use frame_support::{ensure, pallet_prelude::*, traits::Get};
 use sp_runtime::traits::Saturating;
+use sp_std::vec::Vec;
 
 pub struct MerkleTreeService;
 
@@ -204,11 +205,16 @@ impl MerkleTreeService {
 		MerkleRepository::is_known_root::<T>(root)
 	}
 
-	/// Build the sibling path for `leaf_index` from stored nodes.
+	/// Build the sibling path for `leaf_index`.
 	///
-	/// O(depth) point reads: level-0 siblings come from `MerkleLeaves`, upper
-	/// siblings from `MerkleNodes`. A missing entry means an empty subtree, so
-	/// the canonical zero hash for that level is used.
+	/// The active tree is O(depth) point reads: level-0 siblings come from
+	/// `MerkleLeaves`, upper siblings from `MerkleNodes`. A missing entry means an
+	/// empty subtree, so the canonical zero hash for that level is used.
+	///
+	/// A **sealed** tree has its levels below `SealedTreePrunedBelowLevel` dropped
+	/// (see [`Self::prune_sealed_nodes`]), so those siblings are recomputed from
+	/// the leaves instead. Only the sibling subtree is rebuilt, not the whole
+	/// tree: at a cut of 10 that is 2^10 leaf reads and 1_023 hashes.
 	pub fn get_merkle_path<T: Config>(leaf_index: u32) -> Option<DefaultMerklePath> {
 		let size = MerkleRepository::get_tree_size::<T>();
 		if leaf_index >= size {
@@ -222,6 +228,10 @@ impl MerkleTreeService {
 		let mut siblings = [[0u8; 32]; crate::types::DEFAULT_TREE_DEPTH];
 		let mut indices = [0u8; crate::types::DEFAULT_TREE_DEPTH];
 
+		// Only sealed trees are pruned; the active one always has every node.
+		let is_sealed = tree_id < size / cap;
+		let cut = T::SealedTreePrunedBelowLevel::get() as usize;
+
 		for level in 0..depth {
 			let node_index = local >> level;
 			indices[level] = (node_index & 1) as u8;
@@ -230,6 +240,8 @@ impl MerkleTreeService {
 				// Level-0 nodes are the leaves; map the tree-local sibling
 				// back to its global MerkleLeaves index.
 				MerkleRepository::get_leaf::<T>(tree_id * cap + sibling_index).map(|c| c.0)
+			} else if is_sealed && level < cut {
+				Some(Self::subtree_root::<T>(tree_id, level, sibling_index, cap))
 			} else {
 				MerkleRepository::get_node::<T>(tree_id, level as u8, sibling_index)
 			};
@@ -238,11 +250,127 @@ impl MerkleTreeService {
 		Some(DefaultMerklePath { siblings, indices })
 	}
 
+	/// Rebuild the node at `(level, node_index)` from the leaves beneath it.
+	///
+	/// Reads the `2^level` leaves the node spans and folds them pairwise. Used only
+	/// for pruned levels of sealed trees, where the leaves are immutable, so the
+	/// result is exactly what was stored before pruning.
+	fn subtree_root<T: Config>(tree_id: u32, level: usize, node_index: u32, cap: u32) -> Hash {
+		// `level` is bounded by DEFAULT_TREE_DEPTH at every call site, but the
+		// shift below would overflow if that ever changed, so fail soft instead of
+		// wrapping into a wrong-but-plausible root.
+		if level >= 32 {
+			return get_zero_hash_cached(level);
+		}
+		let span = 1u32 << level;
+		let base = tree_id
+			.saturating_mul(cap)
+			.saturating_add(node_index.saturating_mul(span));
+
+		// Read the leaves this node spans. A gap means an empty slot, which the
+		// tree represents with the level-0 zero hash.
+		let mut nodes: Vec<Hash> = (0..span)
+			.map(|i| {
+				MerkleRepository::get_leaf::<T>(base.saturating_add(i))
+					.map(|c| c.0)
+					.unwrap_or_else(|| get_zero_hash_cached(0))
+			})
+			.collect();
+
+		// Fold pairwise up to `level`; the vector halves each round, so one node
+		// remains. A missing right sibling pairs with its level's zero hash,
+		// matching what `insert_leaf` stored.
+		for lvl in 0..level {
+			let zero = get_zero_hash_cached(lvl);
+			nodes = nodes
+				.chunks(2)
+				.map(|pair| hash_pair(&pair[0], pair.get(1).unwrap_or(&zero)))
+				.collect();
+		}
+		nodes
+			.first()
+			.copied()
+			.unwrap_or_else(|| get_zero_hash_cached(level))
+	}
+
 	pub fn verify_merkle_proof(root: &Hash, leaf: &Hash, path: &DefaultMerklePath) -> bool {
 		IncrementalMerkleTree::<20>::verify_proof(root, leaf, path)
 	}
 
 	pub fn find_leaf_index<T: Config>(commitment: &Commitment) -> Option<u32> {
 		MerkleRepository::find_leaf_index::<T>(commitment)
+	}
+
+	/// Drop internal nodes below the cut level for trees that have already sealed.
+	///
+	/// Returns the number of keys removed. Bounded by `budget`: a full tree holds
+	/// ~1M prunable nodes, far past what one block can absorb, so the sweep parks
+	/// its position in `SealedPruneCursor` and resumes on the next call.
+	///
+	/// Safe because `MerkleNodes` serves Merkle paths only — no dispatchable reads
+	/// it — and a sealed tree's leaves never change, so anything dropped here is
+	/// reproducible by [`Self::subtree_root`].
+	pub(crate) fn prune_sealed_nodes<T: Config>(budget: u32) -> u32 {
+		if budget == 0 {
+			return 0;
+		}
+		let cap = T::MaxLeavesPerTree::get();
+		let active_tree = MerkleRepository::get_tree_size::<T>() / cap;
+		if active_tree == 0 {
+			return 0; // nothing has sealed yet
+		}
+		let cut = T::SealedTreePrunedBelowLevel::get();
+
+		let (mut tree, mut level, mut index) = Self::prune_resume_point::<T>();
+
+		let mut removed = 0u32;
+		// Every probe is charged, not just the ones that remove something: a level
+		// already swept is all misses, and an uncharged scan could walk hundreds of
+		// thousands of keys inside one block.
+		let mut probed = 0u32;
+
+		while probed < budget {
+			if tree >= active_tree {
+				// Caught up with the active tree — which is never pruned. Nothing
+				// more to do until another tree seals.
+				crate::pallet::SealedPruneCursor::<T>::kill();
+				return removed;
+			}
+			if level >= cut {
+				crate::pallet::LastPrunedTree::<T>::put(tree);
+				tree = tree.saturating_add(1);
+				level = 1;
+				index = 0;
+				continue;
+			}
+			// A node at `level` spans 2^level leaves, so the level holds cap >> level.
+			if index >= (cap >> level) {
+				level = level.saturating_add(1);
+				index = 0;
+				continue;
+			}
+
+			if MerkleRepository::get_node::<T>(tree, level, index).is_some() {
+				MerkleRepository::remove_node::<T>(tree, level, index);
+				removed = removed.saturating_add(1);
+			}
+			probed = probed.saturating_add(1);
+			index = index.saturating_add(1);
+		}
+
+		crate::pallet::SealedPruneCursor::<T>::put((tree, level, index));
+		removed
+	}
+
+	/// Where the next sweep starts: the parked cursor, or the tree after the last
+	/// one fully swept. Starting past `LastPrunedTree` keeps a restart from
+	/// re-walking trees that are already clean.
+	fn prune_resume_point<T: Config>() -> (u32, u8, u32) {
+		crate::pallet::SealedPruneCursor::<T>::get().unwrap_or_else(|| {
+			let next = crate::pallet::LastPrunedTree::<T>::get()
+				.map(|t| t.saturating_add(1))
+				.unwrap_or(0);
+			(next, 1u8, 0u32)
+		})
 	}
 }

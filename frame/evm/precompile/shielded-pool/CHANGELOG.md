@@ -2,6 +2,21 @@
 
 All notable changes to `pallet-evm-precompile-shielded-pool` will be documented in this file.
 
+## [0.4.0] - 2026-08-06
+
+### Changed
+- **`shield` now accepts any non-zero `msg.value`.** The pallet's `MinShieldAmount`
+  (1 ORB in the runtime) is gone, so a call carrying 1 wei goes through where it
+  previously reverted with `AmountTooSmall`.
+
+  Nothing changed in this crate's own logic: the precompile never enforced the
+  minimum, it only forwarded `msg.value` and let the pallet decide. The zero-value
+  guard at the ABI boundary stays — it fails earlier and with a clearer message
+  than the dispatch layer would.
+
+  **No ABI change.** Every selector, parameter and head layout is untouched;
+  callers need no rebuild. Only the set of calls the chain accepts widened.
+
 ## [0.3.0] - 2026-07-09
 
 ### Changed

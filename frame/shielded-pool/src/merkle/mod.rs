@@ -6,8 +6,9 @@
 //! - [`hashing`] — Poseidon over field elements, plus the zero-hash ladder.
 //! - [`tree`] — `IncrementalMerkleTree`, the in-memory frontier structure.
 //! - [`batch`] — whole-tree root computation, off-chain and test use only.
-//! - [`service`] — `MerkleTreeService`: leaf insertion, sealing, and the
-//!   historic-root window. The only module here that reads or writes storage.
+//! - [`service`] — `MerkleTreeService`: leaf insertion, sealing, the
+//!   historic-root window, and the sealed-tree node sweep. The only module here
+//!   that reads or writes storage.
 
 pub mod batch;
 pub mod hashing;
@@ -892,7 +893,7 @@ mod tests {
 		root
 	}
 
-	/// SP-20: activity alone must never expire a root. Inserting far more roots
+	/// Activity alone must never expire a root. Inserting far more roots
 	/// than `MaxHistoricRoots` within one retention window leaves the oldest
 	/// spendable — under the old insert-counted window it was evicted after
 	/// `MaxHistoricRoots` inserts regardless of how little time had passed.
@@ -963,8 +964,8 @@ mod tests {
 		});
 	}
 
-	/// SP-20 end to end: a root must outlive the mempool longevity a transaction
-	/// was admitted with, even while the chain keeps inserting commitments.
+	/// End to end: a root must outlive the mempool longevity a transaction was
+	/// admitted with, even while the chain keeps inserting commitments.
 	#[test]
 	fn root_outlives_tx_longevity_under_load() {
 		new_test_ext().execute_with(|| {
@@ -1124,4 +1125,212 @@ mod tests {
 			);
 		});
 	}
+}
+
+/// Sealed-tree node pruning.
+///
+/// Kept apart from `tests` because it needs the pruning storage items and the
+/// `Config` trait in scope, which the rest of the suite has no use for.
+#[cfg(test)]
+mod prune_tests {
+	use super::service::MerkleTreeService;
+	use crate::{
+		Config,
+		mock::{Test, new_test_ext},
+		pallet::{LastPrunedTree, MAX_PRUNED_NODES_PER_BLOCK, SealedPruneCursor},
+		storage::MerkleRepository,
+		types::Commitment,
+	};
+
+	/// Fill exactly one tree so it seals, then start the next.
+	fn seal_one_tree() -> u32 {
+		let cap: u32 = <Test as Config>::MaxLeavesPerTree::get();
+		for i in 0..cap {
+			let mut c = [0u8; 32];
+			c[..4].copy_from_slice(&i.to_le_bytes());
+			c[31] = 0x5A;
+			MerkleTreeService::insert_leaf::<Test>(Commitment(c)).expect("insert");
+		}
+		cap
+	}
+
+	/// Pruned nodes must be reproducible: the path a wallet gets after the sweep
+	/// has to be byte-identical to the one it would have got before, or every
+	/// proof built against a sealed tree would fail verification.
+	#[test]
+	fn path_is_identical_before_and_after_pruning() {
+		new_test_ext().execute_with(|| {
+			let cap = seal_one_tree();
+
+			let before: Vec<_> = (0..cap)
+				.map(|i| MerkleTreeService::get_merkle_path::<Test>(i).expect("path"))
+				.collect();
+
+			// Sweep the whole tree.
+			while MerkleTreeService::prune_sealed_nodes::<Test>(1_000) > 0 {}
+
+			for (i, expected) in before.iter().enumerate() {
+				let after = MerkleTreeService::get_merkle_path::<Test>(i as u32).expect("path");
+				assert_eq!(
+					after.siblings, expected.siblings,
+					"leaf {i}: siblings changed after pruning"
+				);
+				assert_eq!(after.indices, expected.indices, "leaf {i}: indices changed");
+			}
+		});
+	}
+
+	/// The recomputed path must still verify against the tree's permanent root —
+	/// this is what keeps a sealed-tree note spendable.
+	#[test]
+	fn pruned_tree_paths_still_verify_against_sealed_root() {
+		new_test_ext().execute_with(|| {
+			let cap = seal_one_tree();
+			let sealed_root = MerkleRepository::get_sealed_root::<Test>(0).expect("sealed root");
+
+			while MerkleTreeService::prune_sealed_nodes::<Test>(1_000) > 0 {}
+
+			for i in 0..cap {
+				let leaf = MerkleRepository::get_leaf::<Test>(i).expect("leaf").0;
+				let path = MerkleTreeService::get_merkle_path::<Test>(i).expect("path");
+				assert!(
+					MerkleTreeService::verify_merkle_proof(&sealed_root, &leaf, &path),
+					"leaf {i} no longer verifies against its sealed root"
+				);
+			}
+		});
+	}
+
+	/// Only levels below the cut are dropped; the kept ones must survive so the
+	/// recompute has somewhere to stop.
+	#[test]
+	fn prunes_only_below_the_cut_level() {
+		new_test_ext().execute_with(|| {
+			seal_one_tree();
+			let cut: u8 = <Test as Config>::SealedTreePrunedBelowLevel::get();
+			let cap: u32 = <Test as Config>::MaxLeavesPerTree::get();
+
+			while MerkleTreeService::prune_sealed_nodes::<Test>(1_000) > 0 {}
+
+			for level in 1..cut {
+				for idx in 0..(cap >> level) {
+					assert!(
+						MerkleRepository::get_node::<Test>(0, level, idx).is_none(),
+						"level {level} index {idx} should have been pruned"
+					);
+				}
+			}
+			// At least one node at the cut level must remain.
+			assert!(
+				MerkleRepository::get_node::<Test>(0, cut, 0).is_some(),
+				"level {cut} must be kept"
+			);
+		});
+	}
+
+	/// The active tree is never touched — its paths must stay O(depth) reads.
+	#[test]
+	fn active_tree_is_never_pruned() {
+		new_test_ext().execute_with(|| {
+			seal_one_tree();
+			// Two leaves into tree 1, which is now active.
+			for i in 0..2u32 {
+				let mut c = [0u8; 32];
+				c[..4].copy_from_slice(&(1000 + i).to_le_bytes());
+				c[31] = 0xC3;
+				MerkleTreeService::insert_leaf::<Test>(Commitment(c)).expect("insert");
+			}
+
+			while MerkleTreeService::prune_sealed_nodes::<Test>(1_000) > 0 {}
+
+			assert!(
+				MerkleRepository::get_node::<Test>(1, 1, 0).is_some(),
+				"the active tree must keep every internal node"
+			);
+		});
+	}
+
+	/// A sweep must respect its budget so one block cannot absorb a whole tree.
+	#[test]
+	fn sweep_respects_its_budget_and_resumes() {
+		new_test_ext().execute_with(|| {
+			seal_one_tree();
+
+			let first = MerkleTreeService::prune_sealed_nodes::<Test>(2);
+			assert!(first <= 2, "budget exceeded: {first}");
+			assert!(
+				SealedPruneCursor::<Test>::get().is_some(),
+				"an unfinished sweep must park its cursor"
+			);
+
+			let mut total = first;
+			while MerkleTreeService::prune_sealed_nodes::<Test>(2) > 0 {
+				total += 2;
+				assert!(total < 10_000, "sweep is not converging");
+			}
+			assert!(
+				LastPrunedTree::<Test>::get().is_some(),
+				"a finished tree must be recorded"
+			);
+		});
+	}
+
+	/// With nothing sealed there is no work, and the sweep must not spin.
+	#[test]
+	fn sweep_is_a_noop_before_any_tree_seals() {
+		new_test_ext().execute_with(|| {
+			let mut c = [0u8; 32];
+			c[31] = 0x11;
+			MerkleTreeService::insert_leaf::<Test>(Commitment(c)).expect("insert");
+
+			assert_eq!(MerkleTreeService::prune_sealed_nodes::<Test>(100), 0);
+			assert!(SealedPruneCursor::<Test>::get().is_none());
+			assert!(LastPrunedTree::<Test>::get().is_none());
+		});
+	}
+
+	/// A zero budget must do nothing rather than fall through to a full sweep.
+	#[test]
+	fn zero_budget_prunes_nothing() {
+		new_test_ext().execute_with(|| {
+			seal_one_tree();
+			assert_eq!(MerkleTreeService::prune_sealed_nodes::<Test>(0), 0);
+			assert!(MerkleRepository::get_node::<Test>(0, 1, 0).is_some());
+		});
+	}
+
+	/// The budget counts probes, not removals. A level already swept is all
+	/// misses, so charging only removals would let one block walk hundreds of
+	/// thousands of keys for free.
+	#[test]
+	fn budget_charges_probes_not_just_removals() {
+		new_test_ext().execute_with(|| {
+			seal_one_tree();
+			// First pass clears everything prunable.
+			while MerkleTreeService::prune_sealed_nodes::<Test>(1_000) > 0 {}
+
+			// A second sweep from scratch finds only misses. It must still stop,
+			// which it can only do if probes are charged.
+			SealedPruneCursor::<Test>::kill();
+			LastPrunedTree::<Test>::kill();
+			let removed = MerkleTreeService::prune_sealed_nodes::<Test>(4);
+			assert_eq!(removed, 0, "nothing left to remove");
+			assert!(
+				SealedPruneCursor::<Test>::get().is_some(),
+				"an all-miss sweep must still park its cursor rather than scan on"
+			);
+		});
+	}
+
+	/// The per-block ceiling has to be a real bound, not a placeholder.
+	///
+	/// A `const` block rather than a runtime assert: both operands are constants,
+	/// so the compiler would fold an `assert!` away and the check would never run.
+	/// This one fails the build instead.
+	const _: () = assert!(
+		MAX_PRUNED_NODES_PER_BLOCK > 0 && MAX_PRUNED_NODES_PER_BLOCK <= 4096,
+		"MAX_PRUNED_NODES_PER_BLOCK must bound the sweep: zero disables pruning, \
+		 and a value this far above the benchmarked batch would let one block \
+		 absorb work it cannot pay for"
+	);
 }

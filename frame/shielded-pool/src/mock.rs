@@ -53,6 +53,10 @@ parameter_types! {
 	/// Above `TX_LONGEVITY` (64), as `integrity_test` requires. Small enough that
 	/// a test can advance past it to exercise expiry.
 	pub const RootRetentionBlocks: u64 = 128;
+	/// Cut at level 2 with `MaxLeavesPerTree = 8`: levels 1..2 are pruned and
+	/// level 3+ kept, so a test can seal a tree and exercise both the pruned and
+	/// the stored branch of `get_merkle_path`.
+	pub const SealedTreePrunedBelowLevel: u8 = 2;
 	pub const MaxLeavesPerTree: u32 = 8;
 	pub const MaxProofSize: u32 = 256;
 	pub const MaxPublicInputs: u32 = 10;
@@ -158,6 +162,7 @@ impl pallet_shielded_pool::Config for Test {
 	type MaxTreeDepth = MaxTreeDepth;
 	type MaxHistoricRoots = MaxHistoricRoots;
 	type RootRetentionBlocks = RootRetentionBlocks;
+	type SealedTreePrunedBelowLevel = SealedTreePrunedBelowLevel;
 	type MaxLeavesPerTree = MaxLeavesPerTree;
 	type WeightInfo = ();
 	type Relayer = pallet_relayer::Pallet<Test>;

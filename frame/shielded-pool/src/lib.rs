@@ -111,6 +111,13 @@ pub mod pallet {
 	///   (`migrations::v3::MigrateToV3`); both historic-root items carry an expiry.
 	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(3);
 
+	/// Ceiling on how many sealed-tree nodes one `on_idle` pass may drop.
+	///
+	/// The weight budget already bounds the sweep; this bounds the trie churn on
+	/// an idle chain, where the leftover weight would otherwise allow tens of
+	/// thousands of removals in a single block.
+	pub(crate) const MAX_PRUNED_NODES_PER_BLOCK: u32 = 512;
+
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
@@ -162,6 +169,24 @@ pub mod pallet {
 		/// `integrity_test`.
 		#[pallet::constant]
 		type RootRetentionBlocks: Get<BlockNumberFor<Self>>;
+
+		/// Merkle level below which a **sealed** tree's internal nodes are pruned.
+		///
+		/// `MerkleNodes` exists only to serve Merkle paths to wallets — no
+		/// dispatchable reads it, so pruning cannot affect spendability. A sealed
+		/// tree is immutable, so anything dropped here is recomputed from
+		/// `MerkleLeaves` on demand.
+		///
+		/// The trade is storage against query latency, and it is lopsided: nodes
+		/// concentrate at the bottom, so cutting at level 10 drops 99.8% of the
+		/// entries (1_048_574 -> 2_046 per tree) while a path costs 2^10 leaf
+		/// reads and 1_023 Poseidon hashes — about 60ms native, ~180ms in Wasm.
+		/// Cutting at 12 frees only 0.15% more for four times the work.
+		///
+		/// Configurable rather than fixed: the recompute cost tracks validator
+		/// hardware. Must be non-zero and below the tree depth (`integrity_test`).
+		#[pallet::constant]
+		type SealedTreePrunedBelowLevel: Get<u8>;
 
 		/// Weight information for extrinsics in this pallet
 		type WeightInfo: WeightInfo;
@@ -224,6 +249,22 @@ pub mod pallet {
 		Hash,
 		OptionQuery,
 	>;
+
+	/// Resume point for the sealed-tree node sweep: `(tree_id, level, index)`.
+	///
+	/// Pruning a sealed tree touches ~1M keys, far more than one block can absorb,
+	/// so `on_idle` walks it in bounded batches and parks the cursor here. `None`
+	/// means the sweep is idle — either nothing has sealed yet, or every sealed
+	/// tree is already pruned.
+	#[pallet::storage]
+	pub type SealedPruneCursor<T> = StorageValue<_, (u32, u8, u32), OptionQuery>;
+
+	/// Highest `tree_id` whose prunable levels have been fully swept.
+	///
+	/// `None` before the first sweep completes. The sweep starts at the tree after
+	/// this one, so a restart never re-walks finished trees.
+	#[pallet::storage]
+	pub type LastPrunedTree<T> = StorageValue<_, u32, OptionQuery>;
 
 	/// Set of used nullifiers (nullifier -> block number when used)
 	#[pallet::storage]
@@ -366,6 +407,37 @@ pub mod pallet {
 
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		/// Reclaim internal Merkle nodes from sealed trees with whatever weight
+		/// the block has left over.
+		///
+		/// A sealed tree holds ~1M prunable nodes — orders of magnitude past one
+		/// block — so the sweep runs in bounded batches and parks its position in
+		/// `SealedPruneCursor`. Doing this in `on_idle` rather than `on_initialize`
+		/// keeps it off the critical path: a busy block simply skips it, and the
+		/// work resumes when the chain has room.
+		fn on_idle(_now: BlockNumberFor<T>, remaining: Weight) -> Weight {
+			// Size the batch from the benchmarked per-node cost, so a nearly-full
+			// block prunes little or nothing and an idle one prunes up to the cap.
+			// Deriving it from the same `WeightInfo` the hook reports with keeps the
+			// budget and the charge from drifting apart.
+			let base = T::WeightInfo::prune_sealed_nodes(0);
+			let per_node = T::WeightInfo::prune_sealed_nodes(1).saturating_sub(base);
+
+			let Some(available) = remaining.checked_sub(&base) else {
+				return Weight::zero(); // not even the cursor read fits
+			};
+			if per_node.ref_time() == 0 || per_node.proof_size() == 0 {
+				return Weight::zero();
+			}
+			let budget = (available.ref_time() / per_node.ref_time())
+				.min(available.proof_size() / per_node.proof_size())
+				.min(MAX_PRUNED_NODES_PER_BLOCK as u64) as u32;
+
+			let removed = crate::merkle::MerkleTreeService::prune_sealed_nodes::<T>(budget);
+			// Charged even when nothing was removed: the cursor read happened.
+			T::WeightInfo::prune_sealed_nodes(removed)
+		}
+
 		fn integrity_test() {
 			assert!(
 				!cfg!(feature = "skip-proof-verification") || cfg!(feature = "runtime-benchmarks"),
@@ -387,7 +459,7 @@ pub mod pallet {
 
 			// The retention window must outlive the mempool longevity an unsigned
 			// transaction is admitted with, or a spend can pass validation, get
-			// gossiped, and only revert once included — the failure SP-20 fixed.
+			// gossiped, and only revert once included.
 			let retention: u64 =
 				sp_runtime::traits::UniqueSaturatedInto::<u64>::unique_saturated_into(
 					T::RootRetentionBlocks::get(),
@@ -396,6 +468,15 @@ pub mod pallet {
 				retention > crate::validate_unsigned::TX_LONGEVITY,
 				"RootRetentionBlocks must exceed TX_LONGEVITY, otherwise a root can \
 				 expire while a transaction admitted against it is still valid in the pool"
+			);
+
+			// Level 0 is `MerkleLeaves` and never prunable; the top level is the
+			// root itself. A cut outside that range would either prune nothing or
+			// leave `get_merkle_path` with no stored node to start from.
+			let cut = T::SealedTreePrunedBelowLevel::get();
+			assert!(
+				cut > 0 && (cut as usize) < crate::types::DEFAULT_TREE_DEPTH,
+				"SealedTreePrunedBelowLevel must be in 1..DEFAULT_TREE_DEPTH"
 			);
 
 			let cap = T::MaxLeavesPerTree::get();

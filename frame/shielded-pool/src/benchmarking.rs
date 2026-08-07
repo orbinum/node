@@ -58,16 +58,31 @@ mod benchmarks {
 		}
 
 		// 2. Fund caller
-		let amount: BalanceOf<T> = 1_000_000u32.into();
-		let _ = <T::Currency as Currency<T::AccountId>>::make_free_balance_be(&caller, amount);
+		let _ = <T::Currency as Currency<T::AccountId>>::make_free_balance_be(
+			&caller,
+			bench_amount::<T>() * 100u32.into(),
+		);
 
 		(caller, asset_id)
+	}
+
+	/// A value large enough to survive a relay fee being deducted from it.
+	///
+	/// `unshield` pays the relayer out of `amount`, so a flat literal breaks the
+	/// moment a runtime's `min_relay_fee` exceeds it — the production fee is
+	/// 1e15 planck, which dwarfs any hand-picked constant. Deriving it from the
+	/// configured fee keeps the benchmarks working across every runtime.
+	fn bench_amount<T: Config>() -> BalanceOf<T> {
+		let fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
+		let scaled = fee * 1_000u32.into();
+		let floor: BalanceOf<T> = 1_000_000u32.into();
+		if scaled > floor { scaled } else { floor }
 	}
 
 	#[benchmark]
 	fn shield() {
 		let (caller, asset_id) = setup_benchmark_env::<T>();
-		let amount: BalanceOf<T> = 10_000u32.into();
+		let amount: BalanceOf<T> = bench_amount::<T>();
 		let commitment = Commitment([1u8; 32]);
 		// Memo must be exactly 180 bytes (MAX_ENCRYPTED_MEMO_SIZE): nonce(12) + data(120) + MAC(16) + ephPk(32)
 		let memo_bytes = vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
@@ -86,7 +101,7 @@ mod benchmarks {
 	#[benchmark]
 	fn shield_batch(n: Linear<1, 20>) {
 		let (caller, asset_id) = setup_benchmark_env::<T>();
-		let amount: BalanceOf<T> = 10_000u32.into();
+		let amount: BalanceOf<T> = bench_amount::<T>();
 
 		let mut operations = Vec::new();
 		for i in 0..n {
@@ -151,7 +166,7 @@ mod benchmarks {
 		let (_caller, asset_id) = setup_benchmark_env::<T>();
 		let recipient: T::AccountId = account("recipient", 0, 0);
 		let merkle_root = [1u8; 32];
-		let amount: BalanceOf<T> = 10_000u32.into();
+		let amount: BalanceOf<T> = bench_amount::<T>();
 
 		// Setup valid state: root and pool balance
 		crate::storage::MerkleRepository::add_historic_poseidon_root::<T>(merkle_root);
@@ -222,7 +237,7 @@ mod benchmarks {
 	#[benchmark]
 	fn claim_shielded_fees() {
 		let (caller, asset_id) = setup_benchmark_env::<T>();
-		let amount: BalanceOf<T> = 10_000u32.into();
+		let amount: BalanceOf<T> = bench_amount::<T>();
 		let amount_u128: u128 = amount.saturated_into();
 
 		// Accumulate relay fees for the validator.
@@ -251,6 +266,47 @@ mod benchmarks {
 			public_signals.try_into().expect("signals fit bound"),
 			1u32,
 		);
+	}
+
+	/// Cost of one `on_idle` sweep that removes `n` sealed-tree nodes.
+	///
+	/// Not an extrinsic: the sweep runs in `on_idle` with whatever weight the
+	/// block has left. It still needs measuring, because the hook must return the
+	/// weight it actually consumed — declaring less would let a block overrun.
+	///
+	/// The setup seals a tree and populates its prunable levels directly rather
+	/// than inserting 2^20 leaves, which no benchmark could run. What matters for
+	/// the measurement is the trie shape: `MerkleNodes` is a three-key `StorageNMap`,
+	/// so the per-node cost is a keyed lookup plus a removal, exactly as in
+	/// production.
+	#[benchmark]
+	fn prune_sealed_nodes(n: Linear<0, 512>) {
+		let cap = T::MaxLeavesPerTree::get();
+		let cut = T::SealedTreePrunedBelowLevel::get();
+
+		// Seal tree 0 by parking the size past its capacity, then give it a
+		// permanent anchor as `seal_tree` would.
+		crate::storage::MerkleRepository::set_tree_size::<T>(cap);
+		crate::storage::MerkleRepository::insert_sealed_root::<T>(0, [0xABu8; 32]);
+
+		// Fill the prunable levels with `n` nodes for the sweep to find.
+		let mut placed = 0u32;
+		'outer: for level in 1..cut {
+			for index in 0..(cap >> level) {
+				if placed >= n {
+					break 'outer;
+				}
+				let mut node = [0u8; 32];
+				node[..4].copy_from_slice(&placed.to_le_bytes());
+				crate::storage::MerkleRepository::set_node::<T>(0, level, index, node);
+				placed = placed.saturating_add(1);
+			}
+		}
+
+		#[block]
+		{
+			crate::merkle::MerkleTreeService::prune_sealed_nodes::<T>(n);
+		}
 	}
 
 	impl_benchmark_test_suite!(Pallet, crate::mock::new_test_ext(), crate::mock::Test,);
