@@ -4,6 +4,49 @@ All notable changes to this pallet are documented here.
 
 ---
 
+## [0.12.0] - 2026-08-07
+
+### Security
+
+- **Circuit ids that do not fit a `u8` are rejected instead of truncated.**
+  `expected_public_inputs` takes a `u8`, and `ensure_vk_arity` reached it through
+  `circuit_id.0 as u8` — so id 257 aliased onto 1 and a key was validated against
+  TRANSFER's arity, then stored under an id no lookup could reach. Now guarded
+  with `u8::try_from`, the same way `purge_circuit` already guarded the same
+  table. Root-gated, so this is an operator-error amplifier rather than an attack
+  primitive; what made it worth closing is that it failed silently.
+
+  Ids inside `u8` but outside the known table are unaffected: they carry no
+  expected arity, so only "deserializes as a BN254 key" applies to them.
+
+- **Genesis validates its keys.** `build` checked length alone, so a well-sized
+  but meaningless key was stored and the chain only discovered it when the first
+  real proof failed to verify — at which point nothing distinguishes a bad key
+  from a bad proof. Genesis now routes through the same `ensure_vk_arity` as
+  `register_verification_key`, turning that into a chain that refuses to start.
+
+  **Breaking for genesis configs carrying placeholder keys.** Two of this
+  pallet's own tests were doing exactly that (`vec![0xCCu8; 300]`) and now fail;
+  they were updated to real keys.
+
+### Fixed
+
+- A test helper's doc claimed the TRANSFER circuit has arity 5 while the constant
+  it reads is 7. Rewritten to point at the constant instead of restating the
+  number, which is how the two drifted apart.
+
+### Notes
+
+- The aliasing guard was verified by reverting it and confirming
+  `register_vk_rejects_circuit_id_that_would_alias` fails.
+- A dev-node E2E (`ts-tests/node/zk-verifier-input-bounds.test.cjs`, 9/9) covers
+  the live path: genesis keys pass the new check at startup, all three real VKs
+  register through `setup-dev-local.sh`, an 8 KiB filler key is refused with
+  `InvalidVerificationKey`, id 257 is refused and stores nothing, and the chain
+  keeps producing blocks throughout.
+
+---
+
 ## [0.11.0] - 2026-08-04
 
 ### Removed

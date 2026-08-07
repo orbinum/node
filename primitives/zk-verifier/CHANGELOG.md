@@ -4,6 +4,53 @@ All notable changes to this crate are documented here.
 
 ---
 
+## [1.4.0] - 2026-08-07
+
+### Security
+
+- **Deserialization size guards moved inside the crate.** `to_ark_vk` and
+  `to_ark_proof` now reject oversized input before handing it to
+  `ark-serialize`.
+
+  A verifying key's `gamma_abc_g1` is a length-prefixed vector, and
+  `ark-serialize` calls `Vec::with_capacity` on that prefix **before reading a
+  single element**. A key declaring 2^40 points asks the allocator for ~48 GB on
+  nothing but submitted bytes: in Wasm that traps, on a native path it can take
+  the node down with it.
+
+  The two on-chain callers already bounded their argument at 8 KiB, so nothing
+  was reachable today. But the bound lived in the caller, not the function:
+  `to_ark_vk`, `num_public_inputs` and `prepare` are public API with no length
+  precondition, so any future caller — runtime API, offchain worker, an unsigned
+  path — inherited the reservation unguarded. New `MAX_VK_BYTES` (8 KiB, matching
+  the extrinsic bound) and `MAX_PROOF_BYTES` (1 KiB against a fixed 128-byte
+  compressed Groth16 proof). `prepare` and `num_public_inputs` route through
+  `to_ark_vk`, so they inherit the check.
+
+- **`MAX_PUBLIC_INPUTS` is now enforced.** The constant was declared and had zero
+  call sites outside its own definition: `to_field_elements` accepted a
+  `PublicInputs` of any length. The pallet bounds its extrinsic argument, but the
+  `ZkVerifierPort` path does not go through that extrinsic. Applied in
+  `to_field_elements`, the single point every input passes through. Every circuit
+  in use declares 7 inputs or fewer, so the limit cannot bite a real proof.
+
+### Fixed
+
+- `estimate_verification_cost` uses saturating arithmetic. The release profile
+  does not enable `overflow-checks`, so plain `*` and `+` would wrap silently and
+  report a cost far below the real one. Indicative only — on-chain weights come
+  from benchmarks — but a silently wrong number is worse than a large one.
+
+### Notes
+
+- Each guard was verified by removing it and confirming the test fails. Two of
+  the first drafts did **not**: they used filler bytes, which also fail to
+  deserialize, so the error arrived by another route and the test passed either
+  way. They now use a genuine BN254 key at arity 400 (over 8 KiB, and would
+  otherwise deserialize) and a real proof padded past the bound.
+
+---
+
 ## [1.3.0] - 2026-07-09
 
 ### Fixed

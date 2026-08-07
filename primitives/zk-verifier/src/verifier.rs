@@ -48,9 +48,15 @@ impl Groth16Verifier {
 		}
 	}
 
-	/// Estimate the weight cost for verifying a proof with `num_public_inputs` inputs.
+	/// Rough cost of verifying a proof with `num_public_inputs` inputs.
+	///
+	/// Indicative only — on-chain weights come from benchmarks, not from here.
+	/// Saturating rather than plain arithmetic because the release profile does
+	/// not enable `overflow-checks`, so an absurd input would silently wrap and
+	/// return a cost far below the real one.
 	pub fn estimate_verification_cost(num_public_inputs: usize) -> u64 {
-		BASE_VERIFICATION_COST + (num_public_inputs as u64 * PER_INPUT_COST)
+		BASE_VERIFICATION_COST
+			.saturating_add((num_public_inputs as u64).saturating_mul(PER_INPUT_COST))
 	}
 }
 

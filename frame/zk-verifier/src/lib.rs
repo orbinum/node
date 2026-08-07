@@ -147,6 +147,9 @@ pub mod pallet {
 					.try_into()
 					.expect("Genesis VK exceeds maximum size (8 KB)");
 
+				Pallet::<T>::ensure_vk_arity(*circuit_id, key_data.as_slice())
+					.expect("Genesis VK must deserialize and match its circuit's arity");
+
 				let hash = sp_io::hashing::blake2_256(key_data.as_slice());
 				VerificationKeys::<T>::insert(
 					circuit_id,
@@ -612,18 +615,25 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
-		/// Verify the VK deserializes as a BN254 Groth16 key and, for known circuits,
-		/// that its arity matches. Unknown circuits are only checked to deserialize.
+		/// Verify the VK deserializes as a BN254 Groth16 key and that its arity
+		/// matches the circuit it is being stored under.
+		///
+		/// Only ids in the known table carry an expected arity; the rest are
+		/// checked to deserialize and nothing more. An id that does not fit a
+		/// `u8` is rejected outright rather than truncated — `as u8` would alias
+		/// 257 onto 1 and silently validate a key against the wrong circuit's
+		/// arity. `purge_circuit` guards the same lookup the same way.
 		fn ensure_vk_arity(circuit_id: CircuitId, key_data: &[u8]) -> DispatchResult {
 			use orbinum_zk_verifier::{VerifyingKey, expected_public_inputs};
+
+			let id = u8::try_from(circuit_id.0).map_err(|_| Error::<T>::InvalidVerificationKey)?;
 
 			let vk = VerifyingKey::new(key_data.to_vec());
 			let arity = vk
 				.num_public_inputs()
 				.map_err(|_| Error::<T>::InvalidVerificationKey)?;
 
-			// circuit ids fit in u8 for the known set.
-			if let Some(expected) = expected_public_inputs(circuit_id.0 as u8) {
+			if let Some(expected) = expected_public_inputs(id) {
 				ensure!(arity == expected, Error::<T>::InvalidVerificationKey);
 			}
 			Ok(())
@@ -714,7 +724,6 @@ mod tests {
 			.expect("serialized VK fits in 8192 bytes")
 	}
 
-	/// VK for the TRANSFER circuit (arity 5) — the default used by most tests.
 	fn vk_bytes() -> BoundedVec<u8, frame_support::traits::ConstU32<8192>> {
 		real_vk(TRANSFER_PUBLIC_INPUTS)
 	}
@@ -849,6 +858,49 @@ mod tests {
 			assert_ok!(ZkVerifier::register_verification_key(
 				root().into(),
 				CircuitId::TRANSFER,
+				1,
+				real_vk(TRANSFER_PUBLIC_INPUTS)
+			));
+		});
+	}
+
+	/// A circuit id past 255 must be refused, not truncated.
+	///
+	/// `expected_public_inputs` takes a `u8`, so `circuit_id.0 as u8` maps 257
+	/// onto 1: a key would be validated against TRANSFER's arity and stored under
+	/// an id that no lookup can reach. Root-gated, so this is an operator-error
+	/// amplifier rather than an attack, but it fails silently — which is the part
+	/// worth closing. `purge_circuit` already guards the same lookup this way.
+	#[test]
+	fn register_vk_rejects_circuit_id_that_would_alias() {
+		new_test_ext().execute_with(|| {
+			// 257 & 0xFF == 1 == CircuitId::TRANSFER.
+			let aliasing = CircuitId(257);
+			assert_eq!(aliasing.0 as u8, CircuitId::TRANSFER.0 as u8);
+
+			assert_noop!(
+				ZkVerifier::register_verification_key(
+					root().into(),
+					aliasing,
+					1,
+					real_vk(TRANSFER_PUBLIC_INPUTS)
+				),
+				Error::<Test>::InvalidVerificationKey
+			);
+		});
+	}
+
+	/// Ids inside `u8` but outside the known table keep working: they carry no
+	/// expected arity, so only "deserializes as a BN254 key" applies.
+	#[test]
+	fn register_vk_allows_unmapped_ids_within_u8() {
+		new_test_ext().execute_with(|| {
+			let unmapped = CircuitId(200);
+			assert!(orbinum_zk_verifier::expected_public_inputs(200).is_none());
+
+			assert_ok!(ZkVerifier::register_verification_key(
+				root().into(),
+				unmapped,
 				1,
 				real_vk(TRANSFER_PUBLIC_INPUTS)
 			));
@@ -1551,7 +1603,12 @@ mod tests {
 	#[test]
 	fn genesis_registers_vk_at_version_1_and_activates_it() {
 		let storage = pallet::GenesisConfig::<Test> {
-			verification_keys: vec![(CircuitId::TRANSFER, vec![0xCCu8; 300])],
+			// Genesis now applies the same arity check as registration, so a
+			// filler byte string no longer stands in for a key.
+			verification_keys: vec![(
+				CircuitId::TRANSFER,
+				real_vk(TRANSFER_PUBLIC_INPUTS).into_inner(),
+			)],
 			_phantom: Default::default(),
 		}
 		.build_storage()
@@ -1573,8 +1630,14 @@ mod tests {
 	fn genesis_multiple_circuits_are_all_registered() {
 		let storage = pallet::GenesisConfig::<Test> {
 			verification_keys: vec![
-				(CircuitId::TRANSFER, vec![0x11u8; 300]),
-				(CircuitId::UNSHIELD, vec![0x22u8; 300]),
+				(
+					CircuitId::TRANSFER,
+					real_vk(TRANSFER_PUBLIC_INPUTS).into_inner(),
+				),
+				(
+					CircuitId::UNSHIELD,
+					real_vk(UNSHIELD_PUBLIC_INPUTS).into_inner(),
+				),
 			],
 			_phantom: Default::default(),
 		}
@@ -1599,6 +1662,37 @@ mod tests {
 				Some(1u32)
 			);
 		});
+	}
+
+	/// Genesis must not accept a key that only passes the length check.
+	///
+	/// Before this, a well-sized but meaningless key was stored and the chain
+	/// found out when the first real proof failed to verify — at which point
+	/// nothing distinguishes a bad key from a bad proof. Failing at genesis
+	/// turns that into a chain that refuses to start.
+	#[test]
+	#[should_panic(expected = "Genesis VK must deserialize")]
+	fn genesis_rejects_a_key_that_only_passes_the_length_check() {
+		let _ = pallet::GenesisConfig::<Test> {
+			verification_keys: vec![(CircuitId::TRANSFER, vec![0xCCu8; 300])],
+			_phantom: Default::default(),
+		}
+		.build_storage();
+	}
+
+	/// A real key of the wrong arity is rejected too — deserializing is not
+	/// enough when the circuit declares how many inputs it takes.
+	#[test]
+	#[should_panic(expected = "Genesis VK must deserialize")]
+	fn genesis_rejects_a_valid_key_with_the_wrong_arity() {
+		let _ = pallet::GenesisConfig::<Test> {
+			verification_keys: vec![(
+				CircuitId::TRANSFER,
+				real_vk(TRANSFER_PUBLIC_INPUTS + 1).into_inner(),
+			)],
+			_phantom: Default::default(),
+		}
+		.build_storage();
 	}
 
 	// ── retire_version / unretire_version ─────────────────────────────────────
