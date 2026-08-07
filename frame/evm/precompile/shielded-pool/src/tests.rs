@@ -376,12 +376,12 @@ fn shield_rejects_truncated_input() {
 }
 
 #[test]
-fn shield_rejects_below_min_amount() {
-	// MinShieldAmount = 100; sending value = 1 should be rejected by the pallet.
+fn shield_accepts_smallest_non_zero_amount() {
+	// There is no minimum shield amount: msg.value = 1 must go through.
 	new_test_ext().execute_with(|| {
 		let input = encode_shield(0, [0x11; 32], &[0xAB; 180]);
 		let mut h = MockHandle::with_value(input, 1);
-		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
+		assert_success(ShieldedPoolPrecompile::<Test>::execute(&mut h));
 	});
 }
 

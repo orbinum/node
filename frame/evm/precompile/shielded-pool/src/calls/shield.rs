@@ -40,8 +40,8 @@ where
 	let asset_id = abi::decode_u32(&params[0..32])?;
 
 	// Reject zero-value calls at the precompile boundary (defense-in-depth;
-	// the pallet also rejects via MinShieldAmount, but this produces a cleaner
-	// error before reaching the dispatch layer).
+	// the pallet also rejects them, but this produces a cleaner error before
+	// reaching the dispatch layer).
 	let apparent_value = handle.context().apparent_value;
 	if apparent_value.is_zero() {
 		return Err(err("shield: amount must be non-zero"));

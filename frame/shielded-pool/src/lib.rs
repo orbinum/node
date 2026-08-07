@@ -163,9 +163,6 @@ pub mod pallet {
 		#[pallet::constant]
 		type RootRetentionBlocks: Get<BlockNumberFor<Self>>;
 
-		/// Minimum amount that can be shielded
-		#[pallet::constant]
-		type MinShieldAmount: Get<BalanceOf<Self>>;
 		/// Weight information for extrinsics in this pallet
 		type WeightInfo: WeightInfo;
 	}
@@ -584,8 +581,6 @@ pub mod pallet {
 		InvalidProof,
 		/// Insufficient balance in the pool
 		InsufficientPoolBalance,
-		/// The amount is below the minimum
-		AmountTooSmall,
 		/// The amount is invalid (zero or overflow)
 		InvalidAmount,
 		/// Too many inputs or outputs
@@ -640,7 +635,7 @@ pub mod pallet {
 		/// * `encrypted_memo` - Encrypted metadata for note recovery and audit
 		///
 		/// # Errors
-		/// * `AmountTooSmall` - Amount is below minimum
+		/// * `InvalidAmount` - Amount is zero
 		/// * `MerkleTreeFull` - No more space in the tree
 		/// * `CommitmentAlreadyExists` - Duplicate commitment
 		/// * `InvalidMemoSize` - Encrypted memo is not exactly 180 bytes

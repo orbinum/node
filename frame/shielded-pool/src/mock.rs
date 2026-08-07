@@ -54,7 +54,6 @@ parameter_types! {
 	/// a test can advance past it to exercise expiry.
 	pub const RootRetentionBlocks: u64 = 128;
 	pub const MaxLeavesPerTree: u32 = 8;
-	pub const MinShieldAmount: u128 = 100;
 	pub const MaxProofSize: u32 = 256;
 	pub const MaxPublicInputs: u32 = 10;
 }
@@ -160,7 +159,6 @@ impl pallet_shielded_pool::Config for Test {
 	type MaxHistoricRoots = MaxHistoricRoots;
 	type RootRetentionBlocks = RootRetentionBlocks;
 	type MaxLeavesPerTree = MaxLeavesPerTree;
-	type MinShieldAmount = MinShieldAmount;
 	type WeightInfo = ();
 	type Relayer = pallet_relayer::Pallet<Test>;
 }

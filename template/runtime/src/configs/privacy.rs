@@ -69,8 +69,6 @@ impl pallet_shielded_pool::Config for Runtime {
 	type RootRetentionBlocks = ConstU32<300>;
 	// Pinned to 2^20: clients derive tree_id = leaf_index >> 20 from this.
 	type MaxLeavesPerTree = ConstU32<1_048_576>;
-	/// Minimum shield amount: prevents spam, 1 ORB = 1e18 wei
-	type MinShieldAmount = ConstU128<1_000_000_000_000_000_000>;
 	type WeightInfo = pallet_shielded_pool::weights::SubstrateWeight<Runtime>;
 }
 
