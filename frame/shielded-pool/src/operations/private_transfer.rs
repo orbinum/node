@@ -53,15 +53,18 @@ impl PrivateTransferOperation {
 			if nullifier.0 == [0u8; 32] {
 				continue; // dummy input — skipped by circuit, no nullifier to check
 			}
+			ensure!(nullifier.is_canonical(), Error::<T>::InvalidPublicSignals);
 			ensure!(
 				!NullifierRepository::is_used::<T>(nullifier),
 				Error::<T>::NullifierAlreadyUsed
 			);
 		}
 
-		// Prevent both inputs being dummy (all-zero nullifiers = value 0+0).
-		// A 2-dummy transfer creates 2 commitments in the Merkle tree at zero cost,
-		// enabling spam without any economic disincentive.
+		for commitment in commitments.iter() {
+			ensure!(commitment.is_canonical(), Error::<T>::InvalidPublicSignals);
+			ensure!(commitment.is_valid(), Error::<T>::InvalidPublicSignals);
+		}
+
 		let all_dummy = nullifiers.iter().all(|n| n.0 == [0u8; 32]);
 		ensure!(!all_dummy, Error::<T>::InvalidAmount);
 
@@ -165,12 +168,19 @@ mod tests {
 		BoundedVec::try_from(vec![0x01u8; 72]).unwrap()
 	}
 
+	fn canonical_bytes(seed: u8) -> [u8; 32] {
+		let mut b = [0u8; 32];
+		b[0] = seed;
+		b[1] = 0xA5; // keep values apart without touching the high bytes
+		b
+	}
+
 	fn make_nullifier(seed: u8) -> Nullifier {
-		Nullifier::new([seed; 32])
+		Nullifier::new(canonical_bytes(seed))
 	}
 
 	fn make_commitment(seed: u8) -> Commitment {
-		Commitment::new([seed; 32])
+		Commitment::new(canonical_bytes(seed))
 	}
 
 	fn make_memo() -> EncryptedMemo {

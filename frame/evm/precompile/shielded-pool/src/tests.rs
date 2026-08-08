@@ -10,6 +10,19 @@ use crate::{
 	ShieldedPoolPrecompile,
 };
 
+/// A distinct, canonical 32-byte field value for `seed`.
+///
+/// Commitments and nullifiers are now checked against the BN254 modulus, and a
+/// repeated byte at or above 0x30 exceeds it — `p` starts at 0x30. Real values
+/// come out of Poseidon and are always canonical, so a filler that is not would
+/// exercise a shape the chain never produces.
+fn canon(seed: u8) -> [u8; 32] {
+	let mut b = [0u8; 32];
+	b[0] = seed;
+	b[1] = 0xA5;
+	b
+}
+
 // ─── Assertion helpers ───────────────────────────────────────────────────────
 
 fn expect_error(result: Result<fp_evm::PrecompileOutput, PrecompileFailure>) {
@@ -407,7 +420,7 @@ fn shield_stores_commitment_and_updates_balance() {
 fn shield_multiple_commitments_are_all_stored() {
 	new_test_ext().execute_with(|| {
 		for (i, byte) in [0x11u8, 0x22, 0x33].iter().enumerate() {
-			do_shield([*byte; 32], 500);
+			do_shield(canon(*byte), 500);
 			assert_eq!(
 				pallet_shielded_pool::MerkleTreeSize::<Test>::get(),
 				(i + 1) as u32
@@ -424,7 +437,7 @@ fn shield_multiple_commitments_are_all_stored() {
 fn shield_updates_merkle_root_after_each_insertion() {
 	new_test_ext().execute_with(|| {
 		let root_before = current_root();
-		do_shield([0x42; 32], 1_000);
+		do_shield(canon(0x42), 1_000);
 		let root_after = current_root();
 		assert_ne!(root_before, root_after, "root must change after shield");
 	});
@@ -433,7 +446,7 @@ fn shield_updates_merkle_root_after_each_insertion() {
 #[test]
 fn shield_with_zero_value_rejected() {
 	new_test_ext().execute_with(|| {
-		let input = encode_shield(0, [0xAA; 32], &[0x00; 180]);
+		let input = encode_shield(0, canon(0xAA), &[0x00; 180]);
 		let mut h = MockHandle::with_value(input, 0);
 		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
 	});
@@ -454,14 +467,14 @@ fn private_transfer_rejects_truncated_input() {
 #[test]
 fn private_transfer_rejects_empty_proof() {
 	new_test_ext().execute_with(|| {
-		do_shield([0x55; 32], 5_000);
+		do_shield(canon(0x55), 5_000);
 		let root = current_root();
 		// empty proof → MockZkVerifier returns Err
 		let input = encode_private_transfer(
 			&[],
 			root,
 			&[[0x11; 32], [0x22; 32]],
-			&[[0x33; 32], [0x44; 32]],
+			&[canon(0x33), canon(0x44)],
 			&[vec![0xAA; 180], vec![0xBB; 180]],
 			0,
 			0,
@@ -477,7 +490,7 @@ fn private_transfer_rejects_zero_nullifiers() {
 	// Calling with an empty nullifier array must be rejected at the precompile
 	// boundary before touching the pallet.
 	new_test_ext().execute_with(|| {
-		do_shield([0x55; 32], 5_000);
+		do_shield(canon(0x55), 5_000);
 		let root = current_root();
 		let input = encode_private_transfer(
 			&[0x01],
@@ -498,13 +511,13 @@ fn private_transfer_rejects_zero_nullifiers() {
 fn private_transfer_rejects_mismatched_nullifier_commitment_count() {
 	// 2 nullifiers but 1 commitment — structurally inconsistent.
 	new_test_ext().execute_with(|| {
-		do_shield([0x55; 32], 5_000);
+		do_shield(canon(0x55), 5_000);
 		let root = current_root();
 		let input = encode_private_transfer(
 			&[0x01],
 			root,
 			&[[0x11; 32], [0x22; 32]], // 2 nullifiers
-			&[[0x33; 32]],             // 1 commitment
+			&[canon(0x33)],            // 1 commitment
 			&[vec![0xAA; 180]],        // 1 memo
 			0,
 			0,
@@ -519,14 +532,14 @@ fn private_transfer_rejects_mismatched_nullifier_commitment_count() {
 fn private_transfer_rejects_mismatched_commitment_memo_count() {
 	// 2 commitments but 1 memo — structurally inconsistent.
 	new_test_ext().execute_with(|| {
-		do_shield([0x55; 32], 5_000);
+		do_shield(canon(0x55), 5_000);
 		let root = current_root();
 		let input = encode_private_transfer(
 			&[0x01],
 			root,
-			&[[0x11; 32], [0x22; 32]], // 2 nullifiers
-			&[[0x33; 32], [0x44; 32]], // 2 commitments
-			&[vec![0xAA; 180]],        // 1 memo — mismatch
+			&[[0x11; 32], [0x22; 32]],   // 2 nullifiers
+			&[canon(0x33), canon(0x44)], // 2 commitments
+			&[vec![0xAA; 180]],          // 1 memo — mismatch
 			0,
 			0,
 			1,
@@ -539,12 +552,12 @@ fn private_transfer_rejects_mismatched_commitment_memo_count() {
 #[test]
 fn private_transfer_happy_path() {
 	new_test_ext().execute_with(|| {
-		do_shield([0x55; 32], 5_000);
+		do_shield(canon(0x55), 5_000);
 		let root = current_root();
 		let nullifier_1 = [0x11; 32];
 		let nullifier_2 = [0x22; 32];
-		let commitment_1 = [0x33; 32];
-		let commitment_2 = [0x44; 32];
+		let commitment_1 = canon(0x33);
+		let commitment_2 = canon(0x44);
 
 		let input = encode_private_transfer(
 			&[0x01, 0x02, 0x03],
@@ -585,9 +598,9 @@ fn private_transfer_happy_path() {
 #[test]
 fn private_transfer_rejects_double_spend() {
 	new_test_ext().execute_with(|| {
-		do_shield([0x55; 32], 5_000);
+		do_shield(canon(0x55), 5_000);
 		let root = current_root();
-		let nullifier = [0xDE; 32];
+		let nullifier = canon(0xDE);
 
 		let input = encode_private_transfer(
 			&[0x01],
@@ -611,14 +624,14 @@ fn private_transfer_rejects_double_spend() {
 #[test]
 fn private_transfer_root_updates_after_outputs() {
 	new_test_ext().execute_with(|| {
-		do_shield([0x55; 32], 5_000);
+		do_shield(canon(0x55), 5_000);
 		let root_before = current_root();
 
 		let input = encode_private_transfer(
 			&[0x01],
 			root_before,
 			&[[0x11; 32], [0x22; 32]],
-			&[[0x33; 32], [0x44; 32]],
+			&[canon(0x33), canon(0x44)],
 			&[vec![0xAA; 180], vec![0xBB; 180]],
 			0,
 			0,
@@ -650,12 +663,12 @@ fn unshield_rejects_truncated_input() {
 #[test]
 fn unshield_rejects_empty_proof() {
 	new_test_ext().execute_with(|| {
-		do_shield([0x55; 32], 5_000);
+		do_shield(canon(0x55), 5_000);
 		let root = current_root();
 		let input = encode_unshield(
 			&[],
 			root,
-			[0x77; 32],
+			canon(0x77),
 			0,
 			100,
 			recipient_bytes(),
@@ -672,9 +685,9 @@ fn unshield_rejects_empty_proof() {
 #[test]
 fn unshield_happy_path() {
 	new_test_ext().execute_with(|| {
-		do_shield([0x55; 32], 5_000);
+		do_shield(canon(0x55), 5_000);
 		let root = current_root();
-		let nullifier = [0x77; 32];
+		let nullifier = canon(0x77);
 
 		let input = encode_unshield(
 			&[0x09, 0x09],
@@ -707,9 +720,9 @@ fn unshield_happy_path() {
 #[test]
 fn unshield_rejects_double_spend() {
 	new_test_ext().execute_with(|| {
-		do_shield([0x55; 32], 5_000);
+		do_shield(canon(0x55), 5_000);
 		let root = current_root();
-		let nullifier = [0x77; 32];
+		let nullifier = canon(0x77);
 
 		let input = encode_unshield(
 			&[0x09, 0x09],
@@ -734,12 +747,12 @@ fn unshield_rejects_double_spend() {
 #[test]
 fn unshield_full_balance() {
 	new_test_ext().execute_with(|| {
-		do_shield([0x55; 32], 1_000);
+		do_shield(canon(0x55), 1_000);
 		let root = current_root();
 		let input = encode_unshield(
 			&[0x01],
 			root,
-			[0x99; 32],
+			canon(0x99),
 			0,
 			1_000,
 			recipient_bytes(),
@@ -759,12 +772,12 @@ fn unshield_rejects_zero_recipient() {
 	// AccountId32 of all zeros is a permanent burn address.  The precompile
 	// must reject it before dispatching to avoid silent token destruction.
 	new_test_ext().execute_with(|| {
-		do_shield([0x55; 32], 5_000);
+		do_shield(canon(0x55), 5_000);
 		let root = current_root();
 		let input = encode_unshield(
 			&[0x09, 0x09],
 			root,
-			[0x77; 32],
+			canon(0x77),
 			0,
 			100,
 			[0u8; 32], // zero AccountId32
@@ -783,12 +796,12 @@ fn unshield_rejects_zero_amount() {
 	// amount = 0 is semantically invalid and must be rejected at the precompile
 	// level before dispatch.
 	new_test_ext().execute_with(|| {
-		do_shield([0x55; 32], 5_000);
+		do_shield(canon(0x55), 5_000);
 		let root = current_root();
 		let input = encode_unshield(
 			&[0x09, 0x09],
 			root,
-			[0x77; 32],
+			canon(0x77),
 			0,
 			0, // zero amount
 			recipient_bytes(),
@@ -811,14 +824,14 @@ fn unshield_rejects_zero_amount() {
 fn full_lifecycle_shield_transfer_unshield() {
 	new_test_ext().execute_with(|| {
 		// 1. Shield
-		do_shield([0xAA; 32], 10_000);
+		do_shield(canon(0xAA), 10_000);
 		assert_eq!(pallet_shielded_pool::MerkleTreeSize::<Test>::get(), 1);
 
 		// 2. Private transfer
 		let root_1 = current_root();
-		let nullifier_in = [0xBB; 32];
-		let commitment_out_1 = [0xCC; 32];
-		let commitment_out_2 = [0xDD; 32];
+		let nullifier_in = canon(0xBB);
+		let commitment_out_1 = canon(0xCC);
+		let commitment_out_2 = canon(0xDD);
 
 		let pt_input = encode_private_transfer(
 			&[0x01],
@@ -836,7 +849,7 @@ fn full_lifecycle_shield_transfer_unshield() {
 
 		// 3. Unshield one of the outputs
 		let root_2 = current_root();
-		let nullifier_out = [0xEE; 32];
+		let nullifier_out = canon(0xEE);
 		let unshield_input = encode_unshield(
 			&[0x02],
 			root_2,

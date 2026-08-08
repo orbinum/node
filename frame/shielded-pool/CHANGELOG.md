@@ -2,6 +2,108 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.16.0] - 2026-08-07
+
+### Security
+
+- **Canonical-encoding guard on commitments and nullifiers.** Both are stored as
+  raw bytes and used as raw `StorageMap` keys, while byte-to-field conversion
+  reduces modulo the BN254 prime `p`. Without a canonicity check, `n` and `n + p`
+  are two distinct keys for the **same** field element — so a nullifier could be
+  presented twice under different bytes, and one note spent twice.
+
+  `Commitment::is_canonical` and `Nullifier::is_canonical` are now checked on
+  every write path: `shield` (where the depositor picks the bytes with no proof
+  constraining them, the least guarded way into the tree), `private_transfer`
+  (both nullifiers and output commitments), and `unshield` (the nullifier and
+  the change commitment).
+
+  Nothing reached storage before this: the verifier passes public inputs through
+  `to_field_elements`, which re-encodes and compares byte for byte. But that was
+  a single check on a single path — any future route that records a nullifier
+  without full verification (a relayer pre-check, a mempool dedup cache, a
+  runtime API) would have lost it silently. The rule now lives at the type
+  boundary that every path crosses.
+
+  The helpers this uses (`FieldElement::is_canonical_le`) already existed in
+  `zk-core` with a doc saying callers should reject non-canonical input at the
+  trust boundary. They had no callers.
+
+  Canonicity is kept separate from `validate()` / `is_valid()`: an all-zero
+  nullifier marks a dummy input slot and is canonical, so folding the two
+  together would have rejected legitimate transfers.
+
+- **Zero commitments are refused.** Zero *is* a canonical field value, so the
+  canonicity check alone admitted it — a dev-node probe caught this after the
+  guards were in. It has to be refused separately: the tree represents an absent
+  leaf with `[0u8; 32]` (`get_zero_hash_cached(0)`), so a stored zero leaf is
+  indistinguishable from an empty slot when `subtree_root` rebuilds a pruned
+  level. Nobody can prove a preimage for it either, so it would sit in the tree
+  permanently as dead weight. `shield` and `private_transfer` now check
+  `is_valid()` alongside `is_canonical()`; `unshield` already skipped a zero
+  change commitment through its `has_change` branch.
+
+### Fixed
+
+- **`zero_hash_at_level` is iterative.** It was defined recursively, one stack
+  frame per level, and `get_zero_hash_cached` falls through to it for any level
+  past its 21-entry table. `usize` is 32 bits under Wasm, so a caller passing a
+  large level would exhaust the runtime's fixed 1 MB stack — and that aborts the
+  process rather than raising a catchable panic.
+
+  Measured on a 1 MiB thread: a recursion of this shape returns at 10,000 frames
+  and aborts at 20,000. The loop returns at 5,000 with the same stack and would
+  at any depth, since it uses a constant number of frames.
+
+  Unreachable today, and not just by configuration: every `level` at every call
+  site comes from a `0..depth` loop bound by `DEFAULT_TREE_DEPTH`, so no external
+  input selects one. Latent because the ladder is `pub` and the bound lived in
+  the callers rather than in the function.
+
+  The digests are unchanged, which is the part that matters: these hashes stand
+  in for empty subtrees inside every Merkle path the chain has served, so a
+  divergence at any level would invalidate proofs against notes already on
+  chain. A test compares the loop against a local recursive reference across
+  levels 0-24, including past the cache boundary.
+
+- **`IncrementalMerkleTree` rejects depths of 32 or more at compile time.**
+  `capacity()` computes `1u32 << DEPTH`, which is undefined past 31: debug
+  builds panic, release builds wrap to 1 and the tree reports itself full after
+  a single leaf. The struct is `pub` and generic over depth, so the bound
+  belonged on the type rather than only in the runtime's `integrity_test`. A
+  const assertion now fails the build instead.
+
+### Notes
+
+- **Breaking for callers that submit non-canonical bytes.** Nothing the chain
+  produces is affected — commitments and nullifiers come out of Poseidon and are
+  always canonical — but a client generating raw 32-byte values without reducing
+  mod `p` will now be rejected with `InvalidPublicSignals`.
+
+  Several of this pallet's own tests were doing exactly that, using fillers like
+  `[0xC1; 32]` and `[0x31; 32]`. Both sit above `p`, whose top byte is `0x30`.
+  They were testing a shape the chain never produces and have been moved onto
+  canonical values.
+
+### Verification
+321 pallet tests (14 new) and 65 precompile tests, clippy clean under the CI feature set, and two
+dev-node runs against the Merkle changes: one reads the zero-hash ladder back
+out of real Merkle paths and matches all 19 levels against pinned digests
+(10/10), the other is adversarial — `u32::MAX` leaf indices, 64 KiB and non-hex
+commitments, a 50-request burst, storage queries at levels 21 through 255 —
+checking block height after each batch (30/30).
+
+The canonicity guard's decisive test builds `n` and `n + p`, asserts they are
+different bytes but the same field element, and requires that only the canonical
+one is accepted. Without that second assertion the test would pass against a
+guard that rejected everything.
+
+A dev-node run (18/18) submits the same pair on-chain and confirms only one ends
+up in the reverse index, that `p` itself and all-ones are refused while `p - 1`
+is accepted, and that 25 rejected shields in a burst grow the tree by nothing —
+checking block height after each batch. It is what surfaced the zero-commitment
+gap above.
+
 ## [0.15.0] - 2026-08-06
 
 ### Added
@@ -30,34 +132,6 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
   tree is untouched: still 20 point reads and zero hashes.
 
 ### Fixed
-- **`zero_hash_at_level` is iterative.** It was defined recursively, one stack
-  frame per level, and `get_zero_hash_cached` falls through to it for any level
-  past its 21-entry table. `usize` is 32 bits under Wasm, so a caller passing a
-  large level would exhaust the runtime's fixed 1 MB stack — and a stack
-  overflow there aborts the process rather than raising a catchable panic.
-
-  Measured on a 1 MiB thread: a recursion of this shape returns at 10,000 frames
-  and aborts at 20,000. The loop returns at 5,000 with the same stack and would
-  at any depth, since it uses a constant number of frames.
-
-  Unreachable today, and not just by configuration: every `level` at every call
-  site comes from a `0..depth` loop bound by `DEFAULT_TREE_DEPTH`, so no external
-  input selects one. Latent because the ladder is `pub` and the bound lives in
-  the callers rather than in the function.
-
-  The digests are unchanged, which is the part that matters: these hashes stand
-  in for empty subtrees inside every Merkle path the chain has served, so a
-  divergence at any level would invalidate proofs against notes already on
-  chain. A test compares the loop against a local recursive reference across
-  levels 0-24, including past the cache boundary.
-
-- **`IncrementalMerkleTree` rejects depths of 32 or more at compile time.**
-  `capacity()` computes `1u32 << DEPTH`, which is undefined past 31: debug
-  builds panic, release builds wrap to 1 and the tree reports itself full after
-  a single leaf. The struct is `pub` and generic over depth, so the bound
-  belonged on the type rather than only in the runtime's `integrity_test`. A
-  const assertion now fails the build instead.
-
 - `hash_pair_poseidon` clamps its output copy instead of slicing `&bytes[..32]`
   raw. BN254 `Fr` always yields 32 bytes, so the clamp never binds today — but
   this runs on the block-import path, where slicing past the end panics the node
