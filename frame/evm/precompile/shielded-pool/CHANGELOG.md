@@ -2,6 +2,68 @@
 
 All notable changes to `pallet-evm-precompile-shielded-pool` will be documented in this file.
 
+## [0.5.0] - 2026-08-07
+
+### Security
+
+- **ABI decoder rejects oversized words instead of truncating them.** Offsets and
+  lengths are `uint256`, but `read_offset` and `read_length` narrowed them with
+  `low_u32()`, which keeps the bottom 32 bits and discards the rest. An offset of
+  `2^32 + 8` read back as `8`, and `2^32` as `0` — so the bounds check validated a
+  value the sender never wrote and the decoder indexed somewhere else entirely.
+  Every word is now checked against `usize::MAX` and refused if it does not fit.
+
+  `decode_u32` had the same shape: the ABI declares the argument as `uint32`, so a
+  wider word is a call the callee never agreed to. Keeping the low bits turned a
+  malformed call into a plausible one naming a different value.
+
+- **Offset and length arithmetic is checked.** `data_start + length >
+  params.len()` wraps for a large length, and the wrapped sum passes the very
+  bounds check it was meant to fail. Release builds do not enable
+  `overflow-checks`, so it wrapped silently on exactly the input being guarded
+  against. Same for `count * 32` in the array decoders. All now use
+  `checked_add` / `checked_mul`. The wrapping-length case was worse than a
+  mis-decode: it built an inverted slice range and panicked the runtime
+  (`slice index starts at 128 but ends at 127` → `wasm unreachable` trap),
+  reachable from an unsigned, gas-free `eth_call`.
+
+- **Element counts are validated before allocating.** `Vec::with_capacity(count)`
+  reserved from a calldata-supplied count before anything confirmed the buffer
+  could hold that many elements. The span is now bounds-checked first.
+
+- A `.unwrap()` on a slice conversion in `decode_bytes32_array_at_slot` became a
+  propagated error. It was unreachable given the surrounding checks, but a panic
+  in a precompile is not a failure mode worth keeping reachable-by-accident.
+
+### Changed
+
+- `abi.rs` and `dispatch.rs` split into directories by responsibility, no
+  behaviour change. `abi/` → `guard` (checked arithmetic), `scalar` (`uint32`,
+  `bytes32`), `dynamic` (`bytes`, `bytes32[]`, `bytes[]`). `dispatch/` → `mod`
+  (shared call/gas/result handling in `record_and_dispatch`) and `origin` (the
+  three origin modes). Tests moved alongside the code they cover.
+
+### Notes
+
+- No ABI change. Every selector, parameter and head layout is untouched, and
+  well-formed calldata decodes exactly as before. What narrowed is the set of
+  malformed inputs the decoder will act on.
+
+### Verification
+74 precompile tests (9 new), clippy clean across the workspace under the CI
+feature set.
+
+Each guard was verified by reverting it and confirming the tests fail: replacing
+`word_to_usize` with `low_u32` breaks three, and turning one `checked_add` into
+`wrapping_add` breaks another — that last one is the direct demonstration, since
+without the check the crafted length passes the bounds check.
+
+A dev-node run (26/26) sends hand-built calldata straight at the precompile via
+`eth_call`: offsets of `2^32`, `2^64`, `2^255` and `uint256::MAX`, lengths that
+would wrap the bounds check, over-wide `uint32` words, truncated heads, and a
+40-call hostile burst — checking block height after each batch. Well-formed
+calldata still clears the decoder and reaches the pallet's own guards.
+
 ## [0.4.0] - 2026-08-06
 
 ### Changed
