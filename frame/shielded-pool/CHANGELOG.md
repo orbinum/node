@@ -2,6 +2,20 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.17.0] - 2026-08-07
+
+### Security
+
+- **`private_transfer` rejects two equal non-dummy nullifiers.** Both slots
+  holding the same real nullifier would spend one input twice within a single
+  transfer: each clears the used-set check (neither is marked yet), and the
+  second `mark_as_used` is idempotent, so nothing downstream caught it. Pool
+  admission does not catch it either — `validate_unsigned` collapses equal
+  nullifiers into one `provides` tag rather than flagging the duplicate. The
+  proof is expected to bind the two inputs distinct, but the chain no longer
+  relies on that: `execute` now compares the non-dummy nullifiers directly (at
+  most two inputs) and refuses a duplicate with `NullifierAlreadyUsed`.
+
 ## [0.16.0] - 2026-08-07
 
 ### Security

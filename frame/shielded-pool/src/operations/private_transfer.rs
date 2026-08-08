@@ -60,6 +60,15 @@ impl PrivateTransferOperation {
 			);
 		}
 
+		let non_dummy: sp_std::vec::Vec<&Nullifier> =
+			nullifiers.iter().filter(|n| n.0 != [0u8; 32]).collect();
+		if non_dummy.len() == 2 {
+			ensure!(
+				non_dummy[0] != non_dummy[1],
+				Error::<T>::NullifierAlreadyUsed
+			);
+		}
+
 		for commitment in commitments.iter() {
 			ensure!(commitment.is_canonical(), Error::<T>::InvalidPublicSignals);
 			ensure!(commitment.is_valid(), Error::<T>::InvalidPublicSignals);
@@ -291,6 +300,30 @@ mod tests {
 					nullifiers_of(&[0x20]),
 					commitments_of(&[0x30]),
 					memos_of(1),
+					0u32,
+					0u128,
+					None,
+					1,
+				),
+				crate::pallet::Error::<Test>::NullifierAlreadyUsed
+			);
+		});
+	}
+
+	#[test]
+	fn execute_two_equal_nullifiers_fails() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			// The same non-dummy nullifier in both slots would spend one input
+			// twice: neither is in the used set yet, so both clear that check.
+			assert_noop!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[0x20, 0x20]),
+					commitments_of(&[0x30, 0x31]),
+					memos_of(2),
 					0u32,
 					0u128,
 					None,
