@@ -32,6 +32,9 @@ with `InsufficientBond`. Callers that pre-funded 1 001 ORB to register can stop.
 - No migration ships with this change: `ValidatorBondOf` was verified empty on
   testnet (0 entries, empty pending queue) before removing it, so there are no
   reserves left stranded. A chain that *had* live bonds would need one.
+- `spec_version` moves 7 → 8 at release, since the removed Config constant and
+  storage item change the metadata. `transaction_version` stays at 2:
+  `register_validator` keeps its call index and its empty signature.
 
 ### Verification
 50 pallet tests; runtime, `try-runtime` and `runtime-benchmarks` all compile. A
