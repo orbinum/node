@@ -14,9 +14,17 @@ const MIN_RELAY_FEE = ethers.parseUnits("0.001", 18);
 /// EVM address derived from GENESIS_ACCOUNT_PRIVATE_KEY (lower‑case, with 0x)
 const RELAYER_ADDRESS = "0x6be02d1d3665660d22ff9624b7be0551ee1ac91b";
 
-/// Verified function selectors (keccak256 of ABI signature, first 4 bytes)
-const SEL_UNSHIELD = "47fc44a2";
-const SEL_PRIVATE_TRANSFER = "8c0f5d24";
+/// Function selectors, derived below from the ABI signatures rather than
+/// hardcoded. A stale copy here is exactly the ME-8 failure: the tests keep
+/// passing because a wrong selector still produces "unsupported selector", so
+/// the negative cases go green while the positive ones silently test nothing.
+const SIG_UNSHIELD =
+	"unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)";
+const SIG_PRIVATE_TRANSFER =
+	"privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32,bytes)";
+
+const SEL_UNSHIELD = ethers.id(SIG_UNSHIELD).slice(2, 10);
+const SEL_PRIVATE_TRANSFER = ethers.id(SIG_PRIVATE_TRANSFER).slice(2, 10);
 
 // ---------------------------------------------------------------------------
 // Calldata builders
@@ -25,15 +33,28 @@ const SEL_PRIVATE_TRANSFER = "8c0f5d24";
 const abiCoder = ethers.AbiCoder.defaultAbiCoder();
 
 /**
- * Build ABI-encoded calldata for `unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256)`
- * with the given relay fee inserted as the 7th argument.
+ * Build ABI-encoded calldata for `unshield(...)` with the given relay fee.
  *
  * ABI head layout after prepending the selector:
- *   data[196..228] = slot 6 = uint256 fee  ← the value relay.rs reads
+ *   data[196..228] = slot 6 = uint256 fee  ← the value the relay reads
+ *
+ * The head is 10 slots (320 bytes), so calldata clears the relay's 324-byte
+ * minimum for this op.
  */
 function buildUnshieldCalldata(fee: bigint): string {
 	const encoded = abiCoder.encode(
-		["bytes", "bytes32", "bytes32", "uint32", "uint256", "bytes32", "uint256"],
+		[
+			"bytes",
+			"bytes32",
+			"bytes32",
+			"uint32",
+			"uint256",
+			"bytes32",
+			"uint256",
+			"bytes32",
+			"bytes",
+			"uint32",
+		],
 		[
 			"0x" + "aa".repeat(32), // proof (32 dummy bytes)
 			"0x" + "bb".repeat(32), // merkle root
@@ -42,29 +63,46 @@ function buildUnshieldCalldata(fee: bigint): string {
 			ethers.parseEther("1"), // amount
 			"0x" + "00".repeat(32), // recipient (AccountId32 as bytes32)
 			fee, // relay fee
+			"0x" + "00".repeat(32), // change commitment (zero = total unshield)
+			"0x", // change encrypted memo (empty = total unshield)
+			1, // circuit version
 		]
 	);
 	return "0x" + SEL_UNSHIELD + encoded.slice(2);
 }
 
 /**
- * Build ABI-encoded calldata for
- * `privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)`
- * with the given relay fee as the 7th argument.
+ * Build ABI-encoded calldata for `privateTransfer(...)` with the given relay fee.
  *
- * ABI head layout: data[196..228] = slot 6 = uint256 fee
+ * ABI head layout: data[196..228] = slot 6 = uint256 fee. The head is 9 slots
+ * (288 bytes), so calldata clears the relay's 292-byte minimum for this op.
+ *
+ * The trailing `bytes` is the 56-byte OVK blob; the precompile rejects any
+ * other length, so a placeholder here must still be exactly 56 bytes.
  */
 function buildPrivateTransferCalldata(fee: bigint): string {
 	const encoded = abiCoder.encode(
-		["bytes", "bytes32", "bytes32[]", "bytes32[]", "bytes[]", "uint32", "uint256"],
+		[
+			"bytes",
+			"bytes32",
+			"bytes32[]",
+			"bytes32[]",
+			"bytes[]",
+			"uint32",
+			"uint256",
+			"uint32",
+			"bytes",
+		],
 		[
 			"0x" + "aa".repeat(32), // proof
 			"0x" + "bb".repeat(32), // merkle root
 			["0x" + "cc".repeat(32)], // nullifiers[]
 			["0x" + "dd".repeat(32)], // output commitments[]
-			["0x" + "ee".repeat(104)], // encrypted memos[]
+			["0x" + "ee".repeat(180)], // encrypted memos[]
 			0, // assetId
 			fee, // relay fee
+			1, // circuit version
+			"0x" + "0b".repeat(56), // ovk blob (exactly 56 bytes)
 		]
 	);
 	return "0x" + SEL_PRIVATE_TRANSFER + encoded.slice(2);

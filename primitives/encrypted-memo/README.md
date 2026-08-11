@@ -36,10 +36,11 @@ use orbinum_encrypted_memo::{MemoData, KeySet, encrypt_memo, decrypt_memo};
 // Derive keys from master spending key
 let keys = KeySet::from_spending_key(spending_key);
 
-// Create memo with counterparty (private transfer)
+// With a counterparty key — only valid when it is ONE-TIME (see the field notes below)
 let memo = MemoData::new(1000, owner_pubkey, blinding, 0, counterparty_pk);
 
-// Create memo without counterparty (shield / unshield)
+// Without one: shield, unshield, and any transfer whose spent note had no
+// one-time key to stamp
 let memo = MemoData::new_without_counterparty(1000, owner_pubkey, blinding, 0);
 
 // Encrypt (nonce must be unique per note)
@@ -105,11 +106,11 @@ let vp = ValueProof::from_bytes(&serialized)?;
 ChaCha20Poly1305 AEAD with per-note key derivation:
 
 ```text
-Plaintext  (MemoData):  value_lo(8) | value_hi(8) | owner_pk(32) | blinding(32) | asset_id(4) | counterparty_pk(32) = 116 bytes
+Plaintext  (MemoData):  value_lo(8) | value_hi(8) | owner_pk(32) | blinding(32) | asset_id(4) | counterparty_pk(32) | circuit_version(4) = 120 bytes
                         (value = value_lo + value_hi × 2^64, supports u128)
 
 encryption_key = SHA256(shared_secret || commitment || "orbinum-note-encryption-v1")
-ciphertext     = ChaCha20Poly1305(plaintext=116B, key=encryption_key, nonce=12B)
+ciphertext     = ChaCha20Poly1305(plaintext=120B, key=encryption_key, nonce=12B)
 encrypted_memo = nonce(12) | ciphertext(132) | MAC(16) | ephPk_packed(32)  →  176 bytes total
 ```
 
@@ -165,13 +166,32 @@ This ensures change note commitments are **unlinkable** — they cannot be assoc
 | `owner_pk` | `[u8; 32]` | 32 bytes | Owner BabyJubJub public key (Ax, LE) |
 | `blinding` | `[u8; 32]` | 32 bytes | Blinding factor |
 | `asset_id` | `u32` LE | 4 bytes | Asset identifier |
-| `counterparty_pk` | `[u8; 32]` | 32 bytes | Other party's Ax (LE); `[0u8;32]` for shield/unshield/change |
+| `counterparty_pk` | `[u8; 32]` | 32 bytes | A **one-time** key of the other party (Ax, LE), or `[0u8;32]` — see below |
+| `circuit_version` | `u32` LE | 4 bytes | ZK circuit version the note is spent under |
 
-**Plaintext**: 116 bytes — **Encrypted wire format**: 176 bytes (`nonce(12) | ciphertext(132) | MAC(16) | ephPk_packed(32)`)
+**Plaintext**: 120 bytes — **Encrypted wire format**: 180 bytes (`nonce(12) | ciphertext(132) | MAC(16) | ephPk_packed(32)`)
 
 **Value range**: u128 supporting ~340 billion tokens with 18 decimals per note
 
-Use `MemoData::new_without_counterparty(value, owner_pk, blinding, asset_id)` for shield, unshield, and change notes.
+### `counterparty_pk` — wire name vs. domain name
+
+This is the **frozen wire name**, kept identical here and in the TypeScript SDK's
+serialisation layer so both implementations agree byte for byte. Above that boundary the
+SDK calls the same field **`sourcePk`**, which describes it more honestly:
+
+- It is **not** an identity. What it carries is the `owner_pk` of the note that was
+  *spent*, and only when that key is **one-time** (it came from a stealth-addressed
+  transfer). Otherwise the field is zero.
+- A note shielded to yourself is self-addressed with no stealth derivation, so its
+  `owner_pk` **is** your permanent key. Stamping that into a recipient's note would give
+  them a stable identifier for you, so on that path the field stays zero.
+
+Zero is therefore the value for shield and unshield outputs, **and** for a transfer whose
+spent note had no one-time key to offer. Use
+`MemoData::new_without_counterparty(value, owner_pk, blinding, asset_id)` for those.
+
+A transfer's **change** note is the one case that reliably carries a non-zero value: it
+records the recipient's one-time stealth key, and it never leaves the sender's own wallet.
 
 ## Value Proof Public Signals
 

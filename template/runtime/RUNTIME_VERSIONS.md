@@ -20,6 +20,73 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
+### spec 9 — tx 3 — 2026-08-10
+
+Outgoing viewing keys (OVK): `private_transfer` gains an argument, so this is
+the first upgrade since the reset where `transaction_version` moves. **Wallet
+and runtime must ship together** — an extrinsic encoded for tx 2 no longer
+decodes, and a caller on the old EVM selector is rejected as unsupported.
+
+**Features**
+
+- **shielded-pool 0.18.0 — OVK blob published per transfer** (OVK plan Fases
+  4–7). A memo is sealed toward the RECIPIENT, so its sender cannot reopen it:
+  a sender who loses their vault loses every record of what they sent.
+  `private_transfer` takes a trailing `ovk_blob: OvkBlob` (fixed `[u8; 56]`)
+  wrapping that memo's shared secret under the sender's outgoing viewing key,
+  and emits `OutgoingBlobPublished { commitment, blob }` bound to
+  `commitments[0]` — its own event, since `CommitmentsInserted` is shared with
+  `shield`, `shield_batch` and `unshield`, none of which carry a blob.
+
+  The chain treats the blob as opaque and checks only its length; it holds no
+  key and must not editorialize about ciphertext. So **any** 56 bytes are
+  accepted, zeros included. A sender opting out of recoverability publishes 56
+  RANDOM bytes rather than zeros: zeros would be greppable, marking the opt-out
+  permanently and making everyone who chose it a trivially identifiable set.
+  Presence and size therefore leak nothing either way.
+
+  `transaction_version` 2 → 3 (dispatch signature). No migration: the field is
+  additive and read only at dispatch, never from storage.
+- **precompile 0.6.0 — `privateTransfer` ABI gains the trailing `bytes`**
+  (same batch). Selector `0x66ed2cd4` → `0x1ec439cf`; the ABI head grows from
+  8 slots (256 B) to 9 (288 B). The decoder pins the blob at **exactly 56
+  bytes** — the SCALE route gets that from the type, but calldata carries a
+  dynamic `bytes`, so the EVM route has to enforce it. Selectors are now
+  exported (`selectors::{SHIELD, PRIVATE_TRANSFER, UNSHIELD,
+  CLAIM_SHIELDED_FEES}`) so the relay whitelist is pinned against the decoder's
+  own constants in a test — the ME-8 class of drift, which fails silently
+  because a wrong selector is merely "unsupported".
+
+**Security**
+
+- **shielded-pool 0.18.0 — pool admission tags one entry per nullifier**, in a
+  namespace shared with `unshield` (`ShieldedPoolSpend`). `and_provides`
+  contributes exactly ONE tag, so passing it a `Vec` encoded the whole
+  nullifier set plus the relayer into a single blob. Three consequences, each
+  free for an attacker since the fee is only charged on execution: reordering
+  the two inputs minted a second admissible entry for the same spend; two
+  transfers sharing only ONE note (A+B and A+C) did not collide at all, so one
+  note could back unboundedly many entries; and transfer/unshield used
+  different prefixes, so the same note could back one of each at once. Every
+  variant propagates and is revalidated network-wide while at most one can
+  execute.
+
+  `relayer` deliberately leaves the tag. Binding it made a copy with a swapped
+  fee recipient a *separate* entry, so anyone could rebroadcast another user's
+  spend pointed at their own account and have both sit in the pool; keyed on
+  the nullifier the two are mutually exclusive, so taking the fee requires
+  out-bidding, which means paying it.
+
+  **Admission policy, not state transition** — consensus is unaffected, and
+  this is the reason `spec_version` moves for the OVK work rather than for
+  this. Nodes on the old logic keep accepting the duplicate variants, so the
+  mitigation only completes as the network updates.
+- **relay RPC — `gas_price` saturates instead of panicking.** `U256::as_u128()`
+  panics above 2^128; the value comes from the runtime API rather than
+  calldata, so it is not attacker-reachable, but a panic there still takes down
+  the relay RPC. Now mirrors the hardening already applied to the
+  caller-controlled fee word. Node-side only, no consensus effect.
+
 ### spec 8 — tx 2 — 2026-08-08
 
 Bundles the whole audit-remediation batch plus the config/feature work that
