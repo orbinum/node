@@ -7,6 +7,7 @@
 //! - [`note`] — the off-chain shielded note.
 //! - [`merkle`] — Merkle path plus the tree-depth constants.
 //! - [`memo`] — the fixed-size encrypted memo.
+//! - [`ovk`] — the outgoing-viewing-key blob published per transfer.
 //! - [`asset`] — registered asset metadata.
 
 pub mod asset;
@@ -14,12 +15,14 @@ pub mod ids;
 pub mod memo;
 pub mod merkle;
 pub mod note;
+pub mod ovk;
 
 pub use asset::AssetMetadata;
 pub use ids::{AssetId, Commitment, Nullifier};
 pub use memo::{EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE};
 pub use merkle::{DEFAULT_TREE_DEPTH, DefaultMerklePath, MAX_TREE_DEPTH, MerklePath};
 pub use note::Note;
+pub use ovk::{OVK_BLOB_SIZE, OvkBlob};
 
 /// A 32-byte hash used for Merkle roots, cryptographic hashes and identifiers.
 ///

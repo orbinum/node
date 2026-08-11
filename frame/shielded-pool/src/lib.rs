@@ -83,7 +83,7 @@ mod runtime_api_impl;
 pub use types::{
 	AssetId, AssetMetadata, Commitment, DEFAULT_TREE_DEPTH, DefaultMerklePath,
 	EncryptedMemo as FrameEncryptedMemo, Hash, MAX_ENCRYPTED_MEMO_SIZE, MAX_TREE_DEPTH, MerklePath,
-	Note, Nullifier,
+	Note, Nullifier, OVK_BLOB_SIZE, OvkBlob,
 };
 
 #[frame_support::pallet]
@@ -567,6 +567,23 @@ pub mod pallet {
 			leaf_indices: BoundedVec<u32, ConstU32<2>>,
 		},
 
+		/// The OVK blob of a private transfer, bound to its recipient output.
+		///
+		/// Its own event rather than a field on `CommitmentsInserted`, because that
+		/// event is shared with shield, shield_batch and unshield — none of which
+		/// carry a blob. Widening it would force an `Option` on three unrelated
+		/// call sites and change the shape every historic event decodes under.
+		///
+		/// Emitted for EVERY transfer, always 56 bytes: a sender who opts out of
+		/// recoverability publishes random bytes, so presence and size reveal
+		/// nothing about whether anyone opted in.
+		OutgoingBlobPublished {
+			/// Recipient output commitment the blob is bound to.
+			commitment: Commitment,
+			/// The 56-byte OVK blob (or 56 random bytes when the sender opted out).
+			blob: OvkBlob,
+		},
+
 		/// Tokens were withdrawn from the shielded pool
 		Unshielded {
 			/// Nullifier of the spent note
@@ -808,6 +825,10 @@ pub mod pallet {
 		/// * `encrypted_memos` - Encrypted metadata for each new note
 		/// * `asset_id` - Asset being transferred (public input of the proof)
 		/// * `fee` - Gasless fee (must match proof's fee public input)
+		/// * `ovk_blob` - 56-byte outgoing-viewing-key blob for commitments[0],
+		///   letting the SENDER recover this transfer later. Opaque to the chain:
+		///   it is ciphertext, and no key to check it against exists on chain.
+		///   Only the length is guaranteed, and the type is what guarantees it.
 		///
 		/// # Errors
 		/// * `UnknownMerkleRoot` - Root is not in historic roots
@@ -830,6 +851,7 @@ pub mod pallet {
 			fee: BalanceOf<T>,
 			relayer: Option<sp_core::H160>,
 			circuit_version: u32,
+			ovk_blob: OvkBlob,
 		) -> DispatchResult {
 			ensure_none(origin)?;
 
@@ -844,6 +866,7 @@ pub mod pallet {
 				fee,
 				relayer,
 				circuit_version,
+				ovk_blob,
 			)
 		}
 
@@ -889,7 +912,10 @@ pub mod pallet {
 			// For partial unshield, must equal NoteCommitment(change_value, asset_id, change_owner_pk, change_blinding).
 			change_commitment: Hash,
 			// Encrypted memo for the change note. Must be [0u8; 0] for total unshield.
-			// For partial unshield, contains encrypted plaintext: [value_lo(8), value_hi(8), owner_pk(32), blinding(32), asset_id(4), counterparty_pk(32)].
+			// For partial unshield it wraps the 120-byte plaintext: value_lo(8),
+			// value_hi(8), owner_pk(32), blinding(32), asset_id(4), source_pk(32),
+			// circuit_version(4). Opaque to the chain — the layout is the wallet's
+			// contract, listed here only as a reader's aid.
 			change_encrypted_memo: FrameEncryptedMemo,
 			// EVM address of the relay node that signed the tx (from precompile caller); None for direct Substrate.
 			relayer: Option<sp_core::H160>,
@@ -1074,6 +1100,12 @@ pub mod pallet {
 					fee,
 					relayer,
 					circuit_version,
+					// `ovk_blob` is deliberately not forwarded. The blob is
+					// unauthenticated ciphertext, so binding it into the `provides`
+					// tag would let anyone who saw a pending tx re-broadcast endless
+					// variants of it — same nullifiers, different blob, each landing
+					// as its own pool entry. The tag stays on the nullifiers, which
+					// the ZK proof does authenticate.
 					..
 				} => crate::validate_unsigned::validate_private_transfer::<T>(
 					merkle_root,

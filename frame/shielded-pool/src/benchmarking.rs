@@ -171,6 +171,7 @@ mod benchmarks {
 			fee,
 			Some(relayer),
 			1u32,
+			crate::types::OvkBlob([0x0Bu8; crate::types::OVK_BLOB_SIZE]),
 		);
 	}
 

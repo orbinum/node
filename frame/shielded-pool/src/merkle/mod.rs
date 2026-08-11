@@ -1413,4 +1413,166 @@ mod prune_tests {
 		 and a value this far above the benchmarked batch would let one block \
 		 absorb work it cannot pay for"
 	);
+
+	// ── adversarial: the Merkle accounting ───────────────────────────────────
+	//
+	// The tree IS the ledger: a leaf that cannot be proven is money nobody can
+	// spend, and a root that disagrees with its leaves lets a forged proof pass.
+
+	/// A commitment may take a leaf ONCE. Two leaves for one note would let a
+	/// wallet's scan see the same money twice, while the nullifier set — keyed on
+	/// the note, not the leaf — allows only one spend.
+	///
+	/// Note WHERE the guard lives: `insert_leaf` tests `CommitmentMemos`, which
+	/// is populated by `store_memo`, called by the operations right after each
+	/// insert. So the duplicate is caught once the memo of the first insert has
+	/// been stored — which is the real dispatch order (see
+	/// `operations/private_transfer.rs`, the insert/store_memo loop). Calling the
+	/// service in isolation, as a future refactor might, does NOT arm the guard;
+	/// this test pins the pairing so that dependency stays visible.
+	#[test]
+	fn attack_reinserting_a_commitment_is_refused() {
+		new_test_ext().execute_with(|| {
+			use crate::storage::CommitmentRepository;
+			use crate::types::{EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE};
+
+			let c = Commitment::new({
+				let mut b = [0u8; 32];
+				b[0] = 0x11;
+				b[1] = 0xA5;
+				b
+			});
+			let memo =
+				EncryptedMemo::from_bytes(&[0x01u8; MAX_ENCRYPTED_MEMO_SIZE as usize]).unwrap();
+
+			// The production pairing: insert the leaf, then store its memo.
+			assert!(MerkleTreeService::insert_leaf::<Test>(c).is_ok());
+			CommitmentRepository::store_memo::<Test>(c, memo);
+
+			assert!(
+				MerkleTreeService::insert_leaf::<Test>(c).is_err(),
+				"a duplicate commitment must never take a second leaf"
+			);
+		});
+	}
+
+	/// Rolling over into a fresh tree must not carry the previous tree's frontier:
+	/// a stale frontier makes the new tree's root a hash of leaves that are not
+	/// in it, so every proof against it fails.
+	#[test]
+	fn attack_tree_rollover_starts_from_a_clean_frontier() {
+		new_test_ext().execute_with(|| {
+			let cap = <Test as crate::pallet::Config>::MaxLeavesPerTree::get();
+
+			// Fill tree 0 exactly, which seals it.
+			for i in 0..cap {
+				let mut b = [0u8; 32];
+				b[0] = (i + 1) as u8;
+				b[1] = 0xA5;
+				assert!(MerkleTreeService::insert_leaf::<Test>(Commitment::new(b)).is_ok());
+			}
+
+			// After the seal the live root is the EMPTY root, not tree 0's root.
+			let empty = super::hashing::get_zero_hash_cached(crate::types::DEFAULT_TREE_DEPTH);
+			assert_eq!(
+				MerkleRepository::get_poseidon_root::<Test>(),
+				empty,
+				"a sealed rollover must reset the live root to the empty tree"
+			);
+			assert_eq!(
+				MerkleRepository::get_frontier::<Test>(),
+				[[0u8; 32]; crate::types::DEFAULT_TREE_DEPTH],
+				"a stale frontier would root the new tree over leaves it does not hold"
+			);
+
+			// The first leaf of tree 1 must produce the same root as the first
+			// leaf of a brand-new tree — proof the rollover is clean.
+			let mut b = [0u8; 32];
+			b[0] = 0xC1;
+			b[1] = 0xA5;
+			assert!(MerkleTreeService::insert_leaf::<Test>(Commitment::new(b)).is_ok());
+			let after_rollover = MerkleRepository::get_poseidon_root::<Test>();
+
+			new_test_ext().execute_with(|| {
+				let mut b2 = [0u8; 32];
+				b2[0] = 0xC1;
+				b2[1] = 0xA5;
+				assert!(MerkleTreeService::insert_leaf::<Test>(Commitment::new(b2)).is_ok());
+				assert_eq!(
+					MerkleRepository::get_poseidon_root::<Test>(),
+					after_rollover,
+					"tree 1's first leaf must root exactly like a fresh tree's first leaf"
+				);
+			});
+		});
+	}
+
+	/// A sealed tree's root must stay accepted for spending: notes in it are
+	/// still live money. Losing it would strand every note in the sealed tree.
+	#[test]
+	fn attack_sealing_does_not_strand_the_notes_it_sealed() {
+		new_test_ext().execute_with(|| {
+			let cap = <Test as crate::pallet::Config>::MaxLeavesPerTree::get();
+			let mut last_root = [0u8; 32];
+			for i in 0..cap {
+				let mut b = [0u8; 32];
+				b[0] = (i + 1) as u8;
+				b[1] = 0xA5;
+				assert!(MerkleTreeService::insert_leaf::<Test>(Commitment::new(b)).is_ok());
+				last_root = MerkleRepository::get_poseidon_root::<Test>();
+			}
+			// `last_root` here is the empty root (the seal already ran), so check
+			// the SEALED root is retrievable and known.
+			let sealed = MerkleRepository::get_sealed_root::<Test>(0);
+			assert!(sealed.is_some(), "the sealed root must be recorded");
+			assert!(
+				MerkleRepository::is_known_root::<Test>(&sealed.unwrap()),
+				"a sealed root must remain spendable, or its notes are stranded"
+			);
+			let _ = last_root;
+		});
+	}
+
+	/// Leaf indices must be dense and monotonic across a rollover. A gap or a
+	/// repeat desynchronises every wallet's scan cursor from the chain.
+	#[test]
+	fn attack_leaf_indices_stay_dense_across_a_rollover() {
+		new_test_ext().execute_with(|| {
+			let cap = <Test as crate::pallet::Config>::MaxLeavesPerTree::get();
+			let total = cap + 3; // force a rollover and then some
+			for i in 0..total {
+				let mut b = [0u8; 32];
+				b[0] = (i + 1) as u8;
+				b[1] = 0xA5;
+				let index = MerkleTreeService::insert_leaf::<Test>(Commitment::new(b))
+					.expect("insert must succeed");
+				assert_eq!(index, i, "leaf indices must be dense and monotonic");
+			}
+			assert_eq!(MerkleRepository::get_tree_size::<Test>(), total);
+		});
+	}
+
+	/// The root must actually change on every insert. A root that repeats means
+	/// two different leaf sets share one root — a forged proof would verify.
+	#[test]
+	fn attack_every_insert_moves_the_root() {
+		new_test_ext().execute_with(|| {
+			let cap = <Test as crate::pallet::Config>::MaxLeavesPerTree::get();
+			let mut seen = alloc::vec::Vec::new();
+			// Stop one short of the cap so the seal (which deliberately resets to
+			// the empty root) does not count as a repeat.
+			for i in 0..(cap - 1) {
+				let mut b = [0u8; 32];
+				b[0] = (i + 1) as u8;
+				b[1] = 0xA5;
+				assert!(MerkleTreeService::insert_leaf::<Test>(Commitment::new(b)).is_ok());
+				let root = MerkleRepository::get_poseidon_root::<Test>();
+				assert!(
+					!seen.contains(&root),
+					"root repeated after insert {i} — distinct leaf sets must not share a root"
+				);
+				seen.push(root);
+			}
+		});
+	}
 }

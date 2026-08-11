@@ -33,9 +33,12 @@ pub(crate) const RELAY_GAS_LIMIT: u64 = 2_000_000;
 pub(crate) const MIN_RELAY_FEE_FALLBACK: u128 = 1_000_000_000_000_000; // 0.001 ORB in planck
 
 /// Static fallback selector whitelist for when the Runtime API is unavailable.
+///
+/// Built from the operation constants rather than re-typed, so this list cannot
+/// drift from what `default_operations` actually dispatches on.
 pub(crate) const SELECTORS_FALLBACK: [[u8; 4]; 2] = [
-	[0x47, 0xfc, 0x44, 0xa2], // unshield
-	[0x8c, 0x0f, 0x5d, 0x24], // privateTransfer
+	super::operations::SELECTOR_UNSHIELD,
+	super::operations::SELECTOR_PRIVATE_TRANSFER,
 ];
 
 /// Maximum calldata size accepted by the relay (32 KB).
@@ -75,7 +78,8 @@ pub(crate) fn compute_effective_min_fee(min_fee_planck: u128, base_fee_wei: u128
 ///                       (or `MIN_RELAY_FEE_FALLBACK` if the API is unavailable).
 /// `allowed_selectors` — from `relay_config().allowed_selectors`.
 ///
-/// Both `unshield` and `privateTransfer` share the same ABI head layout:
+/// Both `unshield` and `privateTransfer` agree up to slot 6, which is all this
+/// function reads:
 /// ```text
 ///  bytes [0..4]     selector
 ///  bytes [4..36]    slot 0  — offset pointer for proof (bytes/dynamic)
@@ -86,7 +90,9 @@ pub(crate) fn compute_effective_min_fee(min_fee_planck: u128, base_fee_wei: u128
 ///  bytes [164..196] slot 5  — bytes32  recipient  / uint32    asset_id
 ///  bytes [196..228] slot 6  — uint256  fee        ← checked here
 /// ```
-/// Minimum head size = 4 + 7 × 32 = 228 bytes.
+/// Past slot 6 the layouts diverge, so the 228-byte minimum above is only a
+/// cheap first gate: each operation declares its own `min_calldata_len()`
+/// (unshield 324, privateTransfer 292), checked after selector dispatch.
 pub(crate) fn validate_relay_calldata(
 	data: &[u8],
 	min_fee_wei: u128,
@@ -152,7 +158,7 @@ mod tests {
 
 	/// Build minimal valid calldata for the given selector and fee.
 	///
-	/// Head layout (228 bytes total):
+	/// Head layout (first 228 bytes; the buffer is padded to the largest op's head):
 	/// ```text
 	///  [0..4]     selector
 	///  [4..36]    slot 0  — proof offset: 0xE0 (= 7×32 = 224, past all head slots)
@@ -164,7 +170,10 @@ mod tests {
 	///  [196..228] slot 6  — uint256 fee
 	/// ```
 	fn build_calldata(selector: [u8; 4], fee_wei: u128) -> Vec<u8> {
-		let mut data = vec![0u8; 228];
+		// unshield's head is 10 slots (4 + 320 = 324 bytes); privateTransfer's is
+		// 9 slots (292). Build the larger of the two — extra zero head slots are
+		// harmless, the fee stays at slot 6 either way.
+		let mut data = vec![0u8; 324];
 		data[..4].copy_from_slice(&selector);
 		// Proof-bytes offset: 7×32 = 224 = 0xE0 (big-endian U256 → only last byte set)
 		data[35] = 0xE0;
@@ -203,6 +212,53 @@ mod tests {
 
 	// ── Selector checks ────────────────────────────────────────────────────
 
+	/// The whitelist must carry the selectors the precompile actually decodes.
+	///
+	/// This is the ME-8 guard. It compares against the DECODER's own constants,
+	/// not against a signature string copied into this file — two copies of a
+	/// signature can drift together and a test on each side would still pass.
+	/// The failure is silent: a wrong selector is merely "unsupported", so the
+	/// rejection tests stay green while relaying stops working entirely.
+	#[test]
+	fn whitelist_selectors_match_the_precompile_decoder() {
+		use pallet_evm_precompile_shielded_pool::selectors;
+
+		assert_eq!(SELECTOR_PRIVATE_TRANSFER, selectors::PRIVATE_TRANSFER);
+		assert_eq!(SELECTOR_UNSHIELD, selectors::UNSHIELD);
+	}
+
+	/// And both are genuine keccak output, not bytes that happen to agree.
+	#[test]
+	fn selectors_are_keccak_of_the_abi_signatures() {
+		let pt = sp_core::hashing::keccak_256(
+			b"privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32,bytes)",
+		);
+		let un = sp_core::hashing::keccak_256(
+			b"unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)",
+		);
+		assert_eq!(pt[..4], SELECTOR_PRIVATE_TRANSFER);
+		assert_eq!(un[..4], SELECTOR_UNSHIELD);
+	}
+
+	/// The runtime fallback list must agree with the client fallback list.
+	#[test]
+	fn fallback_selectors_contain_both_operations() {
+		assert!(SELECTORS_FALLBACK.contains(&SELECTOR_UNSHIELD));
+		assert!(SELECTORS_FALLBACK.contains(&SELECTOR_PRIVATE_TRANSFER));
+	}
+
+	/// privateTransfer calldata shorter than its 9-slot head (292 bytes) is
+	/// rejected even though it clears the global 228-byte minimum.
+	#[test]
+	fn rejects_private_transfer_calldata_between_228_and_292() {
+		let mut data = build_calldata(SELECTOR_PRIVATE_TRANSFER, MIN_RELAY_FEE_FALLBACK);
+		data.truncate(291);
+		assert_eq!(
+			validate_relay_calldata(&data, MIN_RELAY_FEE_FALLBACK, &SELECTORS_FALLBACK),
+			Err("calldata too short")
+		);
+	}
+
 	#[test]
 	fn rejects_unknown_selector() {
 		let mut data = build_calldata(SELECTOR_UNSHIELD, MIN_RELAY_FEE_FALLBACK);
@@ -225,6 +281,25 @@ mod tests {
 	}
 
 	// ── Fee checks ─────────────────────────────────────────────────────────
+
+	/// A fee word above `u128::MAX` must be rejected, not panic.
+	///
+	/// Regression: `U256::as_u128` panics on anything wider than 128 bits, and
+	/// this calldata arrives from an unauthenticated RPC call — 32 crafted bytes
+	/// were enough to take down the handler, repeatably and for free.
+	#[test]
+	fn huge_fee_saturates_instead_of_panicking() {
+		let mut data = build_calldata(SELECTOR_PRIVATE_TRANSFER, 0);
+		// Set a byte in the HIGH 128 bits of the fee slot (data[196..228]).
+		data[196 + 15] = 0x01;
+
+		// Saturates to u128::MAX, so it clears the floor here and is left for
+		// the dry-run to reject — the same outcome as any other absurd fee.
+		assert_eq!(
+			validate_relay_calldata(&data, MIN_RELAY_FEE_FALLBACK, &SELECTORS_FALLBACK),
+			Ok(())
+		);
+	}
 
 	#[test]
 	fn rejects_zero_fee() {
@@ -511,5 +586,217 @@ mod tests {
 		// The message should contain both the prefix and the specific variant.
 		assert!(err.starts_with("calldata would fail on-chain:"), "{err}");
 		assert!(err.contains("OutOfFund"), "{err}");
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial battery — the relay is reachable UNAUTHENTICATED over RPC
+// ---------------------------------------------------------------------------
+//
+// `validate_relay_calldata` is the first code in the node to touch bytes that
+// an anonymous internet caller fully controls. A panic here is a remote node
+// crash, not a rejected request. These tests try to cause one.
+
+#[cfg(test)]
+mod adversarial {
+	use super::*;
+	use crate::relay::operations::{SELECTOR_PRIVATE_TRANSFER, SELECTOR_UNSHIELD};
+
+	/// Well-formed base calldata for privateTransfer, long enough to pass the
+	/// length gates so the later checks are actually reached.
+	fn base_private_transfer(fee: u128) -> Vec<u8> {
+		let mut d = SELECTOR_PRIVATE_TRANSFER.to_vec();
+		d.resize(4 + 288, 0);
+		let mut fee_word = [0u8; 32];
+		fee_word[16..32].copy_from_slice(&fee.to_be_bytes());
+		d[4 + 192..4 + 224].copy_from_slice(&fee_word);
+		d
+	}
+
+	/// Every length from 0 to just past the minimum: no panic, and the boundary
+	/// must be exact (227 rejected, 228 reaches the selector check).
+	#[test]
+	fn attack_every_calldata_length_is_handled_without_panic() {
+		for len in 0..400usize {
+			let data = vec![0xAAu8; len];
+			let _ = validate_relay_calldata(&data, 0, &SELECTORS_FALLBACK);
+		}
+		// Boundary is exact.
+		assert_eq!(
+			validate_relay_calldata(&vec![0u8; 227], 0, &SELECTORS_FALLBACK),
+			Err("calldata too short")
+		);
+		// 228 bytes of zeros passes the length gate and dies on the selector.
+		assert_eq!(
+			validate_relay_calldata(&vec![0u8; 228], 0, &SELECTORS_FALLBACK),
+			Err("unsupported selector")
+		);
+	}
+
+	/// A valid selector with calldata between the global 228 gate and the
+	/// operation's own minimum must be refused by the per-op gate, not read
+	/// past its end.
+	#[test]
+	fn attack_length_between_global_and_per_op_minimum_is_refused() {
+		for len in 228..292usize {
+			let mut d = SELECTOR_PRIVATE_TRANSFER.to_vec();
+			d.resize(len, 0);
+			assert_eq!(
+				validate_relay_calldata(&d, 0, &SELECTORS_FALLBACK),
+				Err("calldata too short"),
+				"privateTransfer at {len} bytes must be refused"
+			);
+		}
+		for len in 228..324usize {
+			let mut d = SELECTOR_UNSHIELD.to_vec();
+			d.resize(len, 0);
+			assert_eq!(
+				validate_relay_calldata(&d, 0, &SELECTORS_FALLBACK),
+				Err("calldata too short"),
+				"unshield at {len} bytes must be refused"
+			);
+		}
+	}
+
+	/// The calldata cap must hold exactly: one byte over is refused, and the
+	/// oversized buffer must never be walked.
+	#[test]
+	fn attack_oversized_calldata_is_refused_at_the_exact_boundary() {
+		let mut ok = base_private_transfer(0);
+		ok.resize(MAX_CALLDATA_BYTES, 0);
+		// At the cap: passes the size gate (fails later or succeeds, but not "too large").
+		assert_ne!(
+			validate_relay_calldata(&ok, 0, &SELECTORS_FALLBACK),
+			Err("calldata too large")
+		);
+
+		let mut over = base_private_transfer(0);
+		over.resize(MAX_CALLDATA_BYTES + 1, 0);
+		assert_eq!(
+			validate_relay_calldata(&over, 0, &SELECTORS_FALLBACK),
+			Err("calldata too large")
+		);
+	}
+
+	/// A fee word of all 0xFF (u256::MAX) must saturate, never panic, and must
+	/// COMPARE as above any minimum — a panic here is remote node death.
+	#[test]
+	fn attack_max_fee_word_saturates_and_passes_the_floor() {
+		let mut d = base_private_transfer(0);
+		d[4 + 192..4 + 224].copy_from_slice(&[0xFFu8; 32]);
+		assert_eq!(
+			validate_relay_calldata(&d, u128::MAX, &SELECTORS_FALLBACK),
+			Ok(()),
+			"a saturated fee must clear even the maximum floor"
+		);
+	}
+
+	/// A fee one planck below the floor must be refused; exactly at the floor
+	/// must pass. Off-by-one here is free money for the attacker or a broken relay.
+	#[test]
+	fn attack_fee_floor_boundary_is_exact() {
+		let floor = 1_000_000_000_000_000u128;
+		assert_eq!(
+			validate_relay_calldata(
+				&base_private_transfer(floor - 1),
+				floor,
+				&SELECTORS_FALLBACK
+			),
+			Err("fee below minimum")
+		);
+		assert_eq!(
+			validate_relay_calldata(&base_private_transfer(floor), floor, &SELECTORS_FALLBACK),
+			Ok(())
+		);
+	}
+
+	/// An empty whitelist must reject everything — a governance misconfiguration
+	/// must fail closed, never open.
+	#[test]
+	fn attack_empty_whitelist_fails_closed() {
+		assert_eq!(
+			validate_relay_calldata(&base_private_transfer(0), 0, &[]),
+			Err("unsupported selector")
+		);
+	}
+
+	/// A selector the governance whitelist allows but the node does not
+	/// implement must be refused, not dispatched to a wrong decoder.
+	#[test]
+	fn attack_whitelisted_but_unimplemented_selector_is_refused() {
+		let mut d = base_private_transfer(0);
+		d[..4].copy_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+		assert_eq!(
+			validate_relay_calldata(&d, 0, &[[0xDE, 0xAD, 0xBE, 0xEF]]),
+			Err("unsupported selector"),
+			"a selector with no registered operation must fail closed"
+		);
+	}
+
+	/// The gas floor must saturate rather than overflow: base_fee near u128::MAX
+	/// multiplied by 2×gas_limit would wrap and produce a floor of ~0, letting
+	/// every transfer through for free.
+	#[test]
+	fn attack_gas_floor_saturates_instead_of_wrapping() {
+		let floor = compute_effective_min_fee(1, u128::MAX);
+		assert_eq!(
+			floor,
+			u128::MAX,
+			"a wrapped multiplication would collapse the floor to near zero"
+		);
+		// And a realistic value still behaves.
+		let normal = compute_effective_min_fee(1_000_000_000_000_000, 1_000_000_000);
+		assert!(normal >= 1_000_000_000_000_000);
+	}
+
+	/// Deterministic byte fuzz over the whole calldata: the only requirement is
+	/// that no input, however malformed, panics the validator.
+	#[test]
+	fn attack_calldata_fuzz_never_panics() {
+		let base = base_private_transfer(1_000_000_000_000_000);
+		let mut seed: u64 = 0xDEADBEEFCAFEBABE;
+		for _ in 0..20_000 {
+			let mut data = base.clone();
+			seed = seed
+				.wrapping_mul(6364136223846793005)
+				.wrapping_add(1442695040888963407);
+			let muts = 1 + (seed >> 60) as usize % 12;
+			for _ in 0..muts {
+				seed = seed
+					.wrapping_mul(6364136223846793005)
+					.wrapping_add(1442695040888963407);
+				let pos = (seed >> 33) as usize % data.len();
+				seed = seed
+					.wrapping_mul(6364136223846793005)
+					.wrapping_add(1442695040888963407);
+				data[pos] = (seed >> 40) as u8;
+			}
+			// Sometimes truncate too.
+			seed = seed
+				.wrapping_mul(6364136223846793005)
+				.wrapping_add(1442695040888963407);
+			if seed % 3 == 0 {
+				let cut = (seed >> 33) as usize % data.len().max(1);
+				data.truncate(cut);
+			}
+			let _ = validate_relay_calldata(&data, 1_000_000_000_000_000, &SELECTORS_FALLBACK);
+		}
+	}
+
+	/// Fuzz the fee slot specifically with full-width random words — this is the
+	/// field that historically panicked via `U256::as_u128()`.
+	#[test]
+	fn attack_fee_slot_fuzz_never_panics() {
+		let mut seed: u64 = 0x1234_5678_9ABC_DEF0;
+		for _ in 0..20_000 {
+			let mut d = base_private_transfer(0);
+			for byte in d[4 + 192..4 + 224].iter_mut() {
+				seed = seed
+					.wrapping_mul(6364136223846793005)
+					.wrapping_add(1442695040888963407);
+				*byte = (seed >> 40) as u8;
+			}
+			let _ = validate_relay_calldata(&d, 1_000_000_000_000_000, &SELECTORS_FALLBACK);
+		}
 	}
 }

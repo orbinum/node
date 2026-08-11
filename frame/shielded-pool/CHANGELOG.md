@@ -2,6 +2,84 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.18.0] - 2026-08-10
+
+### Added
+
+- **`private_transfer` carries a 56-byte OVK blob, published as its own event.**
+  A memo is sealed toward the RECIPIENT, so the sender cannot reopen it — a
+  sender who loses their vault loses all record of what they sent. The blob
+  wraps that memo's shared secret under the sender's outgoing viewing key, so
+  the sender can reach the same plaintext the recipient does.
+
+  The call takes a new trailing `ovk_blob: OvkBlob` argument and emits
+  `OutgoingBlobPublished { commitment, blob }`, bound to `commitments[0]` (the
+  recipient output by the wallet's positional convention). A separate event
+  rather than a field on `CommitmentsInserted`, which is shared with `shield`,
+  `shield_batch` and `unshield` — none of which carry a blob.
+
+  `OvkBlob` is a fixed `[u8; 56]`, so the SCALE codec rejects any other length
+  before the extrinsic decodes. It has **no `Default`**: that would produce the
+  56 zeros the design forbids, from a call that reads as harmless.
+
+  The chain treats the blob as opaque and validates only its length. It cannot
+  do otherwise — the contents are ciphertext and no key exists on chain — so it
+  accepts *any* 56 bytes, zeros included. A sender who opts out of
+  recoverability publishes 56 RANDOM bytes: zeros would be greppable, marking
+  the opt-out forever and making every user who chose it a trivially
+  identifiable set. Presence and size therefore reveal nothing.
+
+  **Breaking:** the extrinsic signature changes. `transaction_version` is
+  bumped 2 → 3, and wallet and runtime must ship together.
+
+### Security
+
+- **Pool admission tags one entry per NULLIFIER, in one namespace shared with
+  `unshield`.** `and_provides` contributes exactly ONE tag, so passing it a
+  `Vec` encoded the whole nullifier set (plus the relayer) into a single blob.
+  Three consequences, all of them free for an attacker since the fee is only
+  charged on execution:
+
+  - reordering the two inputs produced a different tag, minting a second
+    admissible pool entry for the same spend;
+  - two transfers sharing only ONE note (A+B and A+C) did not collide at all,
+    so a single note could back an unbounded number of pool entries;
+  - `private_transfer` and `unshield` used different tag prefixes, so the same
+    note could back one of each simultaneously.
+
+  Every variant propagates and is revalidated network-wide while at most one can
+  ever execute. Now each real nullifier contributes its own tag under a shared
+  `ShieldedPoolSpend` prefix, so pool admission mirrors the chain's rule: one
+  note, one entry.
+
+  The `relayer` deliberately no longer enters the tag. Binding it made a copy
+  with a swapped fee recipient a *separate* entry, so anyone could rebroadcast
+  another user's spend pointed at their own account and have both sit in the
+  pool. Keyed on the nullifier the two are mutually exclusive, so taking the fee
+  requires out-bidding — which means actually paying it.
+
+  Consensus is unaffected: this is admission policy, not state transition. Nodes
+  still running the old logic keep accepting the duplicate variants, so the
+  mitigation is only complete once the network updates.
+
+### Changed
+
+- **Weights re-benchmarked, clearing the STALE marker on `private_transfer`.**
+  The OVK argument landed without re-measuring, so the file carried an explicit
+  warning that its numbers predated the change. This run covers the pallet as it
+  now stands.
+
+  Every measured value moved up: +1.9% on average, +9% worst case.
+  `private_transfer`'s marginal cost per output went 910M → 989M ps and remains
+  parameterised by output count — `private_transfer_weight_scales_with_outputs`
+  still passes, so the second leaf insert is not under-priced.
+
+  Run: 2026-08-11, `ubuntu-32gb-hel1-1` (AMD EPYC-Genoa, 32 GB), steps 50 /
+  repeat 20, `--wasm-execution=compiled`. Note this is a **different instance**
+  from the `fsn1` host used through 0.17.0; same CPU family, but cloud instances
+  vary enough that small deltas across releases are measurement noise rather
+  than real cost changes.
+
 ## [0.17.0] - 2026-08-07
 
 ### Security

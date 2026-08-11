@@ -2,6 +2,36 @@
 
 All notable changes to `pallet-evm-precompile-shielded-pool` will be documented in this file.
 
+## [0.6.0] - 2026-08-10
+
+### Changed
+
+- **`privateTransfer` takes a trailing `bytes` — the 56-byte OVK blob — and its
+  selector changes with it.** A memo is sealed toward the recipient, so its
+  sender cannot reopen it; the blob wraps that memo's shared secret under the
+  sender's outgoing viewing key so a sender who loses their vault can still
+  recover what they sent.
+
+  ```
+  privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)        0x66ed2cd4
+  privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32,bytes)  0x1ec439cf
+  ```
+
+  The ABI head grows from 8 slots (256 bytes) to 9 (288). The decoder requires
+  the blob to be **exactly 56 bytes** — the SCALE route gets that from the type,
+  but calldata carries a dynamic `bytes`, so the EVM route has to pin it here.
+
+  **Breaking, in both directions.** A caller on the old selector is rejected as
+  unsupported; a caller on the new one against an old runtime is too. Wallet and
+  runtime must ship together. `transaction_version` is bumped 2 → 3.
+
+- **The selectors are now exported** as `selectors::{SHIELD, PRIVATE_TRANSFER,
+  UNSHIELD, CLAIM_SHIELDED_FEES}`, so the relay whitelist can be pinned against
+  the decoder's own constants in a test instead of keeping a hand-copied list in
+  sync. That copy drifting is ME-8, and it fails silently: a wrong selector is
+  merely "unsupported", so rejection tests stay green while relaying stops
+  working.
+
 ## [0.5.0] - 2026-08-07
 
 ### Security

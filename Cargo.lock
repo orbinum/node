@@ -3365,6 +3365,7 @@ dependencies = [
  "libsecp256k1",
  "log",
  "pallet-evm",
+ "pallet-evm-precompile-shielded-pool",
  "pallet-relayer-runtime-api",
  "pallet-shielded-pool-runtime-api",
  "parity-scale-codec",
@@ -7894,7 +7895,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-evm-precompile-shielded-pool"
-version = "0.4.0"
+version = "0.6.0"
 dependencies = [
  "fp-evm",
  "frame-support",

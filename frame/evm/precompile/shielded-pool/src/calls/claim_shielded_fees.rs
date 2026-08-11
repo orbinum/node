@@ -5,24 +5,44 @@
 //! `keccak256("claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes,uint32)")[0..4]`
 //! = `0x88d9deba`
 //!
-//! ## ABI layout (`input[4..]`)
-//! | Slot (bytes) | Type      | Field              |
-//! |-------------|-----------|--------------------|
-//! | 0..32       | `bytes32` | `commitment`       |
-//! | 32..64      | `uint256` | `amount`           |
-//! | 64..96      | `uint32`  | `asset_id`         |
-//! | 96..128     | `uint256` | offset → `memo`    |
-//! | 128..160    | `uint256` | offset → `proof`   |
-//! | 160..192    | `uint256` | offset → `public_signals` |
-//! | 192..224    | `uint32`  | `circuit_version`  |
+//! ## ABI layout (`input[4..]`) — standard head/tail encoding
 //!
-//! The **validator** origin is derived from `handle.context().caller`
-//! (the EVM address that sent the transaction), mapped to an `AccountId`
-//! via `AddressMapping`.  It must match the address registered in
-//! `pallet-relayer` that has accumulated pending fees.
+//! Seven 32-byte head slots. Dynamic types (`bytes`) store an OFFSET here and
+//! their real data in the tail; fixed types are inline. The `#` column matches
+//! the numbered steps in [`decode`] below, so the layout and the code that
+//! reads it stay in the same order.
 //!
-//! ## public_signals layout (76 bytes, off-chain encoded)
-//! `commitment[0..32] | value[32..40] | asset_id[40..44] | owner_hash[44..76]`
+//! | # | Slot (bytes) | Type      | Field                     |
+//! |---|--------------|-----------|---------------------------|
+//! | 1 | 0..32        | `bytes32` | `commitment`              |
+//! | 2 | 32..64       | `uint256` | `amount`                  |
+//! | 3 | 64..96       | `uint32`  | `asset_id`                |
+//! | 4 | 96..128      | `uint256` | offset → `memo`           |
+//! | 5 | 128..160     | `uint256` | offset → `proof`          |
+//! | 6 | 160..192     | `uint256` | offset → `public_signals` |
+//! | 7 | 192..224     | `uint32`  | `circuit_version`         |
+//!
+//! ## Field notes
+//!
+//! - **The claiming validator is not in the ABI.** It comes from
+//!   `handle.context().caller` — the EVM address that sent the transaction —
+//!   mapped to an `AccountId` via `AddressMapping`, and it must match the
+//!   address `pallet-relayer` has accumulated pending fees for. Taking it from
+//!   calldata would let anyone claim another validator's fees.
+//! - **`public_signals`** is a 76-byte off-chain blob, laid out as
+//!   `commitment[0..32] | value[32..40] | asset_id[40..44] | owner_hash[44..76]`.
+//!   It is what BINDS the head parameters to the proof: the pallet checks that
+//!   slots 1–3 match the values embedded here, so a caller cannot present a
+//!   valid proof and then claim a different amount or asset with it. Hence the
+//!   exact-length check in step 6 — a short blob would leave those comparisons
+//!   reading past the end or against garbage.
+//!
+//! ## Why the length gate is not a single check
+//!
+//! The head is 224 bytes, but the gate at step 0 only requires 192. That is
+//! deliberate: `circuit_version` (slot 7) was appended by a later upgrade, so
+//! it is checked where it is read (step 7) and the error names the missing
+//! field instead of reporting a generic "too short".
 
 use alloc::vec::Vec;
 
@@ -39,12 +59,27 @@ pub const SELECTOR: [u8; 4] = [0x88, 0xd9, 0xde, 0xba];
 /// Maximum byte length of a serialised Groth16 proof accepted by the pallet.
 const MAX_PROOF_LEN: u32 = 512;
 
+/// Exact length of the `public_signals` blob — see the module header for its
+/// layout. Not a maximum: the pallet indexes fixed offsets inside it.
+const PUBLIC_SIGNALS_LEN: usize = 76;
+
+/// Minimum `params` length: the six head slots this call has always had.
+/// Slot 7 came later and is checked where it is read.
+const HEAD_SIZE_BASE: usize = 192;
+/// The full seven-slot head, through `circuit_version`.
+const HEAD_SIZE_FULL: usize = 224;
+
 /// Decodes the ABI-encoded `input` and returns a ready-to-dispatch
 /// `claim_shielded_fees` call.
 ///
-/// The validator `AccountId` is NOT part of the ABI — it is derived from
-/// `handle.context().caller` so the pallet can look up the correct pending
-/// fee balance in `pallet-relayer`.
+/// The steps below are numbered to match the ABI table in the module header.
+/// The validator `AccountId` is NOT part of the ABI — the pallet derives it
+/// from `handle.context().caller` to look up the right pending-fee balance in
+/// `pallet-relayer`, which is why `_handle` goes unused here.
+///
+/// Everything here decodes UNTRUSTED calldata — an EVM caller controls every
+/// byte — so each helper is bounds-checked and every word is rejected rather
+/// than truncated when it does not fit its declared type.
 pub fn decode<T>(
 	_handle: &impl PrecompileHandle,
 	input: &[u8],
@@ -53,15 +88,26 @@ where
 	T: pallet_shielded_pool::Config,
 	pallet_shielded_pool::BalanceOf<T>: TryFrom<u128>,
 {
-	// Minimum head section: 6 fixed slots × 32 bytes = 192 bytes.
 	let params = &input[4..];
-	if params.len() < 192 {
+
+	// ── 0. Head gate ─────────────────────────────────────────────────────────
+	// Covers slots 1–6, the reads done unconditionally below. Slot 7 is gated
+	// where it is read.
+	if params.len() < HEAD_SIZE_BASE {
 		return Err(err("claimShieldedFees: input too short"));
 	}
 
+	// ── 1. commitment (slot 0, inline) ───────────────────────────────────────
+	// The fee note's commitment. Cross-checked against `public_signals[0..32]`
+	// by the pallet — see step 6.
 	let commitment = pallet_shielded_pool::Commitment::from(abi::read_bytes32(params, 0)?);
 
-	// Reject zero-amount calls early.
+	// ── 2. amount (slot 1, inline) ───────────────────────────────────────────
+	// Zero is refused before anything else is built: claiming nothing would
+	// still insert a leaf and move the Merkle root. Then two fallible narrowing
+	// steps — the ABI word is a `uint256` while the pallet's balance is at most
+	// `u128`. `try_into` rather than `as_u128()`, which panics above 2^128 on a
+	// word the caller fully controls.
 	let amount_u256 = U256::from_big_endian(&params[32..64]);
 	if amount_u256.is_zero() {
 		return Err(err("claimShieldedFees: amount must be non-zero"));
@@ -74,12 +120,20 @@ where
 			.map_err(|_| err("claimShieldedFees: amount conversion failed"))?
 	};
 
+	// ── 3. asset_id (slot 2, inline) ─────────────────────────────────────────
 	let asset_id = abi::decode_u32(&params[64..96])?;
 
+	// ── 4. memo (slot 3 → tail) ──────────────────────────────────────────────
+	// `FrameEncryptedMemo::new` pins the pallet's exact size; the chain never
+	// reads inside it.
 	let memo_bytes: Vec<u8> = abi::decode_bytes_at_slot(params, 96)?;
 	let memo = pallet_shielded_pool::FrameEncryptedMemo::new(memo_bytes)
 		.map_err(|_| err("claimShieldedFees: memo too long or wrong size"))?;
 
+	// ── 5. proof (slot 4 → tail) ─────────────────────────────────────────────
+	// Bounded on the way in: `MAX_PROOF_LEN` is the pallet's ceiling, so an
+	// oversized proof is refused here rather than at dispatch. Empty is refused
+	// separately — the ZK verifier would reject it anyway, but far later.
 	let proof: frame_support::BoundedVec<u8, frame_support::traits::ConstU32<MAX_PROOF_LEN>> =
 		abi::decode_bytes_at_slot(params, 128)?
 			.try_into()
@@ -89,16 +143,24 @@ where
 		return Err(err("claimShieldedFees: proof must be non-empty"));
 	}
 
+	// ── 6. public_signals (slot 5 → tail) ────────────────────────────────────
+	// EXACTLY 76 bytes, not "at most": the pallet reads fixed offsets inside
+	// this blob to check that steps 1–3 match what the proof actually attests
+	// to. A short blob would leave those comparisons reading past the end, and
+	// a long one would hide trailing bytes nothing verifies.
 	let public_signals_raw: Vec<u8> = abi::decode_bytes_at_slot(params, 160)?;
 
-	if public_signals_raw.len() != 76 {
+	if public_signals_raw.len() != PUBLIC_SIGNALS_LEN {
 		return Err(err("claimShieldedFees: public_signals must be 76 bytes"));
 	}
 	let public_signals = public_signals_raw
 		.try_into()
 		.map_err(|_| err("claimShieldedFees: public_signals too long"))?;
 
-	if params.len() < 224 {
+	// ── 7. circuit_version (slot 6, inline) ──────────────────────────────────
+	// Appended by a later upgrade, so it gets its own gate with an error that
+	// names it rather than a generic "too short".
+	if params.len() < HEAD_SIZE_FULL {
 		return Err(err(
 			"claimShieldedFees: input too short (missing circuitVersion)",
 		));

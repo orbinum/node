@@ -37,6 +37,23 @@ fn expect_error(result: Result<fp_evm::PrecompileOutput, PrecompileFailure>) {
 	);
 }
 
+/// Like `expect_error`, but pins the REASON.
+///
+/// `expect_error` only checks the error variant, and this decoder has a dozen
+/// ways to fail before it ever reaches the field under test — so a test named
+/// after one rejection can pass on a completely different one.
+fn expect_error_msg(result: Result<fp_evm::PrecompileOutput, PrecompileFailure>, needle: &str) {
+	match result {
+		Err(PrecompileFailure::Error {
+			exit_status: ExitError::Other(msg),
+		}) => assert!(
+			msg.contains(needle),
+			"expected an error containing {needle:?}, got: {msg:?}"
+		),
+		other => panic!("expected PrecompileFailure::Error(Other), got: {other:?}"),
+	}
+}
+
 fn assert_success(result: Result<fp_evm::PrecompileOutput, PrecompileFailure>) {
 	match result {
 		Ok(out) => assert_eq!(out.exit_status, fp_evm::ExitSucceed::Stopped),
@@ -117,7 +134,55 @@ fn encode_shield(asset_id: u32, commitment: [u8; 32], memo: &[u8]) -> Vec<u8> {
 	input
 }
 
-/// `privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)`  selector `0x8c0f5d24`
+/// `privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32,bytes)`  selector `0x1ec439cf`
+#[allow(clippy::too_many_arguments)]
+fn encode_private_transfer_with_blob(
+	proof: &[u8],
+	merkle_root: [u8; 32],
+	nullifiers: &[[u8; 32]],
+	commitments: &[[u8; 32]],
+	memos: &[Vec<u8>],
+	asset_id: u32,
+	fee: u128,
+	circuit_version: u32,
+	ovk_blob: &[u8],
+) -> Vec<u8> {
+	let proof_enc = encode_bytes(proof);
+	let nullifiers_enc = encode_bytes32_array(nullifiers);
+	let commitments_enc = encode_bytes32_array(commitments);
+	let memos_enc = encode_bytes_array(memos);
+	let blob_enc = encode_bytes(ovk_blob);
+
+	// head: 9 slots × 32 = 288 bytes (trailing bytes = ovk_blob)
+	let head_size = 288usize;
+	let off_proof = head_size;
+	let off_nullifiers = off_proof + proof_enc.len();
+	let off_commitments = off_nullifiers + nullifiers_enc.len();
+	let off_memos = off_commitments + commitments_enc.len();
+	let off_blob = off_memos + memos_enc.len();
+
+	let mut input = crate::calls::private_transfer::SELECTOR.to_vec();
+	let mut head = vec![0u8; head_size];
+	head[0..32].copy_from_slice(&u256_word(off_proof));
+	head[32..64].copy_from_slice(&merkle_root);
+	head[64..96].copy_from_slice(&u256_word(off_nullifiers));
+	head[96..128].copy_from_slice(&u256_word(off_commitments));
+	head[128..160].copy_from_slice(&u256_word(off_memos));
+	head[188..192].copy_from_slice(&asset_id.to_be_bytes());
+	head[192..224].copy_from_slice(&u256_word_u128(fee));
+	head[252..256].copy_from_slice(&circuit_version.to_be_bytes());
+	head[256..288].copy_from_slice(&u256_word(off_blob));
+
+	input.extend_from_slice(&head);
+	input.extend_from_slice(&proof_enc);
+	input.extend_from_slice(&nullifiers_enc);
+	input.extend_from_slice(&commitments_enc);
+	input.extend_from_slice(&memos_enc);
+	input.extend_from_slice(&blob_enc);
+	input
+}
+
+/// Same as `encode_private_transfer_with_blob`, with a valid-length blob.
 #[allow(clippy::too_many_arguments)]
 fn encode_private_transfer(
 	proof: &[u8],
@@ -129,35 +194,17 @@ fn encode_private_transfer(
 	fee: u128,
 	circuit_version: u32,
 ) -> Vec<u8> {
-	let proof_enc = encode_bytes(proof);
-	let nullifiers_enc = encode_bytes32_array(nullifiers);
-	let commitments_enc = encode_bytes32_array(commitments);
-	let memos_enc = encode_bytes_array(memos);
-
-	// head: 8 slots × 32 = 256 bytes (added trailing uint32 circuitVersion)
-	let head_size = 256usize;
-	let off_proof = head_size;
-	let off_nullifiers = off_proof + proof_enc.len();
-	let off_commitments = off_nullifiers + nullifiers_enc.len();
-	let off_memos = off_commitments + commitments_enc.len();
-
-	let mut input = vec![0x66, 0xed, 0x2c, 0xd4];
-	let mut head = vec![0u8; head_size];
-	head[0..32].copy_from_slice(&u256_word(off_proof));
-	head[32..64].copy_from_slice(&merkle_root);
-	head[64..96].copy_from_slice(&u256_word(off_nullifiers));
-	head[96..128].copy_from_slice(&u256_word(off_commitments));
-	head[128..160].copy_from_slice(&u256_word(off_memos));
-	head[188..192].copy_from_slice(&asset_id.to_be_bytes());
-	head[192..224].copy_from_slice(&u256_word_u128(fee));
-	head[252..256].copy_from_slice(&circuit_version.to_be_bytes());
-
-	input.extend_from_slice(&head);
-	input.extend_from_slice(&proof_enc);
-	input.extend_from_slice(&nullifiers_enc);
-	input.extend_from_slice(&commitments_enc);
-	input.extend_from_slice(&memos_enc);
-	input
+	encode_private_transfer_with_blob(
+		proof,
+		merkle_root,
+		nullifiers,
+		commitments,
+		memos,
+		asset_id,
+		fee,
+		circuit_version,
+		&[0x0Bu8; 56],
+	)
 }
 
 /// `unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)` selector `0x4e505348`
@@ -176,7 +223,7 @@ fn encode_unshield(
 ) -> Vec<u8> {
 	// head: 10 slots × 32 = 320 bytes (added trailing uint32 circuitVersion);
 	// tails (proof, memo) appended after.
-	let mut input = vec![0x4e, 0x50, 0x53, 0x48];
+	let mut input = crate::calls::unshield::SELECTOR.to_vec();
 	let mut head = vec![0u8; 320];
 	let proof_offset = 320usize;
 	let memo_offset = proof_offset + encode_bytes(proof).len();
@@ -459,7 +506,7 @@ fn shield_with_zero_value_rejected() {
 #[test]
 fn private_transfer_rejects_truncated_input() {
 	new_test_ext().execute_with(|| {
-		let mut h = MockHandle::new(vec![0x8c, 0x0f, 0x5d, 0x24]);
+		let mut h = MockHandle::new(crate::calls::private_transfer::SELECTOR.to_vec());
 		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
 	});
 }
@@ -547,6 +594,103 @@ fn private_transfer_rejects_mismatched_commitment_memo_count() {
 		let mut h = MockHandle::new(input);
 		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
 	});
+}
+
+#[test]
+fn private_transfer_rejects_blob_of_55_bytes() {
+	new_test_ext().execute_with(|| {
+		do_shield(canon(0x55), 5_000);
+		let root = current_root();
+		let input = encode_private_transfer_with_blob(
+			&[0x01],
+			root,
+			&[[0x11; 32]],
+			&[canon(0x33)],
+			&[vec![0xAA; 180]],
+			0,
+			0,
+			1,
+			&[0x0B; 55], // one byte short
+		);
+		let mut h = MockHandle::new(input);
+		expect_error_msg(
+			ShieldedPoolPrecompile::<Test>::execute(&mut h),
+			"ovk blob must be exactly 56 bytes",
+		);
+	});
+}
+
+#[test]
+fn private_transfer_rejects_blob_of_57_bytes() {
+	new_test_ext().execute_with(|| {
+		do_shield(canon(0x55), 5_000);
+		let root = current_root();
+		let input = encode_private_transfer_with_blob(
+			&[0x01],
+			root,
+			&[[0x11; 32]],
+			&[canon(0x33)],
+			&[vec![0xAA; 180]],
+			0,
+			0,
+			1,
+			&[0x0B; 57], // one byte long
+		);
+		let mut h = MockHandle::new(input);
+		expect_error_msg(
+			ShieldedPoolPrecompile::<Test>::execute(&mut h),
+			"ovk blob must be exactly 56 bytes",
+		);
+	});
+}
+
+#[test]
+fn private_transfer_rejects_empty_blob() {
+	// The likeliest wrong shape in practice: a caller that knows about the new
+	// field but has nothing to put there emits `bytes` of length 0, not 55. If
+	// that decoded, the sender would silently lose recoverability.
+	new_test_ext().execute_with(|| {
+		do_shield(canon(0x55), 5_000);
+		let root = current_root();
+		let input = encode_private_transfer_with_blob(
+			&[0x01],
+			root,
+			&[[0x11; 32]],
+			&[canon(0x33)],
+			&[vec![0xAA; 180]],
+			0,
+			0,
+			1,
+			&[],
+		);
+		let mut h = MockHandle::new(input);
+		expect_error_msg(
+			ShieldedPoolPrecompile::<Test>::execute(&mut h),
+			"ovk blob must be exactly 56 bytes",
+		);
+	});
+}
+
+#[test]
+fn private_transfer_rejects_missing_blob_slot() {
+	// Calldata with the old 8-slot head (256 bytes of params) must be rejected
+	// by the 288-byte minimum before any slot is decoded.
+	new_test_ext().execute_with(|| {
+		let mut input = crate::calls::private_transfer::SELECTOR.to_vec();
+		input.extend_from_slice(&[0u8; 256]);
+		let mut h = MockHandle::new(input);
+		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
+	});
+}
+
+#[test]
+fn private_transfer_selector_matches_signature() {
+	// The constant must be derived from the ABI signature — this is the guard
+	// that would have caught ME-8 (whitelist selector never matching the code).
+	let sig =
+		b"privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32,bytes)";
+	let hash = sp_io::hashing::keccak_256(sig);
+	assert_eq!(hash[..4], crate::calls::private_transfer::SELECTOR);
 }
 
 #[test]
@@ -887,4 +1031,414 @@ fn shield_asset_id_round_trips_through_abi() {
 			"asset_id {id} must round-trip"
 		);
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Adversarial ABI battery — the attacker controls every byte of `input`
+//
+// This is the only surface where untrusted bytes reach the node directly: an
+// EVM caller can send arbitrary calldata to the precompile address. Each test
+// below is an attempt to make the decoder panic, over-allocate, or read out of
+// bounds. A panic here is a node crash, not a rejected transaction.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Truncated calldata at every length from the selector to a full head. None of
+/// these may panic — the decoder must reject each one cleanly.
+#[test]
+fn attack_truncation_at_every_offset_never_panics() {
+	new_test_ext().execute_with(|| {
+		let full = encode_private_transfer(
+			&[0x01u8; 72],
+			canon(0xBB),
+			&[canon(1)],
+			&[canon(2)],
+			&[vec![0x01u8; 180]],
+			0,
+			0,
+			1,
+		);
+		for len in 0..full.len().min(600) {
+			let mut h = MockHandle::new(full[..len].to_vec());
+			// Must not panic. Any Result is acceptable.
+			let _ = ShieldedPoolPrecompile::<Test>::execute(&mut h);
+		}
+	});
+}
+
+/// An offset pointing back into the head makes the "length" word overlap the
+/// caller-controlled head — a classic way to fabricate a huge length.
+#[test]
+fn attack_self_referential_offset_is_refused() {
+	new_test_ext().execute_with(|| {
+		let mut input = encode_private_transfer(
+			&[0x01u8; 72],
+			canon(0xBB),
+			&[canon(1)],
+			&[canon(2)],
+			&[vec![0x01u8; 180]],
+			0,
+			0,
+			1,
+		);
+		// Point the proof offset at slot 0 of the head (offset 0 → itself).
+		input[4..36].copy_from_slice(&[0u8; 32]);
+		let mut h = MockHandle::new(input);
+		let _ = ShieldedPoolPrecompile::<Test>::execute(&mut h);
+	});
+}
+
+/// Every dynamic offset set to u256::MAX. word_to_usize must reject before any
+/// slicing arithmetic happens.
+#[test]
+fn attack_max_u256_offsets_are_refused_not_truncated() {
+	new_test_ext().execute_with(|| {
+		for slot in [0usize, 64, 96, 128, 256] {
+			let mut input = encode_private_transfer(
+				&[0x01u8; 72],
+				canon(0xBB),
+				&[canon(1)],
+				&[canon(2)],
+				&[vec![0x01u8; 180]],
+				0,
+				0,
+				1,
+			);
+			input[4 + slot..4 + slot + 32].copy_from_slice(&[0xFFu8; 32]);
+			let mut h = MockHandle::new(input);
+			expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
+		}
+	});
+}
+
+/// 2^32 + small: the low 32 bits look like a valid offset while the value is
+/// astronomically out of range. This is the exact shape that `low_u32` let
+/// through historically.
+#[test]
+fn attack_offset_above_u32_that_looks_benign_is_refused() {
+	new_test_ext().execute_with(|| {
+		let mut input = encode_private_transfer(
+			&[0x01u8; 72],
+			canon(0xBB),
+			&[canon(1)],
+			&[canon(2)],
+			&[vec![0x01u8; 180]],
+			0,
+			0,
+			1,
+		);
+		// 2^32 + 288 — low 32 bits read as 288, a perfectly plausible offset.
+		let sneaky = U256::from(1u64 << 32) + U256::from(288u64);
+		let word = sneaky.to_big_endian();
+		input[4..36].copy_from_slice(&word);
+		let mut h = MockHandle::new(input);
+		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
+	});
+}
+
+/// A declared array count of ~1e9 must be refused BEFORE Vec::with_capacity
+/// reserves for it — otherwise one call OOMs the node.
+#[test]
+fn attack_huge_array_count_does_not_allocate() {
+	new_test_ext().execute_with(|| {
+		let mut input = encode_private_transfer(
+			&[0x01u8; 72],
+			canon(0xBB),
+			&[canon(1)],
+			&[canon(2)],
+			&[vec![0x01u8; 180]],
+			0,
+			0,
+			1,
+		);
+		// Find the nullifiers array offset and overwrite its count word.
+		let off = U256::from_big_endian(&input[4 + 64..4 + 96]).as_usize();
+		let count_at = 4 + off;
+		if count_at + 32 <= input.len() {
+			let huge = U256::from(1u64 << 30).to_big_endian();
+			input[count_at..count_at + 32].copy_from_slice(&huge);
+		}
+		let mut h = MockHandle::new(input);
+		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
+	});
+}
+
+/// A blob of every wrong length must be refused with the blob's own message —
+/// not silently truncated or padded into a valid-looking 56 bytes.
+#[test]
+fn attack_every_wrong_blob_length_is_refused() {
+	new_test_ext().execute_with(|| {
+		for len in [0usize, 1, 32, 55, 57, 64, 1024] {
+			let input = encode_private_transfer_with_blob(
+				&[0x01u8; 72],
+				canon(0xBB),
+				&[canon(1)],
+				&[canon(2)],
+				&[vec![0x01u8; 180]],
+				0,
+				0,
+				1,
+				&vec![0x0Bu8; len],
+			);
+			let mut h = MockHandle::new(input);
+			expect_error_msg(
+				ShieldedPoolPrecompile::<Test>::execute(&mut h),
+				"ovk blob must be exactly 56 bytes",
+			);
+		}
+	});
+}
+
+/// A fee word of u256::MAX must not panic converting to u128 — it must be
+/// rejected as an overflow.
+#[test]
+fn attack_max_fee_word_is_refused_not_panicking() {
+	new_test_ext().execute_with(|| {
+		let mut input = encode_private_transfer(
+			&[0x01u8; 72],
+			canon(0xBB),
+			&[canon(1)],
+			&[canon(2)],
+			&[vec![0x01u8; 180]],
+			0,
+			0,
+			1,
+		);
+		input[4 + 192..4 + 224].copy_from_slice(&[0xFFu8; 32]);
+		let mut h = MockHandle::new(input);
+		expect_error_msg(
+			ShieldedPoolPrecompile::<Test>::execute(&mut h),
+			"fee overflow",
+		);
+	});
+}
+
+/// asset_id and circuit_version live in u32 slots. A word with high bits set
+/// must be rejected, never truncated to a plausible small number.
+#[test]
+fn attack_oversized_u32_slots_are_refused_not_truncated() {
+	new_test_ext().execute_with(|| {
+		for slot in [160usize, 224] {
+			let mut input = encode_private_transfer(
+				&[0x01u8; 72],
+				canon(0xBB),
+				&[canon(1)],
+				&[canon(2)],
+				&[vec![0x01u8; 180]],
+				0,
+				0,
+				1,
+			);
+			// 2^32 exactly: truncates to 0 if the decoder uses low_u32.
+			let word = U256::from(1u64 << 32).to_big_endian();
+			input[4 + slot..4 + slot + 32].copy_from_slice(&word);
+			let mut h = MockHandle::new(input);
+			expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
+		}
+	});
+}
+
+/// Random fuzz over the whole calldata: flip bytes everywhere and assert the
+/// decoder never panics. Deterministic (fixed LCG) so a failure reproduces.
+#[test]
+fn attack_byte_fuzz_never_panics() {
+	new_test_ext().execute_with(|| {
+		let base = encode_private_transfer(
+			&[0x01u8; 72],
+			canon(0xBB),
+			&[canon(1)],
+			&[canon(2)],
+			&[vec![0x01u8; 180]],
+			0,
+			0,
+			1,
+		);
+		let mut seed: u64 = 0x2545F4914F6CDD1D;
+		for _ in 0..3000 {
+			let mut input = base.clone();
+			// 1–8 mutations per round.
+			seed = seed
+				.wrapping_mul(6364136223846793005)
+				.wrapping_add(1442695040888963407);
+			let muts = 1 + (seed >> 60) as usize % 8;
+			for _ in 0..muts {
+				seed = seed
+					.wrapping_mul(6364136223846793005)
+					.wrapping_add(1442695040888963407);
+				let pos = (seed >> 33) as usize % input.len();
+				seed = seed
+					.wrapping_mul(6364136223846793005)
+					.wrapping_add(1442695040888963407);
+				input[pos] = (seed >> 40) as u8;
+			}
+			let mut h = MockHandle::new(input);
+			// Only requirement: no panic.
+			let _ = ShieldedPoolPrecompile::<Test>::execute(&mut h);
+		}
+	});
+}
+
+/// Fuzz with truncation AND mutation combined — the shape most likely to hit an
+/// unchecked slice near a boundary.
+#[test]
+fn attack_truncated_fuzz_never_panics() {
+	new_test_ext().execute_with(|| {
+		let base = encode_private_transfer(
+			&[0x01u8; 72],
+			canon(0xBB),
+			&[canon(1)],
+			&[canon(2)],
+			&[vec![0x01u8; 180]],
+			0,
+			0,
+			1,
+		);
+		let mut seed: u64 = 0x9E3779B97F4A7C15;
+		for _ in 0..2000 {
+			seed = seed
+				.wrapping_mul(6364136223846793005)
+				.wrapping_add(1442695040888963407);
+			let cut = 4 + (seed >> 33) as usize % base.len().max(1);
+			let mut input = base[..cut.min(base.len())].to_vec();
+			if !input.is_empty() {
+				seed = seed
+					.wrapping_mul(6364136223846793005)
+					.wrapping_add(1442695040888963407);
+				let pos = (seed >> 33) as usize % input.len();
+				input[pos] = (seed >> 40) as u8;
+			}
+			let mut h = MockHandle::new(input);
+			let _ = ShieldedPoolPrecompile::<Test>::execute(&mut h);
+		}
+	});
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Adversarial: the OVK blob over the EVM route
+//
+// The SCALE route gets its 56-byte guarantee from the type itself ([u8;56]).
+// The EVM route does not: calldata carries a dynamic `bytes`, so the decoder is
+// the ONLY thing pinning the length. These probe that boundary from the side an
+// attacker controls byte-for-byte.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A blob whose declared ABI length disagrees with the bytes that follow must
+/// be refused — not padded, not truncated into a valid-looking 56.
+#[test]
+fn attack_blob_length_prefix_lying_about_its_payload_is_refused() {
+	new_test_ext().execute_with(|| {
+		let mut input = encode_private_transfer(
+			&[0x01u8; 72],
+			canon(0xBB),
+			&[canon(1)],
+			&[canon(2)],
+			&[vec![0x01u8; 180]],
+			0,
+			0,
+			1,
+		);
+		// Walk to the blob's length word (head slot 8 → offset) and claim 56
+		// bytes are 4096 — the payload after it is still only 56.
+		let blob_off = U256::from_big_endian(&input[4 + 256..4 + 288]).as_usize();
+		let len_at = 4 + blob_off;
+		if len_at + 32 <= input.len() {
+			let lie = U256::from(4096u64).to_big_endian();
+			input[len_at..len_at + 32].copy_from_slice(&lie);
+		}
+		let mut h = MockHandle::new(input);
+		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
+	});
+}
+
+/// The blob's ABI offset pointing into the middle of another field must not let
+/// the decoder reinterpret that field's bytes as a blob.
+#[test]
+fn attack_blob_offset_aliasing_another_field_is_refused_or_rejected() {
+	new_test_ext().execute_with(|| {
+		let mut input = encode_private_transfer(
+			&[0x01u8; 72],
+			canon(0xBB),
+			&[canon(1)],
+			&[canon(2)],
+			&[vec![0x01u8; 180]],
+			0,
+			0,
+			1,
+		);
+		// Point the blob offset at the proof's region: whatever it reads there
+		// is not a 56-byte blob, so it must fail rather than silently accept.
+		let proof_off = U256::from_big_endian(&input[4..36]);
+		input[4 + 256..4 + 288].copy_from_slice(&proof_off.to_big_endian());
+		let mut h = MockHandle::new(input);
+		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
+	});
+}
+
+/// Every blob byte pattern of the CORRECT length must decode — the chain holds
+/// no key and must not editorialize about ciphertext. Zeros included: the
+/// all-zero blob is a wallet-side smell, never a consensus rule.
+#[test]
+fn attack_any_56_byte_blob_decodes_including_zeros() {
+	new_test_ext().execute_with(|| {
+		for pattern in [0x00u8, 0xFF, 0x0B, 0xAA] {
+			let input = encode_private_transfer_with_blob(
+				&[0x01u8; 72],
+				canon(0xBB),
+				&[canon(1)],
+				&[canon(2)],
+				&[vec![0x01u8; 180]],
+				0,
+				0,
+				1,
+				&[pattern; 56],
+			);
+			let mut h = MockHandle::new(input);
+			// Reaches dispatch (the mock has no registered asset, so the error
+			// is a dispatch one, never an ABI/blob-length rejection).
+			let result = ShieldedPoolPrecompile::<Test>::execute(&mut h);
+			if let Err(fp_evm::PrecompileFailure::Error {
+				exit_status: ExitError::Other(msg),
+			}) = &result
+			{
+				assert!(
+					!msg.contains("ovk blob"),
+					"pattern {pattern:#x} must not be rejected as a blob: {msg}"
+				);
+			}
+		}
+	});
+}
+
+/// The memo bytes where `sourcePk` sits are ciphertext to the chain. Two calls
+/// differing only there must be treated identically by the decoder — a decoder
+/// that could tell them apart would mean the field was not encrypted.
+#[test]
+fn attack_decoder_is_blind_to_the_sourcepk_region_of_the_memo() {
+	new_test_ext().execute_with(|| {
+		let mut memo_a = vec![0x01u8; 180];
+		let mut memo_b = vec![0x01u8; 180];
+		memo_a[84..116].fill(0x00);
+		memo_b[84..116].fill(0xAB);
+
+		let outcomes: Vec<bool> = [memo_a, memo_b]
+			.into_iter()
+			.map(|memo| {
+				let input = encode_private_transfer(
+					&[0x01u8; 72],
+					canon(0xBB),
+					&[canon(1)],
+					&[canon(2)],
+					&[memo],
+					0,
+					0,
+					1,
+				);
+				let mut h = MockHandle::new(input);
+				ShieldedPoolPrecompile::<Test>::execute(&mut h).is_ok()
+			})
+			.collect();
+		assert_eq!(
+			outcomes[0], outcomes[1],
+			"the decoder must not distinguish memos by their sourcePk region"
+		);
+	});
 }

@@ -6,6 +6,20 @@ pub(crate) mod abi;
 pub(crate) mod calls;
 pub(crate) mod dispatch;
 
+/// The ABI selectors this precompile answers to.
+///
+/// Exported so the relay whitelist can be pinned against them in a test rather
+/// than kept in sync by hand. That copy drifting from this one is not a
+/// hypothetical: it is what ME-8 was, and it went unnoticed because a wrong
+/// selector still yields "unsupported selector" — the rejection tests stay
+/// green while the accept path quietly stops working.
+pub mod selectors {
+	pub use crate::calls::claim_shielded_fees::SELECTOR as CLAIM_SHIELDED_FEES;
+	pub use crate::calls::private_transfer::SELECTOR as PRIVATE_TRANSFER;
+	pub use crate::calls::shield::SELECTOR as SHIELD;
+	pub use crate::calls::unshield::SELECTOR as UNSHIELD;
+}
+
 use core::marker::PhantomData;
 
 use fp_evm::{ExitError, Precompile, PrecompileFailure, PrecompileHandle, PrecompileResult};
@@ -19,7 +33,7 @@ use sp_runtime::traits::Dispatchable;
 /// | Selector     | Solidity signature                                                                            |
 /// |-------------|-----------------------------------------------------------------------------------------------|
 /// | `0x9feb22ea` | `shield(uint32,bytes32,bytes)` — payable, amount = `msg.value`                               |
-/// | `0x66ed2cd4` | `privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)`            |
+/// | `0x1ec439cf` | `privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32,bytes)`      |
 /// | `0x4e505348` | `unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)`         |
 /// | `0x88d9deba` | `claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes,uint32)` — signed (validators)   |
 ///

@@ -66,6 +66,10 @@ pallet-shielded-pool-runtime-api = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 tempfile = "3.21.0"
+# Pins the relay's selector whitelist against the precompile's own constants
+# (see relay::validation tests). A dev-dependency only: the relay must not
+# depend on runtime crates at build time.
+pallet-evm-precompile-shielded-pool = { workspace = true, features = ["std"] }
 # Substrate
 sc-block-builder = { workspace = true }
 sc-client-db = { workspace = true, features = ["rocksdb"] }

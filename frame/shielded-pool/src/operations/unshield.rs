@@ -1,3 +1,38 @@
+//! `unshield` — moving shielded value back out to a public account.
+//!
+//! The only operation that takes value OUT of the pool, which makes it the one
+//! whose failure modes lose real money rather than just privacy. Two shapes:
+//!
+//! - **total** — the whole note leaves, `change_commitment` is all zeros and
+//!   there is no change memo;
+//! - **partial** — part leaves and the remainder returns as a new shielded note.
+//!
+//! That single flag drives most of the branching below.
+//!
+//! ## Order of steps
+//!
+//! Numbered below. Every validation (steps 1–6) runs BEFORE any state changes
+//! (steps 7–10), and proof verification (step 6) runs last among the checks so a
+//! transaction failing a cheap test never costs a pairing.
+//!
+//! | # | Step                                | Touches state |
+//! |---|-------------------------------------|---------------|
+//! | 1 | asset, amount, recipient sane       | no            |
+//! | 2 | Merkle root known                   | no            |
+//! | 3 | nullifier canonical and unspent     | no            |
+//! | 4 | change note consistent with the flag| no            |
+//! | 5 | pool solvent, fee meets the floor   | no            |
+//! | 6 | verify the proof                    | no            |
+//! | 7 | pay the recipient                   | yes           |
+//! | 8 | accrue the relay fee, adjust balance| yes           |
+//! | 9 | insert the change note              | yes           |
+//! |10 | burn the input, emit `Unshielded`   | yes           |
+//!
+//! Every check here is also enforced at pool admission
+//! ([`crate::validate_unsigned::unshield`]), which may reject more but never
+//! less: admission can be skipped by a malicious block author, so this is the
+//! authority.
+
 use crate::{
 	merkle::MerkleTreeService,
 	pallet::{CommitmentMemos, Config, Error, Event, Pallet},
@@ -60,6 +95,10 @@ impl UnshieldOperation {
 		relayer_evm: Option<sp_core::H160>,
 		circuit_version: u32,
 	) -> DispatchResult {
+		// ── 1. Asset, amount, recipient ──────────────────────────────────────
+		// The pool account is refused as a recipient: paying the pool from the
+		// pool would credit the tracked balance nothing while `decrease_balance`
+		// below still runs, silently unbacking the accounting.
 		let asset = AssetRepository::get_asset::<T>(asset_id).ok_or(Error::<T>::InvalidAssetId)?;
 		ensure!(asset.is_verified, Error::<T>::AssetNotVerified);
 		ensure!(!amount.is_zero(), Error::<T>::InvalidAmount);
@@ -67,17 +106,28 @@ impl UnshieldOperation {
 			recipient != Pallet::<T>::pool_account_id(),
 			Error::<T>::InvalidRecipient
 		);
+
+		// ── 2. Merkle root ───────────────────────────────────────────────────
 		ensure!(
 			MerkleRepository::is_known_root::<T>(&merkle_root),
 			Error::<T>::UnknownMerkleRoot
 		);
+
+		// ── 3. Nullifier ─────────────────────────────────────────────────────
+		// Canonical because `n` and `n + p` are different storage keys for one
+		// field element; unspent against the on-chain set. Unlike a transfer
+		// there is exactly one input and no dummy padding.
 		ensure!(nullifier.is_canonical(), Error::<T>::InvalidPublicSignals);
 		ensure!(
 			!NullifierRepository::is_used::<T>(&nullifier),
 			Error::<T>::NullifierAlreadyUsed
 		);
 
-		// If a change note is present, ensure its commitment is not already in the tree.
+		// ── 4. Change note, consistent with the total/partial flag ───────────
+		// A zero `change_commitment` means TOTAL. The two branches are mutually
+		// exclusive on purpose: a memo on a total unshield would describe a note
+		// that does not exist, and a partial one whose commitment is already in
+		// the tree would give one note two leaves.
 		let has_change = change_commitment != [0u8; 32];
 		if has_change {
 			let change_comm = Commitment::new(change_commitment);
@@ -86,7 +136,8 @@ impl UnshieldOperation {
 				!CommitmentRepository::exists::<T>(&change_comm),
 				Error::<T>::CommitmentAlreadyExists
 			);
-			// For partial unshield, memo must be valid size (180 bytes).
+			// Exact size, never merely bounded — the wallet slices the memo at
+			// fixed offsets, so a short one is a change note nobody can open.
 			if !change_encrypted_memo.is_empty() {
 				ensure!(
 					change_encrypted_memo.is_valid_size(),
@@ -94,13 +145,17 @@ impl UnshieldOperation {
 				);
 			}
 		} else {
-			// For total unshield, memo must be empty.
 			ensure!(
 				change_encrypted_memo.is_empty(),
 				Error::<T>::InvalidMemoSize
 			);
 		}
 
+		// ── 5. Pool solvency and fee floor ───────────────────────────────────
+		// `amount + fee` both leave the pool's accounting, so both are required
+		// to be backed. The addition is CHECKED: a wrapping sum would produce a
+		// small total that passes the comparison and admit a spend the pool
+		// cannot cover.
 		let total = amount.checked_add(&fee).ok_or(Error::<T>::InvalidAmount)?;
 		ensure!(
 			PoolBalanceRepository::get_asset_balance::<T>(asset_id) >= total,
@@ -113,6 +168,11 @@ impl UnshieldOperation {
 		let fee_u128: u128 = fee.saturated_into();
 		let amount_u128: u128 = amount.saturated_into();
 
+		// ── 6. Verify the proof ──────────────────────────────────────────────
+		// Last and most expensive. `amount`, `recipient`, `fee` and
+		// `change_commitment` are all PUBLIC inputs, so the proof binds the
+		// payout to exactly this destination and these numbers — a relayer
+		// cannot redirect the funds or inflate the fee after the fact.
 		#[cfg(not(feature = "skip-proof-verification"))]
 		{
 			let recipient_bytes = recipient_to_field::<T>(&recipient)?;
@@ -139,6 +199,11 @@ impl UnshieldOperation {
 			let _ = fee_u128;
 		}
 
+		// ── 7. Pay the recipient ─────────────────────────────────────────────
+		// First state change: everything above rejects without moving money.
+		// `AllowDeath` unlike `shield`'s `KeepAlive` — the SOURCE here is the
+		// pool account, which holds every shielded balance and is never at risk
+		// of being reaped by one payout.
 		T::Currency::transfer(
 			&Pallet::<T>::pool_account_id(),
 			&recipient,
@@ -146,6 +211,10 @@ impl UnshieldOperation {
 			ExistenceRequirement::AllowDeath,
 		)?;
 
+		// ── 8. Accrue the fee, then adjust the tracked balance ───────────────
+		// The fee is credited to the relayer's pending balance rather than
+		// transferred, and claimed later via `claim_shielded_fees` — which is
+		// what keeps the payout unlinkable from this transaction.
 		if fee > <T::Currency as Currency<T::AccountId>>::Balance::zero() {
 			let recipient_account = relayer_evm
 				.and_then(|addr| T::Relayer::resolve_relayer(&addr))
@@ -156,11 +225,11 @@ impl UnshieldOperation {
 
 		// Decrement only `amount`: the `fee` tokens stay physically in the pool as
 		// backing for the pending relayer fee, so the tracked balance must retain
-		// them too. This is correct ONLY because the guard above requires
+		// them too. This is correct ONLY because the guard in step 5 requires
 		// `>= amount + fee`; do not weaken it to `>= amount` or fees go unbacked.
 		PoolBalanceRepository::decrease_balance::<T>(asset_id, amount);
 
-		// Insert the change note commitment into the Merkle tree (partial unshield).
+		// ── 9. Insert the change note (partial unshield only) ────────────────
 		let change_leaf_index = if has_change {
 			let change_comm = Commitment::new(change_commitment);
 			let idx = MerkleTreeService::insert_leaf::<T>(change_comm)?;
@@ -175,6 +244,9 @@ impl UnshieldOperation {
 			None
 		};
 
+		// ── 10. Burn the input and announce ──────────────────────────────────
+		// The event reports the change note only when there is one, so a scanner
+		// can tell a total unshield from a partial one without re-deriving it.
 		let current_block = frame_system::Pallet::<T>::block_number();
 		NullifierRepository::mark_as_used::<T>(nullifier, current_block);
 

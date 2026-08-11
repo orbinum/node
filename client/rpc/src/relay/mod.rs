@@ -9,7 +9,7 @@
 //!
 //! The relay only accepts calls to the ShieldedPool precompile
 //! (`0x0000000000000000000000000000000000000801`) with selector
-//! `0x47fc44a2` (unshield) or `0x8c0f5d24` (privateTransfer).
+//! `0x4e505348` (unshield) or `0x1ec439cf` (privateTransfer).
 //! It checks the fee embedded in ABI slot 6 is ≥ the current `min_relay_fee` from
 //! `pallet-relayer` (queried dynamically via Runtime API so forkless upgrades take effect immediately).
 //!
@@ -127,11 +127,15 @@ where
 
 		// Compute 2× gas floor: the relay must earn at least twice what it spends on EVM gas.
 		// 1 wei == 1 plank in Orbinum, so no unit conversion is required.
+		// Saturate rather than `as_u128()`, which panics on a gas_price ≥ 2^128.
+		// The value comes from the runtime, not calldata, but a panic here would
+		// still take down the relay RPC — mirror the fee-word hardening in
+		// operations.rs::fee_at_slot_6.
 		let base_fee_wei: u128 = self
 			.client
 			.runtime_api()
 			.gas_price(best_hash)
-			.map(|p| p.as_u128())
+			.map(|p| p.try_into().unwrap_or(u128::MAX))
 			.unwrap_or(0);
 		let effective_min_fee = compute_effective_min_fee(min_fee_planck, base_fee_wei);
 
@@ -275,7 +279,12 @@ where
 			.map(|cfg| cfg.min_fee_planck)
 			.unwrap_or(MIN_RELAY_FEE_FALLBACK);
 
-		let base_fee_wei: u128 = api.gas_price(best_hash).map(|p| p.as_u128()).unwrap_or(0);
+		// Saturate rather than `as_u128()` (panics ≥ 2^128) — see the sibling
+		// call above; runtime-sourced, but a panic still kills the relay RPC.
+		let base_fee_wei: u128 = api
+			.gas_price(best_hash)
+			.map(|p| p.try_into().unwrap_or(u128::MAX))
+			.unwrap_or(0);
 		let min_fee = compute_effective_min_fee(min_fee_planck, base_fee_wei);
 
 		let balance = {

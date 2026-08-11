@@ -1,3 +1,28 @@
+//! `shield` — moving public tokens into the shielded pool.
+//!
+//! The one operation with NO proof: the depositor names the commitment their
+//! note will have, and nothing constrains those bytes. Everything the other
+//! calls get from the circuit has to be checked explicitly here, which makes
+//! this the least guarded way into the Merkle tree.
+//!
+//! ## Order of steps
+//!
+//! Numbered below. The split matters: every validation (steps 1–3) runs BEFORE
+//! the fund transfer (step 4), so a rejected shield never moves money. After
+//! step 4 the operation must not fail — `?` on any later step would leave the
+//! tokens in the pool account with no note to claim them. Storage is rolled
+//! back on error, so the danger is not a partial write; it is that the
+//! post-transfer steps are all infallible by construction.
+//!
+//! | # | Step                          | Fallible |
+//! |---|-------------------------------|----------|
+//! | 1 | asset is registered, verified | yes      |
+//! | 2 | amount and memo well-formed   | yes      |
+//! | 3 | commitment usable and unused  | yes      |
+//! | 4 | transfer funds into the pool  | yes      |
+//! | 5 | insert leaf, store memo       | tree-full only |
+//! | 6 | emit `Shielded`               | no       |
+
 use frame_support::{
 	pallet_prelude::*,
 	traits::{Currency, ExistenceRequirement},
@@ -14,6 +39,8 @@ use crate::{
 pub struct ShieldOperation;
 
 impl ShieldOperation {
+	/// Executes a shield. Steps are numbered to match the table in the module
+	/// header; the ordering around step 4 is a safety property, not style.
 	pub fn execute<T: Config>(
 		depositor: <T as frame_system::Config>::AccountId,
 		asset_id: u32,
@@ -21,21 +48,38 @@ impl ShieldOperation {
 		commitment: Commitment,
 		encrypted_memo: EncryptedMemo,
 	) -> DispatchResult {
+		// ── 1. Asset ─────────────────────────────────────────────────────────
+		// Unverified assets are refused: governance vets what may enter the pool.
 		let asset = AssetRepository::get_asset::<T>(asset_id).ok_or(Error::<T>::InvalidAssetId)?;
 		ensure!(asset.is_verified, Error::<T>::AssetNotVerified);
+
+		// ── 2. Amount and memo ───────────────────────────────────────────────
+		// A zero-amount shield would insert a leaf and grow the tree for free.
+		// The memo is exact-sized, never merely bounded — the wallet slices it at
+		// fixed offsets, so a short one is a note nobody can open.
 		ensure!(!amount.is_zero(), Error::<T>::InvalidAmount);
 		ensure!(
 			encrypted_memo.0.len() == MAX_ENCRYPTED_MEMO_SIZE as usize,
 			Error::<T>::InvalidMemoSize
 		);
+
+		// ── 3. Commitment ────────────────────────────────────────────────────
+		// No proof constrains these bytes, so all three checks live here:
+		//   - canonical: `n` and `n + p` reduce to the same field element but are
+		//     DIFFERENT storage keys, so a non-canonical spelling would give one
+		//     note two identities;
+		//   - non-zero: zero is the tree's empty-leaf sentinel;
+		//   - unused: one commitment may occupy at most one leaf.
 		ensure!(commitment.is_canonical(), Error::<T>::InvalidPublicSignals);
 		ensure!(commitment.is_valid(), Error::<T>::InvalidPublicSignals);
-
 		ensure!(
 			!CommitmentRepository::exists::<T>(&commitment),
 			Error::<T>::CommitmentAlreadyExists
 		);
 
+		// ── 4. Move the funds ────────────────────────────────────────────────
+		// The point of no return: everything above rejects without touching
+		// money. `KeepAlive` refuses to reap the depositor's account.
 		T::Currency::transfer(
 			&depositor,
 			&Pallet::<T>::pool_account_id(),
@@ -43,10 +87,16 @@ impl ShieldOperation {
 			ExistenceRequirement::KeepAlive,
 		)?;
 
+		// ── 5. Record the note ───────────────────────────────────────────────
+		// The only way this fails is a full forest, which the `?` propagates and
+		// the runtime rolls back along with the transfer above.
 		let leaf_index = MerkleTreeService::insert_leaf::<T>(commitment)?;
 		CommitmentRepository::store_memo::<T>(commitment, encrypted_memo.clone());
 		PoolBalanceRepository::increase_balance::<T>(asset_id, amount);
 
+		// ── 6. Announce it ───────────────────────────────────────────────────
+		// `leaf_index` is what lets a scanner locate the note without walking the
+		// whole tree.
 		Pallet::<T>::deposit_event(Event::Shielded {
 			depositor,
 			amount,
