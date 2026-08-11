@@ -2,6 +2,33 @@
 
 All notable changes to `pallet-evm-precompile-shielded-pool` will be documented in this file.
 
+## [0.5.1] - 2026-08-11
+
+### Added
+
+- **Selectors are exported** (`selectors::{SHIELD, PRIVATE_TRANSFER, UNSHIELD,
+  CLAIM_SHIELDED_FEES}`) so the relay whitelist can be pinned against the
+  decoder's own constants in a test rather than kept in sync by hand. That copy
+  drifting is the ME-8 class of bug, and it fails silently: a wrong selector is
+  merely "unsupported", so the rejection tests stay green while the accept path
+  quietly stops working.
+
+### Fixed
+
+- **`private_transfer_rejects_truncated_input` used a stale selector**
+  (`0x8c0f5d24`, from a signature two versions old). It passed only because a
+  wrong selector is rejected anyway — it was testing nothing about truncation.
+  Now taken from the decoder constant, with `private_transfer_selector_matches_signature`
+  and `unshield_selector_matches_signature` deriving both from keccak of the ABI
+  signature so neither can drift again.
+
+### Tests
+
+- Nine adversarial decoder tests: truncation at every offset, self-referential
+  and `u256::MAX` offsets, offsets above `u32` that look benign, huge array
+  counts that must not allocate, oversized `u32` slots, a maximal fee word, and
+  two fuzz sweeps (random bytes and random truncations) that must never panic.
+
 ## [0.5.0] - 2026-08-07
 
 ### Security

@@ -6,6 +6,19 @@ pub(crate) mod abi;
 pub(crate) mod calls;
 pub(crate) mod dispatch;
 
+/// The ABI selectors this precompile answers to.
+///
+/// Exported so the relay whitelist can be pinned against them in a test rather
+/// than kept in sync by hand. A hand-kept copy drifting from this one fails
+/// silently: a wrong selector still yields "unsupported selector", so the
+/// rejection tests stay green while the accept path quietly stops working.
+pub mod selectors {
+	pub use crate::calls::claim_shielded_fees::SELECTOR as CLAIM_SHIELDED_FEES;
+	pub use crate::calls::private_transfer::SELECTOR as PRIVATE_TRANSFER;
+	pub use crate::calls::shield::SELECTOR as SHIELD;
+	pub use crate::calls::unshield::SELECTOR as UNSHIELD;
+}
+
 use core::marker::PhantomData;
 
 use fp_evm::{ExitError, Precompile, PrecompileFailure, PrecompileHandle, PrecompileResult};
