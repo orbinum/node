@@ -530,4 +530,50 @@ mod tests {
 		);
 		assert!(one.ref_time() > zero.ref_time(), "weight must scale with n");
 	}
+
+	/// A one-element batch must still be charged for the proof verification.
+	///
+	/// The check above passes for ANY positive intercept, which is too weak.
+	/// `shield_batch(n)` is a line fitted over n ∈ [1,20], and where that line
+	/// puts its intercept is a fitting artifact rather than a measurement: the
+	/// fixed cost is dominated by ONE proof verification (~1s, the same for
+	/// every n), so a fit is free to park it in the slope instead. When it does,
+	/// short batches — the ones worth spamming — get under-priced, and the
+	/// intercept alone (41.8 ms here) is nowhere near a verification.
+	///
+	/// So the assertion is on the total charged at n=1, not on the intercept,
+	/// anchored against `shield()` — which covers the same single verification
+	/// and single insert, so it holds wherever the fit moves the split.
+	///
+	/// Execution time only, deliberately: `shield()` writes 34 storage entries
+	/// against `shield_batch(1)`'s 33, so their DB weights differ BY DESIGN and a
+	/// raw `ref_time()` comparison would fail on that gap instead of on the thing
+	/// under test.
+	#[test]
+	fn shield_batch_of_one_is_charged_for_a_proof_verification() {
+		use crate::weights::WeightInfo;
+		use frame_support::weights::constants::RocksDbWeight;
+
+		// The DB term has to come off both sides first. It is ~3.7 Gwt against an
+		// execution time of ~1 Gwt, so a comparison on raw `ref_time()` is
+		// dominated by storage access and stays green even when the execution
+		// component collapses to nothing — which is precisely the regression
+		// this test exists to catch.
+		let db = |r: u64, w: u64| RocksDbWeight::get().read * r + RocksDbWeight::get().write * w;
+		// Read/write counts come from the benchmark header above each weight fn.
+		let batch_exec = <() as WeightInfo>::shield_batch(1).ref_time() - db(15 + 2, 27 + 6);
+		let single_exec = <() as WeightInfo>::shield().ref_time() - db(17, 34);
+
+		// One verification either way, so they must land in the same ballpark.
+		// Half is a deliberately loose floor: it tolerates the spread between two
+		// separate benchmark runs while still failing hard if the fit has moved
+		// the fixed cost into the slope (which drops this by ~25×).
+		assert!(
+			batch_exec * 2 > single_exec,
+			"shield_batch(1) execution time ({batch_exec} ps) is under half of \
+			 shield() ({single_exec} ps) — both verify exactly one proof, so the \
+			 linear fit has pushed that fixed cost out of the intercept and into \
+			 the per-element slope, under-pricing short batches"
+		);
+	}
 }
