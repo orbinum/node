@@ -40,7 +40,7 @@ pub(crate) const SPEND_TAG_PREFIX: &str = "ShieldedPoolSpend";
 
 #[cfg(test)]
 mod tests {
-	use super::{TX_LONGEVITY, validate_private_transfer, validate_unshield};
+	use super::{TX_LONGEVITY, codes, validate_private_transfer, validate_unshield};
 	use crate::{
 		mock::{Test, new_test_ext},
 		storage::{MerkleRepository, NullifierRepository, PoolBalanceRepository},
@@ -871,6 +871,138 @@ mod tests {
 			assert_eq!(
 				transfer.provides, unshield.provides,
 				"one note must back one pool entry, whichever operation spends it"
+			);
+		});
+	}
+
+	// ── Solvency arithmetic ──────────────────────────────────────────────────
+	//
+	// `amount + fee` is attacker-chosen and summed before the balance compare.
+	// A wrapping sum comes out SMALL, which passes the compare — so the overflow
+	// branch is what stops an unbackable spend from being gossiped.
+
+	/// `amount + fee` overflowing `Balance` must be refused, not wrapped.
+	///
+	/// Both operands come from the caller, so the sum is reachable: picking
+	/// `amount = MAX` and any non-zero fee wraps to a tiny total that clears the
+	/// pool-balance check. The result must be AMOUNT_OVERFLOW, never admission.
+	#[test]
+	fn attack_amount_plus_fee_overflow_is_refused_not_wrapped() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			// A pool holding almost nothing — a wrapped total would still clear it.
+			PoolBalanceRepository::set_asset_balance::<Test>(0, 1u128);
+			let n = make_nullifier(0x99);
+
+			let got = validate_unshield::<Test>(
+				&KNOWN_ROOT,
+				&n,
+				&0u32,
+				&u128::MAX,
+				&1u128, // MAX + 1 wraps
+				&None,
+				1,
+			);
+
+			assert_eq!(
+				got,
+				Err(codes::reject(codes::AMOUNT_OVERFLOW).into()),
+				"a wrapping sum would admit a spend the pool cannot cover"
+			);
+		});
+	}
+
+	/// The solvency check is `<`, so a spend of exactly the pool balance is
+	/// admissible and one planck more is not. Pins the boundary an attacker
+	/// probes for free, since admission costs nothing until execution.
+	#[test]
+	fn attack_solvency_boundary_is_exact() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			PoolBalanceRepository::set_asset_balance::<Test>(0, 1_000u128);
+
+			// amount + fee == balance exactly.
+			let exact = validate_unshield::<Test>(
+				&KNOWN_ROOT,
+				&make_nullifier(0xA1),
+				&0u32,
+				&900u128,
+				&100u128,
+				&None,
+				1,
+			);
+			assert!(
+				exact.is_ok(),
+				"draining the pool exactly must be admissible"
+			);
+
+			// One planck over.
+			let over = validate_unshield::<Test>(
+				&KNOWN_ROOT,
+				&make_nullifier(0xA2),
+				&0u32,
+				&901u128,
+				&100u128,
+				&None,
+				1,
+			);
+			assert_eq!(
+				over,
+				Err(codes::reject(codes::INSUFFICIENT_POOL_BALANCE).into())
+			);
+		});
+	}
+
+	/// The fee counts against the pool, not just the amount.
+	///
+	/// Both leave the pool on execution, so a spend whose amount alone fits but
+	/// whose amount+fee does not must be refused — otherwise the fee is paid out
+	/// of a balance that was never there.
+	#[test]
+	fn attack_fee_counts_against_pool_solvency() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			PoolBalanceRepository::set_asset_balance::<Test>(0, 1_000u128);
+
+			// amount == balance, leaving nothing for the fee.
+			let got = validate_unshield::<Test>(
+				&KNOWN_ROOT,
+				&make_nullifier(0xA3),
+				&0u32,
+				&1_000u128,
+				&100u128,
+				&None,
+				1,
+			);
+			assert_eq!(
+				got,
+				Err(codes::reject(codes::INSUFFICIENT_POOL_BALANCE).into()),
+				"amount alone fits, but the fee also leaves the pool"
+			);
+		});
+	}
+
+	/// Solvency is tracked per asset: a rich asset must not underwrite a spend
+	/// against an empty one.
+	#[test]
+	fn attack_other_asset_balance_does_not_underwrite_this_one() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			PoolBalanceRepository::set_asset_balance::<Test>(0, u128::MAX / 2);
+			// Asset 1 holds nothing.
+
+			let got = validate_unshield::<Test>(
+				&KNOWN_ROOT,
+				&make_nullifier(0xA4),
+				&1u32,
+				&1_000u128,
+				&100u128,
+				&None,
+				1,
+			);
+			assert_eq!(
+				got,
+				Err(codes::reject(codes::INSUFFICIENT_POOL_BALANCE).into())
 			);
 		});
 	}
