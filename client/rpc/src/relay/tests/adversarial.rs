@@ -208,3 +208,193 @@ fn attack_fee_slot_fuzz_never_panics() {
 		let _ = validate_relay_calldata(&d, 1_000_000_000_000_000, &SELECTORS_FALLBACK);
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Whitelist integrity
+//
+// `allowed_selectors` comes from governance storage over a Runtime API. These
+// cover what happens when that list is itself hostile or malformed, which the
+// node cannot prevent — only survive.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A whitelist entry for an operation the node does not implement must not
+/// promote the call: the selector matches the whitelist but no decoder claims
+/// it, so `default_operations()` finds nothing and the call is refused.
+///
+/// This is the forward-compatibility path — governance enabling an operation
+/// before the node ships it. Failing open here would relay calldata whose fee
+/// slot has never been located, i.e. an unpriced call.
+#[test]
+fn attack_whitelist_full_of_unimplemented_selectors_fails_closed() {
+	let hostile: Vec<[u8; 4]> = (0u8..64).map(|i| [i, i, i, i]).collect();
+	for sel in &hostile {
+		let mut data = base_private_transfer(u128::MAX);
+		data[..4].copy_from_slice(sel);
+		assert_eq!(
+			validate_relay_calldata(&data, 1, &hostile),
+			Err("unsupported selector"),
+			"selector {sel:?} is whitelisted but unimplemented — must not relay"
+		);
+	}
+}
+
+/// A whitelist containing a real selector many times over must behave exactly
+/// as if it appeared once. Guards the `contains` lookup against a governance
+/// list padded to provoke quadratic scanning or an early-exit mistake.
+#[test]
+fn attack_whitelist_with_duplicate_entries_behaves_identically() {
+	let padded = vec![SELECTOR_PRIVATE_TRANSFER; 4096];
+	let data = base_private_transfer(u128::MAX);
+	assert_eq!(validate_relay_calldata(&data, 1, &padded), Ok(()));
+	assert_eq!(
+		validate_relay_calldata(&data, u128::MAX, &padded),
+		Ok(()),
+		"a saturated fee word clears any floor, duplicates or not"
+	);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fee floor arithmetic
+//
+// `compute_effective_min_fee` multiplies runtime-sourced values. Wrapping here
+// would invert the comparison and let a zero-fee call through.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The 2× gas floor must saturate, never wrap. A wrapped product would come out
+/// *small*, and a small floor is one an attacker can clear with a nominal fee
+/// while the relay pays real gas.
+#[test]
+fn attack_gas_floor_never_wraps_below_governance_minimum() {
+	for base_fee in [
+		u128::MAX,
+		u128::MAX / 2,
+		u128::MAX / RELAY_GAS_LIMIT as u128,
+		1 << 127,
+	] {
+		let floor = compute_effective_min_fee(MIN_RELAY_FEE_FALLBACK, base_fee);
+		assert!(
+			floor >= MIN_RELAY_FEE_FALLBACK,
+			"floor {floor} fell below governance minimum at base_fee={base_fee}"
+		);
+	}
+}
+
+/// Governance setting `min_fee_planck` to zero must not disable the gas floor:
+/// the relay still has to earn back the gas it spends.
+#[test]
+fn attack_zero_governance_fee_still_charges_the_gas_floor() {
+	let floor = compute_effective_min_fee(0, 1_000_000_000);
+	assert_eq!(floor, 2 * RELAY_GAS_LIMIT as u128 * 1_000_000_000);
+	assert!(
+		floor > 0,
+		"a zero governance fee must not mean a free relay"
+	);
+
+	// And with no gas price either, the floor is genuinely zero — documenting
+	// that the free-relay case requires BOTH to be zero.
+	assert_eq!(compute_effective_min_fee(0, 0), 0);
+}
+
+/// A fee exactly one planck below the floor is refused; exactly at it passes.
+/// Pins the comparison as `<` rather than `<=`, at a boundary an attacker
+/// controls precisely.
+#[test]
+fn attack_fee_one_below_floor_is_refused() {
+	let floor = 1_000_000u128;
+	let at = base_private_transfer(floor);
+	let below = base_private_transfer(floor - 1);
+
+	assert_eq!(
+		validate_relay_calldata(&at, floor, &SELECTORS_FALLBACK),
+		Ok(())
+	);
+	assert_eq!(
+		validate_relay_calldata(&below, floor, &SELECTORS_FALLBACK),
+		Err("fee below minimum")
+	);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Selector confusion
+//
+// The two operations share a head up to slot 6 but diverge past it. A call
+// must be measured against the length of the operation it claims to be.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// privateTransfer-length calldata (260) carrying the unshield selector must be
+/// refused: unshield needs 324. Otherwise the shorter layout would be read
+/// against the longer one's expectations.
+#[test]
+fn attack_unshield_selector_on_private_transfer_length_is_refused() {
+	let mut data = base_private_transfer(u128::MAX);
+	data[..4].copy_from_slice(&SELECTOR_UNSHIELD);
+	assert_eq!(data.len(), 260);
+	assert_eq!(
+		validate_relay_calldata(&data, 1, &SELECTORS_FALLBACK),
+		Err("calldata too short"),
+		"260 bytes is valid for privateTransfer but 64 short for unshield"
+	);
+}
+
+/// The fee slot must be read from the same offset regardless of which selector
+/// is claimed — both layouts agree up to slot 6, and that agreement is what
+/// makes a single `fee_at_slot_6` correct.
+#[test]
+fn attack_fee_slot_is_stable_across_both_selectors() {
+	let fee = 12_345_678u128;
+	let mut pt = base_private_transfer(fee);
+	let mut un = pt.clone();
+	un.resize(324, 0);
+	un[..4].copy_from_slice(&SELECTOR_UNSHIELD);
+	pt[..4].copy_from_slice(&SELECTOR_PRIVATE_TRANSFER);
+
+	// Both must accept at exactly `fee` and refuse at `fee + 1`.
+	for data in [&pt, &un] {
+		assert_eq!(
+			validate_relay_calldata(data, fee, &SELECTORS_FALLBACK),
+			Ok(())
+		);
+		assert_eq!(
+			validate_relay_calldata(data, fee + 1, &SELECTORS_FALLBACK),
+			Err("fee below minimum")
+		);
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Size boundary
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Calldata at exactly the cap is accepted, one byte over is refused, and
+/// neither allocates proportionally to the claimed size. Pins `>` rather than
+/// `>=` at the one boundary an attacker pays nothing to probe.
+#[test]
+fn attack_calldata_cap_boundary_is_exact() {
+	let mut at_cap = base_private_transfer(u128::MAX);
+	at_cap.resize(MAX_CALLDATA_BYTES, 0);
+	assert_eq!(
+		validate_relay_calldata(&at_cap, 1, &SELECTORS_FALLBACK),
+		Ok(()),
+		"exactly at the cap must be accepted"
+	);
+
+	let mut over = at_cap.clone();
+	over.push(0);
+	assert_eq!(
+		validate_relay_calldata(&over, 1, &SELECTORS_FALLBACK),
+		Err("calldata too large")
+	);
+}
+
+/// The size check must come before any per-operation work: an oversized body
+/// is refused for its size even when its selector is unknown, so a huge
+/// unknown-selector call cannot be used to force extra scanning.
+#[test]
+fn attack_oversized_unknown_selector_is_refused_on_size_first() {
+	let mut data = vec![0xFFu8; MAX_CALLDATA_BYTES + 1];
+	data[..4].copy_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+	assert_eq!(
+		validate_relay_calldata(&data, 1, &SELECTORS_FALLBACK),
+		Err("calldata too large")
+	);
+}
