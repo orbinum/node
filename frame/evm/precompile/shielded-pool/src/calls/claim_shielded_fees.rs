@@ -6,23 +6,23 @@
 //! = `0x88d9deba`
 //!
 //! ## ABI layout (`input[4..]`)
-//! | Slot (bytes) | Type      | Field              |
-//! |-------------|-----------|--------------------|
-//! | 0..32       | `bytes32` | `commitment`       |
-//! | 32..64      | `uint256` | `amount`           |
-//! | 64..96      | `uint32`  | `asset_id`         |
-//! | 96..128     | `uint256` | offset → `memo`    |
-//! | 128..160    | `uint256` | offset → `proof`   |
-//! | 160..192    | `uint256` | offset → `public_signals` |
-//! | 192..224    | `uint32`  | `circuit_version`  |
+//! | Slot (bytes) | Type      | Field                     |
+//! |--------------|-----------|---------------------------|
+//! | 0..32        | `bytes32` | `commitment`              |
+//! | 32..64       | `uint256` | `amount`                  |
+//! | 64..96       | `uint32`  | `asset_id`                |
+//! | 96..128      | `uint256` | offset → `memo`           |
+//! | 128..160     | `uint256` | offset → `proof`          |
+//! | 160..192     | `uint256` | offset → `public_signals` |
+//! | 192..224     | `uint32`  | `circuit_version`         |
 //!
-//! The **validator** origin is derived from `handle.context().caller`
-//! (the EVM address that sent the transaction), mapped to an `AccountId`
-//! via `AddressMapping`.  It must match the address registered in
-//! `pallet-relayer` that has accumulated pending fees.
+//! ## Notes
+//! `public_signals` is a fixed 76-byte blob encoded off-chain:
+//! `commitment[0..32] | value[32..40] | asset_id[40..44] | owner_hash[44..76]`.
 //!
-//! ## public_signals layout (76 bytes, off-chain encoded)
-//! `commitment[0..32] | value[32..40] | asset_id[40..44] | owner_hash[44..76]`
+//! The validator is not in the ABI: it comes from `handle.context().caller`,
+//! mapped to an `AccountId` via `AddressMapping`. It must match the address
+//! registered in `pallet-relayer` that accumulated the pending fees.
 
 use alloc::vec::Vec;
 
@@ -31,20 +31,16 @@ use sp_core::U256;
 
 use crate::abi;
 
-/// `keccak256("claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes,uint32)")[0..4]`
-/// The trailing `uint32` is `circuitVersion` — the circuit version the spent
-/// notes were created under, so the proof is verified against that version's VK.
+/// Selector for the signature in this module's header.
 pub const SELECTOR: [u8; 4] = [0x88, 0xd9, 0xde, 0xba];
 
 /// Maximum byte length of a serialised Groth16 proof accepted by the pallet.
 const MAX_PROOF_LEN: u32 = 512;
 
-/// Decodes the ABI-encoded `input` and returns a ready-to-dispatch
-/// `claim_shielded_fees` call.
+/// Decodes `input` into a ready-to-dispatch `claim_shielded_fees` call.
 ///
-/// The validator `AccountId` is NOT part of the ABI — it is derived from
-/// `handle.context().caller` so the pallet can look up the correct pending
-/// fee balance in `pallet-relayer`.
+/// The handle is unused: unlike the other calls, the validator origin is mapped
+/// from the caller by the dispatch layer rather than read here.
 pub fn decode<T>(
 	_handle: &impl PrecompileHandle,
 	input: &[u8],
@@ -53,15 +49,19 @@ where
 	T: pallet_shielded_pool::Config,
 	pallet_shielded_pool::BalanceOf<T>: TryFrom<u128>,
 {
-	// Minimum head section: 6 fixed slots × 32 bytes = 192 bytes.
 	let params = &input[4..];
+
+	// Step 1: require the first six head slots. `circuit_version` is the seventh
+	// and is checked in step 7, so calldata predating it reports the missing field
+	// rather than a bad length.
 	if params.len() < 192 {
 		return Err(err("claimShieldedFees: input too short"));
 	}
 
+	// Step 2: commitment of the note the claimed fees are paid into.
 	let commitment = pallet_shielded_pool::Commitment::from(abi::read_bytes32(params, 0)?);
 
-	// Reject zero-amount calls early.
+	// Step 3: amount. Zero would mint a worthless note while consuming the proof.
 	let amount_u256 = U256::from_big_endian(&params[32..64]);
 	if amount_u256.is_zero() {
 		return Err(err("claimShieldedFees: amount must be non-zero"));
@@ -74,12 +74,16 @@ where
 			.map_err(|_| err("claimShieldedFees: amount conversion failed"))?
 	};
 
+	// Step 4: asset_id.
 	let asset_id = abi::decode_u32(&params[64..96])?;
 
+	// Step 5: memo — dynamic, offset at slot 96. It carries the only copy of the
+	// new note's secrets.
 	let memo_bytes: Vec<u8> = abi::decode_bytes_at_slot(params, 96)?;
 	let memo = pallet_shielded_pool::FrameEncryptedMemo::new(memo_bytes)
 		.map_err(|_| err("claimShieldedFees: memo too long or wrong size"))?;
 
+	// Step 6: proof — dynamic, offset at slot 128.
 	let proof: frame_support::BoundedVec<u8, frame_support::traits::ConstU32<MAX_PROOF_LEN>> =
 		abi::decode_bytes_at_slot(params, 128)?
 			.try_into()
@@ -89,6 +93,9 @@ where
 		return Err(err("claimShieldedFees: proof must be non-empty"));
 	}
 
+	// Step 7: public_signals — dynamic, offset at slot 160. Exactly 76 bytes, the
+	// fixed layout the circuit was compiled against; any other length cannot be a
+	// valid public input, so it is rejected before the pallet verifies the proof.
 	let public_signals_raw: Vec<u8> = abi::decode_bytes_at_slot(params, 160)?;
 
 	if public_signals_raw.len() != 76 {
@@ -98,6 +105,7 @@ where
 		.try_into()
 		.map_err(|_| err("claimShieldedFees: public_signals too long"))?;
 
+	// Step 8: circuit_version, selecting the VK the proof is checked against.
 	if params.len() < 224 {
 		return Err(err(
 			"claimShieldedFees: input too short (missing circuitVersion)",

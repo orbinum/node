@@ -7,6 +7,12 @@
 //!
 //! The precompile router in `lib.rs` only needs to match on `SELECTOR`s and
 //! forward to the appropriate `decode`, then hand the call to `dispatch`.
+//!
+//! Each module header documents the selector and the ABI slot layout; `decode`
+//! walks that layout in numbered steps. Decoding is the trust boundary, so a
+//! `decode` also rejects input that is well-formed but irrecoverable — a zero
+//! amount, a burn address, a memo without which a note could never be spent —
+//! rather than leaving it to the pallet.
 
 pub mod claim_shielded_fees;
 pub mod private_transfer;

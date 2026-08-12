@@ -14,9 +14,17 @@ const MIN_RELAY_FEE = ethers.parseUnits("0.001", 18);
 /// EVM address derived from GENESIS_ACCOUNT_PRIVATE_KEY (lower‑case, with 0x)
 const RELAYER_ADDRESS = "0x6be02d1d3665660d22ff9624b7be0551ee1ac91b";
 
-/// Verified function selectors (keccak256 of ABI signature, first 4 bytes)
-const SEL_UNSHIELD = "47fc44a2";
-const SEL_PRIVATE_TRANSFER = "8c0f5d24";
+/// Function selectors, derived below from the ABI signatures rather than
+/// hardcoded. A stale copy here fails silently: the tests keep passing because
+/// a wrong selector still produces "unsupported selector", so the negative
+/// cases go green while the positive ones silently test nothing.
+const SIG_UNSHIELD =
+	"unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)";
+const SIG_PRIVATE_TRANSFER =
+	"privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)";
+
+const SEL_UNSHIELD = ethers.id(SIG_UNSHIELD).slice(2, 10);
+const SEL_PRIVATE_TRANSFER = ethers.id(SIG_PRIVATE_TRANSFER).slice(2, 10);
 
 // ---------------------------------------------------------------------------
 // Calldata builders
@@ -25,15 +33,29 @@ const SEL_PRIVATE_TRANSFER = "8c0f5d24";
 const abiCoder = ethers.AbiCoder.defaultAbiCoder();
 
 /**
- * Build ABI-encoded calldata for `unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256)`
- * with the given relay fee inserted as the 7th argument.
+ * Build ABI-encoded calldata for `unshield(...)` with the given relay fee.
+ *
+ * The argument list mirrors SIG_UNSHIELD exactly — the head is 10 slots, and the
+ * relay's `min_calldata_len` (324 = 4 + 10×32) is derived from that. Encoding a
+ * shorter argument list here would build calldata the relay rightly refuses.
  *
  * ABI head layout after prepending the selector:
  *   data[196..228] = slot 6 = uint256 fee  ← the value relay.rs reads
  */
 function buildUnshieldCalldata(fee: bigint): string {
 	const encoded = abiCoder.encode(
-		["bytes", "bytes32", "bytes32", "uint32", "uint256", "bytes32", "uint256"],
+		[
+			"bytes",
+			"bytes32",
+			"bytes32",
+			"uint32",
+			"uint256",
+			"bytes32",
+			"uint256",
+			"bytes32",
+			"bytes",
+			"uint32",
+		],
 		[
 			"0x" + "aa".repeat(32), // proof (32 dummy bytes)
 			"0x" + "bb".repeat(32), // merkle root
@@ -42,21 +64,25 @@ function buildUnshieldCalldata(fee: bigint): string {
 			ethers.parseEther("1"), // amount
 			"0x" + "00".repeat(32), // recipient (AccountId32 as bytes32)
 			fee, // relay fee
+			"0x" + "00".repeat(32), // change commitment (total unshield → zero)
+			"0x", // change encrypted memo (empty for total unshield)
+			1, // circuit version
 		]
 	);
 	return "0x" + SEL_UNSHIELD + encoded.slice(2);
 }
 
 /**
- * Build ABI-encoded calldata for
- * `privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)`
- * with the given relay fee as the 7th argument.
+ * Build ABI-encoded calldata for `privateTransfer(...)` with the given relay fee.
+ *
+ * Mirrors SIG_PRIVATE_TRANSFER: 8 head slots, so `min_calldata_len` is
+ * 260 = 4 + 8×32.
  *
  * ABI head layout: data[196..228] = slot 6 = uint256 fee
  */
 function buildPrivateTransferCalldata(fee: bigint): string {
 	const encoded = abiCoder.encode(
-		["bytes", "bytes32", "bytes32[]", "bytes32[]", "bytes[]", "uint32", "uint256"],
+		["bytes", "bytes32", "bytes32[]", "bytes32[]", "bytes[]", "uint32", "uint256", "uint32"],
 		[
 			"0x" + "aa".repeat(32), // proof
 			"0x" + "bb".repeat(32), // merkle root
@@ -65,6 +91,7 @@ function buildPrivateTransferCalldata(fee: bigint): string {
 			["0x" + "ee".repeat(104)], // encrypted memos[]
 			0, // assetId
 			fee, // relay fee
+			1, // circuit version
 		]
 	);
 	return "0x" + SEL_PRIVATE_TRANSFER + encoded.slice(2);

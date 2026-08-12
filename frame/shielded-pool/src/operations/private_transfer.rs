@@ -865,4 +865,426 @@ mod tests {
 			"two outputs must cost more proof_size than one"
 		);
 	}
+
+	// ── adversarial battery ──────────────────────────────────────────────────
+	//
+	// Each of these is an attempt to BREAK an invariant, not a demonstration
+	// that it holds. They are written from the attacker's side: assume the ZK
+	// proof is satisfiable (the mock skips verification) and ask what the
+	// non-cryptographic checks still have to stop on their own.
+
+	/// Double-spend inside ONE extrinsic, same nullifier twice.
+	///
+	/// The set check cannot catch this: neither nullifier is in storage yet when
+	/// the loop runs, so only the explicit pairwise comparison stands between
+	/// this and spending one note twice in a single call.
+	#[test]
+	fn attack_same_nullifier_twice_in_one_extrinsic_is_refused() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			let mut nulls: BoundedVec<Nullifier, ConstU32<2>> = BoundedVec::new();
+			nulls.try_push(make_nullifier(0x77)).unwrap();
+			nulls.try_push(make_nullifier(0x77)).unwrap(); // same note, twice
+
+			assert_err!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nulls,
+					commitments_of(&[0xC1, 0xC2]),
+					memos_of(2),
+					0u32,
+					0u128,
+					None,
+					1,
+				),
+				Error::<Test>::NullifierAlreadyUsed
+			);
+		});
+	}
+
+	/// The dummy nullifier is exempt from the "already used" check by design.
+	/// Two dummies in one call must therefore NOT be readable as a duplicate
+	/// pair — but the all-dummy guard has to reject the call outright, or a
+	/// transfer with no real input mints two free leaves.
+	#[test]
+	fn attack_two_dummy_nullifiers_cannot_mint_free_leaves() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			let mut nulls: BoundedVec<Nullifier, ConstU32<2>> = BoundedVec::new();
+			nulls.try_push(Nullifier::new([0u8; 32])).unwrap();
+			nulls.try_push(Nullifier::new([0u8; 32])).unwrap();
+
+			assert_err!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nulls,
+					commitments_of(&[0xD1, 0xD2]),
+					memos_of(2),
+					0u32,
+					0u128,
+					None,
+					1,
+				),
+				Error::<Test>::InvalidAmount
+			);
+		});
+	}
+
+	/// Replay of a nullifier already spent in an EARLIER block.
+	#[test]
+	fn attack_replaying_a_spent_nullifier_is_refused() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			assert_ok!(PrivateTransferOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifiers_of(&[0x51]),
+				commitments_of(&[0x52]),
+				memos_of(1),
+				0u32,
+				0u128,
+				None,
+				1,
+			));
+
+			// Same nullifier, different outputs — the note is already gone.
+			assert_err!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[0x51]),
+					commitments_of(&[0x53]),
+					memos_of(1),
+					0u32,
+					0u128,
+					None,
+					1,
+				),
+				Error::<Test>::NullifierAlreadyUsed
+			);
+		});
+	}
+
+	/// Non-canonical field elements: bytes above the BN254 modulus that reduce
+	/// to a DIFFERENT, already-spent value. Accepting them would give every
+	/// nullifier a second spelling and defeat the double-spend set entirely.
+	#[test]
+	fn attack_non_canonical_nullifier_is_refused() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			// modulus + 1, little-endian — reduces to 1, which is canonical.
+			let mut over = [0u8; 32];
+			over[0] = 0x02;
+			over[31] = 0xFF;
+			assert!(
+				!Nullifier::new(over).is_canonical(),
+				"fixture must actually be non-canonical or the test proves nothing"
+			);
+
+			let mut nulls: BoundedVec<Nullifier, ConstU32<2>> = BoundedVec::new();
+			nulls.try_push(Nullifier::new(over)).unwrap();
+
+			assert_err!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nulls,
+					commitments_of(&[0xE1]),
+					memos_of(1),
+					0u32,
+					0u128,
+					None,
+					1,
+				),
+				Error::<Test>::InvalidPublicSignals
+			);
+		});
+	}
+
+	/// Same, on the output side: a non-canonical commitment would land a leaf
+	/// whose second spelling could collide with a real one.
+	#[test]
+	fn attack_non_canonical_commitment_is_refused() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			let mut over = [0u8; 32];
+			over[0] = 0x02;
+			over[31] = 0xFF;
+			assert!(!Commitment::new(over).is_canonical());
+
+			let mut comms: BoundedVec<Commitment, ConstU32<2>> = BoundedVec::new();
+			comms.try_push(Commitment::new(over)).unwrap();
+
+			assert_err!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[0x61]),
+					comms,
+					memos_of(1),
+					0u32,
+					0u128,
+					None,
+					1,
+				),
+				Error::<Test>::InvalidPublicSignals
+			);
+		});
+	}
+
+	/// A forged Merkle root the attacker made up: it lets them prove membership
+	/// of a note that was never in the tree.
+	#[test]
+	fn attack_unknown_merkle_root_is_refused() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			assert_err!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					[0xEEu8; 32], // never added
+					nullifiers_of(&[0x71]),
+					commitments_of(&[0x72]),
+					memos_of(1),
+					0u32,
+					0u128,
+					None,
+					1,
+				),
+				Error::<Test>::UnknownMerkleRoot
+			);
+		});
+	}
+
+	/// Array-length confusion: more commitments than nullifiers would insert an
+	/// output nothing paid for.
+	#[test]
+	fn attack_more_commitments_than_nullifiers_is_refused() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			assert_err!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[0x81]),        // 1 input
+					commitments_of(&[0x82, 0x83]), // 2 outputs
+					memos_of(2),
+					0u32,
+					0u128,
+					None,
+					1,
+				),
+				Error::<Test>::TooManyInputsOrOutputs
+			);
+		});
+	}
+
+	/// Memo count out of step with the outputs: a missing memo would leave a
+	/// commitment nobody can ever open, and the zip() that stores them would
+	/// silently drop the extra output.
+	#[test]
+	fn attack_memo_count_mismatch_is_refused() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			assert_err!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[0x91, 0x92]),
+					commitments_of(&[0x93, 0x94]),
+					memos_of(1), // one memo for two outputs
+					0u32,
+					0u128,
+					None,
+					1,
+				),
+				Error::<Test>::MemoCommitmentMismatch
+			);
+		});
+	}
+
+	/// A wrong-sized memo must not reach storage: the wallet's decrypt path
+	/// slices fixed offsets, so a short memo is a note nobody can open.
+	#[test]
+	fn attack_undersized_memo_is_refused() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			let mut memos: BoundedVec<EncryptedMemo, ConstU32<2>> = BoundedVec::new();
+			memos.try_push(short_memo()).unwrap();
+
+			assert_err!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[0xA9]),
+					commitments_of(&[0xAA]),
+					memos,
+					0u32,
+					0u128,
+					None,
+					1,
+				),
+				Error::<Test>::InvalidMemoSize
+			);
+		});
+	}
+
+	/// The zero commitment is the tree's empty-leaf sentinel. Inserting it as a
+	/// real output would corrupt the Merkle structure.
+	#[test]
+	fn attack_zero_commitment_is_refused() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			let mut comms: BoundedVec<Commitment, ConstU32<2>> = BoundedVec::new();
+			comms.try_push(Commitment::new([0u8; 32])).unwrap();
+
+			assert_err!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[0xB9]),
+					comms,
+					memos_of(1),
+					0u32,
+					0u128,
+					None,
+					1,
+				),
+				Error::<Test>::InvalidPublicSignals
+			);
+		});
+	}
+
+	/// A fee below the relay minimum must be refused BEFORE any state changes —
+	/// otherwise the pool subsidizes the spam it is meant to price out.
+	#[test]
+	fn attack_fee_below_minimum_is_refused_without_spending_the_nullifier() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			let min = <Test as Config>::Relayer::min_relay_fee();
+			if min == 0 {
+				return; // mock has no minimum; nothing to prove here
+			}
+
+			let n = make_nullifier(0xC9);
+			assert_err!(
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[0xC9]),
+					commitments_of(&[0xCA]),
+					memos_of(1),
+					0u32,
+					min.saturating_sub(1),
+					None,
+					1,
+				),
+				Error::<Test>::FeeTooLow
+			);
+			// And the note must still be spendable — a rejected call that burned
+			// the nullifier would destroy funds.
+			assert!(!NullifierRepository::is_used::<Test>(&n));
+		});
+	}
+
+	/// Duplicate commitments inside ONE call, checked for real.
+	///
+	/// The duplicate guard reads `CommitmentMemos`, which is only populated
+	/// AFTER each insert by `store_memo`. Within a single call the loop runs
+	/// insert→store_memo per output, so by the time the second (identical)
+	/// output is inserted the first one's memo IS stored and the guard fires.
+	/// If that ordering ever changes, one note would take two leaves in one
+	/// transaction — this pins the outcome, not the mechanism.
+	#[test]
+	fn attack_duplicate_commitments_in_one_call_cannot_take_two_leaves() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			let mut comms: BoundedVec<Commitment, ConstU32<2>> = BoundedVec::new();
+			comms.try_push(make_commitment(0xF1)).unwrap();
+			comms.try_push(make_commitment(0xF1)).unwrap(); // same leaf twice
+
+			let before = MerkleRepository::get_tree_size::<Test>();
+
+			// Run inside a storage transaction, the way a dispatchable executes:
+			// FRAME rolls the whole extrinsic back on error, so the partial leaf
+			// from the first (accepted) output must not survive. Calling
+			// `execute` bare would leave that write in place — an artefact of the
+			// test harness, not of the runtime.
+			let result = frame_support::storage::with_storage_layer(|| {
+				PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[0xF2, 0xF3]),
+					comms,
+					memos_of(2),
+					0u32,
+					0u128,
+					None,
+					1,
+				)
+			});
+
+			assert!(result.is_err(), "a duplicated output must not be accepted");
+			let after = MerkleRepository::get_tree_size::<Test>();
+			assert_eq!(
+				before, after,
+				"the rejected call must leave no leaf behind once rolled back"
+			);
+		});
+	}
+
+	/// The memo is opaque to the chain, and must stay that way.
+	///
+	/// `sourcePk` lives at plaintext bytes [84,116) INSIDE the ciphertext — the
+	/// pallet holds no key and must never gate on memo contents. This pins that:
+	/// two transfers whose memos differ only in those bytes are equally valid on
+	/// chain. A pallet that could tell them apart would mean the memo was not
+	/// actually encrypted.
+	#[test]
+	fn attack_memo_contents_never_gate_admission() {
+		new_test_ext().execute_with(|| {
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			// Two memos, same length, different bytes where sourcePk would sit.
+			let mut a = [0x01u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
+			let mut b = [0x01u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
+			for byte in a[84..116].iter_mut() {
+				*byte = 0x00;
+			}
+			for byte in b[84..116].iter_mut() {
+				*byte = 0xAB;
+			}
+
+			for (i, bytes) in [a, b].into_iter().enumerate() {
+				let mut memos: BoundedVec<EncryptedMemo, ConstU32<2>> = BoundedVec::new();
+				memos
+					.try_push(EncryptedMemo::from_bytes(&bytes).unwrap())
+					.unwrap();
+				let seed = 0x80 + i as u8 * 2;
+				assert_ok!(PrivateTransferOperation::execute::<Test>(
+					proof(),
+					KNOWN_ROOT,
+					nullifiers_of(&[seed]),
+					commitments_of(&[seed + 1]),
+					memos,
+					0u32,
+					0u128,
+					None,
+					1,
+				));
+			}
+		});
+	}
 }
