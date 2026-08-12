@@ -2,6 +2,44 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.17.1] - 2026-08-11
+
+### Security
+
+- **Pool admission tags one entry per NULLIFIER, in a namespace shared with
+  `unshield` (`ShieldedPoolSpend`).** `and_provides` contributes exactly ONE
+  tag, so passing it a `Vec` encoded the whole nullifier set plus the relayer
+  into a single blob. Three consequences, each free for an attacker since the
+  fee is only charged on execution:
+
+  - reordering the two inputs produced a different tag, minting a **second
+    admissible pool entry for the same spend**;
+  - two transfers sharing only ONE note (`A+B` and `A+C`) did not collide at
+    all, so one note could back an unbounded number of pool entries;
+  - `private_transfer` and `unshield` used different tag prefixes, so the same
+    note could back one of each simultaneously.
+
+  Every variant propagates and is revalidated network-wide while at most one
+  can ever execute.
+
+  `relayer` deliberately leaves the tag. Binding it made a copy with a swapped
+  fee recipient a *separate* entry, so anyone could rebroadcast another user's
+  spend pointed at their own account and have both sit in the pool; keyed on
+  the nullifier the two are mutually exclusive, so taking the fee requires
+  out-bidding, which means paying it.
+
+  **Admission policy, not state transition — consensus is unaffected.** Nodes
+  on the old logic keep accepting the duplicate variants, so the mitigation
+  completes as the network updates.
+
+### Tests
+
+- Adversarial batteries rather than happy-path coverage: 13 attacks on the
+  transfer operation (double-spend within one extrinsic, non-canonical field
+  elements, forged roots, array-arity mismatch, undersized memo, duplicate
+  commitments) and 11 on pool admission (tag collisions, relayer swap,
+  reordered inputs, cross-call exclusivity with `unshield`).
+
 ## [0.17.0] - 2026-08-07
 
 ### Security
