@@ -3365,6 +3365,7 @@ dependencies = [
  "libsecp256k1",
  "log",
  "pallet-evm",
+ "pallet-evm-precompile-shielded-pool",
  "pallet-relayer-runtime-api",
  "pallet-shielded-pool-runtime-api",
  "parity-scale-codec",

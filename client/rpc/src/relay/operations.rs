@@ -10,11 +10,14 @@
 
 use ethereum_types::U256;
 
-/// 4-byte ABI selector for `unshield(...)`.
-pub(crate) const SELECTOR_UNSHIELD: [u8; 4] = [0x47, 0xfc, 0x44, 0xa2];
-
-/// 4-byte ABI selector for `privateTransfer(...)`.
-pub(crate) const SELECTOR_PRIVATE_TRANSFER: [u8; 4] = [0x8c, 0x0f, 0x5d, 0x24];
+/// Selectors the relay accepts, re-exported from the precompile that decodes
+/// them. Aliases rather than literals: the whitelist and the decoder cannot
+/// disagree if there is only one definition. A hand-kept copy drifting from the
+/// decoder fails silently — a wrong selector is merely "unsupported", so the
+/// rejection tests stay green while the accept path stops working.
+pub(crate) use pallet_evm_precompile_shielded_pool::selectors::{
+	PRIVATE_TRANSFER as SELECTOR_PRIVATE_TRANSFER, UNSHIELD as SELECTOR_UNSHIELD,
+};
 
 /// Describes how to validate calldata for a specific relayable on-chain operation.
 ///
@@ -38,9 +41,32 @@ pub(crate) trait RelayableOperation: Send + Sync {
 	fn extract_fee(&self, calldata: &[u8]) -> u128;
 }
 
-/// `unshield(proof, root, nullifier, asset_id, amount, recipient, fee)` — `0x47fc44a2`
+/// Reads the relay fee from ABI slot 6 (`calldata[196..228]`), the position both
+/// operations share.
 ///
-/// Fee is in ABI slot 6: `calldata[196..228]`.
+/// Saturates instead of panicking on a value above `u128::MAX`. Calldata reaches
+/// this from an unauthenticated RPC call, and `U256::as_u128` panics outright on
+/// anything wider — one crafted 32-byte word would take down the handler.
+/// Saturating is safe because the result is only ever compared against the fee
+/// floor: an absurd fee clears it here and is then rejected by the EVM dry-run,
+/// which is what would have happened anyway.
+///
+/// The slice is bounds-checked by the caller's `min_calldata_len()` gate (260 or
+/// 324, both well past 228).
+fn fee_at_slot_6(calldata: &[u8]) -> u128 {
+	let Ok(bytes) = <[u8; 32]>::try_from(&calldata[196..228]) else {
+		return 0; // unreachable behind the length gate; a zero fee fails the floor
+	};
+	U256::from_big_endian(&bytes)
+		.try_into()
+		.unwrap_or(u128::MAX)
+}
+
+/// `unshield(proof, root, nullifier, asset_id, amount, recipient, fee,
+/// change_commitment, change_encrypted_memo, circuit_version)` — `0x4e505348`
+///
+/// Fee is in ABI slot 6: `calldata[196..228]`. The head is 10 slots (320 bytes)
+/// plus the 4-byte selector = 324 minimum.
 pub(crate) struct UnshieldOp;
 
 impl RelayableOperation for UnshieldOp {
@@ -53,18 +79,19 @@ impl RelayableOperation for UnshieldOp {
 	}
 
 	fn min_calldata_len(&self) -> usize {
-		228
+		324
 	}
 
 	fn extract_fee(&self, calldata: &[u8]) -> u128 {
-		let bytes: [u8; 32] = calldata[196..228].try_into().unwrap();
-		U256::from_big_endian(&bytes).as_u128()
+		fee_at_slot_6(calldata)
 	}
 }
 
-/// `privateTransfer(proof, root, nullifiers, commitments, memos, asset_id, fee)` — `0x8c0f5d24`
+/// `privateTransfer(proof, root, nullifiers, commitments, memos, asset_id, fee,
+/// circuit_version)` — `0x66ed2cd4`
 ///
-/// Fee is in ABI slot 6: `calldata[196..228]`.
+/// Fee is in ABI slot 6: `calldata[196..228]`. The head is 8 slots (256 bytes)
+/// plus the 4-byte selector = 260 minimum.
 pub(crate) struct PrivateTransferOp;
 
 impl RelayableOperation for PrivateTransferOp {
@@ -77,12 +104,11 @@ impl RelayableOperation for PrivateTransferOp {
 	}
 
 	fn min_calldata_len(&self) -> usize {
-		228
+		260
 	}
 
 	fn extract_fee(&self, calldata: &[u8]) -> u128 {
-		let bytes: [u8; 32] = calldata[196..228].try_into().unwrap();
-		U256::from_big_endian(&bytes).as_u128()
+		fee_at_slot_6(calldata)
 	}
 }
 
