@@ -1,7 +1,7 @@
 // Sealed trees keep ~1M internal `MerkleNodes` entries forever (~72 MiB each)
 // purely to serve Merkle paths to wallets. No dispatchable reads them, so levels
-// below `SealedTreePrunedBelowLevel` are pruned in `on_idle` and rebuilt from the
-// leaves when a path needs them.
+// below `SealedTreePrunedBelowLevel` are pruned in `on_initialize` and rebuilt
+// from the leaves when a path needs them.
 //
 // Sealing a tree needs 2^20 shields — not reachable here, since
 // `MaxLeavesPerTree` is a compile-time constant. What this file DOES validate

@@ -281,11 +281,11 @@ mod benchmarks {
 		);
 	}
 
-	/// Cost of one `on_idle` sweep that removes `n` sealed-tree nodes.
+	/// Cost of one sweep that probes `n` sealed-tree nodes.
 	///
-	/// Not an extrinsic: the sweep runs in `on_idle` with whatever weight the
-	/// block has left. It still needs measuring, because the hook must return the
-	/// weight it actually consumed — declaring less would let a block overrun.
+	/// Not an extrinsic: the sweep runs in `on_initialize` over a fixed batch. It
+	/// still needs measuring, because the hook must return the weight it actually
+	/// consumed — declaring less would let a block overrun.
 	///
 	/// The setup seals a tree and populates its prunable levels directly rather
 	/// than inserting 2^20 leaves, which no benchmark could run. What matters for

@@ -20,6 +20,88 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
+### spec 9 — tx 2 — 2026-08-13
+
+Security fixes plus one consensus fix. **`transaction_version` stays at 2** —
+no dispatch signature changes, so offline-signed extrinsics remain valid and
+wallet and runtime do NOT have to ship together.
+
+**No migration, no storage change.**
+
+**Consensus**
+
+- **The sealed-node sweep no longer sizes its batch from the block's leftover
+  weight — this halted the public testnet at block 406997.**
+  `pallet-shielded-pool`'s `on_idle` divided `remaining` by the benchmarked
+  per-node cost to pick how many nodes to prune. Leftover weight is not
+  consensus: once post-dispatch refunds are in play an author and an importer
+  measure the same block slightly differently, so each pruned a different
+  number of nodes and wrote a different state. Frontier folds that state into
+  the Ethereum block header it builds in `on_finalize`, so the divergence
+  surfaced as a mismatched `"fron"` digest and `Executive::final_checks`
+  panicked with *"Digest item must match that calculated."*
+
+  Three validators with identical state at 406997 and byte-identical extrinsics
+  in 406998 produced three mutually unimportable blocks; the chain stopped for 4
+  hours. It survived five days on spec 8 only because empty blocks leave the
+  same leftover weight on every node — the first block carrying real EVM
+  traffic split the network three ways.
+
+  The sweep now runs in `on_initialize` over a constant batch
+  (`PRUNED_NODES_PER_BLOCK`, unchanged at 512, ~6.5 ms of a 2 s block) and
+  charges the full batch rather than the removals, since a miss costs the same
+  read as a hit. The state transition differs only in that it is now identical
+  on every node.
+
+  A governance runtime upgrade cannot deliver this fix: applying one needs a
+  block, and a forked network no longer agrees on any. Roll the binary out to
+  every validator together.
+
+**Security**
+
+- **shielded-pool 0.17.1 — pool admission tags one entry per nullifier**, in a
+  namespace shared with `unshield` (`ShieldedPoolSpend`). `and_provides`
+  contributes exactly ONE tag, so passing it a `Vec` encoded the whole
+  nullifier set plus the relayer into a single blob. Three consequences, each
+  free for an attacker since the fee is only charged on execution: reordering
+  the two inputs minted a second admissible entry for the same spend; two
+  transfers sharing only ONE note (A+B and A+C) did not collide at all, so one
+  note could back unboundedly many entries; and transfer/unshield used
+  different prefixes, so the same note could back one of each at once. Every
+  variant propagates and is revalidated network-wide while at most one can
+  execute.
+
+  `relayer` deliberately leaves the tag. Binding it made a copy with a swapped
+  fee recipient a *separate* entry, so anyone could rebroadcast another user's
+  spend pointed at their own account; keyed on the nullifier the two are
+  mutually exclusive, so taking the fee requires out-bidding — which means
+  paying it.
+
+  **Admission policy, not state transition** — consensus is unaffected. Nodes
+  on the old logic keep accepting the duplicate variants, so the mitigation
+  only completes as the network updates.
+- **relay — the selector whitelist was stale for BOTH operations (ME-8).** The
+  client held `0x47fc44a2` (unshield) and `0x8c0f5d24` (privateTransfer), while
+  the decoder answers to `0x4e505348` and `0x66ed2cd4`. Derived by keccak, the
+  stale pair turn out to be real selectors from signatures two versions old.
+  Relaying was therefore rejecting every call as *"unsupported selector"* —
+  silently, because that is indistinguishable from a legitimate rejection. The
+  same stale literals sat in the runtime's fallback list and in
+  `ts-tests/test-relay-rpc.ts`, so the tests stayed green while testing nothing.
+
+  Both now derive from `pallet_evm_precompile_shielded_pool::selectors::*` (or
+  from the ABI signature, in the TypeScript tests), and a unit test pins the
+  client constants against the decoder's.
+- **relay — per-operation calldata minimums were both 228 bytes**, the shared
+  head up to the fee slot. Past that the layouts diverge: unshield's head is 10
+  slots (324 with the selector), privateTransfer's is 8 (260). A call between
+  228 and its real minimum passed validation and reached the decoder truncated.
+- **relay — `gas_price` and the fee word saturate instead of panicking.**
+  `U256::as_u128()` panics above 2^128. The fee word is caller-controlled over
+  an unauthenticated RPC, so one crafted 32-byte value took down the handler;
+  `gas_price` comes from the runtime and is not attacker-reachable, but a panic
+  there still kills the relay RPC. Node-side only, no consensus effect.
+
 ### spec 8 — tx 2 — 2026-08-08
 
 Bundles the whole audit-remediation batch plus the config/feature work that

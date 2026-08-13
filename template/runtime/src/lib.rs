@@ -201,7 +201,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: Cow::Borrowed("orbinum"),
 	impl_name: Cow::Borrowed("orbinum"),
 	authoring_version: 1,
-	spec_version: 8,
+	spec_version: 9,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 2,
@@ -924,9 +924,12 @@ impl_runtime_apis! {
 			let allowed_selectors = {
 				let stored = pallet_relayer::Pallet::<Runtime>::allowed_selectors();
 				if stored.is_empty() {
+					// Taken from the precompile itself rather than copied: a
+					// literal here that drifts from the decoder fails silently,
+					// since a wrong selector is simply "unsupported".
 					sp_std::vec![
-						[0x47, 0xfc, 0x44, 0xa2], // unshield
-						[0x8c, 0x0f, 0x5d, 0x24], // privateTransfer
+						pallet_evm_precompile_shielded_pool::selectors::UNSHIELD,
+						pallet_evm_precompile_shielded_pool::selectors::PRIVATE_TRANSFER,
 					]
 				} else {
 					stored

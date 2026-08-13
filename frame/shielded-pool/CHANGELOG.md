@@ -2,6 +2,32 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.17.2] - 2026-08-13
+
+### Fixed
+
+- **The sealed-node sweep no longer sizes its batch from the block's leftover
+  weight — this halted the public testnet at block 406997.** `on_idle` received
+  `remaining` and divided it by the benchmarked per-node cost to pick how many
+  nodes to prune. Leftover weight is not consensus: once post-dispatch refunds
+  are in play an author and an importer measure the same block slightly
+  differently, so each pruned a different number of nodes and wrote a different
+  state. Frontier folds that state into the Ethereum block header it builds in
+  `on_finalize`, so the divergence surfaced as a mismatched `"fron"` digest and
+  `Executive::final_checks` panicked with *"Digest item must match that
+  calculated."* — every node rejecting every other node's block.
+
+  Three validators, identical state at 406997 and byte-identical extrinsics in
+  406998, produced three mutually unimportable blocks and the chain stopped for
+  4 hours. It survived five days only because empty blocks left the same
+  leftover weight everywhere; the first block carrying real EVM traffic split
+  the network.
+
+  The sweep now runs in `on_initialize` with a constant batch
+  (`PRUNED_NODES_PER_BLOCK`, unchanged at 512), which costs a fixed ~6.5 ms of a
+  2 s block. Regression test:
+  `prune_batch_is_independent_of_block_fullness`.
+
 ## [0.17.1] - 2026-08-11
 
 ### Security
