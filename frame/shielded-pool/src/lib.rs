@@ -111,12 +111,13 @@ pub mod pallet {
 	///   (`migrations::v3::MigrateToV3`); both historic-root items carry an expiry.
 	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(3);
 
-	/// Ceiling on how many sealed-tree nodes one `on_idle` pass may drop.
+	/// How many sealed-tree nodes each block sweeps.
 	///
-	/// The weight budget already bounds the sweep; this bounds the trie churn on
-	/// an idle chain, where the leftover weight would otherwise allow tens of
-	/// thousands of removals in a single block.
-	pub(crate) const MAX_PRUNED_NODES_PER_BLOCK: u32 = 512;
+	/// Fixed, never derived from the block's leftover weight — see `on_initialize`
+	/// for why that distinction is a consensus matter and not a tuning knob. At
+	/// ~12.7 µs of ref_time per node this costs ~6.5 ms of a 2 s block, and clears
+	/// a sealed 1 M-node tree in roughly 2 048 blocks (~3.4 hours at 6 s).
+	pub(crate) const PRUNED_NODES_PER_BLOCK: u32 = 512;
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
@@ -253,7 +254,7 @@ pub mod pallet {
 	/// Resume point for the sealed-tree node sweep: `(tree_id, level, index)`.
 	///
 	/// Pruning a sealed tree touches ~1M keys, far more than one block can absorb,
-	/// so `on_idle` walks it in bounded batches and parks the cursor here. `None`
+	/// so `on_initialize` walks it in bounded batches and parks the cursor here. `None`
 	/// means the sweep is idle — either nothing has sealed yet, or every sealed
 	/// tree is already pruned.
 	#[pallet::storage]
@@ -407,35 +408,25 @@ pub mod pallet {
 
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
-		/// Reclaim internal Merkle nodes from sealed trees with whatever weight
-		/// the block has left over.
+		/// Reclaim internal Merkle nodes from sealed trees, a fixed batch per block.
 		///
 		/// A sealed tree holds ~1M prunable nodes — orders of magnitude past one
 		/// block — so the sweep runs in bounded batches and parks its position in
-		/// `SealedPruneCursor`. Doing this in `on_idle` rather than `on_initialize`
-		/// keeps it off the critical path: a busy block simply skips it, and the
-		/// work resumes when the chain has room.
-		fn on_idle(_now: BlockNumberFor<T>, remaining: Weight) -> Weight {
-			// Size the batch from the benchmarked per-node cost, so a nearly-full
-			// block prunes little or nothing and an idle one prunes up to the cap.
-			// Deriving it from the same `WeightInfo` the hook reports with keeps the
-			// budget and the charge from drifting apart.
-			let base = T::WeightInfo::prune_sealed_nodes(0);
-			let per_node = T::WeightInfo::prune_sealed_nodes(1).saturating_sub(base);
-
-			let Some(available) = remaining.checked_sub(&base) else {
-				return Weight::zero(); // not even the cursor read fits
-			};
-			if per_node.ref_time() == 0 || per_node.proof_size() == 0 {
-				return Weight::zero();
-			}
-			let budget = (available.ref_time() / per_node.ref_time())
-				.min(available.proof_size() / per_node.proof_size())
-				.min(MAX_PRUNED_NODES_PER_BLOCK as u64) as u32;
-
-			let removed = crate::merkle::MerkleTreeService::prune_sealed_nodes::<T>(budget);
-			// Charged even when nothing was removed: the cursor read happened.
-			T::WeightInfo::prune_sealed_nodes(removed)
+		/// `SealedPruneCursor`.
+		///
+		/// The batch size is a constant and must stay one. Sizing it from the
+		/// block's leftover weight looks free, but leftover weight is not
+		/// consensus: an author and an importer measure the same block slightly
+		/// differently once post-dispatch refunds are in play, so each would prune
+		/// a different number of nodes and their state roots would diverge. That
+		/// halted the testnet at block 406997.
+		fn on_initialize(_now: BlockNumberFor<T>) -> Weight {
+			crate::merkle::MerkleTreeService::prune_sealed_nodes::<T>(PRUNED_NODES_PER_BLOCK);
+			// The full batch is charged, not the removals: the sweep probes
+			// `PRUNED_NODES_PER_BLOCK` keys either way, and a miss costs the same
+			// read as a hit. Charging removals would under-declare an all-miss
+			// pass and let the block admit extrinsics it cannot pay for.
+			T::WeightInfo::prune_sealed_nodes(PRUNED_NODES_PER_BLOCK)
 		}
 
 		fn integrity_test() {

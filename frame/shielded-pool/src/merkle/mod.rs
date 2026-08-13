@@ -1217,7 +1217,7 @@ mod prune_tests {
 	use crate::{
 		Config,
 		mock::{Test, new_test_ext},
-		pallet::{LastPrunedTree, MAX_PRUNED_NODES_PER_BLOCK, SealedPruneCursor},
+		pallet::{LastPrunedTree, PRUNED_NODES_PER_BLOCK, SealedPruneCursor},
 		storage::MerkleRepository,
 		types::Commitment,
 	};
@@ -1402,14 +1402,159 @@ mod prune_tests {
 		});
 	}
 
-	/// The per-block ceiling has to be a real bound, not a placeholder.
+	/// Two nodes running the same block must end at the same state root.
+	///
+	/// The old `on_idle` hook received the block's leftover weight, which is NOT consensus: an
+	/// author that filled the block differently from what the importer measures
+	/// hands the hook a different leftover weight, the sweep prunes a different
+	/// number of nodes, and the two states diverge. That halted the testnet at
+	/// block 406997.
+	///
+	/// Regression: the sweep must consume a constant batch, so two nodes running
+	/// the same block land on the same state regardless of how full it was.
+	#[test]
+	fn prune_batch_is_independent_of_block_fullness() {
+		// The mock's 8-leaf tree is swept dry in one call, which would hide the
+		// divergence. Production seals 1_048_576-leaf trees, where the batch
+		// genuinely bounds the sweep — seal several mock trees to match.
+		fn sweep_once() -> (u32, Option<(u32, u8, u32)>) {
+			new_test_ext().execute_with(|| {
+				for _ in 0..40 {
+					seal_one_tree();
+				}
+				let removed = MerkleTreeService::prune_sealed_nodes::<Test>(PRUNED_NODES_PER_BLOCK);
+				(removed, SealedPruneCursor::<Test>::get())
+			})
+		}
+
+		// Same block, two nodes. Nothing about how full the block was may reach
+		// the sweep, so both must land identically.
+		assert_eq!(
+			sweep_once(),
+			sweep_once(),
+			"the sealed-node sweep is not deterministic: author and importer would \
+			 disagree on state and the chain would fork"
+		);
+	}
+
+	/// How many internal nodes the forest still holds — the sweep's whole effect.
+	fn surviving_nodes() -> usize {
+		crate::pallet::MerkleNodes::<Test>::iter().count()
+	}
+
+	// ── adversarial: can anything reintroduce the divergence? ─────────────────
+	//
+	// The fix is only worth what it survives. Each of these attacks the sweep
+	// from a different angle, trying to make two nodes running the same block
+	// prune differently.
+
+	/// Attack: run the sweep from a cursor parked anywhere, repeatedly.
+	///
+	/// The full sweep of a forest must reach the same end state no matter how
+	/// the batches were carved up — otherwise a node that restarted mid-sweep
+	/// would land somewhere its peers never do.
+	#[test]
+	fn sweep_converges_regardless_of_how_the_batches_are_carved() {
+		fn sweep_to_exhaustion(batch: u32) -> (u32, Option<(u32, u8, u32)>, usize) {
+			new_test_ext().execute_with(|| {
+				for _ in 0..20 {
+					seal_one_tree();
+				}
+				let mut total = 0;
+				// Bounded: a stuck sweep must fail the test, not hang it.
+				for _ in 0..10_000 {
+					let removed = MerkleTreeService::prune_sealed_nodes::<Test>(batch);
+					total += removed;
+					if SealedPruneCursor::<Test>::get().is_none() && removed == 0 {
+						break;
+					}
+				}
+				(total, SealedPruneCursor::<Test>::get(), surviving_nodes())
+			})
+		}
+
+		// One node sweeps in tiny batches, another in large ones. Same forest,
+		// so the same nodes must end up gone.
+		let fine = sweep_to_exhaustion(1);
+		let coarse = sweep_to_exhaustion(PRUNED_NODES_PER_BLOCK);
+		assert_eq!(
+			fine, coarse,
+			"batch size changed the end state: nodes that swept at different \
+			 rates would hold different tries"
+		);
+	}
+
+	/// Attack: seal more trees mid-sweep, the way a live chain does.
+	///
+	/// The cursor walks tree-by-tree while the forest grows underneath it. Two
+	/// nodes that saw the same insertions must still agree.
+	#[test]
+	fn sweep_is_stable_while_the_forest_grows() {
+		fn interleaved(batch: u32) -> usize {
+			new_test_ext().execute_with(|| {
+				for _ in 0..20 {
+					seal_one_tree();
+					// A block's worth of sweeping between each sealing.
+					MerkleTreeService::prune_sealed_nodes::<Test>(batch);
+				}
+				for _ in 0..2_000 {
+					let removed = MerkleTreeService::prune_sealed_nodes::<Test>(batch);
+					if SealedPruneCursor::<Test>::get().is_none() && removed == 0 {
+						break;
+					}
+				}
+				surviving_nodes()
+			})
+		}
+
+		assert_eq!(
+			interleaved(PRUNED_NODES_PER_BLOCK),
+			interleaved(PRUNED_NODES_PER_BLOCK),
+			"interleaving sealing with sweeping is not reproducible"
+		);
+	}
+
+	/// Attack: the sweep must never touch the tree still being written to.
+	///
+	/// This is the property that keeps today's notes spendable at O(depth); the
+	/// batch change moved the hook, so re-prove it rather than assume it held.
+	#[test]
+	fn active_tree_survives_an_exhaustive_sweep() {
+		new_test_ext().execute_with(|| {
+			let cap = seal_one_tree();
+			// Start a second tree and leave it active with one leaf.
+			let mut c = [0u8; 32];
+			c[..4].copy_from_slice(&cap.to_le_bytes());
+			MerkleTreeService::insert_leaf::<Test>(Commitment(c)).expect("insert");
+
+			for _ in 0..1_000 {
+				if MerkleTreeService::prune_sealed_nodes::<Test>(PRUNED_NODES_PER_BLOCK) == 0
+					&& SealedPruneCursor::<Test>::get().is_none()
+				{
+					break;
+				}
+			}
+
+			let active = MerkleRepository::get_tree_size::<Test>() / cap;
+			let cut = <Test as Config>::SealedTreePrunedBelowLevel::get();
+			for level in 1..cut {
+				assert!(
+					MerkleRepository::get_node::<Test>(active, level, 0).is_some(),
+					"active tree lost node at level {level}: paths would no longer \
+					 be O(depth) and the sweep is eating live state"
+				);
+			}
+		});
+	}
+
+	/// The per-block batch has to be a real bound, not a placeholder.
 	///
 	/// A `const` block rather than a runtime assert: both operands are constants,
 	/// so the compiler would fold an `assert!` away and the check would never run.
 	/// This one fails the build instead.
 	const _: () = assert!(
-		MAX_PRUNED_NODES_PER_BLOCK > 0 && MAX_PRUNED_NODES_PER_BLOCK <= 4096,
-		"MAX_PRUNED_NODES_PER_BLOCK must bound the sweep: zero disables pruning, \
+		PRUNED_NODES_PER_BLOCK > 0 && PRUNED_NODES_PER_BLOCK <= 4096,
+		"PRUNED_NODES_PER_BLOCK must bound the sweep: zero disables pruning, \
 		 and a value this far above the benchmarked batch would let one block \
 		 absorb work it cannot pay for"
 	);
