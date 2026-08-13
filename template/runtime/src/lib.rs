@@ -153,7 +153,8 @@ pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 ///
 /// Drop an entry once every live chain has passed its version — a migration
 /// that can no longer run is dead weight that could be re-armed by mistake.
-pub type Migrations = (pallet_shielded_pool::migrations::v3::MigrateToV3<Runtime>,);
+/// Empty: every live chain is past v3.
+pub type Migrations = ();
 
 /// Executive: handles dispatch to the various modules.
 pub type Executive = frame_executive::Executive<

@@ -65,7 +65,6 @@ mod benchmarking;
 pub mod genesis;
 pub mod helpers;
 pub mod merkle;
-pub mod migrations;
 pub mod operations;
 pub mod storage;
 pub mod types;
@@ -107,8 +106,9 @@ pub mod pallet {
 	///   Migration removed once every live chain reached v2 — see git history.
 	/// - v2: multi-tree forest — `SealedTreeRoots` / `SealedRootIndex` (start empty).
 	///   Migration removed once every live chain reached v2 — see git history.
-	/// - v3: historic-root window re-anchored from insert counts to block numbers
-	///   (`migrations::v3::MigrateToV3`); both historic-root items carry an expiry.
+	/// - v3: historic-root window re-anchored from insert counts to block numbers;
+	///   both historic-root items carry an expiry. Migration removed once every
+	///   live chain reached v3 — see git history.
 	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(3);
 
 	/// How many sealed-tree nodes each block sweeps.

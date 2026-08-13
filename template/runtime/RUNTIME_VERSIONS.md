@@ -20,6 +20,24 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
+### spec 10 — tx 2 — [Unreleased]
+
+Dead code only. **`transaction_version` stays at 2.**
+
+`spec_version` moves because `Migrations` compiles into the WASM: two blobs
+that run a different `on_runtime_upgrade` must not both claim `spec_version: 9`.
+
+**Removed**
+
+- **`MigrateToV3` and the `migrations` module.** `Migrations` is now empty —
+  every live chain is past v3, so the entry was a no-op behind a
+  storage-version guard, and a migration that can no longer run is dead weight
+  that could be re-armed by mistake. Replaying it against a v3 state aborts
+  with *"produced an already-expired root"*, which `try-runtime
+  on-runtime-upgrade` does by design (it forces migrations past their guard),
+  so every upgrade rehearsal failed for the wrong reason. **No on-chain effect
+  either way** — the guard already made it a single storage read.
+
 ### spec 9 — tx 2 — 2026-08-13
 
 Security fixes plus one consensus fix. **`transaction_version` stays at 2** —

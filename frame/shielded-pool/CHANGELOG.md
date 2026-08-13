@@ -2,6 +2,18 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [Unreleased]
+
+### Removed
+
+- **`migrations::v3::MigrateToV3`**, along with the whole `migrations` module.
+  Every live chain is past v3, so the migration was a no-op guarded by a storage
+  version check — dead weight that could be re-armed by mistake. Replaying it
+  against a v3 state aborts with *"produced an already-expired root"*, which a
+  `try-runtime on-runtime-upgrade` dry run surfaced by design: it forces
+  migrations past their guard. Harmless on chain, but it made every upgrade
+  rehearsal fail for the wrong reason.
+
 ## [0.17.2] - 2026-08-13
 
 ### Fixed
