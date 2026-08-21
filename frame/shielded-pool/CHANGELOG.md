@@ -2,6 +2,54 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.19.0] - 2026-08-21
+
+Relay fees are attributed by dispatch origin instead of by a call argument.
+**Breaking** — `unshield` and `private_transfer` each lose a parameter, and a new
+`Event` variant shifts the enum, so callers, exhaustive matches and
+index-decoding indexers all need updating.
+
+### Changed
+
+#### The relay fee recipient is no longer a call argument
+`unshield` and `private_transfer` drop `relayer: Option<H160>`. Both are
+`ensure_none`, so that field was an unauthenticated claim on an unauthenticated
+call: anyone could take a propagated proof, resubmit it naming themselves, and
+collect a fee they never paid for. It had no honest producer either — the SDK
+sent `None`, and the precompile already derived the answer from
+`handle.context().caller`.
+
+The recipient now comes from the dispatch origin, which calldata cannot
+influence. A new crate-level `RawOrigin::Relayed(H160)` carries it, built only in
+`dispatch::relayed` from the EVM caller. `ensure_relayed` also accepts a **signed**
+origin and resolves the signer's registered address — a new path that lets
+non-validator relayers be paid without touching the registry. An unsigned
+submission names nobody and its fee falls back to the block author, unchanged.
+
+Root is rejected: `sudo.sudo(unshield { .. })` must not become a way to pay an
+arbitrary party, which is the very thing removing the argument prevents.
+
+The registry still resolves H160 → account. The EVM address mapping produces a
+synthetic `[address | 0x00 * 12]` account, never the validator's own, so it
+cannot substitute for the registry.
+
+**What remains open:** a validator can resubmit another node's spend under its own
+key and win in the slots it authors. The pool tags on the nullifier alone, so the
+copy and the original are mutually exclusive — it cannot win by arriving first.
+That bounds theft at 1/N of relayed volume, now costs real EVM gas, and names the
+thief in the block header. Closing it outright requires the recipient as a circuit
+public input, which is a ceremony plus a VK migration — not proportionate while
+validation stays permissioned.
+
+### Added
+
+- **`Event::SelfRelayedFee`.** Emitted when an authenticated relayer resolves to
+  the account that authored the block its fee landed in. Legitimate and expected —
+  with N authors in rotation it happens about 1/N of the time — so it is a signal,
+  not a verdict. The block-author fallback deliberately does **not** emit: it fires
+  on every unrelayed call and makes no claim about who relayed anything, so
+  including it would bury the signal in ordinary traffic.
+
 ## [0.18.0] - 2026-08-21
 
 Relay fee attribution leaves an on-chain trace when it falls back. **Breaking** —

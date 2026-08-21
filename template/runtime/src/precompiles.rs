@@ -46,7 +46,8 @@ where
 		+ frame_support::dispatch::GetDispatchInfo
 		+ From<pallet_shielded_pool::Call<R>>,
 	<<R as frame_system::Config>::RuntimeCall as sp_runtime::traits::Dispatchable>::RuntimeOrigin:
-		From<Option<<R as frame_system::Config>::AccountId>>,
+		From<Option<<R as frame_system::Config>::AccountId>>
+			+ From<pallet_shielded_pool::RawOrigin>,
 	<<R as frame_system::Config>::RuntimeCall as sp_runtime::traits::Dispatchable>::PostInfo:
 		core::fmt::Debug,
 	<R as frame_system::Config>::AccountId: From<[u8; 32]>,

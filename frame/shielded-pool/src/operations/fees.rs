@@ -14,11 +14,13 @@ pub type BalanceOf<T> = <<T as Config>::Currency as frame_support::traits::Curre
 	<T as frame_system::Config>::AccountId,
 >>::Balance;
 
-/// Credit `fee` to whoever the call named, falling back to the block author.
+/// Credit `fee` to the submitting relayer, falling back to the block author.
 ///
-/// The `relayer` H160 is an ordinary call argument — the ZK proof binds the fee
-/// *amount* but not its *recipient* — so this resolves it through the registry
-/// rather than trusting it. An address that resolves to nobody is not an error:
+/// `relayer_evm` comes from the dispatch origin, never from a call argument: the
+/// ZK proof binds the fee *amount* but not its *recipient*, so an argument would
+/// be an unauthenticated claim any resubmitter could rewrite. It is still resolved
+/// through the registry rather than trusted, because the EVM address must map to
+/// a substrate account. An address that resolves to nobody is not an error:
 /// relaying is not gated on registration, and rejecting here would fail a user's
 /// transaction because of someone else's misconfiguration. The fee goes to the
 /// block author instead and [`Event::RelayFeeDiverted`] records that it did.
@@ -31,6 +33,10 @@ pub fn credit_relay_fee<T: Config>(
 	fee: u128,
 ) -> Result<(), Error<T>> {
 	let resolved = relayer_evm.and_then(|addr| T::Relayer::resolve_relayer(&addr));
+
+	let resolved_to_author = resolved
+		.as_ref()
+		.is_some_and(|account| T::Relayer::block_author().as_ref() == Some(account));
 
 	let recipient = match resolved {
 		Some(account) => account,
@@ -49,6 +55,24 @@ pub fn credit_relay_fee<T: Config>(
 			author
 		}
 	};
+
+	// A validator relaying in its own slot is normal — with N authors it happens
+	// about 1/N of the time by pure rotation — so this is a signal, never a
+	// verdict. What it makes visible is the one residual attack: an author can
+	// ignore its own pool ordering and include a copy of someone else's spend
+	// submitted under its own key. That shows up as a self-relay rate materially
+	// above 1/N, only detectable by watching the rate across many sessions.
+	//
+	// Gated on `resolved_to_author`, not on the final recipient: the fallback
+	// credits the author on EVERY unrelayed call, and reporting those would bury
+	// the signal in traffic that carries no claim about who relayed anything.
+	if resolved_to_author {
+		Pallet::<T>::deposit_event(Event::SelfRelayedFee {
+			author: recipient.clone(),
+			asset_id,
+			amount: fee,
+		});
+	}
 
 	T::Relayer::accumulate_relay_fee(&recipient, asset_id, fee);
 	Ok(())
@@ -147,7 +171,10 @@ impl FeeOperation {
 mod tests {
 	use super::*;
 	use crate::{
-		mock::{Test, acc, mock_pending_fees_get, mock_pending_fees_set, new_test_ext},
+		mock::{
+			Test, acc, mock_pending_fees_get, mock_pending_fees_set, mock_register_relayer,
+			new_test_ext,
+		},
 		operations::assets::AssetOperation,
 		pallet::Event as PalletEvent,
 		storage::CommitmentRepository,
@@ -712,5 +739,78 @@ mod tests {
 		// signals bound = 128: the real 76-byte payload fits, over-bound rejected.
 		assert!(BoundedVec::<u8, ConstU32<128>>::try_from(vec![0u8; 76]).is_ok());
 		assert!(BoundedVec::<u8, ConstU32<128>>::try_from(vec![0u8; 129]).is_err());
+	}
+
+	// ── SelfRelayedFee ────────────────────────────────────────────────────────
+	//
+	// The mock's block author is `acc(1)` (see `MockBlockAuthor`).
+
+	/// The signal that matters: a registered relayer that is also the author.
+	#[test]
+	fn a_relayer_that_authors_its_own_block_is_flagged() {
+		new_test_ext().execute_with(|| {
+			frame_system::Pallet::<Test>::set_block_number(1);
+			let addr = sp_core::H160::repeat_byte(0xAA);
+			mock_register_relayer(acc(1), addr); // acc(1) IS the block author
+
+			assert_ok!(credit_relay_fee::<Test>(Some(addr), 0, 500));
+
+			assert!(
+				frame_system::Pallet::<Test>::events().iter().any(|r| matches!(
+					&r.event,
+					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::SelfRelayedFee { .. })
+				)),
+				"a resolved relayer equal to the author must be reported"
+			);
+		});
+	}
+
+	/// A relayer that is not the author is ordinary traffic.
+	#[test]
+	fn a_relayer_that_is_not_the_author_is_not_flagged() {
+		new_test_ext().execute_with(|| {
+			frame_system::Pallet::<Test>::set_block_number(1);
+			let addr = sp_core::H160::repeat_byte(0xBB);
+			mock_register_relayer(acc(2), addr); // acc(2) != author acc(1)
+
+			assert_ok!(credit_relay_fee::<Test>(Some(addr), 0, 500));
+
+			assert!(
+				!frame_system::Pallet::<Test>::events().iter().any(|r| matches!(
+					&r.event,
+					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::SelfRelayedFee { .. })
+				)),
+				"a relayer other than the author must not be flagged"
+			);
+		});
+	}
+
+	/// The regression this event was silently failing: an unrelayed call credits
+	/// the author by design, on EVERY such call. Reporting those would drown the
+	/// signal in traffic that makes no claim about who relayed anything.
+	#[test]
+	fn the_block_author_fallback_is_not_flagged_as_self_relay() {
+		new_test_ext().execute_with(|| {
+			frame_system::Pallet::<Test>::set_block_number(1);
+
+			// No relayer named at all.
+			assert_ok!(credit_relay_fee::<Test>(None, 0, 500));
+			// Named, but unregistered — resolves to nobody.
+			assert_ok!(credit_relay_fee::<Test>(
+				Some(sp_core::H160::repeat_byte(0xCC)),
+				0,
+				500
+			));
+
+			assert!(
+				!frame_system::Pallet::<Test>::events().iter().any(|r| matches!(
+					&r.event,
+					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::SelfRelayedFee { .. })
+				)),
+				"the fallback to the block author is not a self-relay"
+			);
+			// The fee still lands on the author both times.
+			assert_eq!(mock_pending_fees_get(acc(1), 0), 1000);
+		});
 	}
 }

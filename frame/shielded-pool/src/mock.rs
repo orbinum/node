@@ -202,7 +202,12 @@ pub fn mock_set_min_relay_fee(fee: u128) {
 /// Register an EVM address → account mapping so `resolve_relayer` returns `Some`.
 /// Writes directly into `pallet-relayer`'s registry for tests.
 pub fn mock_register_relayer(who: AccountId, addr: sp_core::H160) {
-	pallet_relayer::RelayerRegistry::<Test>::insert(addr, who);
+	pallet_relayer::RelayerRegistry::<Test>::insert(addr, who.clone());
+	// Both indexes: `credit_relay_fee` resolves H160 -> account, while the signed
+	// dispatch path resolves account -> H160. `register_relayer` writes both, so a
+	// helper that wrote only one would let a test pass against state the runtime
+	// cannot produce.
+	pallet_relayer::RelayerByAccount::<Test>::insert(who, addr);
 }
 
 /// Force the relayer's `block_author()` to return `None` (default is `Some(acc(1))`),

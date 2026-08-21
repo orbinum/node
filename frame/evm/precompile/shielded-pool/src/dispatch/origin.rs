@@ -60,11 +60,16 @@ where
 	})
 }
 
-/// Dispatches `call` with `None` origin (`ensure_none`).
+/// Dispatches `call` carrying the **EVM caller** as the relaying address.
 ///
-/// Used for `private_transfer` and `unshield`, where a ZK proof authenticates the
-/// operation and no transaction signer is needed.
-pub fn unsigned<T>(
+/// Used for `private_transfer` and `unshield`. A ZK proof authenticates the spend
+/// but says nothing about who relayed it, so the relay fee has to be attributed
+/// some other way. It comes from here: the EVM executor sets `caller` from the
+/// transaction signature and debited its gas, so it cannot be forged by calldata.
+///
+/// This is why neither call carries a `relayer` argument — an argument would be an
+/// unauthenticated claim that any resubmitter could rewrite to point at itself.
+pub fn relayed<T>(
 	handle: &mut impl PrecompileHandle,
 	call: pallet_shielded_pool::Call<T>,
 ) -> PrecompileResult
@@ -73,8 +78,11 @@ where
 	<T as frame_system::Config>::RuntimeCall: Dispatchable<PostInfo = PostDispatchInfo>
 		+ GetDispatchInfo
 		+ From<pallet_shielded_pool::Call<T>>,
-	RuntimeOriginOf<T>: From<Option<<T as frame_system::Config>::AccountId>>,
+	RuntimeOriginOf<T>: From<pallet_shielded_pool::Origin>,
 	<<T as frame_system::Config>::RuntimeCall as Dispatchable>::PostInfo: core::fmt::Debug,
 {
-	record_and_dispatch(handle, call, || RuntimeOriginOf::<T>::from(None))
+	let caller = handle.context().caller;
+	record_and_dispatch(handle, call, || {
+		RuntimeOriginOf::<T>::from(pallet_shielded_pool::Origin::Relayed(caller))
+	})
 }

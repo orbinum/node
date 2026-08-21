@@ -27,7 +27,9 @@
 //! `NoteCommitment(change_value, asset_id, change_owner_pk, change_blinding)`, and
 //! `change_encrypted_memo` then holds `nonce(12) || ciphertext(132) || ephPk(32)`.
 //!
-//! `relayer` is not in the ABI: it comes from `handle.context().caller`.
+//! The relay fee recipient is not in the ABI and is not a call argument: it is
+//! the dispatch origin, built from `handle.context().caller`. Calldata therefore
+//! cannot name a different one.
 
 use alloc::vec::Vec;
 
@@ -49,7 +51,9 @@ const MAX_PROOF_LEN: u32 = 512;
 /// are irrecoverable rather than merely invalid: a zero amount, the zero
 /// recipient, and a malformed change memo.
 pub fn decode<T>(
-	handle: &impl PrecompileHandle,
+	// Unused here: the relaying address comes from the dispatch origin, not from
+	// anything this decoder reads. Kept for signature parity with the other calls.
+	_handle: &impl PrecompileHandle,
 	input: &[u8],
 ) -> Result<pallet_shielded_pool::Call<T>, PrecompileFailure>
 where
@@ -146,11 +150,7 @@ where
 				.map_err(|_| err("unshield: invalid change_encrypted_memo"))?
 		};
 
-	// Step 10: relayer. Not an ABI field — whoever submits the EVM transaction is
-	// the relayer, so the calldata cannot spoof it.
-	let relayer = Some(handle.context().caller);
-
-	// Step 11: circuit_version. Checked here rather than in the step 1 guard so
+	// Step 10: circuit_version. Checked here rather than in the step 1 guard so
 	// that calldata predating this slot reports the missing field instead of a
 	// generic length error.
 	if params.len() < 320 {
@@ -168,7 +168,6 @@ where
 		fee,
 		change_commitment,
 		change_encrypted_memo,
-		relayer,
 		circuit_version,
 	})
 }

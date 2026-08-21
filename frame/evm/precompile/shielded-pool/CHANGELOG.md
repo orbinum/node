@@ -2,6 +2,25 @@
 
 All notable changes to `pallet-evm-precompile-shielded-pool` will be documented in this file.
 
+## [0.6.0] - 2026-08-21
+
+### Changed
+
+#### `unshield` and `private_transfer` dispatch with a relaying origin
+`dispatch::unsigned` becomes `dispatch::relayed`, which builds
+`pallet_shielded_pool::RawOrigin::Relayed(handle.context().caller)` instead of a
+plain `None` origin. The pallet takes the relay fee recipient from that origin
+now, so this precompile is where the EVM caller becomes the party that gets paid.
+
+Nothing changes for callers: `relayer` was never an ABI field, and the selectors
+and calldata layout are untouched. What changes is that the caller is no longer
+copied into a call argument the pallet then had to trust — it rides on the origin,
+which calldata cannot influence.
+
+**Breaking for integrators of the Rust API:** the runtime must satisfy
+`RuntimeOrigin: From<pallet_shielded_pool::RawOrigin>`, and the two decoders no
+longer emit a `relayer` field. Requires `pallet-shielded-pool` 0.19.0.
+
 ## [0.5.1] - 2026-08-11
 
 ### Added

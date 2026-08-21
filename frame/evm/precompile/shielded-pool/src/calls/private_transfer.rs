@@ -21,7 +21,9 @@
 //! The three arrays are parallel: `commitments[i]` and `memos[i]` describe the
 //! output note paid for by `nullifiers[i]`, so all three must have equal length.
 //!
-//! `relayer` is not in the ABI: it comes from `handle.context().caller`.
+//! The relay fee recipient is not in the ABI and is not a call argument: it is
+//! the dispatch origin, built from `handle.context().caller`. Calldata therefore
+//! cannot name a different one.
 
 use fp_evm::{ExitError, PrecompileFailure, PrecompileHandle};
 use frame_support::BoundedVec;
@@ -42,7 +44,9 @@ const MAX_NOTES: u32 = 2;
 /// Beyond the ABI itself, this enforces the structural invariant the proof does
 /// not cover: at least one input note, and the three arrays equal in length.
 pub fn decode<T>(
-	handle: &impl PrecompileHandle,
+	// Unused here: the relaying address comes from the dispatch origin, not from
+	// anything this decoder reads. Kept for signature parity with the other calls.
+	_handle: &impl PrecompileHandle,
 	input: &[u8],
 ) -> Result<pallet_shielded_pool::Call<T>, PrecompileFailure>
 where
@@ -131,11 +135,7 @@ where
 			.map_err(|_| err("privateTransfer: fee conversion failed"))?
 	};
 
-	// Step 8: relayer. Not an ABI field — whoever submits the EVM transaction is
-	// the relayer, so the calldata cannot spoof it.
-	let relayer = Some(handle.context().caller);
-
-	// Step 9: circuit_version, selecting the VK the proof is checked against.
+	// Step 8: circuit_version, selecting the VK the proof is checked against.
 	let circuit_version = abi::decode_u32(&params[224..256])?;
 
 	Ok(pallet_shielded_pool::Call::<T>::private_transfer {
@@ -146,7 +146,6 @@ where
 		encrypted_memos,
 		asset_id,
 		fee,
-		relayer,
 		circuit_version,
 	})
 }

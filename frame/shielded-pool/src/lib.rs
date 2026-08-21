@@ -85,6 +85,40 @@ pub use types::{
 	Note, Nullifier,
 };
 
+use frame_support::pallet_prelude::{Decode, DecodeWithMemTracking, Encode, MaxEncodedLen};
+use scale_info::TypeInfo;
+use sp_runtime::RuntimeDebug;
+
+/// Who submitted a relayed spend, as established by the dispatch path itself.
+///
+/// Relay fees are paid to whoever *submitted* the operation, never to an
+/// address named in the call. The distinction is the whole point: a ZK proof
+/// authenticates the spend but says nothing about who relayed it, so a
+/// recipient carried as a call argument is an unauthenticated claim that any
+/// resubmitter can rewrite. An origin cannot be forged — the EVM executor
+/// sets it from the transaction signature.
+#[derive(
+	PartialEq,
+	Eq,
+	Clone,
+	RuntimeDebug,
+	Encode,
+	Decode,
+	DecodeWithMemTracking,
+	TypeInfo,
+	MaxEncodedLen
+)]
+pub enum RawOrigin {
+	/// Submitted through the EVM precompile by this address, which signed the
+	/// transaction and paid its gas.
+	///
+	/// The only variant: an unrelayed submission arrives as `frame_system`'s
+	/// `None` origin, so there is nothing for this enum to say about it. A second
+	/// variant meaning "nobody" would be constructible by anyone able to build an
+	/// origin, and would then be indistinguishable from the real thing.
+	Relayed(sp_core::H160),
+}
+
 #[frame_support::pallet]
 #[allow(clippy::too_many_arguments)]
 pub mod pallet {
@@ -96,6 +130,7 @@ pub mod pallet {
 	};
 	use frame_system::pallet_prelude::*;
 	use pallet_zk_verifier::ZkVerifierPort;
+	use sp_runtime::traits::BadOrigin;
 
 	/// The balance type for this pallet
 	pub type BalanceOf<T> =
@@ -123,9 +158,54 @@ pub mod pallet {
 	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
 
+	#[pallet::origin]
+	pub type Origin = RawOrigin;
+
+	/// Extracts the relaying address from `origin`, if the dispatch path
+	/// established one.
+	///
+	/// Three accepted shapes, all of them authenticated or deliberately anonymous:
+	///
+	/// | Origin | Relayer | Why |
+	/// |---|---|---|
+	/// | `Relayed(addr)` | `Some(addr)` | EVM precompile; `addr` signed the transaction |
+	/// | Signed(who) | `who`'s registered address | the signature proves who submitted |
+	/// | `None` | `None` | no relayer named; fee goes to the block author |
+	///
+	/// A signed submitter with no registered address resolves to `None` rather
+	/// than failing: relaying is not gated on registration, so its fee falls back
+	/// to the block author exactly as an unregistered EVM caller's would.
+	pub fn ensure_relayed<T: Config, OuterOrigin>(
+		o: OuterOrigin,
+	) -> Result<Option<sp_core::H160>, BadOrigin>
+	where
+		OuterOrigin: Into<Result<Origin, OuterOrigin>>
+			+ Into<Result<frame_system::RawOrigin<T::AccountId>, OuterOrigin>>,
+	{
+		use pallet_relayer::RelayerInterface;
+
+		match Into::<Result<Origin, OuterOrigin>>::into(o) {
+			Ok(RawOrigin::Relayed(who)) => Ok(Some(who)),
+			Err(other) => match other.into() {
+				Ok(frame_system::RawOrigin::None) => Ok(None),
+				Ok(frame_system::RawOrigin::Signed(who)) => {
+					Ok(T::Relayer::registered_evm_address(&who))
+				}
+				_ => Err(BadOrigin),
+			},
+		}
+	}
+
 	/// Configuration trait for the pallet
 	#[pallet::config]
-	pub trait Config: frame_system::Config<RuntimeEvent: From<Event<Self>>> {
+	pub trait Config:
+		frame_system::Config<
+			RuntimeEvent: From<Event<Self>>,
+			// Relay attribution reads the origin rather than a call argument, so the
+			// outer origin must be convertible back to this pallet's own variant.
+			RuntimeOrigin: Into<Result<Origin, <Self as frame_system::Config>::RuntimeOrigin>>,
+		>
+	{
 		/// The currency mechanism
 		type Currency: Currency<Self::AccountId> + ReservableCurrency<Self::AccountId>;
 
@@ -561,6 +641,28 @@ pub mod pallet {
 			amount: u128,
 		},
 
+		/// A relay fee was credited to a relayer that also authored the block it
+		/// landed in.
+		///
+		/// Only fires when an authenticated relayer *resolved* and turned out to be
+		/// the author. The fallback path — no relayer named, fee to the author —
+		/// does not emit: it happens on every unrelayed call and carries no claim
+		/// about who relayed anything, so reporting it would bury the signal.
+		///
+		/// Legitimate and expected: with N authors in rotation this occurs about
+		/// 1/N of the time on its own. It is published because it is the only
+		/// on-chain trace of the one attack the origin-based attribution does not
+		/// prevent — an author may ignore its own pool ordering and include a copy
+		/// of another node's spend pointed at itself. A single event proves
+		/// nothing; a self-relay rate materially above 1/N sustained over many
+		/// sessions does. Adjudication is off-chain, enforcement is
+		/// `validatorSet.removeValidator`.
+		SelfRelayedFee {
+			author: T::AccountId,
+			asset_id: u32,
+			amount: u128,
+		},
+
 		/// Input nullifiers were spent in a private transfer.
 		/// Emitted independently of CommitmentsInserted to prevent graph correlation.
 		NullifiersSpent {
@@ -812,7 +914,8 @@ pub mod pallet {
 		/// a transaction signer, preserving full sender privacy.
 		///
 		/// # Arguments
-		/// * `origin` - Must be none (unsigned transaction)
+		/// * `origin` - Unsigned, signed, or the precompile's relayed origin; it
+		///   determines who is credited the relay fee (see `ensure_relayed`)
 		/// * `proof` - The ZK proof of valid transfer
 		/// * `merkle_root` - The Merkle root the proof was computed against
 		/// * `nullifiers` - Nullifiers for notes being spent
@@ -840,10 +943,11 @@ pub mod pallet {
 			encrypted_memos: BoundedVec<FrameEncryptedMemo, ConstU32<2>>,
 			asset_id: u32,
 			fee: BalanceOf<T>,
-			relayer: Option<sp_core::H160>,
 			circuit_version: u32,
 		) -> DispatchResult {
-			ensure_none(origin)?;
+			// The relayer is established by HOW the call arrived, never by what it
+			// carries: an argument would be an unauthenticated claim.
+			let relayer = ensure_relayed::<T, _>(origin)?;
 
 			// Delegate to business operation
 			crate::operations::private_transfer::PrivateTransferOperation::execute::<T>(
@@ -867,7 +971,8 @@ pub mod pallet {
 		/// paid to the fee collector without a transaction signer.
 		///
 		/// # Arguments
-		/// * `origin` - Must be none (unsigned transaction)
+		/// * `origin` - Unsigned, signed, or the precompile's relayed origin; it
+		///   determines who is credited the relay fee (see `ensure_relayed`)
 		/// * `proof` - The ZK proof of valid withdrawal
 		/// * `merkle_root` - The Merkle root the proof was computed against
 		/// * `nullifier` - Nullifier for the note being spent
@@ -903,13 +1008,13 @@ pub mod pallet {
 			// Encrypted memo for the change note. Must be [0u8; 0] for total unshield.
 			// For partial unshield, contains encrypted plaintext: [value_lo(8), value_hi(8), owner_pk(32), blinding(32), asset_id(4), counterparty_pk(32)].
 			change_encrypted_memo: FrameEncryptedMemo,
-			// EVM address of the relay node that signed the tx (from precompile caller); None for direct Substrate.
-			relayer: Option<sp_core::H160>,
 			// Circuit version the spent notes were created under; the proof is
 			// verified against this version's VK (not merely the active one).
 			circuit_version: u32,
 		) -> DispatchResult {
-			ensure_none(origin)?;
+			// The relayer is established by HOW the call arrived, never by what it
+			// carries: an argument would be an unauthenticated claim.
+			let relayer = ensure_relayed::<T, _>(origin)?;
 
 			// Delegate to business operation
 			crate::operations::unshield::UnshieldOperation::execute::<T>(
@@ -1084,14 +1189,12 @@ pub mod pallet {
 					merkle_root,
 					nullifiers,
 					fee,
-					relayer,
 					circuit_version,
 					..
 				} => crate::validate_unsigned::validate_private_transfer::<T>(
 					merkle_root,
 					nullifiers,
 					fee,
-					relayer,
 					*circuit_version,
 				),
 
@@ -1101,7 +1204,6 @@ pub mod pallet {
 					asset_id,
 					amount,
 					fee,
-					relayer,
 					circuit_version,
 					..
 				} => crate::validate_unsigned::validate_unshield::<T>(
@@ -1110,12 +1212,97 @@ pub mod pallet {
 					asset_id,
 					amount,
 					fee,
-					relayer,
 					*circuit_version,
 				),
 
 				_ => InvalidTransaction::Call.into(),
 			}
 		}
+	}
+}
+
+// ─── Origin-based relay attribution ──────────────────────────────────────────
+
+#[cfg(test)]
+mod origin_tests {
+	use super::pallet::ensure_relayed;
+	use crate::{
+		RawOrigin,
+		mock::{RuntimeOrigin, Test, acc, mock_register_relayer, new_test_ext},
+	};
+	use sp_core::H160;
+
+	fn evm(byte: u8) -> H160 {
+		H160::repeat_byte(byte)
+	}
+
+	/// The precompile path: whatever the EVM executor put in `caller` is the
+	/// relayer, verbatim and unresolved — the registry lookup happens later, in
+	/// `credit_relay_fee`.
+	#[test]
+	fn a_relayed_origin_yields_its_address() {
+		new_test_ext().execute_with(|| {
+			let origin: RuntimeOrigin = RawOrigin::Relayed(evm(0xAA)).into();
+			assert_eq!(ensure_relayed::<Test, _>(origin).unwrap(), Some(evm(0xAA)));
+		});
+	}
+
+	/// Unsigned submissions name nobody. Not an error: the fee falls back to the
+	/// block author, which is the pre-existing behaviour for an unnamed relayer.
+	#[test]
+	fn an_unsigned_origin_names_nobody() {
+		new_test_ext().execute_with(|| {
+			assert_eq!(ensure_relayed::<Test, _>(RuntimeOrigin::none()).unwrap(), None);
+		});
+	}
+
+	/// The signed path resolves through the reverse index, so a signer is paid
+	/// only for an address it actually registered.
+	#[test]
+	fn a_signed_origin_resolves_the_signers_registered_address() {
+		new_test_ext().execute_with(|| {
+			mock_register_relayer(acc(7), evm(0xBB));
+			let origin: RuntimeOrigin = frame_system::RawOrigin::Signed(acc(7)).into();
+			assert_eq!(ensure_relayed::<Test, _>(origin).unwrap(), Some(evm(0xBB)));
+		});
+	}
+
+	/// An unregistered signer is not rejected — relaying is not gated on
+	/// registration — it simply names nobody, exactly like an unsigned call.
+	#[test]
+	fn an_unregistered_signer_names_nobody() {
+		new_test_ext().execute_with(|| {
+			let origin: RuntimeOrigin = frame_system::RawOrigin::Signed(acc(9)).into();
+			assert_eq!(ensure_relayed::<Test, _>(origin).unwrap(), None);
+		});
+	}
+
+	/// Root must not be able to attribute a fee. Sudo dispatches with Root, so
+	/// accepting it here would make `sudo.sudo(unshield { .. })` a way to pay an
+	/// arbitrary party — the very thing removing the call argument prevents.
+	#[test]
+	fn root_cannot_relay() {
+		new_test_ext().execute_with(|| {
+			assert!(
+				ensure_relayed::<Test, _>(RuntimeOrigin::root()).is_err(),
+				"root must not be able to attribute a relay fee"
+			);
+		});
+	}
+
+	/// One signer, one address: registering a second account must not let the
+	/// first claim it.
+	#[test]
+	fn a_signer_cannot_claim_another_accounts_address() {
+		new_test_ext().execute_with(|| {
+			mock_register_relayer(acc(1), evm(0xC1));
+			mock_register_relayer(acc(2), evm(0xC2));
+
+			let one: RuntimeOrigin = frame_system::RawOrigin::Signed(acc(1)).into();
+			assert_eq!(ensure_relayed::<Test, _>(one).unwrap(), Some(evm(0xC1)));
+
+			let two: RuntimeOrigin = frame_system::RawOrigin::Signed(acc(2)).into();
+			assert_eq!(ensure_relayed::<Test, _>(two).unwrap(), Some(evm(0xC2)));
+		});
 	}
 }

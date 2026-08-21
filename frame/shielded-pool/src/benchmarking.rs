@@ -18,7 +18,10 @@ extern crate alloc;
 use alloc::vec;
 
 #[benchmarks(
-	where T: pallet_zk_verifier::Config + pallet_relayer::Config
+	where
+		T: pallet_zk_verifier::Config + pallet_relayer::Config,
+		// Relay fees are attributed by origin, so the benchmarks build one.
+		<T as frame_system::Config>::RuntimeOrigin: From<crate::RawOrigin>,
 )]
 mod benchmarks {
 	use super::*;
@@ -157,11 +160,14 @@ mod benchmarks {
 		let asset_id = 0u32;
 		// Must be >= T::Relayer::min_relay_fee() to pass the FeeTooLow check.
 		let fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
+		// Registered relayer on the origin: this measures the resolve-through-the-
+		// registry branch, which is the expensive one. An unrelayed origin would
+		// short-circuit to the block author and under-report the weight.
 		let relayer = setup_relayer::<T>();
 
 		#[extrinsic_call]
 		private_transfer(
-			RawOrigin::None,
+			crate::RawOrigin::Relayed(relayer),
 			proof,
 			merkle_root,
 			nullifiers,
@@ -169,7 +175,6 @@ mod benchmarks {
 			encrypted_memos,
 			asset_id,
 			fee,
-			Some(relayer),
 			1u32,
 		);
 	}
@@ -195,11 +200,13 @@ mod benchmarks {
 
 		// Must be >= T::Relayer::min_relay_fee() to pass the FeeTooLow check.
 		let fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
+		// Registered relayer on the origin — measures the resolve-through-the-
+		// registry branch rather than the block-author short-circuit.
 		let relayer = setup_relayer::<T>();
 
 		#[extrinsic_call]
 		unshield(
-			RawOrigin::None,
+			crate::RawOrigin::Relayed(relayer),
 			proof,
 			merkle_root,
 			nullifier,
@@ -209,7 +216,6 @@ mod benchmarks {
 			fee,
 			Hash::default(),    // change_commitment: [0u8; 32] for total unshield
 			Default::default(), // change_encrypted_memo: empty for total unshield
-			Some(relayer),      // relayer resolves the fee recipient
 			1u32,               // circuit_version
 		);
 	}
