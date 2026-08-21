@@ -40,17 +40,20 @@ wallets must ship alongside the runtime.
 A chain where either does not hold needs migrations for them — for the second,
 iterate `RelayerByAccount` and `clear_relayer` any holder outside the set.
 
-**Relay fee guard — `set_min_relay_fee` ceiling**
+**Relay guards**
 
-Folded into this same version — spec 10 has not shipped, so it releases with the
-onboarding change. `transaction_version` is unaffected: no dispatch signature
-changes.
+Folded into this same version — spec 10 has not shipped, so these release with
+the onboarding change. `transaction_version` is unaffected: no dispatch
+signature changes.
 
-`set_min_relay_fee` is capped by a new `Config::MaxMinRelayFee` (1 ORB, a
-thousand times the default) and rejects above it with `MinRelayFeeTooHigh`.
-Without a ceiling, one mistyped governance call could brick EVM relay until the
-next runtime upgrade — the call that would lower the fee again has to run on the
-runtime the mistake broke.
+- `set_min_relay_fee` is capped by a new `Config::MaxMinRelayFee` (1 ORB, a
+  thousand times the default) and rejects above it with `MinRelayFeeTooHigh`.
+  Without a ceiling, one mistyped governance call could brick EVM relay until
+  the next runtime upgrade — the call that would lower the fee again has to run
+  on the runtime the mistake broke.
+- `get_active_relayers` caps its result at 256 entries. The method has no
+  callers today and registration is gated on the validator set, so nothing can
+  reach the cap; it is headroom for whoever wires it up later.
 
 **Removed — validator self-registration**
 

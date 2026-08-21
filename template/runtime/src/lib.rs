@@ -995,7 +995,14 @@ impl_runtime_apis! {
 		}
 
 		fn get_active_relayers() -> sp_std::vec::Vec<([u8; 20], sp_runtime::AccountId32)> {
+			// Capped: this iterates a map with no inherent bound, and a runtime
+			// API runs inside the caller's block/RPC budget. Registration is
+			// gated on the validator set, so the live count cannot exceed
+			// `MaxValidators` — the cap is headroom against a future path that
+			// registers without that gate, not against today's storage.
+			const MAX_RELAYERS_RETURNED: usize = 256;
 			pallet_relayer::RelayerRegistry::<Runtime>::iter()
+				.take(MAX_RELAYERS_RETURNED)
 				.map(|(h160, account)| (h160.0, account))
 				.collect()
 		}

@@ -17,6 +17,16 @@ New `Config::MaxMinRelayFee` (1 ORB in the runtime, a thousand times the default
 and error `MinRelayFeeTooHigh`. This is not a defence against an attacker —
 governance is already trusted — but against a typo in a governance call.
 
+#### `get_active_relayers` is capped
+The runtime API collected the whole `RelayerRegistry` with no bound, and a
+runtime API runs inside its caller's block or RPC budget.
+
+Capped at 256 entries via `.take()`. Nothing can hit that today: the method has
+no callers — the RPC trait exposes only the three O(1) methods — and
+registration is gated on the validator set, so the registry cannot exceed
+`MaxValidators`. The cap is headroom for whoever wires this up later, when
+neither of those may still hold.
+
 ## [0.4.0] - 2026-08-20
 
 EVM relay registration becomes self-service, gated on validator-set membership
