@@ -21,6 +21,7 @@ impl frame_system::Config for Test {
 parameter_types! {
 	pub const DefaultMinRelayFee: u128 = 1_000_000_000_000_000u128; // 1e15 planck
 	pub const MaxAllowedSelectors: u32 = 8;
+	pub const MaxMinRelayFee: u128 = 1_000_000_000_000_000_000u128; // 1 ORB
 
 }
 
@@ -70,6 +71,7 @@ impl pallet_validator_set::ValidatorSetInterface<u64> for MockValidatorSet {
 impl pallet_relayer::Config for Test {
 	type BlockAuthor = MockBlockAuthor;
 	type DefaultMinRelayFee = DefaultMinRelayFee;
+	type MaxMinRelayFee = MaxMinRelayFee;
 	type ManageOrigin = frame_system::EnsureRoot<u64>;
 	type MaxAllowedSelectors = MaxAllowedSelectors;
 	type ValidatorSet = MockValidatorSet;

@@ -2,6 +2,21 @@
 
 All notable changes to `pallet-relayer` will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+#### `set_min_relay_fee` is bounded
+`ManageOrigin` could previously set the minimum relay fee to any `u128`. A value
+large enough would make the EVM relay unusable: every shielded call would fail
+`FeeTooLow`, and the node's relay would reject the calldata before it reached the
+pool — with no way back until the next runtime upgrade, since the call that would
+lower it again has to run on the broken runtime.
+
+New `Config::MaxMinRelayFee` (1 ORB in the runtime, a thousand times the default)
+and error `MinRelayFeeTooHigh`. This is not a defence against an attacker —
+governance is already trusted — but against a typo in a governance call.
+
 ## [0.4.0] - 2026-08-20
 
 EVM relay registration becomes self-service, gated on validator-set membership

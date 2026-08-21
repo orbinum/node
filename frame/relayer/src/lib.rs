@@ -83,6 +83,16 @@ pub mod pallet {
 		#[pallet::constant]
 		type DefaultMinRelayFee: Get<u128>;
 
+		/// Ceiling for `set_min_relay_fee`.
+		///
+		/// Without it `ManageOrigin` can set `u128::MAX`, which bricks EVM relay
+		/// outright: every shielded call would fail `FeeTooLow`, and the node
+		/// relay would reject the calldata before it ever reached the pool. That
+		/// is a governance foot-gun, not an attack — but a single mistyped
+		/// extrinsic should not take relaying down until a runtime upgrade.
+		#[pallet::constant]
+		type MaxMinRelayFee: Get<u128>;
+
 		/// Origin allowed to update relay configuration (fee, selectors).
 		/// Use `EnsureRoot` for testnets; a governance pallet for mainnet.
 		type ManageOrigin: EnsureOrigin<Self::RuntimeOrigin>;
@@ -189,6 +199,8 @@ pub mod pallet {
 		InsufficientPendingFees,
 		/// Selector list exceeds `MaxAllowedSelectors`.
 		TooManySelectors,
+		/// The requested minimum relay fee exceeds `MaxMinRelayFee`.
+		MinRelayFeeTooHigh,
 		/// Only accounts in the active validator set may register a relay address.
 		NotValidator,
 		/// The EVM address is not usable as a relay identity (zero, or reserved).
@@ -208,11 +220,16 @@ pub mod pallet {
 	impl<T: Config> Pallet<T> {
 		/// Update the minimum relay fee.
 		///
-		/// Requires `ManageOrigin`. The new value takes effect immediately.
+		/// Requires `ManageOrigin`. The new value takes effect immediately and is
+		/// capped at `MaxMinRelayFee`, so a mistake cannot brick relaying.
 		#[pallet::call_index(0)]
 		#[pallet::weight(T::WeightInfo::set_min_relay_fee())]
 		pub fn set_min_relay_fee(origin: OriginFor<T>, fee: u128) -> DispatchResult {
 			T::ManageOrigin::ensure_origin(origin)?;
+			ensure!(
+				fee <= T::MaxMinRelayFee::get(),
+				Error::<T>::MinRelayFeeTooHigh
+			);
 			MinRelayFee::<T>::put(fee);
 			Self::deposit_event(Event::MinRelayFeeUpdated { new_fee: fee });
 			Ok(())

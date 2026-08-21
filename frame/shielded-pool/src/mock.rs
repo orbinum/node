@@ -150,6 +150,7 @@ impl frame_support::traits::Get<Option<AccountId>> for MockBlockAuthor {
 impl pallet_relayer::Config for Test {
 	type BlockAuthor = MockBlockAuthor;
 	type DefaultMinRelayFee = ConstU128<0>;
+	type MaxMinRelayFee = ConstU128<{ u128::MAX }>;
 	type ManageOrigin = EnsureRoot<AccountId>;
 	type MaxAllowedSelectors = ConstU32<16>;
 	type ValidatorSet = ();
