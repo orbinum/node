@@ -17,10 +17,10 @@ targets = ["x86_64-unknown-linux-gnu"]
 async-trait = { workspace = true }
 clap = { workspace = true }
 futures = { workspace = true }
-jsonrpsee = { workspace = true, features = ["server", "macros"] }
-log = { workspace = true }
 hex = { workspace = true, features = ["std"] }
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
 libsecp256k1 = { workspace = true, features = ["std", "static-context"] }
+log = { workspace = true }
 scale-codec = { workspace = true }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
 
