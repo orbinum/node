@@ -58,10 +58,41 @@ signature changes.
   unregistered EVM address and the fee falls back to the block author. The
   fallback itself is unchanged — relaying is not gated on registration, so
   rejecting there would fail a user's transaction over someone else's
-  misconfiguration. This does not close fee substitution by a *registered*
-  relayer: `relayer` is not a public input to the proof, so an approved
-  validator with a registered address resolves normally and records no
-  diversion. Closing that needs the recipient bound into the circuit.
+  misconfiguration.
+
+**Relay fees are attributed by origin, not by argument**
+
+`unshield` and `private_transfer` lose their `relayer: Option<H160>` parameter.
+Both are `ensure_none`, so that field was an unauthenticated claim on an
+unauthenticated call: anyone could take a propagated proof, resubmit it naming
+themselves, and collect a fee they never paid for. It also had no honest
+producer — the SDK sent `None`, and the precompile already knew the answer from
+`handle.context().caller`.
+
+The recipient now comes from the dispatch origin, which the calldata cannot
+influence:
+
+| Submitted via | Credited |
+|---|---|
+| EVM precompile | `context().caller` — signed the transaction and paid its gas |
+| Signed extrinsic | the signer's registered EVM address |
+| Unsigned extrinsic | nobody; the fee falls back to the block author |
+
+The signed path is new and gives non-validator relayers a future on-ramp without
+touching the registry. The registry still does the H160 → account resolution:
+`EeSuffixAddressMapping` yields a synthetic account, not the validator's own.
+
+**What this does not close.** A validator can still resubmit another node's spend
+through the precompile under its own key and win *in the slots it authors* — the
+pool tags on the nullifier alone, so the copy and the original are mutually
+exclusive and it cannot win by arriving first. That caps theft at 1/N of relayed
+volume, now costs real EVM gas, and names the thief in the block header. New
+`Event::SelfRelayedFee` records every fee credited to the block's own author.
+Self-relaying is legitimate — it happens ~1/N of the time by rotation — so this
+is a signal for off-chain correlation, not grounds for automatic punishment;
+enforcement is `validatorSet.removeValidator`. Closing it outright needs the
+recipient as a circuit public input, which is a ceremony plus a VK migration and
+is not proportionate while validation stays permissioned.
 
 **Removed — validator self-registration**
 

@@ -7897,7 +7897,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-evm-precompile-shielded-pool"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "fp-evm",
  "frame-support",
@@ -8108,7 +8108,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-shielded-pool"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.5.0",

@@ -81,13 +81,8 @@ mod tests {
 	fn private_transfer_valid_transaction() {
 		new_test_ext().execute_with(|| {
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-			let result = validate_private_transfer::<Test>(
-				&KNOWN_ROOT,
-				&nullifiers_of(&[0x01]),
-				&0u128,
-				&None,
-				1,
-			);
+			let result =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers_of(&[0x01]), &0u128, 1);
 			assert!(result.is_ok());
 		});
 	}
@@ -99,7 +94,6 @@ mod tests {
 				&[0xFFu8; 32],
 				&nullifiers_of(&[0x01]),
 				&0u128,
-				&None,
 				1,
 			);
 			assert!(result.is_err());
@@ -112,13 +106,8 @@ mod tests {
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 			let n = make_nullifier(0x05);
 			NullifierRepository::mark_as_used::<Test>(n, 1u64);
-			let result = validate_private_transfer::<Test>(
-				&KNOWN_ROOT,
-				&nullifiers_of(&[0x05]),
-				&0u128,
-				&None,
-				1,
-			);
+			let result =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers_of(&[0x05]), &0u128, 1);
 			assert!(result.is_err());
 		});
 	}
@@ -134,7 +123,6 @@ mod tests {
 				&KNOWN_ROOT,
 				&nullifiers_of(&[0x10, 0x11]),
 				&0u128,
-				&None,
 				1,
 			);
 			assert!(result.is_err());
@@ -149,7 +137,6 @@ mod tests {
 				&KNOWN_ROOT,
 				&nullifiers_of(&[0xA1, 0xA2]),
 				&100u128, // non-zero fee,
-				&None,
 				1,
 			);
 			assert!(result.is_ok());
@@ -168,8 +155,7 @@ mod tests {
 			let mut nullifiers: BoundedVec<Nullifier, ConstU32<2>> = BoundedVec::new();
 			nullifiers.try_push(make_nullifier(0x01)).ok();
 			nullifiers.try_push(Nullifier::new([0u8; 32])).ok(); // dummy
-			let result =
-				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128, &None, 1);
+			let result = validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128, 1);
 			assert!(
 				result.is_ok(),
 				"dummy nullifier should not cause Stale rejection"
@@ -188,8 +174,7 @@ mod tests {
 			let mut nullifiers: BoundedVec<Nullifier, ConstU32<2>> = BoundedVec::new();
 			nullifiers.try_push(real).ok();
 			nullifiers.try_push(Nullifier::new([0u8; 32])).ok(); // dummy
-			let result =
-				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128, &None, 1);
+			let result = validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128, 1);
 			assert!(
 				result.is_err(),
 				"used real nullifier must still be rejected"
@@ -206,8 +191,7 @@ mod tests {
 			let mut nullifiers: BoundedVec<Nullifier, ConstU32<2>> = BoundedVec::new();
 			nullifiers.try_push(Nullifier::new([0u8; 32])).ok();
 			nullifiers.try_push(Nullifier::new([0u8; 32])).ok();
-			let result =
-				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128, &None, 1);
+			let result = validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers, &0u128, 1);
 			assert!(result.is_err(), "all-dummy-nullifier tx must be rejected");
 		});
 	}
@@ -225,7 +209,6 @@ mod tests {
 				&0u32,
 				&500u128,
 				&0u128,
-				&None,
 				1,
 			);
 			assert!(result.is_ok());
@@ -242,7 +225,6 @@ mod tests {
 				&0u32,
 				&500u128,
 				&0u128,
-				&None,
 				1,
 			);
 			assert!(result.is_err());
@@ -256,8 +238,7 @@ mod tests {
 			PoolBalanceRepository::set_asset_balance::<Test>(0, 1_000u128);
 			let n = make_nullifier(0x20);
 			NullifierRepository::mark_as_used::<Test>(n, 1u64);
-			let result =
-				validate_unshield::<Test>(&KNOWN_ROOT, &n, &0u32, &500u128, &0u128, &None, 1);
+			let result = validate_unshield::<Test>(&KNOWN_ROOT, &n, &0u32, &500u128, &0u128, 1);
 			assert!(result.is_err());
 		});
 	}
@@ -273,7 +254,6 @@ mod tests {
 				&0u32,
 				&100u128, // 100 > 50
 				&0u128,
-				&None,
 				1,
 			);
 			assert!(result.is_err());
@@ -292,7 +272,6 @@ mod tests {
 				&0u32,
 				&100u128,
 				&60u128,
-				&None,
 				1,
 			);
 			assert!(result.is_err());
@@ -311,7 +290,6 @@ mod tests {
 				&0u32,
 				&100u128,
 				&50u128,
-				&None,
 				1,
 			);
 			assert!(result.is_ok());
@@ -331,13 +309,8 @@ mod tests {
 			crate::mock::mock_set_min_relay_fee(100);
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 			// fee=50 < min_relay_fee=100 → InvalidTransaction::Payment
-			let result = validate_private_transfer::<Test>(
-				&KNOWN_ROOT,
-				&nullifiers_of(&[0x01]),
-				&50u128,
-				&None,
-				1,
-			);
+			let result =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers_of(&[0x01]), &50u128, 1);
 			assert!(result.is_err(), "fee below minimum must be rejected");
 			assert_eq!(
 				result.unwrap_err(),
@@ -358,7 +331,6 @@ mod tests {
 				&KNOWN_ROOT,
 				&nullifiers_of(&[0x01]),
 				&100u128,
-				&None,
 				1,
 			);
 			assert!(result.is_ok(), "fee equal to minimum must be accepted");
@@ -378,7 +350,6 @@ mod tests {
 				&0u32,
 				&100u128,
 				&50u128,
-				&None,
 				1,
 			);
 			assert!(result.is_err(), "fee below minimum must be rejected");
@@ -404,130 +375,50 @@ mod tests {
 				&0u32,
 				&100u128,
 				&200u128,
-				&None,
 				1,
 			);
 			assert!(result.is_ok(), "fee equal to minimum must be accepted");
 		});
 	}
 
-	// ── relayer bound into the provides tag ──────────────────────────────────
+	// ── one note, one pool entry ─────────────────────────────────────────────
 
-	fn evm(byte: u8) -> sp_core::H160 {
-		sp_core::H160::from([byte; 20])
-	}
-
-	/// Two unshield variants differing only in `relayer` COLLIDE — they are the
-	/// same spend of the same note.
+	/// Two submissions of the same spend collide in the pool, whoever sends them.
 	///
-	/// This inverts the earlier expectation on purpose. Binding the relayer into
-	/// the tag made a spoofed copy a SEPARATE pool entry, so anyone could
-	/// rebroadcast an honest unshield pointed at their own account and have both
-	/// live in the pool: duplicate propagation and revalidation across the whole
-	/// network, for a copy that cost the attacker nothing. Keyed on the nullifier
-	/// alone the two are mutually exclusive, and taking the fee requires
-	/// out-bidding — which means actually paying it.
+	/// The tag is the nullifier alone, which is now the *only* thing that could
+	/// distinguish them: the fee recipient is no longer a call argument, so a
+	/// "spoofed copy pointed at my own account" is not expressible. Resubmitting
+	/// someone else's spend produces a byte-identical call that collides with the
+	/// original instead of racing it.
 	#[test]
-	fn unshield_relayer_swap_collides_with_the_original() {
+	fn resubmitting_the_same_spend_collides_with_the_original() {
 		new_test_ext().execute_with(|| {
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 			PoolBalanceRepository::set_asset_balance::<Test>(0, 1000u128);
 			let n = make_nullifier(0x61);
 
-			let a = validate_unshield::<Test>(
-				&KNOWN_ROOT,
-				&n,
-				&0u32,
-				&100u128,
-				&10u128,
-				&Some(evm(0xAA)),
-				1,
-			)
-			.unwrap();
-			let b = validate_unshield::<Test>(
-				&KNOWN_ROOT,
-				&n,
-				&0u32,
-				&100u128,
-				&10u128,
-				&Some(evm(0xBB)),
-				1,
-			)
-			.unwrap();
-			let none =
-				validate_unshield::<Test>(&KNOWN_ROOT, &n, &0u32, &100u128, &10u128, &None, 1)
-					.unwrap();
+			let a =
+				validate_unshield::<Test>(&KNOWN_ROOT, &n, &0u32, &100u128, &10u128, 1).unwrap();
+			let b =
+				validate_unshield::<Test>(&KNOWN_ROOT, &n, &0u32, &100u128, &10u128, 1).unwrap();
 
 			assert_eq!(
 				a.provides, b.provides,
-				"a relayer-swapped copy is the same spend and must collide"
+				"the same note being spent must occupy one pool entry"
 			);
-			assert_eq!(
-				a.provides, none.provides,
-				"Some vs None relayer is still the same note being spent"
-			);
-			// Fee steers priority, not the relayer field.
-			assert_eq!(a.priority, b.priority);
+			assert_eq!(a.priority, b.priority, "priority comes from the fee alone");
 		});
 	}
 
-	/// Identical relayer + nullifier yields identical provides (honest re-gossip
-	/// is idempotent, first-seen wins at equal fee).
+	/// Same property for `private_transfer`: one note, one pool entry.
 	#[test]
-	fn unshield_same_relayer_same_provides() {
-		new_test_ext().execute_with(|| {
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-			PoolBalanceRepository::set_asset_balance::<Test>(0, 1000u128);
-			let n = make_nullifier(0x62);
-
-			let a = validate_unshield::<Test>(
-				&KNOWN_ROOT,
-				&n,
-				&0u32,
-				&100u128,
-				&10u128,
-				&Some(evm(0xAA)),
-				1,
-			)
-			.unwrap();
-			let b = validate_unshield::<Test>(
-				&KNOWN_ROOT,
-				&n,
-				&0u32,
-				&100u128,
-				&10u128,
-				&Some(evm(0xAA)),
-				1,
-			)
-			.unwrap();
-			assert_eq!(a.provides, b.provides);
-		});
-	}
-
-	/// A relayer-swapped copy of a transfer COLLIDES with the original.
-	///
-	/// This inverts the earlier expectation, deliberately. Binding the relayer
-	/// into the tag made a copy with a different fee recipient a *separate* pool
-	/// entry, so a third party could rebroadcast someone else's spend pointed at
-	/// their own account and have both sit in the pool at once — duplicate load,
-	/// and a race for the fee that cost the attacker nothing.
-	///
-	/// Tagging per nullifier makes the two mutually exclusive: the higher fee
-	/// wins (first-seen at equal fee), so out-bidding is the only way to take
-	/// the fee, and out-bidding means actually paying it. The pool now mirrors
-	/// the on-chain rule — one note, one spend.
-	#[test]
-	fn transfer_relayer_swap_collides_with_the_original() {
+	fn resubmitting_the_same_transfer_collides_with_the_original() {
 		new_test_ext().execute_with(|| {
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 			let ns = nullifiers_of(&[0x63]);
 
-			let a =
-				validate_private_transfer::<Test>(&KNOWN_ROOT, &ns, &10u128, &Some(evm(0xAA)), 1)
-					.unwrap();
-			let b =
-				validate_private_transfer::<Test>(&KNOWN_ROOT, &ns, &10u128, &Some(evm(0xBB)), 1)
-					.unwrap();
+			let a = validate_private_transfer::<Test>(&KNOWN_ROOT, &ns, &10u128, 1).unwrap();
+			let b = validate_private_transfer::<Test>(&KNOWN_ROOT, &ns, &10u128, 1).unwrap();
 			assert_eq!(a.provides, b.provides);
 		});
 	}
@@ -540,14 +431,9 @@ mod tests {
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 			PoolBalanceRepository::set_asset_balance::<Test>(0, 1000u128);
 
-			let t = validate_private_transfer::<Test>(
-				&KNOWN_ROOT,
-				&nullifiers_of(&[0x90]),
-				&10u128,
-				&None,
-				1,
-			)
-			.unwrap();
+			let t =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers_of(&[0x90]), &10u128, 1)
+					.unwrap();
 			assert_eq!(t.longevity, TX_LONGEVITY);
 			assert!(t.longevity < sp_runtime::transaction_validity::TransactionLongevity::MAX);
 
@@ -557,7 +443,6 @@ mod tests {
 				&0u32,
 				&100u128,
 				&10u128,
-				&None,
 				1,
 			)
 			.unwrap();
@@ -575,13 +460,8 @@ mod tests {
 	fn private_transfer_unsupported_version_rejected() {
 		new_test_ext().execute_with(|| {
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-			let result = validate_private_transfer::<Test>(
-				&KNOWN_ROOT,
-				&nullifiers_of(&[0x01]),
-				&0u128,
-				&None,
-				0,
-			);
+			let result =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers_of(&[0x01]), &0u128, 0);
 			assert_eq!(
 				result.unwrap_err(),
 				sp_runtime::transaction_validity::TransactionValidityError::Invalid(
@@ -602,7 +482,6 @@ mod tests {
 				&0u32,
 				&500u128,
 				&0u128,
-				&None,
 				0,
 			);
 			assert_eq!(
@@ -633,10 +512,8 @@ mod tests {
 			MerkleRepository::add_historic_poseidon_root::<Test>(other_root);
 
 			let nulls = nullifiers_of(&[0x42]);
-			let a =
-				validate_private_transfer::<Test>(&KNOWN_ROOT, &nulls, &0u128, &None, 1).unwrap();
-			let b =
-				validate_private_transfer::<Test>(&other_root, &nulls, &0u128, &None, 1).unwrap();
+			let a = validate_private_transfer::<Test>(&KNOWN_ROOT, &nulls, &0u128, 1).unwrap();
+			let b = validate_private_transfer::<Test>(&other_root, &nulls, &0u128, 1).unwrap();
 
 			assert_eq!(
 				a.provides, b.provides,
@@ -655,16 +532,9 @@ mod tests {
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 			let nulls = nullifiers_of(&[0x43]);
 
-			let honest =
-				validate_private_transfer::<Test>(&KNOWN_ROOT, &nulls, &0u128, &None, 1).unwrap();
-			let hijacked = validate_private_transfer::<Test>(
-				&KNOWN_ROOT,
-				&nulls,
-				&0u128,
-				&Some(sp_core::H160::repeat_byte(0xEE)),
-				1,
-			)
-			.unwrap();
+			let honest = validate_private_transfer::<Test>(&KNOWN_ROOT, &nulls, &0u128, 1).unwrap();
+			let hijacked =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &nulls, &0u128, 1).unwrap();
 
 			assert_eq!(
 				honest.provides, hijacked.provides,
@@ -688,10 +558,8 @@ mod tests {
 			b_nulls.try_push(make_nullifier(0x52)).unwrap();
 			b_nulls.try_push(Nullifier::new([0u8; 32])).unwrap();
 
-			let a =
-				validate_private_transfer::<Test>(&KNOWN_ROOT, &a_nulls, &0u128, &None, 1).unwrap();
-			let b =
-				validate_private_transfer::<Test>(&KNOWN_ROOT, &b_nulls, &0u128, &None, 1).unwrap();
+			let a = validate_private_transfer::<Test>(&KNOWN_ROOT, &a_nulls, &0u128, 1).unwrap();
+			let b = validate_private_transfer::<Test>(&KNOWN_ROOT, &b_nulls, &0u128, 1).unwrap();
 
 			assert_ne!(
 				a.provides, b.provides,
@@ -710,8 +578,8 @@ mod tests {
 			let ab = nullifiers_of(&[0x61, 0x62]);
 			let ba = nullifiers_of(&[0x62, 0x61]);
 
-			let a = validate_private_transfer::<Test>(&KNOWN_ROOT, &ab, &0u128, &None, 1).unwrap();
-			let b = validate_private_transfer::<Test>(&KNOWN_ROOT, &ba, &0u128, &None, 1).unwrap();
+			let a = validate_private_transfer::<Test>(&KNOWN_ROOT, &ab, &0u128, 1).unwrap();
+			let b = validate_private_transfer::<Test>(&KNOWN_ROOT, &ba, &0u128, 1).unwrap();
 
 			let mut a_tags = a.provides.clone();
 			let mut b_tags = b.provides.clone();
@@ -732,10 +600,9 @@ mod tests {
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 			let nulls = nullifiers_of(&[0x71]);
 
-			let cheap =
-				validate_private_transfer::<Test>(&KNOWN_ROOT, &nulls, &10u128, &None, 1).unwrap();
-			let rich = validate_private_transfer::<Test>(&KNOWN_ROOT, &nulls, &1_000u128, &None, 1)
-				.unwrap();
+			let cheap = validate_private_transfer::<Test>(&KNOWN_ROOT, &nulls, &10u128, 1).unwrap();
+			let rich =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &nulls, &1_000u128, 1).unwrap();
 
 			assert!(
 				rich.priority > cheap.priority,
@@ -759,13 +626,8 @@ mod tests {
 			let n = make_nullifier(0x81);
 			NullifierRepository::mark_as_used::<Test>(n, 1u64);
 
-			let result = validate_private_transfer::<Test>(
-				&KNOWN_ROOT,
-				&nullifiers_of(&[0x81]),
-				&0u128,
-				&None,
-				1,
-			);
+			let result =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers_of(&[0x81]), &0u128, 1);
 			assert_eq!(
 				result.unwrap_err(),
 				sp_runtime::transaction_validity::TransactionValidityError::Invalid(
@@ -790,8 +652,8 @@ mod tests {
 			let ab = nullifiers_of(&[0x61, 0x62]);
 			let ac = nullifiers_of(&[0x61, 0x63]);
 
-			let a = validate_private_transfer::<Test>(&KNOWN_ROOT, &ab, &0u128, &None, 1).unwrap();
-			let b = validate_private_transfer::<Test>(&KNOWN_ROOT, &ac, &0u128, &None, 1).unwrap();
+			let a = validate_private_transfer::<Test>(&KNOWN_ROOT, &ab, &0u128, 1).unwrap();
+			let b = validate_private_transfer::<Test>(&KNOWN_ROOT, &ac, &0u128, 1).unwrap();
 
 			let shared = a.provides.iter().any(|t| b.provides.contains(t));
 			assert!(
@@ -809,21 +671,15 @@ mod tests {
 		new_test_ext().execute_with(|| {
 			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 
-			let one = validate_private_transfer::<Test>(
-				&KNOWN_ROOT,
-				&nullifiers_of(&[0x91]),
-				&0u128,
-				&None,
-				1,
-			)
-			.unwrap();
+			let one =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers_of(&[0x91]), &0u128, 1)
+					.unwrap();
 			assert_eq!(one.provides.len(), 1, "one real input → one tag");
 
 			let two = validate_private_transfer::<Test>(
 				&KNOWN_ROOT,
 				&nullifiers_of(&[0x92, 0x93]),
 				&0u128,
-				&None,
 				1,
 			)
 			.unwrap();
@@ -837,8 +693,7 @@ mod tests {
 			let mut padded: BoundedVec<Nullifier, ConstU32<2>> = BoundedVec::new();
 			padded.try_push(make_nullifier(0x94)).unwrap();
 			padded.try_push(Nullifier::new([0u8; 32])).unwrap();
-			let p =
-				validate_private_transfer::<Test>(&KNOWN_ROOT, &padded, &0u128, &None, 1).unwrap();
+			let p = validate_private_transfer::<Test>(&KNOWN_ROOT, &padded, &0u128, 1).unwrap();
 			assert_eq!(p.provides.len(), 1, "the dummy must not contribute a tag");
 		});
 	}
@@ -856,17 +711,11 @@ mod tests {
 			PoolBalanceRepository::set_asset_balance::<Test>(0, 100_000u128);
 			let n = make_nullifier(0x77);
 
-			let transfer = validate_private_transfer::<Test>(
-				&KNOWN_ROOT,
-				&nullifiers_of(&[0x77]),
-				&10u128,
-				&None,
-				1,
-			)
-			.unwrap();
-			let unshield =
-				validate_unshield::<Test>(&KNOWN_ROOT, &n, &0u32, &100u128, &10u128, &None, 1)
+			let transfer =
+				validate_private_transfer::<Test>(&KNOWN_ROOT, &nullifiers_of(&[0x77]), &10u128, 1)
 					.unwrap();
+			let unshield =
+				validate_unshield::<Test>(&KNOWN_ROOT, &n, &0u32, &100u128, &10u128, 1).unwrap();
 
 			assert_eq!(
 				transfer.provides, unshield.provides,
@@ -900,7 +749,6 @@ mod tests {
 				&0u32,
 				&u128::MAX,
 				&1u128, // MAX + 1 wraps
-				&None,
 				1,
 			);
 
@@ -928,7 +776,6 @@ mod tests {
 				&0u32,
 				&900u128,
 				&100u128,
-				&None,
 				1,
 			);
 			assert!(
@@ -943,7 +790,6 @@ mod tests {
 				&0u32,
 				&901u128,
 				&100u128,
-				&None,
 				1,
 			);
 			assert_eq!(
@@ -971,7 +817,6 @@ mod tests {
 				&0u32,
 				&1_000u128,
 				&100u128,
-				&None,
 				1,
 			);
 			assert_eq!(
@@ -997,7 +842,6 @@ mod tests {
 				&1u32,
 				&1_000u128,
 				&100u128,
-				&None,
 				1,
 			);
 			assert_eq!(

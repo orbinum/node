@@ -7,11 +7,11 @@
 //!
 //! - [`origin::from_self`] — the precompile's own address as signed origin.
 //! - [`origin::from_caller`] — the EVM caller's mapped address as signed origin.
-//! - [`origin::unsigned`] — `None` origin (`ensure_none`).
+//! - [`origin::relayed`] — carries the EVM caller as the relaying address.
 
 mod origin;
 
-pub use origin::{from_caller, from_self, unsigned};
+pub use origin::{from_caller, from_self, relayed};
 
 use alloc::format;
 

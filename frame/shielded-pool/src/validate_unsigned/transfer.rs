@@ -44,16 +44,16 @@ use sp_runtime::{
 /// zk-verifier's `CircuitId` constants).
 const CIRCUIT_TRANSFER: u32 = 1;
 
-/// `_relayer` is intentionally unused: it is part of the call and reaches the
-/// dispatchable, but it must NOT enter the pool tag. Binding it made a copy with
-/// a swapped fee recipient a separate pool entry, so anyone could duplicate an
-/// honest transaction at no cost. Kept in the signature so the caller in
-/// `lib.rs` stays a faithful mirror of the call's fields.
+/// Validate an incoming `private_transfer` unsigned transaction.
+///
+/// The fee recipient is absent by construction — it comes from the dispatch
+/// origin, not the call — and it must not enter the pool tag either way: binding
+/// it once made a copy with a swapped recipient a separate pool entry, so anyone
+/// could duplicate an honest transaction at no cost.
 pub fn validate_private_transfer<T: Config>(
 	merkle_root: &Hash,
 	nullifiers: &BoundedVec<Nullifier, ConstU32<2>>,
 	fee: &BalanceOf<T>,
-	_relayer: &Option<sp_core::H160>,
 	circuit_version: u32,
 ) -> TransactionValidity {
 	// ── 1. Circuit version ───────────────────────────────────────────────────

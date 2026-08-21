@@ -47,7 +47,7 @@ where
 		+ GetDispatchInfo
 		+ From<pallet_shielded_pool::Call<T>>,
 	<<T as frame_system::Config>::RuntimeCall as Dispatchable>::RuntimeOrigin:
-		From<Option<<T as frame_system::Config>::AccountId>>,
+		From<Option<<T as frame_system::Config>::AccountId>> + From<pallet_shielded_pool::Origin>,
 	<<T as frame_system::Config>::RuntimeCall as Dispatchable>::PostInfo: core::fmt::Debug,
 	pallet_evm::AccountIdOf<T>: Into<<T as frame_system::Config>::AccountId>,
 	pallet_shielded_pool::BalanceOf<T>: TryFrom<u128>,
@@ -71,11 +71,11 @@ where
 			}
 			calls::private_transfer::SELECTOR => {
 				let call = calls::private_transfer::decode::<T>(handle, &input)?;
-				dispatch::unsigned::<T>(handle, call)
+				dispatch::relayed::<T>(handle, call)
 			}
 			calls::unshield::SELECTOR => {
 				let call = calls::unshield::decode::<T>(handle, &input)?;
-				dispatch::unsigned::<T>(handle, call)
+				dispatch::relayed::<T>(handle, call)
 			}
 			calls::claim_shielded_fees::SELECTOR => {
 				let call = calls::claim_shielded_fees::decode::<T>(handle, &input)?;

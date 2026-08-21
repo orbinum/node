@@ -51,16 +51,15 @@ const CIRCUIT_UNSHIELD: u32 = 2;
 
 /// Validate an incoming `unshield` unsigned transaction.
 ///
-/// `_relayer` is intentionally unused — see the note in `transfer.rs`: the fee
-/// recipient must not enter the pool tag, or a spoofed copy becomes a separate
-/// pool entry instead of colliding with the original.
+/// The fee recipient is deliberately absent: it is not a call argument at all,
+/// and it must not enter the pool tag — see the note at the tag construction
+/// below.
 pub fn validate_unshield<T: Config>(
 	merkle_root: &Hash,
 	nullifier: &Nullifier,
 	asset_id: &u32,
 	amount: &BalanceOf<T>,
 	fee: &BalanceOf<T>,
-	_relayer: &Option<sp_core::H160>,
 	circuit_version: u32,
 ) -> TransactionValidity {
 	// ── 1. Circuit version ───────────────────────────────────────────────────
