@@ -2,7 +2,10 @@
 
 All notable changes to `pallet-relayer` will be documented in this file.
 
-## [Unreleased]
+## [0.5.0] - 2026-08-21
+
+Two guards on relay configuration. **Breaking** — `Config::MaxMinRelayFee` is a
+new required associated type, so any runtime implementing `Config` must add it.
 
 ### Changed
 
