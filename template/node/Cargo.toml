@@ -19,6 +19,8 @@ clap = { workspace = true }
 futures = { workspace = true }
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 log = { workspace = true }
+hex = { workspace = true, features = ["std"] }
+libsecp256k1 = { workspace = true, features = ["std", "static-context"] }
 scale-codec = { workspace = true }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
 
@@ -56,6 +58,7 @@ sp-timestamp = { workspace = true, features = ["default"] }
 sp-transaction-pool = { workspace = true, features = ["default"] }
 # These dependencies are used for RPC
 frame-system-rpc-runtime-api = { workspace = true }
+pallet-relayer = { workspace = true, features = ["std"] }
 pallet-relayer-rpc = { workspace = true }
 pallet-relayer-runtime-api = { workspace = true }
 pallet-shielded-pool-runtime-api = { workspace = true }
@@ -72,7 +75,6 @@ frame-metadata-hash-extension = { workspace = true }
 frame-system = { workspace = true }
 pallet-transaction-payment = { workspace = true }
 sp-keystore = { workspace = true }
-tokio = { workspace = true, features = ["time"] }
 
 # Frontier
 fc-api = { workspace = true }

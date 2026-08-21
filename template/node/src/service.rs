@@ -71,39 +71,6 @@ type GrandpaLinkHalf<B, C> = sc_consensus_grandpa::LinkHalf<B, C, FullSelectChai
 /// imported and generated.
 const GRANDPA_JUSTIFICATION_PERIOD: u32 = 512;
 
-/// Derive the EVM relay key from the on-disk keystore.
-/// Reads the Aura (Sr25519) mnemonic from the keystore and derives the ECDSA
-/// private key from it, returning the 32-byte seed as a `0x…` hex string.
-///
-/// The keystore stores keys as files named `{hex(key_type)}{hex(pubkey)}`
-/// containing a JSON-encoded secret phrase. We scan for the `aura` prefix
-/// (hex `61757261`), load the phrase, and derive an ECDSA pair — so the EVM
-/// relay key is always deterministic from the validator's Aura mnemonic.
-fn evm_key_from_keystore(keystore_path: &Path) -> Option<String> {
-	const AURA_PREFIX: &str = "61757261"; // hex::encode(b"aura")
-	let entries = std::fs::read_dir(keystore_path).ok()?;
-	for entry in entries.flatten() {
-		let name = entry.file_name().to_string_lossy().to_string();
-		if name.starts_with(AURA_PREFIX) {
-			let raw = std::fs::read_to_string(entry.path()).ok()?;
-			let phrase: String = serde_json::from_str(&raw).ok()?;
-			use sp_core::Pair as _;
-			let (pair, _) = sp_core::ecdsa::Pair::from_phrase(&phrase, None).ok()?;
-			let seed: [u8; 32] = pair.seed();
-			let hex = format!(
-				"0x{}",
-				seed.iter().map(|b| format!("{b:02x}")).collect::<String>()
-			);
-			log::info!(
-				target: "orbinum-relay",
-				"Derived EVM relay key from Aura keystore entry"
-			);
-			return Some(hex);
-		}
-	}
-	None
-}
-
 pub fn new_partial<B, RA, HF, BIQ>(
 	config: &Configuration,
 	eth_config: &EthConfiguration,
@@ -464,25 +431,7 @@ where
 	// for ethereum-compatibility rpc.
 	config.rpc.id_provider = Some(Box::new(fc_rpc::EthereumSubIdProvider));
 
-	// Read the EVM relay key:
-	// - In dev mode (ChainType::Development): inject Alice's ECDSA seed automatically.
-	// - Otherwise: read from the keystore (type "evmr", inserted via author_insertKey).
-	const ALICE_ECDSA_SEED: &str =
-		"0xcb6df9de1efca7a3998a8ead4e02159d5fa99c3e0d4fd6432667390bb4726854";
-	let evm_key: Option<String> = if matches!(
-		config.chain_spec.chain_type(),
-		sc_chain_spec::ChainType::Development
-	) {
-		log::info!(
-			target: "orbinum-relay",
-			"🔑 Dev mode: using Alice's ECDSA key as EVM relay key"
-		);
-		Some(ALICE_ECDSA_SEED.to_string())
-	} else if let sc_service::config::KeystoreConfig::Path { path, .. } = &config.keystore {
-		evm_key_from_keystore(path)
-	} else {
-		None
-	};
+	let evm_key = crate::evm_relay_key::resolve(&config);
 
 	let rpc_builder = {
 		let client = client.clone();
@@ -615,26 +564,7 @@ where
 	)
 	.await;
 
-	// If an EVM relay key is available in the keystore (type "evmr"), auto-register
-	// it with pallet-relayer using the node's first Aura (sr25519) key.
-	if let Some(key_hex) = evm_key.as_deref() {
-		match fc_rpc::EthValidatorSigner::from_hex(key_hex) {
-			Ok(signer) => {
-				let evm_address = signer.address();
-				let client_r = client.clone();
-				let keystore_r = keystore_container.keystore();
-				task_manager.spawn_handle().spawn(
-					"relayer-auto-register",
-					Some("relayer"),
-					crate::relayer_register::auto_register(client_r, keystore_r, evm_address)
-						.boxed(),
-				);
-			}
-			Err(e) => {
-				log::error!(target: "orbinum-relay", "invalid EVM relay key in keystore: {e}");
-			}
-		}
-	}
+	crate::evm_relay_key::report_identity(evm_key.as_deref());
 
 	if role.is_authority() {
 		// manual-seal authorship

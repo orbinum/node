@@ -129,17 +129,39 @@ function freshCommitment() {
     assert.strictEqual(after - before, 1n, `pool moved by ${after - before}, expected 1`);
   });
 
-  // ── register_validator: no funds reserved ─────────────────────────────────
+  // ── self-registration flow is gone ────────────────────────────────────────
   //
-  // Alice already validates in dev, so she cannot re-register. Use a fresh
-  // account funded with far less than the old 1 000 ORB bond: enough to pay the
-  // fee, nowhere near enough to have posted a bond. Under the old rule this was
-  // a guaranteed InsufficientBond. It must now reach the prerequisite gate,
-  // which is the only thing left standing between an applicant and the queue.
+  // Candidate selection moved off-chain: there is no pending queue and no
+  // self-application. Sudo records the decision with addValidator instead.
+
+  await test('the self-registration extrinsics no longer exist', async () => {
+    for (const call of ['registerValidator', 'approveValidator', 'rejectValidator']) {
+      assert.strictEqual(
+        api.tx.validatorSet[call],
+        undefined,
+        `validatorSet.${call} should have been removed`,
+      );
+    }
+  });
+
+  await test('the pending queue storage no longer exists', async () => {
+    assert.strictEqual(
+      api.query.validatorSet.pendingValidators,
+      undefined,
+      'validatorSet.pendingValidators should have been removed',
+    );
+  });
+
+  // ── addValidator: gated on session keys, reserves nothing ─────────────────
+  //
+  // A fresh account funded with far less than the old 1 000 ORB bond. Under the
+  // old rule a registration attempt was a guaranteed InsufficientBond. Now the
+  // account cannot be added at all — but for want of session keys, not funds —
+  // and nothing is reserved either way.
 
   const POOR = 10n ** 18n; // 1 ORB — 1/1000th of the bond that used to be required
 
-  await test('an account holding far less than the old bond reaches the prerequisite gate', async () => {
+  await test('addValidator rejects an account without session keys', async () => {
     const poor = keyring.addFromUri('//PoorValidator');
     await submit(api.tx.balances.transferKeepAlive(poor.address, POOR), alice);
 
@@ -147,14 +169,38 @@ function freshCommitment() {
     assert.ok(free > 0n && free < 1000n * 10n ** 18n, `unexpected balance ${free}`);
 
     await assert.rejects(
-      () => submit(api.tx.validatorSet.registerValidator(), poor),
-      (e) => e.message === 'validatorSet.NoSessionKeys' || e.message === 'validatorSet.NoRelayer',
-      'expected a prerequisite failure — a funding failure would mean the bond survived',
+      () => submit(api.tx.sudo.sudo(api.tx.validatorSet.addValidator(poor.address)), alice),
+      (e) => e.message === 'validatorSet.NoSessionKeys',
+      'expected the session-key gate — a funding failure would mean the bond survived',
     );
 
-    // The failed attempt must not have reserved anything.
     const after = (await api.query.system.account(poor.address)).data;
-    assert.strictEqual(after.reserved.toBigInt(), 0n, 'registration reserved funds');
+    assert.strictEqual(after.reserved.toBigInt(), 0n, 'addValidator reserved funds');
+  });
+
+  await test('registerRelayer rejects an account outside the validator set', async () => {
+    const poor = keyring.addFromUri('//PoorValidator');
+    // The set gate is checked before the signature, so a dummy proof suffices
+    // to show a non-validator gets no further.
+    await assert.rejects(
+      () =>
+        submit(
+          api.tx.relayer.registerRelayer('0x' + '11'.repeat(20), '0x' + '00'.repeat(65)),
+          poor,
+        ),
+      (e) => e.message === 'relayer.NotValidator',
+      'a non-validator must not be able to claim an EVM relay address',
+    );
+  });
+
+  await test('registerRelayer takes an ownership proof', async () => {
+    // Two arguments: without the signature an approved validator could claim a
+    // rival's public relay address and divert its fees.
+    assert.strictEqual(
+      api.tx.relayer.registerRelayer.meta.args.length,
+      2,
+      'registerRelayer must take (evmAddress, signature)',
+    );
   });
 
   await test('no account on chain holds a reserved validator bond', async () => {

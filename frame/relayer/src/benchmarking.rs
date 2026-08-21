@@ -17,17 +17,12 @@ use super::*;
 use frame_benchmarking::v2::*;
 use frame_support::traits::Get;
 use frame_system::RawOrigin;
+use pallet_validator_set::ValidatorSetInterface;
 use sp_core::H160;
 
 #[benchmarks]
 mod benchmarks {
 	use super::*;
-
-	// ── Helpers ──────────────────────────────────────────────────────────────
-
-	fn evm_address_for(seed: u64) -> H160 {
-		H160::from_low_u64_be(seed)
-	}
 
 	// ── set_min_relay_fee ────────────────────────────────────────────────────
 
@@ -55,17 +50,20 @@ mod benchmarks {
 
 	// ── register_relayer ─────────────────────────────────────────────────────
 
-	/// Worst case: two storage writes + event deposit.
+	/// Worst case: validator-set lookup + two storage writes + event deposit.
 	///
-	/// `register_relayer` is gated by `ManageOrigin` (sudo/governance).
-	/// We call it with `RawOrigin::Root` which always satisfies that bound.
+	/// `register_relayer` is gated on membership of the active validator set,
+	/// so the caller has to be put there first.
 	#[benchmark]
 	fn register_relayer() {
 		let who: T::AccountId = whitelisted_caller();
-		let evm = evm_address_for(0xA11CE);
+		T::ValidatorSet::setup_validator(&who);
+		// A fixed key whose signature over the binding digest is recomputed here,
+		// so the benchmark exercises the real ECDSA recovery path.
+		let (evm, signature) = crate::test_signing::signed_binding::<T>(&who);
 
 		#[extrinsic_call]
-		register_relayer(RawOrigin::Root, who.clone(), evm);
+		register_relayer(RawOrigin::Signed(who.clone()), evm, signature);
 
 		assert_eq!(RelayerRegistry::<T>::get(evm), Some(who));
 	}
@@ -77,7 +75,7 @@ mod benchmarks {
 	#[benchmark]
 	fn unregister_relayer() {
 		let caller: T::AccountId = whitelisted_caller();
-		let evm = evm_address_for(0xA11CE);
+		let evm = H160::from_low_u64_be(0xA11CE);
 
 		// Pre-register so unregister has real work to do.
 		RelayerRegistry::<T>::insert(evm, caller.clone());

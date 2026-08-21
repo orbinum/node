@@ -5,6 +5,109 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.3.0] — 2026-08-20
+
+Validator onboarding moves off-chain: the two-phase self-registration flow is
+gone and sudo records the decision directly. **Breaking** — three call indices
+retired, so `transaction_version` must move. Ships alongside `pallet-relayer`
+0.4.0, which consumes the new `ValidatorSetInterface`.
+
+### Removed
+
+#### Self-registration flow
+`register_validator`, `approve_validator` and `reject_validator` are gone, along
+with the `PendingValidators` storage item, the `MaxPendingValidators` Config
+constant, the `ValidatorRegistrationRequested` / `ValidatorApproved` /
+`ValidatorRejected` events, and the `AlreadyPending` / `NotPending` /
+`TooManyPending` / `NoRelayer` errors.
+
+Candidate selection moves off-chain: operators share their `AccountId` and node
+details through an external service, and sudo records the decision on-chain with
+`add_validator`. The pending queue existed to stage that decision on-chain, and
+an on-chain queue that only sudo can drain is a slower way to reach the same
+outcome.
+
+`ValidatorPrerequisites` loses `has_relayer`, which severs the last
+validator-set → relayer coupling.
+
+**Breaking:** call indices 2, 4 and 5 are retired and must never be reassigned.
+
+### Changed
+
+#### Session-key gate moved to `add_validator`
+The session-key check that used to guard `register_validator` now guards
+`add_validator`. Without it an approved account with no keys would hold a slot in
+the active set without ever authoring, leaving gaps in the slot schedule.
+
+`remove_validator` and `deregister_validator` lose their pending-queue branches
+and now share one `remove_from_approved` helper.
+
+### Added
+
+#### `traits` module
+`ValidatorPrerequisites`, `OnValidatorRemoved` and the new
+`ValidatorSetInterface` now live in `src/traits.rs`, matching the port pattern
+`pallet-relayer` already uses for `RelayerInterface`.
+
+`ValidatorSetInterface` answers "is this an active validator" and is implemented
+directly on `Pallet<T>`, so a consumer binds to the trait instead of the runtime
+hand-writing an adapter over `ApprovedValidators`. The next pallet that needs the
+same question costs one line rather than a second adapter.
+
+`OnValidatorRemoved` gains a tuple impl, so a runtime can wire several
+subscribers without a combinator struct.
+
+#### `OnValidatorRemoved` hook
+A new Config item, notified whenever an account leaves the approved set by either
+path. The runtime wires it to `pallet_relayer::clear_relayer` so an EVM relay
+binding cannot outlive the validator membership that authorised it.
+
+Deliberately infallible: leaving the set must always succeed, so failing cleanup
+can never block removal.
+
+### Fixed
+
+#### Keyless validators no longer hold session slots
+`SessionManager::new_session` now filters out approved accounts with no session
+keys. `session.purge_keys` is permissionless, so a validator could pass the
+`add_validator` gate and then drop its keys, keeping a slot in the Aura schedule
+while producing nothing. Checking at add-time alone did not survive that.
+
+#### `remove_validator` was under-weighted
+Its benchmark removed an account with no dependent state, so `OnValidatorRemoved`
+short-circuited and the recorded weight missed the cleanup writes entirely —
+`RelayerByAccount` was annotated `w:0` and `RelayerRegistry` did not appear at
+all. `deregister_validator` shares that weight and is user-dispatchable, so the
+gap was reachable without sudo. `OnValidatorRemoved` gains a benchmark-only
+`setup_removal_state` so the expensive branch is what gets measured.
+
+#### Test isolation
+The mock's thread-locals were not reset between tests, so a test that flipped the
+session-key gate leaked into whichever test ran next. `ExtBuilder::build` clears
+them now.
+
+### Internal
+
+- Section dividers now match `pallet-relayer`'s: previously they appeared only
+  inside `#[pallet::call]` and at two different widths, so Config/Storage/Events
+  were undivided in one pallet and divided in its sibling.
+
+### Notes
+- No migration ships with this change, on the same argument as the bond removal:
+  `PendingValidators` must be verified empty on testnet before release. A chain
+  with a live queue would need to drain it.
+- `spec_version` moves 9 → 10 (removed storage item and Config constant change
+  the metadata). `transaction_version` moves 2 → 3 — unlike the bond removal,
+  this one deletes call indices.
+- Benchmarks are unaffected in coverage: none of the removed calls had a weight
+  function of their own. `add_validator`'s benchmark gains a `setup_session_keys`
+  step so its throwaway account can pass the new gate, and `remove_validator`'s
+  gains `setup_removal_state` so the hook's writes are measured.
+- Genesis deliberately skips the session-key gate: this pallet's `genesis_build`
+  runs before `pallet_session`'s, so `NextKeys` is still empty and the check
+  would reject every account. Chain-spec authors seed both from the same list.
+  Pinned by a test so the behaviour is a decision, not an accident.
+
 ## [0.2.0] — 2026-08-06
 
 ### Removed
@@ -100,9 +203,9 @@ the way.
   the authoritative validator set. Validator changes take effect at the next session.
 
 #### Benchmarks
-- `add_validator`, `remove_validator`, `approve_validator`, `reject_validator`,
-  `register_validator`, `deregister_validator` — all benchmarked with
-  `frame_benchmarking::v2`.
+- `add_validator`, `remove_validator` — benchmarked with `frame_benchmarking::v2`.
+  (This entry originally claimed all six calls were benchmarked; the other four
+  reused these two weight functions. Corrected in [Unreleased].)
 
 #### Genesis
 - `GenesisConfig { initial_validators }` seeds the initial approved set without

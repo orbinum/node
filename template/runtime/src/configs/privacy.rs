@@ -36,6 +36,8 @@ impl pallet_relayer::Config for Runtime {
 	type ManageOrigin = frame_system::EnsureRoot<AccountId>;
 	/// Allow up to 16 ABI selectors in the whitelist.
 	type MaxAllowedSelectors = ConstU32<16>;
+	/// Only approved validators may register an EVM relay address.
+	type ValidatorSet = ValidatorSet;
 	type WeightInfo = ();
 }
 

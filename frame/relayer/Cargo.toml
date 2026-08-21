@@ -1,6 +1,6 @@
 [package]
 name = "pallet-relayer"
-version = "0.3.1"
+version = "0.4.0"
 description = "On-chain relay configuration, relayer registry and fee accounting."
 authors = { workspace = true }
 license = "GPL-3.0-or-later"
@@ -18,11 +18,16 @@ scale-info = { workspace = true }
 frame-benchmarking = { workspace = true, optional = true }
 frame-support = { workspace = true }
 frame-system = { workspace = true }
+libsecp256k1 = { workspace = true, optional = true, features = ["static-context", "hmac"] }
+pallet-validator-set = { workspace = true }
 sp-core = { workspace = true }
+sp-io = { workspace = true }
 sp-runtime = { workspace = true }
 sp-std = { workspace = true }
 
 [dev-dependencies]
+libsecp256k1 = { workspace = true, features = ["std", "static-context", "hmac"] }
+pallet-validator-set = { workspace = true, features = ["std"] }
 sp-io = { workspace = true, features = ["default"] }
 
 [features]
@@ -33,16 +38,22 @@ std = [
 	"frame-benchmarking?/std",
 	"frame-support/std",
 	"frame-system/std",
+	"libsecp256k1?/std",
+	"pallet-validator-set/std",
 	"sp-core/std",
+	"sp-io/std",
 	"sp-runtime/std",
 	"sp-std/std",
 ]
 runtime-benchmarks = [
+	"dep:libsecp256k1",
 	"frame-benchmarking/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
+	"pallet-validator-set/runtime-benchmarks",
 ]
 try-runtime = [
 	"frame-support/try-runtime",
 	"frame-system/try-runtime",
+	"pallet-validator-set/try-runtime",
 ]

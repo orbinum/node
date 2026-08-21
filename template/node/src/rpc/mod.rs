@@ -36,7 +36,7 @@ pub struct FullDeps<B: BlockT, C, P, CT, CIDP> {
 	pub pool: Arc<P>,
 	/// Manual seal command sink
 	pub command_sink: Option<mpsc::Sender<EngineCommand<Hash>>>,
-	/// Keystore — used by `relayer_registerRelayer` to sign with the Aura key.
+	/// Keystore — holds the node's session keys and its `evmr` relay key.
 	pub keystore: Arc<dyn Keystore>,
 	/// Ethereum-compatibility specific dependencies.
 	pub eth: EthDeps<B, C, P, CT, CIDP>,
@@ -107,7 +107,7 @@ where
 	io.merge(TransactionPayment::new(client.clone()).into_rpc())?;
 	io.merge(ZkVerifier::new(client.clone()).into_rpc())?;
 	io.merge(Relayer::new(client.clone()).into_rpc())?;
-	io.merge(RelayerAuthor::new(keystore).into_rpc())?;
+	io.merge(RelayerAuthor::new(client.clone(), keystore).into_rpc())?;
 
 	io.merge(PrivacyRpc::new(client.clone()).into_rpc())?;
 	io.merge(ChainRpc::new(client.clone()).into_rpc())?;

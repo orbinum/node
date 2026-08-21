@@ -7265,10 +7265,13 @@ dependencies = [
  "frame-system",
  "frame-system-rpc-runtime-api",
  "futures",
+ "hex",
  "jsonrpsee",
+ "libsecp256k1",
  "log",
  "orbinum-runtime",
  "orbinum-zk-core",
+ "pallet-relayer",
  "pallet-relayer-rpc",
  "pallet-relayer-runtime-api",
  "pallet-shielded-pool-runtime-api",
@@ -7313,7 +7316,6 @@ dependencies = [
  "substrate-build-script-utils",
  "substrate-frame-rpc-system",
  "substrate-prometheus-endpoint",
- "tokio",
 ]
 
 [[package]]
@@ -8041,11 +8043,13 @@ dependencies = [
 
 [[package]]
 name = "pallet-relayer"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
  "frame-system",
+ "libsecp256k1",
+ "pallet-validator-set",
  "parity-scale-codec",
  "scale-info",
  "sp-core",
@@ -8282,11 +8286,12 @@ dependencies = [
 
 [[package]]
 name = "pallet-validator-set"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
  "frame-system",
+ "impl-trait-for-tuples",
  "pallet-balances",
  "pallet-session",
  "parity-scale-codec",
