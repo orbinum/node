@@ -2,6 +2,34 @@
 
 All notable changes to `pallet-relayer` will be documented in this file.
 
+## [0.5.0] - 2026-08-21
+
+Two guards on relay configuration. **Breaking** — `Config::MaxMinRelayFee` is a
+new required associated type, so any runtime implementing `Config` must add it.
+
+### Changed
+
+#### `set_min_relay_fee` is bounded
+`ManageOrigin` could previously set the minimum relay fee to any `u128`. A value
+large enough would make the EVM relay unusable: every shielded call would fail
+`FeeTooLow`, and the node's relay would reject the calldata before it reached the
+pool — with no way back until the next runtime upgrade, since the call that would
+lower it again has to run on the broken runtime.
+
+New `Config::MaxMinRelayFee` (1 ORB in the runtime, a thousand times the default)
+and error `MinRelayFeeTooHigh`. This is not a defence against an attacker —
+governance is already trusted — but against a typo in a governance call.
+
+#### `get_active_relayers` is capped
+The runtime API collected the whole `RelayerRegistry` with no bound, and a
+runtime API runs inside its caller's block or RPC budget.
+
+Capped at 256 entries via `.take()`. Nothing can hit that today: the method has
+no callers — the RPC trait exposes only the three O(1) methods — and
+registration is gated on the validator set, so the registry cannot exceed
+`MaxValidators`. The cap is headroom for whoever wires this up later, when
+neither of those may still hold.
+
 ## [0.4.0] - 2026-08-20
 
 EVM relay registration becomes self-service, gated on validator-set membership

@@ -32,6 +32,10 @@ impl pallet_relayer::Config for Runtime {
 	/// Default minimum relay fee: 0.001 ORB = 1e15 planck (anti-spam).
 	/// Overridable at runtime via `set_min_relay_fee` (governance/sudo).
 	type DefaultMinRelayFee = ConstU128<1_000_000_000_000_000>;
+	/// Ceiling for `set_min_relay_fee`: 1 ORB, a thousand times the default.
+	/// Room to react to price swings, far below the point where a typo would
+	/// brick relaying until the next runtime upgrade.
+	type MaxMinRelayFee = ConstU128<1_000_000_000_000_000_000>;
 	/// Only sudo/governance can update relay configuration.
 	type ManageOrigin = frame_system::EnsureRoot<AccountId>;
 	/// Allow up to 16 ABI selectors in the whitelist.

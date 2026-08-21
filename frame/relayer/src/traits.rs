@@ -39,6 +39,15 @@ pub trait RelayerInterface {
 	///
 	/// Called by pallet-shielded-pool after a successful `private_transfer`
 	/// or `unshield` unsigned extrinsic.
+	///
+	/// **Caller contract:** `asset_id` must already be known to exist. This
+	/// creates a `PendingRelayerFees` entry unconditionally, so an unchecked
+	/// caller could bloat storage with rows for assets that were never
+	/// registered. Both current callers validate first — `unshield` and
+	/// `private_transfer` resolve the asset and reject `InvalidAssetId` before
+	/// any fee path runs — and a new caller must do the same rather than
+	/// rely on a check here, which would duplicate a lookup the caller has
+	/// already performed.
 	fn accumulate_relay_fee(author: &Self::AccountId, asset_id: u32, amount: u128);
 
 	/// Return the total pending relay fees for (`who`, `asset_id`) in planck.

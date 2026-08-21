@@ -1,7 +1,8 @@
 //! Tests for relay configuration management.
 //!
 //! Covers:
-//! - `set_min_relay_fee` — governance gating, storage update, event emission
+//! - `set_min_relay_fee` — governance gating, storage update, event emission,
+//!   and the `MaxMinRelayFee` ceiling that keeps a typo from bricking relaying
 //! - `set_allowed_selectors` — governance gating, update, clear, overflow guard
 //! - Default value wiring (`T::DefaultMinRelayFee`)
 
@@ -129,5 +130,45 @@ fn set_allowed_selectors_accepts_max_capacity() {
 			sels.clone()
 		));
 		assert_eq!(AllowedSelectors::<Test>::get().len(), 8);
+	});
+}
+
+// ─── set_min_relay_fee upper bound ───────────────────────────────────────────
+
+#[test]
+fn the_fee_ceiling_is_accepted() {
+	new_test_ext().execute_with(|| {
+		let ceiling = <Test as crate::Config>::MaxMinRelayFee::get();
+		assert_ok!(Relayer::set_min_relay_fee(RuntimeOrigin::root(), ceiling));
+		assert_eq!(crate::MinRelayFee::<Test>::get(), ceiling);
+	});
+}
+
+#[test]
+fn a_fee_above_the_ceiling_is_rejected() {
+	// Without the cap, governance could set u128::MAX and brick EVM relaying:
+	// every shielded call would fail FeeTooLow until a runtime upgrade.
+	new_test_ext().execute_with(|| {
+		let ceiling = <Test as crate::Config>::MaxMinRelayFee::get();
+		assert_noop!(
+			Relayer::set_min_relay_fee(RuntimeOrigin::root(), ceiling + 1),
+			Error::<Test>::MinRelayFeeTooHigh,
+		);
+		assert_noop!(
+			Relayer::set_min_relay_fee(RuntimeOrigin::root(), u128::MAX),
+			Error::<Test>::MinRelayFeeTooHigh,
+		);
+	});
+}
+
+#[test]
+fn a_rejected_fee_leaves_the_previous_value_intact() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(Relayer::set_min_relay_fee(RuntimeOrigin::root(), 42));
+		assert_noop!(
+			Relayer::set_min_relay_fee(RuntimeOrigin::root(), u128::MAX),
+			Error::<Test>::MinRelayFeeTooHigh,
+		);
+		assert_eq!(crate::MinRelayFee::<Test>::get(), 42);
 	});
 }

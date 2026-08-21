@@ -2,7 +2,27 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
-## [Unreleased]
+## [0.18.0] - 2026-08-21
+
+Relay fee attribution leaves an on-chain trace when it falls back. **Breaking** —
+a new `Event` variant, so exhaustive matches on the enum and indexers decoding
+events by index need updating.
+
+### Added
+
+- **`Event::RelayFeeDiverted`.** When relay calldata names an EVM address that is
+  not registered, the fee falls back to the block author. That fallback is
+  deliberate and unchanged — relaying is not gated on registration, so failing
+  here would reject a user's transaction over someone else's misconfiguration.
+  The event makes the diversion visible: a relayer that forgot to register can
+  see where its fees went.
+
+### Internal
+
+- **`credit_relay_fee`** in `operations/fees.rs` now holds the fee attribution
+  logic for both `unshield` and `private_transfer`, which carried identical
+  copies of the resolve-or-fallback path. One copy means the two cannot drift
+  apart on a security-sensitive route.
 
 ### Removed
 
