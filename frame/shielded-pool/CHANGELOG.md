@@ -2,7 +2,11 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
-## [Unreleased]
+## [0.18.0] - 2026-08-21
+
+Relay fee attribution leaves an on-chain trace when it falls back. **Breaking** —
+a new `Event` variant, so exhaustive matches on the enum and indexers decoding
+events by index need updating.
 
 ### Added
 
