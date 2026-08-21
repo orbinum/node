@@ -756,10 +756,12 @@ mod tests {
 			assert_ok!(credit_relay_fee::<Test>(Some(addr), 0, 500));
 
 			assert!(
-				frame_system::Pallet::<Test>::events().iter().any(|r| matches!(
-					&r.event,
-					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::SelfRelayedFee { .. })
-				)),
+				frame_system::Pallet::<Test>::events()
+					.iter()
+					.any(|r| matches!(
+						&r.event,
+						crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::SelfRelayedFee { .. })
+					)),
 				"a resolved relayer equal to the author must be reported"
 			);
 		});
@@ -776,10 +778,12 @@ mod tests {
 			assert_ok!(credit_relay_fee::<Test>(Some(addr), 0, 500));
 
 			assert!(
-				!frame_system::Pallet::<Test>::events().iter().any(|r| matches!(
-					&r.event,
-					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::SelfRelayedFee { .. })
-				)),
+				!frame_system::Pallet::<Test>::events()
+					.iter()
+					.any(|r| matches!(
+						&r.event,
+						crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::SelfRelayedFee { .. })
+					)),
 				"a relayer other than the author must not be flagged"
 			);
 		});
@@ -803,10 +807,12 @@ mod tests {
 			));
 
 			assert!(
-				!frame_system::Pallet::<Test>::events().iter().any(|r| matches!(
-					&r.event,
-					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::SelfRelayedFee { .. })
-				)),
+				!frame_system::Pallet::<Test>::events()
+					.iter()
+					.any(|r| matches!(
+						&r.event,
+						crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::SelfRelayedFee { .. })
+					)),
 				"the fallback to the block author is not a self-relay"
 			);
 			// The fee still lands on the author both times.

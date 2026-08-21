@@ -1252,7 +1252,10 @@ mod origin_tests {
 	#[test]
 	fn an_unsigned_origin_names_nobody() {
 		new_test_ext().execute_with(|| {
-			assert_eq!(ensure_relayed::<Test, _>(RuntimeOrigin::none()).unwrap(), None);
+			assert_eq!(
+				ensure_relayed::<Test, _>(RuntimeOrigin::none()).unwrap(),
+				None
+			);
 		});
 	}
 
