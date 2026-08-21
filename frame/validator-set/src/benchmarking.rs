@@ -14,6 +14,7 @@
 //! ```
 
 use super::*;
+use crate::{OnValidatorRemoved, ValidatorPrerequisites};
 use frame_benchmarking::v2::*;
 use frame_support::traits::Get;
 use frame_system::RawOrigin;
@@ -38,6 +39,8 @@ mod benchmarks {
 		ApprovedValidators::<T>::put(existing);
 
 		let new_validator: T::AccountId = account("new", 0, 0);
+		// The extrinsic gates on session keys; register them for the target first.
+		T::Prerequisites::setup_session_keys(&new_validator);
 
 		#[extrinsic_call]
 		add_validator(RawOrigin::Root, new_validator.clone());
@@ -48,7 +51,9 @@ mod benchmarks {
 	// ── remove_validator ──────────────────────────────────────────────────────
 
 	/// Worst case: the target validator is at the last position in the set
-	/// (maximum linear scan over `MaxValidators` entries).
+	/// (maximum linear scan over `MaxValidators` entries) **and** has dependent
+	/// state for `OnValidatorRemoved` to clean up, so the hook's writes are
+	/// measured rather than short-circuited.
 	#[benchmark]
 	fn remove_validator() {
 		let max = T::MaxValidators::get();
@@ -62,6 +67,7 @@ mod benchmarks {
 			.try_into()
 			.expect("max entries == MaxValidators; qed");
 		ApprovedValidators::<T>::put(bounded);
+		T::OnValidatorRemoved::setup_removal_state(&target);
 
 		#[extrinsic_call]
 		remove_validator(RawOrigin::Root, target.clone());

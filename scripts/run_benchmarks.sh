@@ -82,6 +82,7 @@ echo "[2/3] Running benchmarks for full runtime set..."
 run_bench "pallet_zk_verifier" "./frame/zk-verifier/src/weights.rs"
 run_bench "pallet_shielded_pool" "./frame/shielded-pool/src/weights.rs"
 run_bench "pallet_relayer" "./frame/relayer/src/weights.rs"
+run_bench "pallet_validator_set" "./frame/validator-set/src/weights.rs"
 
 # Pallets benchmarkeables del runtime sin destino de weights versionado en este repo
 run_bench "pallet_balances" "$SCRATCH_DIR/pallet-balances-weights.rs"

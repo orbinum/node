@@ -7,14 +7,14 @@ pub type AccountId = u64;
 
 // ── Prerequisite mock controls ────────────────────────────────────────────────
 //
-// Tests can toggle these thread-locals to simulate missing session keys or
-// a missing EVM relayer without needing real pallet-session / pallet-relayer state.
+// Tests toggle this thread-local to simulate missing session keys without
+// needing real pallet-session state.
 
 use std::cell::RefCell;
 
 thread_local! {
 	static MOCK_HAS_SESSION_KEYS: RefCell<bool> = const { RefCell::new(true) };
-	static MOCK_HAS_RELAYER: RefCell<bool> = const { RefCell::new(true) };
+	static REMOVED_HOOK_CALLS: RefCell<Vec<AccountId>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Set whether `MockPrerequisites::has_session_keys` returns `true` or `false`.
@@ -22,9 +22,9 @@ pub fn set_mock_session_keys(val: bool) {
 	MOCK_HAS_SESSION_KEYS.with(|v| *v.borrow_mut() = val);
 }
 
-/// Set whether `MockPrerequisites::has_relayer` returns `true` or `false`.
-pub fn set_mock_relayer(val: bool) {
-	MOCK_HAS_RELAYER.with(|v| *v.borrow_mut() = val);
+/// Accounts passed to `OnValidatorRemoved`, in call order.
+pub fn removed_hook_calls() -> Vec<AccountId> {
+	REMOVED_HOOK_CALLS.with(|v| v.borrow().clone())
 }
 
 pub struct MockPrerequisites;
@@ -32,9 +32,20 @@ impl pallet_validator_set::ValidatorPrerequisites<AccountId> for MockPrerequisit
 	fn has_session_keys(_who: &AccountId) -> bool {
 		MOCK_HAS_SESSION_KEYS.with(|v| *v.borrow())
 	}
-	fn has_relayer(_who: &AccountId) -> bool {
-		MOCK_HAS_RELAYER.with(|v| *v.borrow())
+
+	#[cfg(feature = "runtime-benchmarks")]
+	fn setup_session_keys(_who: &AccountId) {}
+}
+
+/// Records every removal so tests can assert the hook fired.
+pub struct MockOnValidatorRemoved;
+impl pallet_validator_set::OnValidatorRemoved<AccountId> for MockOnValidatorRemoved {
+	fn on_validator_removed(who: &AccountId) {
+		REMOVED_HOOK_CALLS.with(|v| v.borrow_mut().push(*who));
 	}
+
+	#[cfg(feature = "runtime-benchmarks")]
+	fn setup_removal_state(_who: &AccountId) {}
 }
 
 frame_support::construct_runtime!(
@@ -63,14 +74,13 @@ impl pallet_balances::Config for Test {
 
 parameter_types! {
 	pub const MaxValidators: u32 = 10;
-	pub const MaxPendingValidators: u32 = 10;
 }
 
 impl pallet_validator_set::Config for Test {
 	type AddRemoveOrigin = frame_system::EnsureRoot<AccountId>;
 	type MaxValidators = MaxValidators;
-	type MaxPendingValidators = MaxPendingValidators;
 	type Prerequisites = MockPrerequisites;
+	type OnValidatorRemoved = MockOnValidatorRemoved;
 	type WeightInfo = ();
 }
 
@@ -95,6 +105,12 @@ impl ExtBuilder {
 	}
 
 	pub fn build(self) -> sp_io::TestExternalities {
+		// Thread-locals outlive externalities and tests share a thread, so reset
+		// them here: otherwise a test that flips the session-key gate leaks into
+		// whichever test happens to run next.
+		MOCK_HAS_SESSION_KEYS.with(|v| *v.borrow_mut() = true);
+		REMOVED_HOOK_CALLS.with(|v| v.borrow_mut().clear());
+
 		let mut storage = frame_system::GenesisConfig::<Test>::default()
 			.build_storage()
 			.unwrap();

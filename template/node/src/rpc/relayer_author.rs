@@ -1,242 +1,137 @@
-//! `relayer_getRelayInfo` RPC — informational query for the validator operator.
+//! `relayer_getRelayInfo` RPC — onboarding helper for the validator operator.
 //!
-//! Returns the node's Substrate `AccountId` and derived EVM address so that
-//! a **sudo/governance** account knows what arguments to pass to
-//! `relayer.register_relayer(who, evm_address)` on-chain.
+//! Returns the node's Substrate `AccountId`, its EVM relay address, and a
+//! signature proving the node holds that address's private key — the three
+//! things `relayer.registerRelayer(evmAddress, signature)` needs.
 //!
-//! No extrinsic is submitted; this is a pure read-only query.
+//! The signature is what stops one approved validator from claiming another's
+//! public relay address, so it cannot be produced by hand: only the holder of
+//! the `evmr` key can sign the binding digest. This RPC exists so the operator
+//! does not have to.
+//!
+//! No extrinsic is submitted; this is a pure read-only query. The signature it
+//! returns is only usable to register this node's own address, and becomes
+//! public the moment that extrinsic lands, so the method is not gated.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, types::ErrorObjectOwned};
-use sp_core::{crypto::KeyTypeId, H160};
+use sp_api::ProvideRuntimeApi;
+use sp_blockchain::HeaderBackend;
+use sp_core::{crypto::KeyTypeId, H160, H256};
 use sp_keystore::Keystore;
+use sp_runtime::traits::Block as BlockT;
 
 use orbinum_runtime::AccountId;
 
-/// Aura key-type: `KeyTypeId(*b"aura")`.
 const AURA_KEY_TYPE: KeyTypeId = KeyTypeId(*b"aura");
+
+/// Imported rather than redeclared: two copies of the key type could drift and
+/// the node would sign with a key the RPC never reports.
+use crate::evm_relay_key::EVM_RELAY_KEY_TYPE;
 
 // ── RPC trait ────────────────────────────────────────────────────────────────
 
 #[rpc(client, server)]
 pub trait RelayerAuthorApi {
-	/// Returns the node's Substrate account and derived EVM address.
+	/// Returns everything needed to call `relayer.registerRelayer`.
 	///
-	/// Use these values to construct the sudo call:
-	/// `relayer.registerRelayer(who, evmAddress)` via Polkadot-JS or the CLI.
-	///
-	/// Requires an Aura session key to be present in the local keystore.
+	/// Requires an Aura session key (for the account) and an `evmr` key (for the
+	/// address and the proof) in the local keystore.
 	#[method(name = "relayer_getRelayInfo")]
-	async fn get_relay_info(&self, evm_address: String) -> RpcResult<serde_json::Value>;
+	async fn get_relay_info(&self) -> RpcResult<serde_json::Value>;
 }
 
 // ── Handler struct ───────────────────────────────────────────────────────────
 
-pub struct RelayerAuthor {
+pub struct RelayerAuthor<C, B> {
+	client: Arc<C>,
 	keystore: Arc<dyn Keystore>,
+	_block: std::marker::PhantomData<B>,
 }
 
-impl RelayerAuthor {
-	pub fn new(keystore: Arc<dyn Keystore>) -> Self {
-		Self { keystore }
+impl<C, B> RelayerAuthor<C, B> {
+	pub fn new(client: Arc<C>, keystore: Arc<dyn Keystore>) -> Self {
+		Self {
+			client,
+			keystore,
+			_block: std::marker::PhantomData,
+		}
 	}
 }
 
 // ── Implementation ───────────────────────────────────────────────────────────
 
 #[async_trait]
-impl RelayerAuthorApiServer for RelayerAuthor {
-	async fn get_relay_info(&self, evm_address: String) -> RpcResult<serde_json::Value> {
-		let evm_addr = parse_h160(&evm_address)?;
-
+impl<C, B> RelayerAuthorApiServer for RelayerAuthor<C, B>
+where
+	B: BlockT<Hash = H256>,
+	C: ProvideRuntimeApi<B> + HeaderBackend<B> + Send + Sync + 'static,
+{
+	async fn get_relay_info(&self) -> RpcResult<serde_json::Value> {
 		let aura_keys = self.keystore.sr25519_public_keys(AURA_KEY_TYPE);
 		let pub_key = aura_keys.first().copied().ok_or_else(|| {
 			rpc_err("No Aura key in keystore — is this node configured as a validator?")
 		})?;
-
 		let account_id: AccountId = pub_key.0.into();
-		let substrate_hex = format!(
-			"0x{}",
-			<AccountId as AsRef<[u8; 32]>>::as_ref(&account_id)
-				.iter()
-				.map(|b| format!("{b:02x}"))
-				.collect::<String>()
+
+		let evm_keys = self.keystore.ecdsa_public_keys(EVM_RELAY_KEY_TYPE);
+		let evm_pub = evm_keys.first().copied().ok_or_else(|| {
+			rpc_err(
+				"No \"evmr\" key in keystore — insert one with \
+				 author_insertKey(\"evmr\", <phrase>, <pubkey>) and restart",
+			)
+		})?;
+		let evm_addr = evm_address_of(&evm_pub)?;
+
+		let genesis = self
+			.client
+			.hash(0u32.into())
+			.map_err(|e| rpc_err(format!("cannot read genesis hash: {e}")))?
+			.ok_or_else(|| rpc_err("genesis block missing"))?;
+
+		let digest = pallet_relayer::evm_proof::binding_digest(
+			scale_codec::Encode::encode(&account_id).as_slice(),
+			&evm_addr,
+			&genesis,
 		);
-		let evm_hex = format!("{evm_addr:#x}");
+		let signature = self
+			.keystore
+			.ecdsa_sign_prehashed(EVM_RELAY_KEY_TYPE, &evm_pub, &digest)
+			.map_err(|e| rpc_err(format!("signing failed: {e}")))?
+			.ok_or_else(|| rpc_err("keystore refused to sign with the \"evmr\" key"))?;
 
 		Ok(serde_json::json!({
-			"substrate_account": substrate_hex,
-			"evm_address": evm_hex,
+			"substrate_account": to_hex(<AccountId as AsRef<[u8; 32]>>::as_ref(&account_id)),
+			"evm_address": format!("{evm_addr:#x}"),
+			"signature": to_hex(&signature.0),
+			"call": "relayer.registerRelayer(evm_address, signature)",
 		}))
 	}
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/// Ethereum address for a compressed secp256k1 public key.
+///
+/// Delegates the actual derivation to `pallet_relayer::evm_proof` so the node and
+/// the runtime can never disagree about which address a key owns.
+fn evm_address_of(pubkey: &sp_core::ecdsa::Public) -> Result<H160, ErrorObjectOwned> {
+	let tagged = libsecp256k1::PublicKey::parse_compressed(&pubkey.0)
+		.map_err(|e| rpc_err(format!("malformed evmr public key: {e:?}")))?
+		.serialize();
+	// serialize() is 65 bytes with a 0x04 tag; the derivation wants the 64 after it.
+	let untagged: [u8; 64] = tagged[1..].try_into().expect("65 - 1 == 64; qed");
+	Ok(pallet_relayer::evm_proof::evm_address_from_uncompressed(
+		&untagged,
+	))
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+	format!("0x{}", hex::encode(bytes))
+}
+
 fn rpc_err(msg: impl Into<String>) -> ErrorObjectOwned {
 	ErrorObjectOwned::owned(-32000, msg.into(), None::<()>)
-}
-
-fn parse_h160(s: &str) -> Result<H160, ErrorObjectOwned> {
-	let hex = s.trim_start_matches("0x");
-	if hex.len() != 40 {
-		return Err(rpc_err(format!(
-			"EVM address must be 40 hex chars (20 bytes), got {} in {:?}",
-			hex.len(),
-			s
-		)));
-	}
-	let mut arr = [0u8; 20];
-	for (i, chunk) in hex.as_bytes().chunks(2).enumerate() {
-		let hi = hex_nibble(chunk[0])
-			.ok_or_else(|| rpc_err(format!("Invalid hex char in EVM address: {s:?}")))?;
-		let lo = hex_nibble(chunk[1])
-			.ok_or_else(|| rpc_err(format!("Invalid hex char in EVM address: {s:?}")))?;
-		arr[i] = (hi << 4) | lo;
-	}
-	Ok(H160(arr))
-}
-
-fn hex_nibble(c: u8) -> Option<u8> {
-	match c {
-		b'0'..=b'9' => Some(c - b'0'),
-		b'a'..=b'f' => Some(c - b'a' + 10),
-		b'A'..=b'F' => Some(c - b'A' + 10),
-		_ => None,
-	}
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests {
-	use super::{hex_nibble, parse_h160};
-
-	// ── hex_nibble ────────────────────────────────────────────────────────────
-
-	#[test]
-	fn hex_nibble_digits() {
-		for (c, expected) in (b'0'..=b'9').zip(0u8..=9u8) {
-			assert_eq!(hex_nibble(c), Some(expected));
-		}
-	}
-
-	#[test]
-	fn hex_nibble_lowercase() {
-		for (c, expected) in (b'a'..=b'f').zip(10u8..=15u8) {
-			assert_eq!(hex_nibble(c), Some(expected));
-		}
-	}
-
-	#[test]
-	fn hex_nibble_uppercase() {
-		for (c, expected) in (b'A'..=b'F').zip(10u8..=15u8) {
-			assert_eq!(hex_nibble(c), Some(expected));
-		}
-	}
-
-	#[test]
-	fn hex_nibble_invalid_returns_none() {
-		for c in [b'g', b'G', b'z', b' ', b'!', b'\n'] {
-			assert_eq!(hex_nibble(c), None, "expected None for {:?}", c as char);
-		}
-	}
-
-	// ── parse_h160 ────────────────────────────────────────────────────────────
-
-	#[test]
-	fn parse_h160_valid_with_prefix() {
-		let addr = "0xd43593c715fdd31c61141abd04a99fd6822c8558";
-		let result = parse_h160(addr);
-		assert!(result.is_ok(), "expected Ok for valid 0x-prefixed address");
-		let h160 = result.unwrap();
-		assert_eq!(h160.0[0], 0xd4);
-		assert_eq!(h160.0[19], 0x58);
-	}
-
-	#[test]
-	fn parse_h160_valid_without_prefix() {
-		let addr = "d43593c715fdd31c61141abd04a99fd6822c8558";
-		assert!(parse_h160(addr).is_ok());
-	}
-
-	#[test]
-	fn parse_h160_uppercase_accepted() {
-		let addr = "0xD43593C715FDD31C61141ABD04A99FD6822C8558";
-		assert!(parse_h160(addr).is_ok());
-	}
-
-	#[test]
-	fn parse_h160_all_zeros() {
-		let addr = "0x0000000000000000000000000000000000000000";
-		let result = parse_h160(addr).unwrap();
-		assert_eq!(result.0, [0u8; 20]);
-	}
-
-	#[test]
-	fn parse_h160_all_ff() {
-		let addr = "0xffffffffffffffffffffffffffffffffffffffff";
-		let result = parse_h160(addr).unwrap();
-		assert_eq!(result.0, [0xffu8; 20]);
-	}
-
-	#[test]
-	fn parse_h160_too_short_rejected() {
-		let addr = "0xd435";
-		assert!(
-			parse_h160(addr).is_err(),
-			"address shorter than 20 bytes must be rejected"
-		);
-	}
-
-	#[test]
-	fn parse_h160_too_long_rejected() {
-		// 21 bytes = 42 hex chars
-		let addr = "0xd43593c715fdd31c61141abd04a99fd6822c8558AA";
-		assert!(
-			parse_h160(addr).is_err(),
-			"address longer than 20 bytes must be rejected"
-		);
-	}
-
-	#[test]
-	fn parse_h160_invalid_char_rejected() {
-		let addr = "0xd43593c715fdd31c61141abd04a99fd6822c85GG";
-		assert!(
-			parse_h160(addr).is_err(),
-			"address with invalid hex chars must be rejected"
-		);
-	}
-
-	#[test]
-	fn parse_h160_empty_string_rejected() {
-		assert!(parse_h160("").is_err());
-		assert!(parse_h160("0x").is_err());
-	}
-
-	#[test]
-	fn parse_h160_error_code_is_minus_32000() {
-		let err = parse_h160("bad").unwrap_err();
-		assert_eq!(err.code(), -32000);
-	}
-
-	#[test]
-	fn parse_h160_roundtrip_bytes() {
-		// Build a known 20-byte array, hex-encode, parse back, compare.
-		let expected: [u8; 20] = [
-			0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
-			0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
-		];
-		let hex_str = format!(
-			"0x{}",
-			expected
-				.iter()
-				.map(|b| format!("{b:02x}"))
-				.collect::<String>()
-		);
-		let result = parse_h160(&hex_str).unwrap();
-		assert_eq!(result.0, expected);
-	}
 }

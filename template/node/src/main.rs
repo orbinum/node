@@ -16,7 +16,7 @@ mod cli;
 mod client;
 mod command;
 mod eth;
-mod relayer_register;
+mod evm_relay_key;
 mod rpc;
 mod service;
 

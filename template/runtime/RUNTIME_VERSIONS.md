@@ -20,14 +20,87 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
-### spec 10 — tx 2 — [Unreleased]
+### spec 10 — tx 3 — [Unreleased]
 
-Dead code only. **`transaction_version` stays at 2.**
+Validator onboarding moves off-chain, and the EVM relay identity becomes the
+operator's to choose. Ships **validator-set 0.3.0** and **relayer 0.4.0**.
+**`transaction_version` moves 2 → 3** — call indices are deleted and one
+dispatch signature changes, so offline-signed extrinsics are invalidated and
+wallets must ship alongside the runtime.
 
-`spec_version` moves because `Migrations` compiles into the WASM: two blobs
-that run a different `on_runtime_upgrade` must not both claim `spec_version: 9`.
+**No migration**, on two verified conditions rather than assumptions:
 
-**Removed**
+- `PendingValidators` must be empty on testnet before release. A chain with a
+  live queue would need one.
+- Every `RelayerByAccount` holder must already be in `ApprovedValidators`. The
+  new rules do not reach backwards, so a binding created by the old sudo-gated
+  call for a non-validator would keep resolving in the fee path forever. This
+  testnet runs 5 operator-owned validators, all in the set, so the gap is empty.
+
+A chain where either does not hold needs migrations for them — for the second,
+iterate `RelayerByAccount` and `clear_relayer` any holder outside the set.
+
+**Removed — validator self-registration**
+
+- **`register_validator`, `approve_validator`, `reject_validator`** (call
+  indices 2, 4, 5 — retired, never to be reassigned), the `PendingValidators`
+  storage item, `MaxPendingValidators`, three events and four errors.
+  Candidate selection now happens off-chain and sudo records the decision with
+  `add_validator`. An on-chain queue only sudo could drain was a slower route
+  to the same outcome.
+- **`ValidatorPrerequisites::has_relayer`**, which severs the last
+  validator-set → relayer coupling.
+
+**Changed**
+
+- **Session-key gate moved to `add_validator`.** Previously it guarded
+  `register_validator`. Without it an approved account holding no keys would
+  occupy a slot in the active set without ever authoring, leaving gaps in the
+  slot schedule.
+- **`relayer.register_relayer(who, evm_address)` →
+  `register_relayer(evm_address, signature)`**, and from `ManageOrigin` to
+  `Signed`. The operator registers their own address; the signer is the owner, so
+  nobody can bind an address on another's behalf. **This is the dispatch
+  signature change that forces the `transaction_version` bump.**
+
+  `ManageOrigin` previously did two jobs: it kept arbitrary accounts out, and it
+  let governance verify the operator actually owned the address. The validator-set
+  gate replaces the first. The second needed the `signature`: a relay address is
+  public (it is the `caller` of every relay transaction), so without proof of key
+  ownership any approved validator could register a rival's address, take its
+  fees, and lock the owner out permanently through `AlreadyRegistered`.
+
+- **Zero and precompile-range addresses (`0x0..=0xffff`) are rejected.** Those
+  "callers" originate inside the runtime, so no key can sign for them.
+
+- **`SessionManager::new_session` filters out approved accounts with no session
+  keys.** `session.purge_keys` is permissionless, so a validator could clear the
+  `add_validator` gate and then drop its keys, holding an Aura slot while
+  producing nothing.
+
+**Added**
+
+- **`ValidatorSetInterface`** in `pallet-validator-set`, implemented directly on
+  its `Pallet<T>`, replacing a hand-written runtime adapter over
+  `ApprovedValidators`. Follows the same provider-trait convention as
+  `RelayerInterface`.
+- **`OnValidatorRemoved` hook**, wired to `pallet_relayer::clear_relayer`: a
+  relay binding cannot outlive the validator membership that authorised it.
+  Infallible by design — leaving the set must never be blocked by cleanup.
+  Accrued `PendingRelayerFees` are untouched; clearing a binding is not
+  confiscation.
+
+**Node-side (breaks running validators)**
+
+- The node no longer derives its EVM relay key from the Aura mnemonic. It reads
+  keystore type `evmr` instead, so consensus identity no longer dictates EVM
+  identity. `relayer_register.rs` is deleted. **Without an `evmr` key a node
+  still authors blocks — only relaying stops.** Operators keep their registered
+  address by recovering the old key with `scripts/vk/derive-legacy-evm-key.cjs`.
+- The relay fee fallback to the block author is **unchanged**: an unregistered
+  relayer still credits the block author rather than failing the transaction.
+
+**Removed — dead code**
 
 - **`MigrateToV3` and the `migrations` module.** `Migrations` is now empty —
   every live chain is past v3, so the entry was a no-op behind a

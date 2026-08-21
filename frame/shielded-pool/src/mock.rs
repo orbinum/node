@@ -152,6 +152,7 @@ impl pallet_relayer::Config for Test {
 	type DefaultMinRelayFee = ConstU128<0>;
 	type ManageOrigin = EnsureRoot<AccountId>;
 	type MaxAllowedSelectors = ConstU32<16>;
+	type ValidatorSet = ();
 	type WeightInfo = ();
 }
 

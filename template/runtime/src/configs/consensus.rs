@@ -1,8 +1,8 @@
 //! Block production and finality: Aura, GRANDPA, sessions, and the validator set.
 //!
-//! The validator set is governance-gated and enforces prerequisites before
-//! bonding — a candidate must have registered both its session keys and its
-//! relayer EVM address, or it cannot author.
+//! The validator set is a sudo-controlled allowlist: operators are selected
+//! off-chain and added with `add_validator`, which requires the account to have
+//! session keys registered so an approved account can always author.
 
 use crate::*;
 use frame_support::parameter_types;
@@ -56,32 +56,64 @@ impl pallet_session::Config for Runtime {
 	type WeightInfo = ();
 }
 
-/// Checks that a validator candidate has completed all prerequisites before bonding.
+/// Verifies that an account can actually author before it joins the active set.
 ///
-/// - [`has_session_keys`]: verifies `pallet_session::NextKeys` contains an entry for `who`
-///   (i.e. the node called `session.setKeys` with its Aura + GRANDPA keys).
-/// - [`has_relayer`]: verifies `pallet_relayer::RelayerByAccount` contains an entry for `who`
-///   (i.e. the node called `relayer.register_relayer` with its EVM address).
+/// [`has_session_keys`] checks that `pallet_session::NextKeys` holds an entry for
+/// `who`, i.e. the operator called `session.setKeys` with their Aura + GRANDPA
+/// keys. Without them the account would hold a slot without producing blocks.
 pub struct ValidatorPrerequisiteChecker;
 
 impl pallet_validator_set::ValidatorPrerequisites<AccountId> for ValidatorPrerequisiteChecker {
 	fn has_session_keys(who: &AccountId) -> bool {
 		pallet_session::NextKeys::<Runtime>::contains_key(who)
 	}
-	fn has_relayer(who: &AccountId) -> bool {
-		pallet_relayer::RelayerByAccount::<Runtime>::contains_key(who)
+
+	#[cfg(feature = "runtime-benchmarks")]
+	fn setup_session_keys(who: &AccountId) {
+		// Benchmarks add throwaway accounts that never called `session.setKeys`.
+		// Only the presence of an entry matters to the gate, so derive both keys
+		// from the account bytes rather than generating real ones.
+		let raw: [u8; 32] = who.clone().into();
+		pallet_session::NextKeys::<Runtime>::insert(
+			who,
+			opaque::SessionKeys {
+				aura: sp_core::sr25519::Public::from_raw(raw).into(),
+				grandpa: sp_core::ed25519::Public::from_raw(raw).into(),
+			},
+		);
+	}
+}
+
+/// Clears the EVM relay binding of an account that leaves the validator set.
+///
+/// Registering a relay address requires an active validator, so the binding must
+/// not outlive the membership that authorised it.
+pub struct RelayerCleanup;
+
+impl pallet_validator_set::OnValidatorRemoved<AccountId> for RelayerCleanup {
+	fn on_validator_removed(who: &AccountId) {
+		pallet_relayer::Pallet::<Runtime>::clear_relayer(who);
+	}
+
+	#[cfg(feature = "runtime-benchmarks")]
+	fn setup_removal_state(who: &AccountId) {
+		// Give `remove_validator` a binding to tear down, so its benchmark
+		// measures the two cleanup writes instead of the empty branch.
+		let evm_address = sp_core::H160::repeat_byte(0x99);
+		pallet_relayer::RelayerRegistry::<Runtime>::insert(evm_address, who.clone());
+		pallet_relayer::RelayerByAccount::<Runtime>::insert(who.clone(), evm_address);
 	}
 }
 
 impl pallet_validator_set::Config for Runtime {
-	/// Only sudo (EnsureRoot) can add/remove/approve/reject validators.
+	/// Only sudo (EnsureRoot) can add and remove validators.
 	type AddRemoveOrigin = frame_system::EnsureRoot<AccountId>;
 	/// Maximum 32 validators in the approved (active) set.
 	type MaxValidators = ConstU32<32>;
-	/// Maximum 32 registrations awaiting governance approval.
-	type MaxPendingValidators = ConstU32<32>;
-	/// Prerequisite gate: verifies session keys and EVM relayer before accepting registration.
+	/// Gate on `add_validator`: the account must already have session keys.
 	type Prerequisites = ValidatorPrerequisiteChecker;
+	/// Drop the EVM relay binding when an account leaves the set.
+	type OnValidatorRemoved = RelayerCleanup;
 	type WeightInfo = pallet_validator_set::weights::SubstrateWeight<Runtime>;
 }
 

@@ -9,7 +9,8 @@
 //!   `ShieldedPoolRuntimeApi::relay_config()`.
 //! - **Registry**: EVM address → AccountId binding so fee attribution is
 //!   unambiguous even when the EVM and substrate keys differ.
-//!   Managed exclusively by sudo/governance via `register_relayer`.
+//!   Self-service: an approved validator registers its own address via
+//!   `register_relayer`, and the binding is cleared when it leaves the set.
 //! - **Fee accounting**: `PendingRelayerFees` tracks accrued relay fees per
 //!   (AccountId, asset_id).  Other pallets (pallet-shielded-pool) call
 //!   `T::Relayer::accumulate_relay_fee()` and `T::Relayer::consume_relay_fee()`
@@ -36,9 +37,13 @@
 //! type Relayer = pallet_relayer::Pallet<Runtime>;
 //! ```
 
+pub mod evm_proof;
+#[cfg(any(test, feature = "runtime-benchmarks"))]
+pub mod test_signing;
 pub mod traits;
 pub mod weights;
 
+pub use evm_proof::EvmSignature;
 pub use pallet::*;
 pub use traits::RelayerInterface;
 pub use weights::WeightInfo;
@@ -56,9 +61,13 @@ mod tests;
 
 #[frame_support::pallet]
 pub mod pallet {
-	use super::{RelayerInterface, WeightInfo};
+	use super::{
+		RelayerInterface, WeightInfo,
+		evm_proof::{self, EvmSignature},
+	};
 	use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
 	use frame_system::pallet_prelude::*;
+	use pallet_validator_set::ValidatorSetInterface;
 	use sp_core::H160;
 	use sp_std::vec::Vec;
 
@@ -81,6 +90,10 @@ pub mod pallet {
 		/// Maximum number of ABI selectors in the whitelist.
 		#[pallet::constant]
 		type MaxAllowedSelectors: Get<u32>;
+
+		/// Gate for `register_relayer`: only accounts in the active validator
+		/// set may bind an EVM relay address.
+		type ValidatorSet: ValidatorSetInterface<Self::AccountId>;
 
 		type WeightInfo: WeightInfo;
 	}
@@ -136,12 +149,13 @@ pub mod pallet {
 		MinRelayFeeUpdated { new_fee: u128 },
 		/// `ManageOrigin` updated the allowed selector whitelist.
 		AllowedSelectorsUpdated { count: u32 },
-		/// sudo/governance registered a relayer mapping.
+		/// A validator registered its EVM relay address.
 		RelayerRegistered {
 			evm_address: H160,
 			account: T::AccountId,
 		},
-		/// sudo/governance removed a relayer mapping.
+		/// A relayer mapping was removed, either by the owner calling
+		/// `unregister_relayer` or by the account leaving the validator set.
 		RelayerUnregistered {
 			evm_address: H160,
 			account: T::AccountId,
@@ -175,6 +189,12 @@ pub mod pallet {
 		InsufficientPendingFees,
 		/// Selector list exceeds `MaxAllowedSelectors`.
 		TooManySelectors,
+		/// Only accounts in the active validator set may register a relay address.
+		NotValidator,
+		/// The EVM address is not usable as a relay identity (zero, or reserved).
+		InvalidEvmAddress,
+		/// The signature does not prove control of the EVM address being claimed.
+		BadEvmSignature,
 	}
 
 	// ── Pallet core ───────────────────────────────────────────────────────────
@@ -218,23 +238,41 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Register an EVM address for a substrate account.
+		/// Register the caller's EVM relay address.
 		///
-		/// Requires `ManageOrigin` (sudo / governance). The `who` account is
-		/// registered as the owner of `evm_address`. One registration per account
-		/// (`AccountAlreadyRegistered`) and one per EVM address (`AlreadyRegistered`)
-		/// are enforced.
+		/// Three things must hold:
 		///
-		/// Intended to be called after a validator inserts their Aura key and the
-		/// node derives and logs the corresponding EVM relay address.
+		/// 1. the caller is in the active validator set (`NotValidator`);
+		/// 2. `signature` proves the caller holds the EVM private key
+		///    (`BadEvmSignature`) — without this an approved validator could claim
+		///    a rival's public relay address and divert its fees;
+		/// 3. the address and the account are both unclaimed (`AlreadyRegistered`,
+		///    `AccountAlreadyRegistered`).
+		///
+		/// The address is chosen freely by the operator; it must match the key the
+		/// node signs relay transactions with (keystore type `evmr`).
+		///
+		/// See [`crate::evm_proof`] for the exact bytes to sign.
 		#[pallet::call_index(2)]
 		#[pallet::weight(T::WeightInfo::register_relayer())]
 		pub fn register_relayer(
 			origin: OriginFor<T>,
-			who: T::AccountId,
 			evm_address: H160,
+			signature: EvmSignature,
 		) -> DispatchResult {
-			T::ManageOrigin::ensure_origin(origin)?;
+			let who = ensure_signed(origin)?;
+			ensure!(
+				T::ValidatorSet::is_active_validator(&who),
+				Error::<T>::NotValidator
+			);
+			ensure!(
+				evm_proof::is_usable_relay_address(&evm_address),
+				Error::<T>::InvalidEvmAddress
+			);
+			ensure!(
+				Self::verify_evm_ownership(&who, &evm_address, &signature),
+				Error::<T>::BadEvmSignature
+			);
 			ensure!(
 				!RelayerRegistry::<T>::contains_key(evm_address),
 				Error::<T>::AlreadyRegistered
@@ -259,14 +297,45 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::unregister_relayer())]
 		pub fn unregister_relayer(origin: OriginFor<T>) -> DispatchResult {
 			let who = ensure_signed(origin)?;
-			let evm_address = RelayerByAccount::<T>::get(&who).ok_or(Error::<T>::NotRegistered)?;
+			Self::clear_relayer(&who).ok_or(Error::<T>::NotRegistered)?;
+			Ok(())
+		}
+	}
+
+	// ── Internal helpers ──────────────────────────────────────────────────────
+
+	impl<T: Config> Pallet<T> {
+		/// Drop any EVM binding held by `who`, in both directions, returning the
+		/// address that was removed. `None` when the account had no registration.
+		///
+		/// Infallible and idempotent: the runtime calls it when a validator leaves
+		/// the set, and removal from the set must never be blocked by cleanup.
+		///
+		/// `PendingRelayerFees` is deliberately left untouched — those fees were
+		/// already earned and stay claimable via `claim_shielded_fees`.
+		pub fn clear_relayer(who: &T::AccountId) -> Option<H160> {
+			let evm_address = RelayerByAccount::<T>::take(who)?;
 			RelayerRegistry::<T>::remove(evm_address);
-			RelayerByAccount::<T>::remove(&who);
 			Self::deposit_event(Event::RelayerUnregistered {
 				evm_address,
-				account: who,
+				account: who.clone(),
 			});
-			Ok(())
+			Some(evm_address)
+		}
+
+		/// Check that `signature` was produced by the key behind `evm_address`
+		/// over the binding message for `who` on this chain.
+		fn verify_evm_ownership(
+			who: &T::AccountId,
+			evm_address: &H160,
+			signature: &EvmSignature,
+		) -> bool {
+			let digest = evm_proof::binding_digest(
+				who.encode().as_slice(),
+				evm_address,
+				&evm_proof::genesis_hash::<T>(),
+			);
+			evm_proof::recover_evm_address(signature, &digest) == Some(*evm_address)
 		}
 	}
 

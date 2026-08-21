@@ -3,15 +3,19 @@
 Scripts to generate and insert session keys for an Orbinum validator node.
 These scripts work for both **testnet** and **mainnet** — they are network-agnostic.
 
-Each validator needs two cryptographic keys derived from a single mnemonic:
+Each validator needs two session keys derived from a single mnemonic, plus an
+EVM relay key it chooses freely:
 
-| Key         | Scheme  | Key type | Role                                                |
-| ----------- | ------- | -------- | --------------------------------------------------- |
-| **Aura**    | Sr25519 | `aura`   | Block production — your on-chain validator identity |
-| **GRANDPA** | Ed25519 | `gran`   | Block finalization                                  |
+| Key          | Scheme  | Key type | Role                                                |
+| ------------ | ------- | -------- | --------------------------------------------------- |
+| **Aura**     | Sr25519 | `aura`   | Block production — your on-chain validator identity |
+| **GRANDPA**  | Ed25519 | `gran`   | Block finalization                                  |
+| **EVM relay**| ECDSA   | `evmr`   | Signs relay transactions — your EVM identity        |
 
-> **EVM relay address:** The node derives it automatically from the Aura key at startup.
-> You do not generate or insert a separate EVM key.
+> **EVM relay key:** you pick it. It is independent of the Aura key, so your
+> consensus identity does not dictate your EVM identity. Insert it with
+> `author_insertKey("evmr", …)`. Without it the node still authors blocks, but
+> cannot relay.
 
 ---
 
@@ -87,28 +91,43 @@ The script also calls `author_rotateKeys` and prints the **combined session key*
 
 ---
 
-## Step 4 — Restart the node — EVM address is derived automatically
+## Step 4 — Insert an EVM relay key and restart
 
-After inserting keys, restart the node:
+> **Upgrading an existing validator?** Until `spec_version` 9 the node derived
+> this key from your Aura mnemonic automatically. To keep the EVM address you
+> already registered on-chain, recover that exact key with
+> `node scripts/vk/derive-legacy-evm-key.cjs "<your aura mnemonic>"` and insert
+> what it prints. To switch addresses instead, generate a fresh ECDSA key here,
+> then call `unregisterRelayer` followed by `registerRelayer` with the new one.
+
+Pick any ECDSA key you control and insert it into the keystore:
+
+```bash
+curl -H 'Content-Type: application/json' -d '{
+  "jsonrpc":"2.0","id":1,"method":"author_insertKey",
+  "params":["evmr","<your mnemonic>","<your ECDSA public key>"]
+}' http://localhost:9944
+```
+
+Then restart the node so it loads every key from the keystore:
 
 ```bash
 docker compose restart validator-1
 ```
 
-At block #1 the node reads the Aura key from the keystore, derives the EVM relay address, and prints a log box if not yet registered:
+At startup the node logs the relay address it will sign with:
 
 ```
-╔══════════════════════════════════════════════════╗
-║   EVM relay key detected — register via sudo     ║
-╠══════════════════════════════════════════════════╣
-║  Substrate : 5GrwvaEF5...
-║  EVM addr  : 0xd43593c7...
-╠══════════════════════════════════════════════════╣
-║  relayer.registerRelayer(who, evmAddress)        ║
-╚══════════════════════════════════════════════════╝
+EVM relay address: 0xd43593c7… — register it with relayer.registerRelayer(evmAddress)
 ```
 
-**Copy the `Substrate` and `EVM addr` values** — you will need them in Step 6.
+**Copy that address** — you register it yourself in Step 6.
+
+If the key is missing you get a warning instead, and relaying stays disabled:
+
+```
+no EVM relay key in keystore (type "evmr"); relaying is disabled.
+```
 
 ---
 
@@ -124,16 +143,47 @@ Submit from your validator account.
 
 ---
 
-## Step 6 — Request validator approval
+## Step 6 — Ask to be added, then register your relay address
 
-Orbinum uses a permissioned validator set. Send the Orbinum team:
+Orbinum uses a permissioned validator set. Candidate selection happens off-chain:
+send the Orbinum team
 
-- **Substrate AccountId** (from the log box in Step 4)
-- **EVM relay address** (from the log box in Step 4, `0x...` 40 hex chars)
-- **Server public IP** and **Peer ID** (`12D3KooW...`)
-- Confirmation that `validatorSet.registerValidator()` was called on-chain
+- **Substrate AccountId** (SS58) — the only thing they need for the extrinsic
+- **Server public IP** and **Peer ID** (`12D3KooW...`) — for peering
 
-The team will execute in order:
-1. `relayer.registerRelayer(who, evmAddress)` — links your EVM relay address
-2. `validatorSet.approveValidator(who)` — moves you to the active validator set
+They run `validatorSet.addValidator(who)` under sudo. It fails with
+`NoSessionKeys` if Step 5 is missing, so complete that first. Your node joins the
+active set at the next session rotation.
 
+**Once you are in the approved set**, register the EVM relay address yourself.
+The call needs a signature proving you hold the EVM key, which the node produces
+for you:
+
+```bash
+curl -s -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"relayer_getRelayInfo","params":[]}' \
+  http://localhost:9944
+```
+
+It returns your account, your EVM address, and the `signature` to pass along:
+
+```json
+{"substrate_account":"0x…","evm_address":"0x…","signature":"0x…"}
+```
+
+**Polkadot.js Apps** → Developer → Extrinsics →
+`relayer.registerRelayer(evmAddress, signature)`
+
+Sign from your validator account. The call fails with `NotValidator` if you are
+not yet in the set, `BadEvmSignature` if the proof does not match the address,
+and `InvalidEvmAddress` for the zero address or the reserved precompile range.
+
+The signature is what stops another validator from claiming your address: it is
+public (every relay transaction reveals it), so without proof of key ownership
+anyone approved could register it and collect your fees.
+
+> Until you register, relay fees you earn are credited to the block author
+> instead of to you. Nothing breaks; the attribution is just wrong.
+
+To leave the set, call `validatorSet.deregisterValidator()`. Leaving also clears
+your EVM relay binding, so re-register it if you rejoin.

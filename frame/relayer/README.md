@@ -160,32 +160,51 @@ In `pallet-shielded-pool` unit tests: a lightweight mock struct in `mock.rs` bac
 
 ## Validator registration flow
 
-A new validator node does not call `register_relayer` directly — it is a privileged call. The intended flow is:
+`register_relayer` is self-service, but gated: only an account already in the
+approved validator set may bind an EVM address, and the signer is always the
+owner. The flow is:
 
-1. **Insert Aura key** into the node keystore:
+1. **Insert an EVM relay key** into the node keystore. You choose it — it is
+   independent of the Aura key, so your consensus identity does not dictate your
+   EVM identity:
    ```bash
    curl -s -X POST http://localhost:9944 -H 'Content-Type: application/json' \
      -d '{"jsonrpc":"2.0","id":1,"method":"author_insertKey",
-          "params":["aura","<mnemonic>","<public_key_hex>"]}'
+          "params":["evmr","<mnemonic>","<public_key_hex>"]}'
    ```
-2. **Restart the node.** At block #1 `auto_register` (in `template/node/src/relayer_register.rs`) reads the Aura key from the keystore, derives the EVM address, checks `RelayerRegistry`, and if not registered **prints a log box**:
+2. **Restart the node.** It logs the address it will sign relay transactions
+   with:
    ```
-   ╔══════════════════════════════════════════════════╗
-   ║   EVM relay key detected — register via sudo     ║
-   ╠══════════════════════════════════════════════════╣
-   ║  Substrate : 5GrwvaEF5...
-   ║  EVM addr  : 0xd43593c7...
-   ╠══════════════════════════════════════════════════╣
-   ║  relayer.registerRelayer(who, evmAddress)        ║
-   ╚══════════════════════════════════════════════════╝
+   EVM relay address: 0xd43593c7… — register it with relayer.registerRelayer(evmAddress)
    ```
-3. **Sudo** calls `relayer → registerRelayer(who, evmAddress)` on-chain with the values from the log.
-4. The validator can now complete the `pallet-validator-set` registration:
+   Without an `evmr` key the node warns and relaying stays disabled; block
+   production is unaffected.
+3. **Register session keys and get added to the set:**
    ```
    session → setKeys(aura + grandpa keys, proof)
-   validatorSet → registerValidator()   // has_relayer check now passes
+   validatorSet → addValidator(who)   // sudo; fails with NoSessionKeys otherwise
    ```
-5. **Governance** approves: `validatorSet → approveValidator(who)`.
+4. **The validator registers its own address**, proving it holds the key:
+   ```
+   relayer_getRelayInfo                    // node returns address + signature
+   relayer → registerRelayer(evmAddress, signature)
+   ```
+   Signed by the validator. Fails with `NotValidator` outside the set,
+   `BadEvmSignature` if the proof does not match, `InvalidEvmAddress` for the
+   zero address or the reserved precompile range.
+
+   The proof matters because a relay address is public — it is the `caller` of
+   every relay transaction. Without it, any approved validator could register a
+   rival's address, divert its fees, and lock the owner out permanently, since
+   `AlreadyRegistered` has no override.
+
+Until step 4 completes, relay fees earned by the node are credited to the block
+author instead. Nothing fails — the attribution is simply wrong, which is a soft
+incentive to register rather than a penalty.
+
+Leaving the validator set (`removeValidator` or `deregisterValidator`) clears the
+binding, since the membership that authorised it is gone. Accrued
+`PendingRelayerFees` are untouched and stay claimable.
 
 ---
 
