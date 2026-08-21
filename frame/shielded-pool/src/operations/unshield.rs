@@ -147,11 +147,7 @@ impl UnshieldOperation {
 		)?;
 
 		if fee > <T::Currency as Currency<T::AccountId>>::Balance::zero() {
-			let recipient_account = relayer_evm
-				.and_then(|addr| T::Relayer::resolve_relayer(&addr))
-				.or_else(T::Relayer::block_author)
-				.ok_or(Error::<T>::FeeRecipientUnavailable)?;
-			T::Relayer::accumulate_relay_fee(&recipient_account, asset_id, fee_u128);
+			crate::operations::fees::credit_relay_fee::<T>(relayer_evm, asset_id, fee_u128)?;
 		}
 
 		// Decrement only `amount`: the `fee` tokens stay physically in the pool as
@@ -221,7 +217,7 @@ impl UnshieldOperation {
 mod tests {
 	use super::*;
 	use crate::{
-		mock::{Test, acc, new_test_ext},
+		mock::{RuntimeEvent, System, Test, acc, new_test_ext},
 		operations::assets::AssetOperation,
 		pallet::Event as PalletEvent,
 		storage::{
@@ -1137,6 +1133,120 @@ mod tests {
 				crate::mock::mock_pending_fees_get(block_author(), asset_id),
 				fee
 			);
+		});
+	}
+
+	/// The diversion is recorded on-chain, so a relayer that forgot to register
+	/// can see where its fee went instead of it vanishing silently.
+	#[test]
+	fn unshield_unregistered_relayer_emits_a_diversion_event() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let (amount, fee) = (500u128, 50u128);
+			fund_pool(asset_id, amount + fee);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x53),
+				asset_id,
+				amount,
+				acc(2),
+				fee,
+				[0u8; 32],
+				FrameEncryptedMemo::default(),
+				Some(evm(0xBB)),
+				1,
+			));
+
+			let diverted = System::events().into_iter().any(|r| {
+				matches!(
+					r.event,
+					RuntimeEvent::ShieldedPool(PalletEvent::RelayFeeDiverted {
+						requested,
+						asset_id: aid,
+						amount: amt,
+						..
+					}) if requested == evm(0xBB) && aid == asset_id && amt == fee
+				)
+			});
+			assert!(
+				diverted,
+				"an unresolved relayer must leave an on-chain trace"
+			);
+		});
+	}
+
+	/// A call that named nobody was not asking to credit anyone else, so there is
+	/// no diversion to report.
+	#[test]
+	fn unshield_without_a_relayer_emits_no_diversion_event() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let (amount, fee) = (500u128, 50u128);
+			fund_pool(asset_id, amount + fee);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x54),
+				asset_id,
+				amount,
+				acc(2),
+				fee,
+				[0u8; 32],
+				FrameEncryptedMemo::default(),
+				None,
+				1,
+			));
+
+			let diverted = System::events().into_iter().any(|r| {
+				matches!(
+					r.event,
+					RuntimeEvent::ShieldedPool(PalletEvent::RelayFeeDiverted { .. })
+				)
+			});
+			assert!(!diverted, "no address named means no diversion");
+		});
+	}
+
+	/// A registered relayer is credited directly, with no diversion recorded.
+	#[test]
+	fn unshield_registered_relayer_emits_no_diversion_event() {
+		new_test_ext().execute_with(|| {
+			let asset_id = setup_asset();
+			let (amount, fee) = (500u128, 50u128);
+			fund_pool(asset_id, amount + fee);
+			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+			crate::mock::mock_register_relayer(acc(7), evm(0xCC));
+
+			assert_ok!(UnshieldOperation::execute::<Test>(
+				proof(),
+				KNOWN_ROOT,
+				nullifier(0x55),
+				asset_id,
+				amount,
+				acc(2),
+				fee,
+				[0u8; 32],
+				FrameEncryptedMemo::default(),
+				Some(evm(0xCC)),
+				1,
+			));
+
+			assert_eq!(
+				pallet_relayer::PendingRelayerFees::<Test>::get(acc(7), asset_id),
+				fee,
+			);
+			let diverted = System::events().into_iter().any(|r| {
+				matches!(
+					r.event,
+					RuntimeEvent::ShieldedPool(PalletEvent::RelayFeeDiverted { .. })
+				)
+			});
+			assert!(!diverted, "a resolved relayer is not a diversion");
 		});
 	}
 

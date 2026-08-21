@@ -540,6 +540,27 @@ pub mod pallet {
 			leaf_index: u32,
 		},
 
+		/// A relay fee went to the block author instead of the address the call
+		/// named, because that address resolves to no registered relayer.
+		///
+		/// Not an error — the fallback is deliberate, since relaying is not gated
+		/// on registration and failing here would reject a user's transaction over
+		/// someone else's misconfiguration. The event exists so the diversion is
+		/// visible: a relayer that forgot to register can see where its fees went,
+		/// and the redirection leaves an on-chain trace either way.
+		///
+		/// This does not flag fee substitution by a registered relayer: such a
+		/// caller is an approved validator with a registered address, so the fee
+		/// resolves normally and no diversion is recorded.
+		RelayFeeDiverted {
+			/// The address the call asked to credit.
+			requested: sp_core::H160,
+			/// Who was credited instead.
+			credited: T::AccountId,
+			asset_id: u32,
+			amount: u128,
+		},
+
 		/// Input nullifiers were spent in a private transfer.
 		/// Emitted independently of CommitmentsInserted to prevent graph correlation.
 		NullifiersSpent {

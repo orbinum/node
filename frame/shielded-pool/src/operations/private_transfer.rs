@@ -130,11 +130,7 @@ impl PrivateTransferOperation {
 		}
 
 		if fee > <T::Currency as Currency<T::AccountId>>::Balance::zero() {
-			let recipient_account = relayer_evm
-				.and_then(|addr| T::Relayer::resolve_relayer(&addr))
-				.or_else(T::Relayer::block_author)
-				.ok_or(Error::<T>::FeeRecipientUnavailable)?;
-			T::Relayer::accumulate_relay_fee(&recipient_account, asset_id, fee_u128);
+			crate::operations::fees::credit_relay_fee::<T>(relayer_evm, asset_id, fee_u128)?;
 		}
 
 		Pallet::<T>::deposit_event(Event::NullifiersSpent {

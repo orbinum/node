@@ -1,4 +1,4 @@
-//! Fee-claiming operation — converts pending relay fees into a private note.
+//! Relay fee accounting: crediting the fee a call paid, and claiming it later.
 
 use crate::{
 	pallet::{Assets, CommitmentMemos, Config, Error, Event, Pallet},
@@ -13,6 +13,46 @@ use sp_runtime::SaturatedConversion;
 pub type BalanceOf<T> = <<T as Config>::Currency as frame_support::traits::Currency<
 	<T as frame_system::Config>::AccountId,
 >>::Balance;
+
+/// Credit `fee` to whoever the call named, falling back to the block author.
+///
+/// The `relayer` H160 is an ordinary call argument — the ZK proof binds the fee
+/// *amount* but not its *recipient* — so this resolves it through the registry
+/// rather than trusting it. An address that resolves to nobody is not an error:
+/// relaying is not gated on registration, and rejecting here would fail a user's
+/// transaction because of someone else's misconfiguration. The fee goes to the
+/// block author instead and [`Event::RelayFeeDiverted`] records that it did.
+///
+/// Both `unshield` and `private_transfer` route through here so the two cannot
+/// drift apart on a security-relevant path.
+pub fn credit_relay_fee<T: Config>(
+	relayer_evm: Option<sp_core::H160>,
+	asset_id: u32,
+	fee: u128,
+) -> Result<(), Error<T>> {
+	let resolved = relayer_evm.and_then(|addr| T::Relayer::resolve_relayer(&addr));
+
+	let recipient = match resolved {
+		Some(account) => account,
+		None => {
+			let author = T::Relayer::block_author().ok_or(Error::<T>::FeeRecipientUnavailable)?;
+			// Only report a diversion when an address was actually named: a call
+			// with no relayer at all was never asking to credit anyone else.
+			if let Some(requested) = relayer_evm {
+				Pallet::<T>::deposit_event(Event::RelayFeeDiverted {
+					requested,
+					credited: author.clone(),
+					asset_id,
+					amount: fee,
+				});
+			}
+			author
+		}
+	};
+
+	T::Relayer::accumulate_relay_fee(&recipient, asset_id, fee);
+	Ok(())
+}
 
 pub struct FeeOperation;
 

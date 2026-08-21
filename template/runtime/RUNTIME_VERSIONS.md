@@ -54,6 +54,14 @@ signature changes.
 - `get_active_relayers` caps its result at 256 entries. The method has no
   callers today and registration is gated on the validator set, so nothing can
   reach the cap; it is headroom for whoever wires it up later.
+- New `Event::RelayFeeDiverted`, emitted when relay calldata names an
+  unregistered EVM address and the fee falls back to the block author. The
+  fallback itself is unchanged — relaying is not gated on registration, so
+  rejecting there would fail a user's transaction over someone else's
+  misconfiguration. This does not close fee substitution by a *registered*
+  relayer: `relayer` is not a public input to the proof, so an approved
+  validator with a registered address resolves normally and records no
+  diversion. Closing that needs the recipient bound into the circuit.
 
 **Removed — validator self-registration**
 
