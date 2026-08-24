@@ -57,6 +57,10 @@ pub fn development() -> serde_json::Value {
 				ethereum_to_account_id(hex!("6be02d1d3665660d22ff9624b7be0551ee1ac91b")),
 				DEV_BALANCE,
 			),
+			(
+				ethereum_to_account_id(hex!("e04cc55ebee1cbce552f250e85c57b70b2e2625b")),
+				DEV_BALANCE,
+			),
 		],
 		vec![],
 		42,
