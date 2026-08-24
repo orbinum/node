@@ -9,8 +9,6 @@ export const FIRST_CONTRACT_ADDRESS = "0xc2bf5f29a4384b1ab0c063e1c666f02121b6084
 export const NODE_BINARY_NAME = "orbinum-node";
 
 export const RUNTIME_SPEC_NAME = "orbinum";
-export const RUNTIME_SPEC_VERSION = 1;
-export const RUNTIME_IMPL_VERSION = 1;
 
 export const CHAIN_ID = 42;
 export const BLOCK_TIMESTAMP = 6; // 6 seconds per block
