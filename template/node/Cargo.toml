@@ -54,6 +54,8 @@ sp-io = { workspace = true, features = ["default"] }
 sp-offchain = { workspace = true, features = ["default"] }
 sp-runtime = { workspace = true, features = ["default"] }
 sp-session = { workspace = true, features = ["default"] }
+sp-state-machine = { workspace = true, features = ["default"] }
+sp-storage = { workspace = true, features = ["default"] }
 sp-timestamp = { workspace = true, features = ["default"] }
 sp-transaction-pool = { workspace = true, features = ["default"] }
 # These dependencies are used for RPC

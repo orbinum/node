@@ -25,8 +25,10 @@ use orbinum_runtime::{AccountId, Balance, Hash, Nonce};
 
 mod eth;
 mod relayer_author;
+mod storage_override;
 pub use self::eth::{create_eth, EthDeps, LogsJournalConfig};
 use self::relayer_author::{RelayerAuthor, RelayerAuthorApiServer};
+use self::storage_override::EeSuffixStorageOverride;
 
 /// Full client dependencies.
 pub struct FullDeps<B: BlockT, C, P, CT, CIDP> {
@@ -51,8 +53,9 @@ where
 	BE: Backend<B> + 'static,
 {
 	type EstimateGasAdapter = ();
-	type RuntimeStorageOverride =
-		fc_rpc::frontier_backend_client::SystemAccountId20StorageOverride<B, C, BE>;
+	// Frontier's stock overrides assume either AccountId20 or HashedAddressMapping;
+	// this runtime is AccountId32 with EeSuffixAddressMapping.
+	type RuntimeStorageOverride = EeSuffixStorageOverride<B, C, BE>;
 }
 
 /// Instantiate all Full RPC extensions.
