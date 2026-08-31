@@ -6,43 +6,73 @@
 exclude-dev = true
 
 [advisories]
-# Ignore advisories for transitive dependencies that cannot be resolved
-# without upgrading polkadot-sdk or ZK crates upstream.
+# Every entry below suppresses a real advisory, so each one needs three things:
+# why it does not apply to us, what would let us drop it, and a date by which
+# someone looks again. An ignore list without those turns into a list nobody
+# can safely shorten.
+#
+# The reasons given are a reading of how the affected code is reached from this
+# workspace, not a guarantee. Anything marked CONFIRM has not been verified
+# against the build.
+#
+# Adding an entry: put it in the right group, or start a new one. Do not append
+# to the end of the list.
+
 ignore = [
-    # wasmtime 35.0.0 — pinned by polkadot-sdk stable2512 via sc-executor-wasmtime
-    # No upgrade path within current SDK pinning.
+    # ── wasmtime, pinned by polkadot-sdk stable2512 via sc-executor-wasmtime ──
+    #
+    # No upgrade path without moving the SDK pin, so these ride along until the
+    # next SDK bump. Drop the whole group at that point and re-run cargo-deny
+    # rather than carrying them forward by habit.
+    #
+    # Winch backend. Substrate compiles with Cranelift; Winch is not enabled by
+    # sc-executor-wasmtime, so these are believed unreachable. CONFIRM if the
+    # executor config ever changes.
+    "RUSTSEC-2026-0089",  # improperly masked return value from table.grow
+    "RUSTSEC-2026-0091",  # sandbox-escaping memory access
+    #
+    # Component model and WASI. Substrate executes core wasm modules only and
+    # links no WASI or component-model surface, so these are believed
+    # unreachable. CONFIRM.
+    "RUSTSEC-2026-0085",  # panic lifting flags component value
+    "RUSTSEC-2026-0086",  # OOB write transcoding component model strings
+    "RUSTSEC-2026-0087",  # panic transcoding misaligned UTF-16 strings
+    "RUSTSEC-2026-0088",  # heap OOB read, UTF-16 to latin1+utf16 transcoding
+    "RUSTSEC-2026-0020",  # guest-controlled resource exhaustion in WASI
+    "RUSTSEC-2026-0021",  # panic adding excessive fields to wasi:http/types.fields
+    #
+    # Core engine. These are NOT ruled out by the two arguments above and are
+    # the group worth re-reading first, especially on aarch64 validators.
+    # A runtime is attacker-influenced input on any chain that allows runtime
+    # upgrades, so "we only run our own runtime" is not by itself an argument.
+    "RUSTSEC-2026-0092",  # miscompiled guest heap access, sandbox escape on aarch64
+    "RUSTSEC-2026-0093",
+    "RUSTSEC-2026-0094",
+    "RUSTSEC-2026-0095",
+    "RUSTSEC-2026-0096",
     "RUSTSEC-2026-0006",  # segfault with f64.copysign on x86-64
     "RUSTSEC-2026-0114",  # panic allocating table exceeding host address space
-    "RUSTSEC-2026-0086",  # out-of-bounds write/crash transcoding component model strings
-    "RUSTSEC-2026-0087",  # panic transcoding misaligned component model UTF-16 strings
-    "RUSTSEC-2026-0088",  # heap OOB read in component model UTF-16 → latin1+utf16 transcoding
-    "RUSTSEC-2026-0089",  # improperly masked return value from table.grow (Winch backend)
-    "RUSTSEC-2026-0091",  # sandbox-escaping memory access with Winch compiler backend
-    "RUSTSEC-2026-0092",  # miscompiled guest heap access enables sandbox escape on aarch64
-    "RUSTSEC-2026-0093",  # wasmtime vulnerability
-    "RUSTSEC-2026-0094",  # wasmtime vulnerability
-    "RUSTSEC-2026-0095",  # wasmtime vulnerability
-    "RUSTSEC-2026-0096",  # wasmtime vulnerability
-    "RUSTSEC-2025-0118",  # unsound API access to WebAssembly shared linear memory
-    "RUSTSEC-2026-0020",  # guest-controlled resource exhaustion in WASI implementations
-    "RUSTSEC-2026-0021",  # panic adding excessive fields to wasi:http/types.fields
-    "RUSTSEC-2026-0085",  # panic when lifting flags component value
     "RUSTSEC-2026-0222",  # stores can mix up type indices between engines
+    "RUSTSEC-2025-0118",  # unsound API access to shared linear memory
 
-    # tracing-subscriber 0.2.25 — pinned by ark-relations (ZK crates), no upgrade path
+    # ── tracing-subscriber 0.2.25, via ark-relations ─────────────────────────
+    # Reached only from the ZK crates. Drops when ark-relations updates.
     "RUSTSEC-2025-0055",
 
-    # Unmaintained — all transitive, no direct upgrade path
-    "RUSTSEC-2025-0161",  # libsecp256k1 0.7.2 (from frontier fp-evm/pallet-evm)
-    "RUSTSEC-2026-0119",  # hickory-proto 0.24.x (from libp2p-dns → sc-network)
-    "RUSTSEC-2026-0118",  # hickory-proto 0.25.x (from libp2p-dns → sc-network)
-    "RUSTSEC-2024-0388",  # derivative 2.2.0 (from ark-r1cs-std)
-    "RUSTSEC-2025-0057",  # fxhash 0.2.1 (from cranelift)
-    "RUSTSEC-2024-0384",  # instant 0.1.13 (from parking_lot)
-    "RUSTSEC-2022-0061",  # parity-wasm 0.45.0 (from sc-executor-common)
-    "RUSTSEC-2024-0436",  # paste 1.0.15 (from wasmtime-runtime)
-    "RUSTSEC-2024-0370",  # proc-macro-error 1.0.4 (from multihash)
-    "RUSTSEC-2026-0173",  # proc-macro-error2 2.0.1 (from subxt-macro → frame-benchmarking-cli)
+    # ── Unmaintained crates, all transitive ──────────────────────────────────
+    # Unmaintained is not itself a vulnerability, but each of these is a place
+    # a future advisory would land with no upstream fix available. Nothing to
+    # do here beyond tracking what pulls them in.
+    "RUSTSEC-2025-0161",  # libsecp256k1 0.7.2      (frontier fp-evm/pallet-evm)
+    "RUSTSEC-2026-0119",  # hickory-proto 0.24.x    (libp2p-dns -> sc-network)
+    "RUSTSEC-2026-0118",  # hickory-proto 0.25.x    (libp2p-dns -> sc-network)
+    "RUSTSEC-2024-0388",  # derivative 2.2.0        (ark-r1cs-std)
+    "RUSTSEC-2025-0057",  # fxhash 0.2.1            (cranelift)
+    "RUSTSEC-2024-0384",  # instant 0.1.13          (parking_lot)
+    "RUSTSEC-2022-0061",  # parity-wasm 0.45.0      (sc-executor-common)
+    "RUSTSEC-2024-0436",  # paste 1.0.15            (wasmtime-runtime)
+    "RUSTSEC-2024-0370",  # proc-macro-error 1.0.4  (multihash)
+    "RUSTSEC-2026-0173",  # proc-macro-error2 2.0.1 (subxt-macro -> frame-benchmarking-cli)
 ]
 
 [licenses]
