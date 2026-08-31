@@ -5,7 +5,7 @@ description = "On-chain relay configuration, relayer registry and fee accounting
 authors = { workspace = true }
 license = "GPL-3.0-or-later"
 edition = "2024"
-repository = "https://github.com/orbinum/orbinum-node"
+repository = "https://github.com/orbinum/node"
 readme = "README.md"
 
 [package.metadata.docs.rs]

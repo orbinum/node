@@ -56,6 +56,15 @@ pallet-transaction-payment = { workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { workspace = true }
 pallet-validator-set = { workspace = true }
 
+# ISMP / Hyperbridge — see the workspace Cargo.toml for why these need patching.
+pallet-ismp = { workspace = true }
+pallet-ismp-messaging = { workspace = true }
+pallet-ismp-runtime-api = { workspace = true }
+ismp = { workspace = true }
+ismp-grandpa = { workspace = true }
+grandpa-verifier-primitives = { workspace = true }
+anyhow = { workspace = true }
+
 # Frontier
 fp-evm = { workspace = true, features = ["serde"] }
 fp-rpc = { workspace = true }
@@ -97,6 +106,13 @@ default = ["std", "with-rocksdb-weights", "poseidon-native-runtime"]
 with-rocksdb-weights = []
 with-paritydb-weights = []
 
+# Point the ISMP coprocessor at Hyperbridge's testnet deployment (para 4009, currently
+# on the Paseo relay) instead of mainnet (3367). This selects where the BRIDGE lives,
+# not which chains we message — destinations are per-message. Getting it wrong is a
+# silent failure, proofs verify against the wrong chain, so it is a build flag rather
+# than a constant to remember to edit.
+hyperbridge-testnet = []
+
 poseidon-native-runtime = [
 	"pallet-shielded-pool/poseidon-native",
 ]
@@ -137,6 +153,13 @@ std = [
 	"pallet-session/std",
 	"pallet-sudo/std",
 	"pallet-validator-set/std",
+	"pallet-ismp/std",
+	"pallet-ismp-messaging/std",
+	"pallet-ismp-runtime-api/std",
+	"ismp/std",
+	"ismp-grandpa/std",
+	"grandpa-verifier-primitives/std",
+	"anyhow/std",
 	"pallet-timestamp/std",
 	"pallet-transaction-payment/std",
 	"pallet-transaction-payment-rpc-runtime-api/std",
@@ -187,6 +210,9 @@ runtime-benchmarks = [
 	"pallet-shielded-pool/runtime-benchmarks",
 	"pallet-relayer/runtime-benchmarks",
 	"pallet-validator-set/runtime-benchmarks",
+	"pallet-ismp/runtime-benchmarks",
+	"pallet-ismp-messaging/runtime-benchmarks",
+	"ismp-grandpa/runtime-benchmarks",
 	"polkadot-runtime-common/runtime-benchmarks",
 ]
 
@@ -218,6 +244,9 @@ try-runtime = [
 	"pallet-timestamp/try-runtime",
 	"pallet-transaction-payment/try-runtime",
 	"pallet-validator-set/try-runtime",
+	"pallet-ismp/try-runtime",
+	"pallet-ismp-messaging/try-runtime",
+	"ismp-grandpa/try-runtime",
 	"pallet-zk-verifier/try-runtime",
 	"polkadot-runtime-common/try-runtime",
 	"sp-runtime/try-runtime",

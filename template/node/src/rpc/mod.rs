@@ -31,11 +31,14 @@ use self::relayer_author::{RelayerAuthor, RelayerAuthorApiServer};
 use self::storage_override::EeSuffixStorageOverride;
 
 /// Full client dependencies.
-pub struct FullDeps<B: BlockT, C, P, CT, CIDP> {
+pub struct FullDeps<B: BlockT, C, P, BE, CT, CIDP> {
 	/// The client instance to use.
 	pub client: Arc<C>,
 	/// Transaction pool instance.
 	pub pool: Arc<P>,
+	/// Substrate backend — the ISMP RPC reads outgoing requests from its offchain
+	/// storage, so it needs the backend rather than just the client.
+	pub backend: Arc<BE>,
 	/// Manual seal command sink
 	pub command_sink: Option<mpsc::Sender<EngineCommand<Hash>>>,
 	/// Keystore — holds the node's session keys and its `evmr` relay key.
@@ -60,7 +63,7 @@ where
 
 /// Instantiate all Full RPC extensions.
 pub fn create_full<B, C, P, BE, CT, CIDP>(
-	deps: FullDeps<B, C, P, CT, CIDP>,
+	deps: FullDeps<B, C, P, BE, CT, CIDP>,
 	subscription_task_executor: SubscriptionTaskExecutor,
 	pubsub_notification_sinks: Arc<
 		fc_mapping_sync::EthereumBlockNotificationSinks<
@@ -80,14 +83,19 @@ where
 	C::Api: pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi<B>,
 	C::Api: pallet_zk_verifier_runtime_api::ZkVerifierRuntimeApi<B>,
 	C::Api: pallet_relayer_runtime_api::RelayerRuntimeApi<B>,
+	C::Api: pallet_ismp_runtime_api::IsmpRuntimeApi<B, B::Hash>,
+	C: sc_client_api::ProofProvider<B> + sc_client_api::BlockBackend<B>,
 	C::Api: sp_api::Core<B>,
 	C: HeaderBackend<B> + HeaderMetadata<B, Error = BlockChainError> + 'static,
 	C: BlockchainEvents<B> + AuxStore + UsageProvider<B> + StorageProvider<B, BE>,
-	BE: Backend<B> + 'static,
+	BE: Backend<B> + Send + Sync + 'static,
+	BE::OffchainStorage: Clone + Send + Sync + 'static,
 	P: TransactionPool<Block = B, Hash = B::Hash> + 'static,
+	u64: From<<<B as BlockT>::Header as sp_runtime::traits::Header>::Number>,
 	CIDP: CreateInherentDataProviders<B, ()> + Send + 'static,
 	CT: fp_rpc::ConvertTransaction<<B as BlockT>::Extrinsic> + Send + Sync + 'static,
 {
+	use pallet_ismp_rpc::{IsmpApiServer, IsmpRpcHandler};
 	use pallet_relayer_rpc::{Relayer, RelayerApiServer};
 	use pallet_transaction_payment_rpc::{TransactionPayment, TransactionPaymentApiServer};
 	use pallet_zk_verifier_rpc::{ZkVerifier, ZkVerifierApiServer};
@@ -101,6 +109,7 @@ where
 	let FullDeps {
 		client,
 		pool,
+		backend,
 		command_sink,
 		keystore,
 		eth,
@@ -111,6 +120,9 @@ where
 	io.merge(ZkVerifier::new(client.clone()).into_rpc())?;
 	io.merge(Relayer::new(client.clone()).into_rpc())?;
 	io.merge(RelayerAuthor::new(client.clone(), keystore).into_rpc())?;
+	// Exposes the `ismp_query*` methods. `new` fails if the backend has no offchain
+	// storage — the misconfiguration that leaves relayers unable to see our messages.
+	io.merge(IsmpRpcHandler::new(client.clone(), backend.clone())?.into_rpc())?;
 
 	io.merge(PrivacyRpc::new(client.clone()).into_rpc())?;
 	io.merge(ChainRpc::new(client.clone()).into_rpc())?;

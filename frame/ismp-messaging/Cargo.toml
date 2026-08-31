@@ -1,0 +1,53 @@
+[package]
+name = "pallet-ismp-messaging"
+version = "0.1.0"
+description = "Cross-chain messaging over ISMP for Orbinum"
+authors = { workspace = true }
+license = "GPL-3.0-or-later"
+edition = "2024"
+repository = "https://github.com/orbinum/node"
+publish = false
+
+[dependencies]
+scale-codec = { workspace = true }
+scale-info = { workspace = true }
+frame-support = { workspace = true }
+frame-system = { workspace = true }
+sp-runtime = { workspace = true }
+sp-core = { workspace = true }
+ismp = { workspace = true }
+anyhow = { workspace = true }
+pallet-ismp = { workspace = true }
+frame-benchmarking = { workspace = true, optional = true }
+
+[dev-dependencies]
+pallet-balances = { workspace = true, features = ["std"] }
+pallet-timestamp = { workspace = true, features = ["std"] }
+sp-io = { workspace = true, features = ["std"] }
+sp-std = { workspace = true, features = ["std"] }
+
+[features]
+default = ["std"]
+std = [
+	"scale-codec/std",
+	"scale-info/std",
+	"frame-support/std",
+	"frame-system/std",
+	"sp-runtime/std",
+	"sp-core/std",
+	"ismp/std",
+	"anyhow/std",
+	"pallet-ismp/std",
+	"frame-benchmarking?/std",
+]
+runtime-benchmarks = [
+	"frame-benchmarking/runtime-benchmarks",
+	"frame-support/runtime-benchmarks",
+	"frame-system/runtime-benchmarks",
+	"pallet-ismp/runtime-benchmarks",
+]
+try-runtime = [
+	"frame-support/try-runtime",
+	"frame-system/try-runtime",
+	"sp-runtime/try-runtime",
+]

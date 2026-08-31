@@ -83,6 +83,12 @@ run_bench "pallet_zk_verifier" "./frame/zk-verifier/src/weights.rs"
 run_bench "pallet_shielded_pool" "./frame/shielded-pool/src/weights.rs"
 run_bench "pallet_relayer" "./frame/relayer/src/weights.rs"
 run_bench "pallet_validator_set" "./frame/validator-set/src/weights.rs"
+run_bench "pallet_ismp_messaging" "./frame/ismp-messaging/src/weights.rs"
+
+# ISMP crates we do not own: the WeightInfo trait belongs to the upstream crate, so the
+# generated impl lives runtime-side rather than in the pallet.
+run_bench "ismp_grandpa" "./template/runtime/src/weights/ismp_grandpa.rs"
+run_bench "pallet_ismp" "./template/runtime/src/weights/pallet_ismp.rs"
 
 # Pallets benchmarkeables del runtime sin destino de weights versionado en este repo
 run_bench "pallet_balances" "$SCRATCH_DIR/pallet-balances-weights.rs"

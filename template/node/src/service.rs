@@ -306,6 +306,9 @@ where
 	RA::RuntimeApi: RuntimeApiCollection<B, AuraId, AccountId, Nonce, Balance>,
 	RA::RuntimeApi: pallet_zk_verifier_runtime_api::ZkVerifierRuntimeApi<B>,
 	RA::RuntimeApi: pallet_relayer_runtime_api::RelayerRuntimeApi<B>,
+	RA::RuntimeApi: pallet_ismp_runtime_api::IsmpRuntimeApi<B, <B as BlockT>::Hash>,
+	// The ISMP RPC converts block numbers to u64 when answering height queries.
+	u64: From<NumberFor<B>>,
 	HF: HostFunctionsT + 'static,
 	NB: sc_network::NetworkBackend<B, <B as BlockT>::Hash>,
 {
@@ -435,6 +438,9 @@ where
 
 	let rpc_builder = {
 		let client = client.clone();
+		// Cloned before the closure takes ownership: the outer `backend` is still
+		// needed after this point (see the mapping-sync setup below).
+		let rpc_backend = backend.clone();
 		let pool = transaction_pool.clone();
 		let network = network.clone();
 		let sync_service = sync_service.clone();
@@ -506,6 +512,7 @@ where
 			let deps = crate::rpc::FullDeps {
 				client: client.clone(),
 				pool: pool.clone(),
+				backend: rpc_backend.clone(),
 				command_sink: if sealing.is_some() {
 					Some(command_sink.clone())
 				} else {
@@ -527,7 +534,7 @@ where
 	// worker can skip past pruned blocks during catch-up (KV backend only).
 	let state_pruning_blocks = config.state_pruning.as_ref().and_then(|mode| {
 		if let sc_service::PruningMode::Constrained(c) = mode {
-			c.max_blocks.map(u64::from)
+			c.max_blocks.map(<u64 as From<u32>>::from)
 		} else {
 			None
 		}

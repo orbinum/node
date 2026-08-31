@@ -11,13 +11,11 @@ parameter_types! {
 	pub const BlockHashCount: BlockNumber = 256;
 	pub BlockWeights: frame_system::limits::BlockWeights = frame_system::limits::BlockWeights
 		::with_sensible_defaults(MAXIMUM_BLOCK_WEIGHT, NORMAL_DISPATCH_RATIO);
+	/// Note the ratio: block LENGTH uses 85% (`BLOCK_LENGTH_NORMAL_RATIO`), not the
+	/// 75% `NORMAL_DISPATCH_RATIO` that bounds weights. ISMP needs the extra headroom
+	/// for GRANDPA consensus proofs; weights are deliberately left where they were.
 	pub BlockLength: frame_system::limits::BlockLength = frame_system::limits::BlockLength
-		::max_with_normal_ratio(MAXIMUM_BLOCK_LENGTH, NORMAL_DISPATCH_RATIO);
-	/// TODO: register a unique SS58 prefix for Orbinum at
-	/// https://github.com/paritytech/ss58-registry before mainnet.
-	/// 42 is the generic Substrate default and will conflict with other chains in
-	/// tools like polkadot.js. Changing this value invalidates all existing
-	/// encoded addresses — coordinate with explorer / wallet teams before bumping.
+		::max_with_normal_ratio(MAXIMUM_BLOCK_LENGTH, BLOCK_LENGTH_NORMAL_RATIO);
 	pub const SS58Prefix: u8 = 42;
 }
 

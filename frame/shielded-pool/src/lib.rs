@@ -510,12 +510,19 @@ pub mod pallet {
 		}
 
 		fn integrity_test() {
-			assert!(
-				!cfg!(feature = "skip-proof-verification") || cfg!(feature = "runtime-benchmarks"),
-				"pallet-shielded-pool compiled with `skip-proof-verification` but without \
-				 `runtime-benchmarks`: shield/unshield/transfer proofs are NOT verified \
-				 outside a benchmark build. This must never run on a live chain."
-			);
+			// `const` block: both operands are `cfg!`, so this resolves at compile time
+			// and a bad feature combination fails the build rather than the runtime's
+			// integrity check. Strictly stronger than asserting at runtime, and it is
+			// what clippy::assertions_on_constants asks for.
+			const {
+				assert!(
+					!cfg!(feature = "skip-proof-verification") ||
+						cfg!(feature = "runtime-benchmarks"),
+					"pallet-shielded-pool compiled with `skip-proof-verification` but without \
+					 `runtime-benchmarks`: shield/unshield/transfer proofs are NOT verified \
+					 outside a benchmark build. This must never run on a live chain."
+				);
+			}
 
 			assert_eq!(
 				T::MaxTreeDepth::get(),

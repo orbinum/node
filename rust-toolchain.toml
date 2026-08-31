@@ -1,6 +1,12 @@
 [toolchain]
 # Stable
-channel = "1.88.0" # rustc 1.88.0 (6b00bc388 2025-06-23)
+# Raised from 1.88.0 for the ISMP/Hyperbridge integration: `ismp-abi` depends on
+# `alloy-contract ^1.7.3`, and every alloy-contract >= 1.7 declares rust-version 1.91.
+# The newest alloy-contract with MSRV <= 1.88 is 1.6.3, below that floor, so the bump
+# is required rather than preferred.
+#
+# Node operators and CI build from source — this raises their minimum too.
+channel = "1.93.0"
 components = ["cargo", "clippy", "rustc", "rustfmt", "rust-docs"]
 profile = "minimal"
 targets = ["wasm32v1-none"]

@@ -5,7 +5,7 @@ description = "Shielded pool pallet for private transactions using ZK proofs"
 authors = ["Orbinum Team"]
 license = "GPL-3.0-or-later"
 edition = "2024"
-repository = "https://github.com/orbinum/orbinum-node"
+repository = "https://github.com/orbinum/node"
 readme = "README.md"
 
 [package.metadata.docs.rs]
@@ -20,15 +20,15 @@ scale-info = { version = "2.11", default-features = false, features = ["derive"]
 once_cell = { version = "1.19", default-features = false, features = ["alloc"] }
 
 # Substrate primitives
-sp-core = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
-sp-io = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
-sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
-sp-std = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
+sp-core = { version = "39.0.0", default-features = false }
+sp-io = { version = "44.0.0", default-features = false }
+sp-runtime = { version = "45.0.0", default-features = false }
+sp-std = { version = "14.0.0", default-features = false }
 
 # FRAME dependencies
-frame-benchmarking = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false, optional = true }
-frame-support = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
-frame-system = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
+frame-benchmarking = { version = "45.0.3", default-features = false, optional = true }
+frame-support = { version = "45.1.3", default-features = false }
+frame-system = { version = "45.0.0", default-features = false }
 
 # Local dependencies
 orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
@@ -44,10 +44,10 @@ ark-ff = { version = "0.5.0", default-features = false }
 ark-bn254 = { version = "0.5.0", default-features = false }
 ark-ff = { version = "0.5.0", default-features = false }
 orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
-pallet-balances = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512" }
+pallet-balances = { version = "46.0.0" }
 pallet-zk-verifier = { path = "../zk-verifier", default-features = false }
-sp-core = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512" }
-sp-io = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512" }
+sp-core = { version = "39.0.0" }
+sp-io = { version = "44.0.0" }
 
 [features]
 default = ["std", "poseidon-native"]

@@ -13,7 +13,7 @@ access changes.
 ## What changed vs. the older guide
 
 The benchmark pipeline no longer needs the `groth16-proofs` sibling checkout or
-the `convert-vk` binary, and `verify_proof` is now self-contained:
+the `pack-verifying-key` binary, and `verify_proof` is now self-contained:
 
 - **Feature set:** builds use `runtime-benchmarks,skip-proof-verification,poseidon-native`.
   `skip-proof-verification` lets `verify_proof` record weight even though its

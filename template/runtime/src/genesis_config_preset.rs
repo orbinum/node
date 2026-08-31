@@ -17,7 +17,7 @@ use sp_genesis_builder::PresetId;
 use sp_std::prelude::*;
 
 /// Map an Ethereum H160 address to its Substrate AccountId32 using
-/// the runtime helper (H160_bytes ++ [0xEE; 12]).
+/// the runtime helper (H160_bytes ++ [0x00; 12]).
 ///
 /// This matches `EeSuffixAddressMapping` in lib.rs so that
 /// `eth_getBalance` and `system.account` read from the same pallet-balances entry.

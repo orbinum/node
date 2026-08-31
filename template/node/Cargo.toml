@@ -62,6 +62,9 @@ sp-transaction-pool = { workspace = true, features = ["default"] }
 frame-system-rpc-runtime-api = { workspace = true }
 pallet-relayer = { workspace = true, features = ["std"] }
 pallet-relayer-rpc = { workspace = true }
+# ISMP RPC: the read path relayers use to discover our outbound messages.
+pallet-ismp-rpc = { workspace = true }
+pallet-ismp-runtime-api = { workspace = true, default-features = false, features = ["std"] }
 pallet-relayer-runtime-api = { workspace = true }
 pallet-shielded-pool-runtime-api = { workspace = true }
 pallet-transaction-payment-rpc = { workspace = true }
@@ -111,6 +114,16 @@ default = [
 ]
 poseidon-native = [
 	"orbinum-zk-core/poseidon-native",
+]
+# Point the ISMP coprocessor at Hyperbridge's testnet deployment (para 4009, relay
+# Kusama, currently Paseo) instead
+# of Polkadot mainnet (3367). Forwarded to the runtime, which is where the constant
+# lives — without this passthrough the flag is unreachable from a node build, which is
+# the only way anyone actually produces a testnet binary.
+#
+#   cargo build --release -p orbinum-node --features hyperbridge-testnet
+hyperbridge-testnet = [
+	"orbinum-runtime/hyperbridge-testnet",
 ]
 rocksdb = [
 	"sc-cli/rocksdb",

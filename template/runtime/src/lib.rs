@@ -225,12 +225,34 @@ pub const MAXIMUM_BLOCK_WEIGHT: Weight = Weight::from_parts(
 	WEIGHT_MILLISECS_PER_BLOCK * WEIGHT_REF_TIME_PER_MILLIS,
 	u64::MAX,
 );
-pub const MAXIMUM_BLOCK_LENGTH: u32 = 5 * 1024 * 1024;
+/// 8 MiB, raised from 5 MiB for ISMP: GRANDPA proofs do not fit the old budget. The
+/// 85% ratio below applies to block LENGTH only — `NORMAL_DISPATCH_RATIO` still governs
+/// weights at 75%.
+///
+/// Bigger blocks widen the DoS surface: re-run benchmarks and confirm validators keep
+/// up under load before mainnet.
+pub const MAXIMUM_BLOCK_LENGTH: u32 = 8 * 1024 * 1024;
+
+/// Normal-dispatch ratio for block LENGTH only: 85% so a GRANDPA proof fits in a
+/// normal extrinsic.
+pub const BLOCK_LENGTH_NORMAL_RATIO: Perbill = Perbill::from_percent(85);
 
 // Pallet `Config` impls live in `configs/`, grouped by domain. They are plain
 // `impl` items, so moving them out changes nothing about assembly — unlike the
 // macro blocks below, which must stay whole.
 pub use configs::{consensus::*, evm::*, privacy::*, system::*};
+
+// Imported rather than fully qualified: the qualified paths bury the runtime-API
+// signatures. `IsmpEvent`/`IsmpRequest` are aliased because bare `Event`/`Request`
+// collide with runtime types of the same name.
+use ismp::{
+	consensus::{ConsensusClientId, StateMachineHeight, StateMachineId},
+	events::Event as IsmpEvent,
+	host::StateMachine,
+	router::{GetResponse, Request as IsmpRequest},
+};
+// `configs::ismp` is deliberately not glob-imported: it would shadow the `ismp` crate.
+// Its `Config` impls apply regardless of imports.
 
 parameter_types! {
 	pub storage EnableManualSeal: bool = false;
@@ -338,6 +360,17 @@ mod runtime {
 
 	#[runtime::pallet_index(18)]
 	pub type Session = pallet_session;
+
+	// ISMP / Hyperbridge. `IsmpGrandpa` is the consensus client that lets Hyperbridge
+	// verify this chain's own finality — what keeps Orbinum sovereign, not a parachain.
+	#[runtime::pallet_index(19)]
+	pub type Ismp = pallet_ismp;
+
+	#[runtime::pallet_index(20)]
+	pub type IsmpGrandpa = ismp_grandpa;
+
+	#[runtime::pallet_index(21)]
+	pub type IsmpMessaging = pallet_ismp_messaging;
 }
 
 #[derive(Clone)]
@@ -436,7 +469,31 @@ mod benches {
 		[pallet_shielded_pool, ShieldedPool]
 		[pallet_relayer, Relayer]
 		[pallet_validator_set, ValidatorSet]
+		[ismp_grandpa, IsmpGrandpa]
+		[pallet_ismp, Ismp]
+		[pallet_ismp_messaging, IsmpMessaging]
 	);
+}
+
+/// Orbinum-local ISMP runtime API.
+///
+/// Upstream's `IsmpRuntimeApi` has no accessor for the coprocessor, and neither
+/// `Coprocessor` nor `HostStateMachine` is a `#[pallet::constant]`, so neither reaches
+/// metadata. That left the value deciding which relay chain our state commitments are
+/// recorded under undiscoverable from a running node — the suites hardcoded it and were
+/// wrong for the testnet build with nothing failing. Exposing it lets them read the
+/// answer off the node instead of restating it.
+pub mod runtime_api {
+	use ismp::host::StateMachine;
+
+	sp_api::decl_runtime_apis! {
+		/// Build-dependent ISMP identities that are otherwise compile-time only.
+		pub trait OrbinumIsmpApi {
+			/// The configured coprocessor, i.e. which Hyperbridge deployment this
+			/// build talks to. `None` would mean ISMP proxying is disabled.
+			fn coprocessor() -> Option<StateMachine>;
+		}
+	}
 }
 
 impl_runtime_apis! {
@@ -977,6 +1034,77 @@ impl_runtime_apis! {
 						.collect(),
 				})
 				.collect()
+		}
+	}
+
+	// ISMP Runtime API — the read path relayers depend on:
+	//   relayer -> RPC (ismp_query*) -> this runtime API -> offchain DB
+	//
+	// Thin delegations; the pallet owns the logic. `requests`/`responses` read the
+	// offchain DB, populated only when offchain indexing is on — `command.rs` forces
+	// it, because a node without it answers every query with an empty list and no error.
+	impl pallet_ismp_runtime_api::IsmpRuntimeApi<Block, <Block as BlockT>::Hash> for Runtime {
+		fn host_state_machine() -> StateMachine {
+			configs::ismp::network::host_state_machine()
+		}
+
+		fn block_events() -> Vec<IsmpEvent> {
+			Ismp::block_events()
+		}
+
+		fn block_events_with_metadata() -> Vec<(IsmpEvent, Option<u32>)> {
+			Ismp::block_events_with_metadata()
+		}
+
+		fn consensus_state(id: ConsensusClientId) -> Option<Vec<u8>> {
+			pallet_ismp::ConsensusStates::<Runtime>::get(id)
+		}
+
+		/// The host's *local* timestamp when this height was committed. This is the
+		/// clock the challenge period is measured against — not the counterparty's
+		/// own block timestamp, which lives in `StateCommitment.timestamp`.
+		///
+		/// Reads `BoundedStateMachineUpdateTime`, **not** the similarly named
+		/// `StateMachineUpdateTime`. On 2512 the latter is a legacy map that nothing
+		/// writes any more (outside benchmarks) and that `on_idle` drains to empty,
+		/// yet it still carries the `#[pallet::getter(fn state_machine_update_time)]`
+		/// attribute — so the obvious-looking read returns `None` forever, leaving
+		/// relayers unable to tell when a challenge period has elapsed and no error
+		/// to point at.
+		///
+		/// Upstream removed the legacy map and moved that getter onto the bounded map
+		/// in the 2606 line, which makes the trap disappear. We cannot take 2606
+		/// (it needs `frame-support 48` against our `45.1.3`), so the explicit read
+		/// below is what keeps this correct. `pallet_ismp`'s own
+		/// `IsmpHost::state_machine_update_time` reads the same bounded map.
+		fn state_machine_update_time(id: StateMachineHeight) -> Option<u64> {
+			pallet_ismp::BoundedStateMachineUpdateTime::<Runtime>::get(id.id, id.height)
+		}
+
+		fn challenge_period(id: StateMachineId) -> Option<u64> {
+			pallet_ismp::ChallengePeriod::<Runtime>::get(id)
+		}
+
+		fn latest_state_machine_height(id: StateMachineId) -> Option<u64> {
+			pallet_ismp::LatestStateMachineHeight::<Runtime>::get(id)
+		}
+
+		fn requests(request_commitments: Vec<H256>) -> Vec<IsmpRequest> {
+			Ismp::requests(request_commitments)
+		}
+
+		/// Returns `GetResponse`, not `Response`: ISMP has no first-class POST
+		/// response — an application replies with a POST in the opposite direction.
+		/// The published docs show `Vec<Response>` here, which does not compile
+		/// against this version.
+		fn responses(response_commitments: Vec<H256>) -> Vec<GetResponse> {
+			Ismp::responses(response_commitments)
+		}
+	}
+
+	impl crate::runtime_api::OrbinumIsmpApi<Block> for Runtime {
+		fn coprocessor() -> Option<StateMachine> {
+			configs::ismp::network::coprocessor()
 		}
 	}
 

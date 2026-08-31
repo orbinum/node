@@ -74,7 +74,7 @@ impl<const DEPTH: usize> IncrementalMerkleTree<DEPTH> {
 		let mut current_index = index;
 
 		for level in 0..DEPTH {
-			if current_index % 2 == 0 {
+			if current_index.is_multiple_of(2) {
 				self.frontier[level] = current_hash;
 				let zero = Self::zero_hash(level);
 				current_hash = hash_pair(&current_hash, &zero);
@@ -114,10 +114,10 @@ impl<const DEPTH: usize> IncrementalMerkleTree<DEPTH> {
 		let mut target_index = leaf_index as usize;
 
 		for level in 0..DEPTH {
-			if current_level.len() % 2 != 0 {
+			if !current_level.len().is_multiple_of(2) {
 				current_level.push(Self::zero_hash(level));
 			}
-			let sibling_index = if target_index % 2 == 0 {
+			let sibling_index = if target_index.is_multiple_of(2) {
 				indices[level] = 0;
 				target_index + 1
 			} else {
