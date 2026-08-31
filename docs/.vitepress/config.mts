@@ -3,9 +3,9 @@ import { footnote } from "@mdit/plugin-footnote";
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
-  title: "Frontier",
-  description: "Ethereum and EVM compatibility layer for Polkadot",
-  base: '/frontier',
+  title: "Orbinum",
+  description: "Privacy-focused Substrate network with EVM compatibility and a ZK shielded pool",
+  base: '/node',
   cleanUrls: true,
 
   themeConfig: {
@@ -14,7 +14,7 @@ export default defineConfig({
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Overview', link: '/overview' },
-      { text: 'API', link: 'https://polkadot-evm.github.io/frontier/rustdocs/pallet_evm/' }
+      { text: 'API', link: 'https://orbinum.github.io/node/rustdocs/pallet_shielded_pool/' }
     ],
 
     sidebar: [
@@ -35,12 +35,12 @@ export default defineConfig({
     ],
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/polkadot-evm/frontier' }
+      { icon: 'github', link: 'https://github.com/orbinum/node' }
     ],
 
     footer: {
-      message: '<a href="https://bitarray.dev/#legal-notice">Legal notice</a>',
-      copyright: 'Copyright © 2018-present, Frontier developers'
+      message: 'Dual-licensed under Apache-2.0 and GPL-3.0',
+      copyright: 'Copyright © 2025-present, Orbinum contributors'
     },
   },
 
