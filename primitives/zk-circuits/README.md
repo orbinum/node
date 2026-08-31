@@ -8,6 +8,29 @@ R1CS circuits and constraint gadgets for off-chain ZK proof generation.
 Intended for off-chain use (proof generation, testing). The runtime only needs
 `orbinum-zk-verifier` for on-chain proof verification.
 
+> **These are not the circuits Orbinum runs.**
+>
+> The verification keys registered on chain are generated from the Circom
+> sources in [orbinum/circuits](https://github.com/orbinum/circuits). This crate
+> is a separate arkworks implementation of the same ideas, and the two have
+> drifted apart. Do not run a trusted setup against it, and do not treat it as a
+> specification of the protocol.
+>
+> Known divergences from the deployed circuits, as of this writing:
+>
+> | | This crate | `orbinum/circuits` |
+> |---|---|---|
+> | Unshield public signals | 6 | 7, including `change_commitment` |
+> | Unshield change note | not modelled | supported |
+> | Range checks on note values | none | `Num2Bits(128)` |
+>
+> The missing range checks matter most. Balance conservation here is enforced as
+> field arithmetic with no bound on any value, so `sum(inputs) == sum(outputs) +
+> fee` can be satisfied by wrapping modulo the BN254 scalar field. A setup run
+> against `TransferCircuit` or `UnshieldCircuit` would produce a verifier that
+> accepts inflated notes. The deployed Circom circuits constrain every value to
+> 128 bits and are not affected.
+
 ## Modules
 
 | Module | Contents |
