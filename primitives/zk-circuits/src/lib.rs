@@ -6,6 +6,17 @@
 //! Intended for off-chain use (proof generation, testing). The runtime only
 //! needs `orbinum-zk-verifier` for on-chain proof verification.
 //!
+//! # These are not the circuits Orbinum runs
+//!
+//! The verification keys registered on chain come from the Circom sources in
+//! [orbinum/circuits](https://github.com/orbinum/circuits). This crate is a
+//! separate arkworks implementation that has drifted from them: `UnshieldCircuit`
+//! exposes 6 public signals against the deployed circuit's 7 and does not model
+//! the change note, and neither circuit here range-constrains note values, so
+//! balance conservation can be satisfied by wrapping modulo the BN254 scalar
+//! field. Do not run a trusted setup against these circuits. See the crate
+//! README for the full comparison.
+//!
 //! ## Modules
 //!
 //! - [`types`]: Core data types (Note, MerklePath, TreeDepth, CircuitValidator)

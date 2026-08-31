@@ -36,7 +36,7 @@ Orbinum is built using Substrate's FRAME framework and implements Clean Architec
 - **Pallets**: Modular runtime components (`pallet-shielded-pool`, `pallet-zk-verifier`, `pallet-relayer`)
 - **Primitives**: Core cryptographic libraries (`zk-core`, `zk-verifier`, `zk-circuits`)
 - **Client**: RPC layer and blockchain infrastructure
-- **Circuits**: Circom zero-knowledge circuits (`value_proof`, `transfer`, `unshield`)
+- **Circuits**: Circom zero-knowledge circuits (`value_proof`, `transfer`, `unshield`), maintained in [orbinum/circuits](https://github.com/orbinum/circuits) and the source of the verification keys registered on chain
 
 ## License
 
