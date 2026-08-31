@@ -1,0 +1,81 @@
+# Tesseract relayer — Orbinum <-> Hyperbridge on Paseo
+#
+# TEMPLATE. Running the daemon needs a real `signer` seed; keep that copy out of the
+# repository. See README.md for the procedure.
+#
+# Exchanges GRANDPA finality proofs in both directions. Neither side trusts the
+# relayer: each verifies the other's proofs cryptographically, which is what lets
+# Orbinum stay sovereign instead of becoming a parachain.
+#
+# ── Format note ───────────────────────────────────────────────────────────────
+# This targets the CONSOLIDATED `tesseract` binary, the only one that exists on
+# `main` (`tesseract/relayer`, plus `tesseract-prover`). The published
+# `developers/polkadot/solochains` page still shows the older two-binary layout
+# with `polytopelabs/tesseract-consensus` and `[chain.grandpa]` sections; that
+# binary is gone. The shape below follows `tesseract/relayer/src/config.rs` and
+# the `developers/network/relayer` page, which use `[chain.consensus]`.
+#
+# ── Usage ─────────────────────────────────────────────────────────────────────
+# Read Hyperbridge's initial consensus state, to bootstrap our side:
+#
+#   docker run --network=host \
+#     -v $PWD/scripts/hyperbridge/relayer.paseo.toml:/root/relayer.toml \
+#     polytopelabs/tesseract:latest \
+#     --config=/root/relayer.toml --db=/root/relayer.db \
+#     log-consensus-state KUSAMA-4009
+#
+# Read OUR initial consensus state, to hand to Hyperbridge in the onboarding issue:
+#
+#   ... log-consensus-state SUBSTRATE-orbi
+#
+# Both subcommands are one-shot. Omit the subcommand to run the relayer as a daemon.
+#
+# ── Requirement ───────────────────────────────────────────────────────────────
+# Substrate RPCs must expose unsafe methods (`--rpc-methods Unsafe`). Tesseract
+# calls methods that are off by default; without them it fails at runtime, not at
+# startup.
+
+# ── Hyperbridge on Paseo ──────────────────────────────────────────────────────
+[hyperbridge]
+rpc_ws = "wss://gargantua.rpc.polytope.technology"
+# Needed only to submit transactions. `log-consensus-state` is read-only, so it
+# can stay empty until the relayer runs as a daemon.
+# signer deliberately OMITTED: an empty string is hex-decoded and fails with
+# "Invalid seed length". Absent = throwaway key + inbound-only mode.
+# Delivering messages requires a real hex seed here.
+
+[hyperbridge.consensus]
+type = "grandpa"
+# Hyperbridge is a parachain: its GRANDPA finality comes from the RELAY chain
+# (Paseo), not from Hyperbridge itself.
+rpc = "wss://pas-rpc.stakeworld.io"   # dwellir stopped resolving (2026-08-27)
+# Hyperbridge's para id on Paseo. Listing it is what makes the relayer ship
+# proofs that verify Hyperbridge *through* its relay's GRANDPA.
+para_ids = [4009]
+
+# ── Orbinum ───────────────────────────────────────────────────────────────────
+[orbinum]
+type = "substrate"
+rpc_ws = "wss://rpc-1.testnet.orbinum.io"
+# signer deliberately OMITTED: an empty string is hex-decoded and fails with
+# "Invalid seed length". Absent = throwaway key + inbound-only mode.
+# Delivering messages requires a real hex seed here.
+# Our consensus state id ON Hyperbridge — 4 UTF-8 chars we choose. Distinct from
+# the state machine id (`SUBSTRATE-orbi`), though kept related for legibility.
+consensus_state_id = "ORBI"
+
+[orbinum.consensus]
+type = "grandpa"
+# Orbinum is standalone, so this points at Orbinum itself.
+rpc = "wss://rpc-1.testnet.orbinum.io"
+# Empty: we are not a relay chain with parachains to prove.
+para_ids = []
+
+# ── Watchdog ──────────────────────────────────────────────────────────────────
+[relayer]
+# Restart if either consensus client goes stale for 3 minutes. A silently stalled
+# relayer looks identical to a quiet one, so this timeout is the only signal.
+maximum_update_intervals = [
+    [{ state_id = "KUSAMA-4009", consensus_state_id = "PAS0" }, 180],
+    [{ state_id = "SUBSTRATE-orbi", consensus_state_id = "ORBI" }, 180],
+]
