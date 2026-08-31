@@ -541,14 +541,21 @@ pub mod pallet {
 		},
 
 		/// Input nullifiers were spent in a private transfer.
-		/// Emitted independently of CommitmentsInserted to prevent graph correlation.
+		///
+		/// Emitted separately from `CommitmentsInserted` so the two carry no shared
+		/// field. This does NOT unlink them: both are deposited by the same
+		/// extrinsic and therefore share a `Phase::ApplyExtrinsic` index, which any
+		/// indexer can join on. Unlinkability comes from the commitments and
+		/// nullifiers being opaque, not from the event split.
 		NullifiersSpent {
 			/// Input nullifiers consumed — max 2.
 			nullifiers: BoundedVec<Nullifier, ConstU32<2>>,
 		},
 
 		/// Output commitments were inserted into the Merkle tree in a private transfer.
-		/// Emitted independently of NullifiersSpent to prevent graph correlation.
+		///
+		/// Emitted separately from `NullifiersSpent`; see the note there on what that
+		/// separation does and does not buy.
 		CommitmentsInserted {
 			/// New commitments created — max 2.
 			commitments: BoundedVec<Commitment, ConstU32<2>>,
@@ -880,7 +887,10 @@ pub mod pallet {
 			// For partial unshield, must equal NoteCommitment(change_value, asset_id, change_owner_pk, change_blinding).
 			change_commitment: Hash,
 			// Encrypted memo for the change note. Must be [0u8; 0] for total unshield.
-			// For partial unshield, contains encrypted plaintext: [value_lo(8), value_hi(8), owner_pk(32), blinding(32), asset_id(4), counterparty_pk(32)].
+			// For partial unshield, contains the encrypted 120-byte `MemoData` plaintext:
+			// [value_lo(8), value_hi(8), owner_pk(32), blinding(32), asset_id(4),
+			// counterparty_pk(32), circuit_version(4)]. The wire format wraps it as
+			// nonce(12) | ciphertext(120) | MAC(16) | ephPk(32) = 180 bytes.
 			change_encrypted_memo: FrameEncryptedMemo,
 			// EVM address of the relay node that signed the tx (from precompile caller); None for direct Substrate.
 			relayer: Option<sp_core::H160>,

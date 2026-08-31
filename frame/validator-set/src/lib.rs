@@ -24,8 +24,10 @@
 //! ## Security
 //!
 //! - A non-approved account **never** enters the active validator set.
-//! - Spam is bounded by `MaxPendingValidators` and by the session-key and relayer
-//!   prerequisites, both of which cost a transaction to satisfy.
+//! - Registration takes no bond. Spam is bounded by `MaxPendingValidators` and by
+//!   the session-key and relayer prerequisites. Note that `register_relayer` is
+//!   itself `ManageOrigin`-gated, so in practice only accounts governance has
+//!   already touched can enter the pending queue at all.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -96,13 +98,13 @@ pub mod pallet {
 	/// The approved (active) set of validator account IDs.
 	///
 	/// Included as block producers at every session rotation.
-	/// Updated by `add_validator` (sudo) and `approve_validator` (sudo after bond).
+	/// Updated by `add_validator` (sudo) and `approve_validator` (sudo).
 	#[pallet::storage]
 	#[pallet::getter(fn approved_validators)]
 	pub type ApprovedValidators<T: Config> =
 		StorageValue<_, BoundedVec<T::AccountId, T::MaxValidators>, ValueQuery>;
 
-	/// Accounts that have self-registered (bond locked) and are awaiting governance approval.
+	/// Accounts that have self-registered and are awaiting governance approval.
 	///
 	/// Entries here are **not** included in the active session — they only become validators
 	/// after `AddRemoveOrigin` calls `approve_validator`.
