@@ -101,7 +101,11 @@ run_bench() {
 
     # `--execution` is gone: it is accepted but documented as having no effect, and
     # `--wasm-execution=compiled` is what actually selects the executor.
-    if ! "$NODE" benchmark pallet \
+    #
+    # `|| rc=$?` and not `if ! …`: inside an `if` condition, `$?` is the status of the
+    # `if` itself, so a SIGKILLed run reads back as 0 and gets reported as a success.
+    local rc=0
+    "$NODE" benchmark pallet \
         --chain dev \
         --pallet "$pallet" \
         --extrinsic '*' \
@@ -111,19 +115,28 @@ run_bench() {
         --heap-pages="$HEAP_PAGES" \
         --db-cache="$DB_CACHE" \
         --output "$output" \
-        --template "$TEMPLATE"
-    then
-        local rc=$?
+        --template "$TEMPLATE" || rc=$?
+
+    if [[ $rc -ne 0 ]]; then
         echo "" >&2
         echo "  > FAILED: $pallet (exit $rc)" >&2
         # 137 = 128 + SIGKILL. The OOM killer leaves no other trace, and the generic
         # advice ("check the logs") is useless because the process is simply gone.
         if [[ $rc -eq 137 ]]; then
             echo "  > Exit 137 is SIGKILL — almost always the OOM killer." >&2
-            echo "  > Retry that pallet alone with a smaller footprint, e.g.:" >&2
-            echo "  >   $0 --pallet $pallet --db-cache 256 --steps 20 --repeat 5" >&2
+            echo "  > This pallet needs a smaller footprint. Retry it alone with:" >&2
+            echo "  >   $0 --pallet $pallet --db-cache 256" >&2
+            echo "  > Keep --steps/--repeat at their defaults for weights you intend" >&2
+            echo "  > to commit; lower them only to rehearse the run." >&2
         fi
         return $rc
+    fi
+
+    # A killed run can still have written a partial file before dying, and a partial
+    # weights file compiles — it just carries wrong numbers. Refuse to call it done.
+    if [[ ! -s "$output" ]]; then
+        echo "  > FAILED: $pallet produced no output at $output" >&2
+        return 1
     fi
 
     echo "  > Done."
@@ -164,12 +177,28 @@ echo ""
 echo "[2/3] Running ${#selected[@]} benchmark(s) — steps=$STEPS repeat=$REPEAT"
 echo "      heap-pages=$HEAP_PAGES db-cache=${DB_CACHE}MiB"
 
+failed=()
 for entry in "${selected[@]}"; do
-    run_bench "${entry%%:*}" "${entry#*:}"
+    pallet="${entry%%:*}"
+    # Keep going after a failure so one OOM-prone pallet does not hide whether the rest
+    # would have worked, but remember it: the summary must not claim success.
+    run_bench "$pallet" "${entry#*:}" || failed+=("$pallet")
 done
 
 echo ""
-echo "[3/3] All benchmarks completed successfully"
+if [[ ${#failed[@]} -gt 0 ]]; then
+    echo "[3/3] FAILED: ${#failed[@]} of ${#selected[@]} benchmark(s) did not complete" >&2
+    for pallet in "${failed[@]}"; do
+        echo "  - $pallet" >&2
+    done
+    echo "" >&2
+    echo "Weights for the failed pallets are unchanged or incomplete — do not commit" >&2
+    echo "them. Re-run each one alone, then verify with 'git diff'." >&2
+    echo "------------------------------------------------------" >&2
+    exit 1
+fi
+
+echo "[3/3] All ${#selected[@]} benchmark(s) completed successfully"
 echo "Saved committed weights in frame/*/src/weights.rs and template/runtime/src/weights/"
 echo "Saved auxiliary weights in $SCRATCH_DIR"
 echo "------------------------------------------------------"
