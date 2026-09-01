@@ -6,9 +6,12 @@
 //! every timestamp `0`, so unbonding and challenge-period checks against that chain
 //! become vacuous without erroring; a very large value overflows.
 //!
-//! Both are fixed on the 2606 line (`saturating_mul`, plus an error when the timestamp
-//! still resolves to zero). Taking it needs `frame-support 48` against our `45.1.3`, so
-//! on 2512 the exposure is live.
+//! Both are fixed on Hyperbridge's `main` (`saturating_mul`, plus an error when the
+//! timestamp still resolves to zero) — but that fix has never been published.
+//! `substrate-state-machine 2606.0.0`, the release we are on, still carries the raw
+//! multiply, in two places rather than main's single `.map()`. So the exposure is live
+//! on the published stack regardless of SDK version, and these bounds stay until a
+//! release ships the fix.
 //!
 //! **These bounds are advisory.** `add_state_machines` is an upstream extrinsic we
 //! cannot intercept without a chain-wide `BaseCallFilter` — disproportionate for a

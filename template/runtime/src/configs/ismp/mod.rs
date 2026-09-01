@@ -142,6 +142,19 @@ impl pallet_ismp::Config for Runtime {
 	>;
 }
 
+// State-commitment retention is left at the pallet default, deliberately.
+//
+// 2606 raised `MAX_STATE_MACHINE_COMMITMENTS` from 1,024 to 10,240 and rebuilt eviction
+// as an O(1) FIFO queue. Against a 6s counterparty that is ~17h of provable heights
+// retained, up from ~1.7h — a free win from the version bump, and far more headroom than
+// any challenge period needs.
+//
+// The cap only bounds retention *depth*: too shallow prunes heights a relayer still
+// needs to prove against, which fails liveness, never soundness. `update_commitment_caps`
+// (root, new in 2606) is the governance lever to override per chain — worth reaching for
+// only if we add a consensus client for a sub-second chain, where 10,240 blocks would be
+// a much shorter wall-clock window.
+
 impl ismp_grandpa::Config for Runtime {
 	type IsmpHost = pallet_ismp::Pallet<Runtime>;
 

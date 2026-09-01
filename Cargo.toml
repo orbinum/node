@@ -280,16 +280,20 @@ pallet-validator-set = { path = "frame/validator-set", default-features = false 
 # relay-chain consensus.
 #
 # These crates pin the crates.io `polkadot-sdk` umbrella by exact version
-# (`=2512.3.2`), which is why every SDK dependency above is now a registry version
-# rather than a git branch: a git/registry split duplicates `sp_io` and breaks the
-# wasm build. See docs/governance/ismp-integration-notes.md.
+# (`=2606.0.0` on this line), which is why every SDK dependency above is a registry
+# version rather than a git branch: a git/registry split duplicates `sp_io` and breaks
+# the wasm build. That exact pin is also why the node-side SDK crates sit one minor
+# behind `polkadot-sdk 2606.2.0` — the runtime API crates (`frame-support` 48,
+# `sp-runtime` 48, `sp-core` 43) are unchanged across that range, so the gap is
+# client-side only and clears when ISMP publishes against a newer umbrella.
 pallet-ismp-messaging = { path = "frame/ismp-messaging", default-features = false }
 pallet-ismp = { version = "2606.1.0", default-features = false }
 pallet-ismp-runtime-api = { version = "2606.0.0", default-features = false }
 pallet-ismp-rpc = { version = "2606.0.0" }
 ismp = { version = "2606.1.0", default-features = false }
 ismp-grandpa = { version = "2606.0.0", default-features = false }
-# Types the consensus guard needs to decode: ConsensusState, FinalityProof.
+# Dev-only since the 2606 guard deletion: the consensus-binding tests decode
+# ConsensusState and FinalityProof to build their fixtures.
 grandpa-verifier-primitives = { version = "2606.0.0", default-features = false }
 # `IsmpRouter::module_for_id` returns `anyhow::Error`.
 anyhow = { version = "1.0", default-features = false }

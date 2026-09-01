@@ -154,6 +154,13 @@ pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 /// Drop an entry once every live chain has passed its version — a migration
 /// that can no longer run is dead weight that could be re-armed by mistake.
 /// Empty: every live chain is past v3.
+///
+/// Deliberately does NOT include `pallet_ismp::migrations::SeedCommitmentCaps`, which
+/// 2606 ships: it seeds retention caps for `Evm(56)` and `Evm(137)` (BSC, Polygon),
+/// state machines we have no consensus client for — our `ConsensusClients` is GRANDPA
+/// alone. Hyperbridge itself wires it only on its mainnet runtime and deliberately not
+/// on its testnet one. The default cap applies instead, which is the right value for
+/// us; see the note on `MAX_STATE_MACHINE_COMMITMENTS` in `configs::ismp`.
 pub type Migrations = ();
 
 /// Executive: handles dispatch to the various modules.
@@ -1074,11 +1081,11 @@ impl_runtime_apis! {
 		/// relayers unable to tell when a challenge period has elapsed and no error
 		/// to point at.
 		///
-		/// Upstream removed the legacy map and moved that getter onto the bounded map
-		/// in the 2606 line, which makes the trap disappear. We cannot take 2606
-		/// (it needs `frame-support 48` against our `45.1.3`), so the explicit read
-		/// below is what keeps this correct. `pallet_ismp`'s own
-		/// `IsmpHost::state_machine_update_time` reads the same bounded map.
+		/// On 2606 the trap is gone: upstream deleted the legacy map and moved the
+		/// getter onto the bounded one, so the explicit read below is now simply
+		/// naming the only map there is. `pallet_ismp`'s own
+		/// `IsmpHost::state_machine_update_time` reads the same bounded map. Kept
+		/// explicit so a future rename cannot silently redirect it.
 		fn state_machine_update_time(id: StateMachineHeight) -> Option<u64> {
 			pallet_ismp::BoundedStateMachineUpdateTime::<Runtime>::get(id.id, id.height)
 		}
@@ -1099,6 +1106,11 @@ impl_runtime_apis! {
 		/// response — an application replies with a POST in the opposite direction.
 		/// The published docs show `Vec<Response>` here, which does not compile
 		/// against this version.
+		///
+		/// That asymmetry is the design, not a gap waiting on an API: `IsmpDispatcher`
+		/// declares `dispatch_request` and nothing else, on 2512, on 2606, and on
+		/// Hyperbridge's unpublished `main` alike. Request/reply is built by dispatching
+		/// a POST back from state recorded in `on_accept`, a block later.
 		fn responses(response_commitments: Vec<H256>) -> Vec<GetResponse> {
 			Ismp::responses(response_commitments)
 		}

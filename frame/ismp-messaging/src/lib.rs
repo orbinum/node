@@ -7,9 +7,10 @@
 //! Hyperbridge but never *through* it.
 //!
 //! `pallet_ismp` exposes no send extrinsic — its calls are only `handle_unsigned`,
-//! `create_consensus_client`, `update_consensus_state` and `fund_message` — so
-//! originating a request means calling [`ismp::dispatcher::IsmpDispatcher`] from a
-//! pallet of your own. That is why this one exists.
+//! `create_consensus_client`, `update_consensus_state`, `fund_message` and
+//! `update_commitment_caps` — so originating a request means calling
+//! [`ismp::dispatcher::IsmpDispatcher`] from a pallet of your own. That is why this
+//! one exists.
 //!
 //! [`outbound`] builds and dispatches; [`inbound`] handles the `IsmpModule` callbacks;
 //! [`payload`] is the versioned wire format.
