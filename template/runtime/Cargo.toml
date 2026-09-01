@@ -57,12 +57,12 @@ pallet-transaction-payment-rpc-runtime-api = { workspace = true }
 pallet-validator-set = { workspace = true }
 
 # ISMP / Hyperbridge — see the workspace Cargo.toml for why these need patching.
+anyhow = { workspace = true }
+ismp = { workspace = true }
+ismp-grandpa = { workspace = true }
 pallet-ismp = { workspace = true }
 pallet-ismp-messaging = { workspace = true }
 pallet-ismp-runtime-api = { workspace = true }
-ismp = { workspace = true }
-ismp-grandpa = { workspace = true }
-anyhow = { workspace = true }
 
 # Frontier
 fp-evm = { workspace = true, features = ["serde"] }

@@ -9,16 +9,16 @@ repository = "https://github.com/orbinum/node"
 publish = false
 
 [dependencies]
-scale-codec = { workspace = true }
-scale-info = { workspace = true }
+anyhow = { workspace = true }
+frame-benchmarking = { workspace = true, optional = true }
 frame-support = { workspace = true }
 frame-system = { workspace = true }
-sp-runtime = { workspace = true }
-sp-core = { workspace = true }
 ismp = { workspace = true }
-anyhow = { workspace = true }
 pallet-ismp = { workspace = true }
-frame-benchmarking = { workspace = true, optional = true }
+scale-codec = { workspace = true }
+scale-info = { workspace = true }
+sp-core = { workspace = true }
+sp-runtime = { workspace = true }
 
 [dev-dependencies]
 pallet-balances = { workspace = true, features = ["std"] }
