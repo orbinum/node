@@ -322,5 +322,3 @@ codegen-units = 1
 # here. (They used to come from git, which forced a large patch table to keep cargo
 # from seeing two copies of every SDK type.)
 orbinum-zk-core = { path = "primitives/zk-core" }
-# core2 v0.4.0 was yanked from crates.io; patch with git source to unblock cid v0.9.0 -> sc-network
-core2 = { git = "https://github.com/technocreatives/core2", branch = "main" }
