@@ -27,24 +27,8 @@ include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 use alloc::{borrow::Cow, vec, vec::Vec};
 use core::marker::PhantomData;
 use ethereum::AuthorizationList;
-use scale_codec::{Decode, Encode};
-use sp_api::impl_runtime_apis;
-use sp_consensus_aura::sr25519::AuthorityId as AuraId;
-use sp_consensus_grandpa::{AuthorityId as GrandpaId, AuthorityList as GrandpaAuthorityList};
-use sp_core::{
-	crypto::{ByteArray, KeyTypeId},
-	ConstU128, OpaqueMetadata, H160, H256, U256,
-};
-use sp_runtime::{
-	generic, impl_opaque_keys,
-	traits::{
-		BlakeTwo256, Block as BlockT, Convert, DispatchInfoOf, Dispatchable, Get, IdentityLookup,
-		NumberFor, OpaqueKeys, PostDispatchInfoOf, UniqueSaturatedInto,
-	},
-	transaction_validity::{TransactionSource, TransactionValidity, TransactionValidityError},
-	ApplyExtrinsicResult, ConsensusEngineId, ExtrinsicInclusionMode, Perbill, Permill,
-};
-use sp_version::RuntimeVersion;
+use fp_evm::weight_per_gas;
+use fp_rpc::TransactionStatus;
 #[cfg(feature = "with-paritydb-weights")]
 use frame_support::weights::constants::ParityDbWeight as RuntimeDbWeight;
 #[cfg(feature = "with-rocksdb-weights")]
@@ -56,13 +40,29 @@ use frame_support::{
 	weights::{constants::WEIGHT_REF_TIME_PER_MILLIS, IdentityFee, Weight},
 	PalletId,
 };
-use pallet_transaction_payment::FungibleAdapter;
-use polkadot_runtime_common::SlowAdjustingFeeUpdate;
-use sp_genesis_builder::PresetId;
-use fp_evm::weight_per_gas;
-use fp_rpc::TransactionStatus;
 use pallet_ethereum::{Call::transact, PostLogContent, Transaction as EthereumTransaction};
 use pallet_evm::{Account as EVMAccount, FeeCalculator, Runner};
+use pallet_transaction_payment::FungibleAdapter;
+use polkadot_runtime_common::SlowAdjustingFeeUpdate;
+use scale_codec::{Decode, Encode};
+use sp_api::impl_runtime_apis;
+use sp_consensus_aura::sr25519::AuthorityId as AuraId;
+use sp_consensus_grandpa::{AuthorityId as GrandpaId, AuthorityList as GrandpaAuthorityList};
+use sp_core::{
+	crypto::{ByteArray, KeyTypeId},
+	ConstU128, OpaqueMetadata, H160, H256, U256,
+};
+use sp_genesis_builder::PresetId;
+use sp_runtime::{
+	generic, impl_opaque_keys,
+	traits::{
+		BlakeTwo256, Block as BlockT, Convert, DispatchInfoOf, Dispatchable, Get, IdentityLookup,
+		NumberFor, OpaqueKeys, PostDispatchInfoOf, UniqueSaturatedInto,
+	},
+	transaction_validity::{TransactionSource, TransactionValidity, TransactionValidityError},
+	ApplyExtrinsicResult, ConsensusEngineId, ExtrinsicInclusionMode, Perbill, Permill,
+};
+use sp_version::RuntimeVersion;
 
 pub use frame_system::Call as SystemCall;
 pub use pallet_balances::Call as BalancesCall;
@@ -443,6 +443,10 @@ pub mod runtime_api {
 			/// The configured coprocessor, i.e. which Hyperbridge deployment this
 			/// build talks to. `None` would mean ISMP proxying is disabled.
 			fn coprocessor() -> Option<StateMachine>;
+
+			/// The slot duration to whitelist the coprocessor with, so callers derive
+			/// it from the runtime instead of restating it.
+			fn hyperbridge_slot_duration() -> u64;
 		}
 	}
 }
@@ -1048,9 +1052,12 @@ impl_runtime_apis! {
 		fn coprocessor() -> Option<StateMachine> {
 			configs::ismp::network::coprocessor()
 		}
+
+		fn hyperbridge_slot_duration() -> u64 {
+			configs::ismp::network::HYPERBRIDGE_SLOT_DURATION_MS
+		}
 	}
 
-	// Relayer Runtime API implementation
 	impl pallet_relayer_runtime_api::RelayerRuntimeApi<Block> for Runtime {
 		fn is_relayer(account: sp_runtime::AccountId32) -> bool {
 			pallet_relayer::RelayerByAccount::<Runtime>::contains_key(&account)

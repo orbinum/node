@@ -1,59 +1,56 @@
-//! Bounds for a whitelisted state machine's slot duration.
+//! Bounds on a whitelisted state machine's slot duration.
 //!
-//! `ismp_grandpa::add_state_machines` writes `slot_duration` to storage unvalidated.
-//! Downstream, `substrate_state_machine::fetch_overlay_root_and_timestamp` derives a
-//! header timestamp with an unchecked multiply, `*slot * slot_duration`. Zero makes
-//! every timestamp `0`, so unbonding and challenge-period checks against that chain
-//! become vacuous without erroring; a very large value overflows.
+//! Upstream's `fetch_overlay_root_and_timestamp` derives header timestamps with an
+//! unchecked `*slot * slot_duration`, still raw in `substrate-state-machine 2606.0.0`
+//! (the fix is on Hyperbridge's `main`, unpublished). Zero makes every timestamp `0`, so
+//! challenge-period checks against that chain pass vacuously without erroring; a very
+//! large value overflows.
 //!
-//! Both are fixed on Hyperbridge's `main` (`saturating_mul`, plus an error when the
-//! timestamp still resolves to zero) — but that fix has never been published.
-//! `substrate-state-machine 2606.0.0`, the release we are on, still carries the raw
-//! multiply, in two places rather than main's single `.map()`. So the exposure is live
-//! on the published stack regardless of SDK version, and these bounds stay until a
-//! release ships the fix.
-//!
-//! **These bounds are advisory.** `add_state_machines` is an upstream extrinsic we
-//! cannot intercept without a chain-wide `BaseCallFilter` — disproportionate for a
-//! value only root can set. `slot_duration` comes from our own whitelist and derives
-//! timestamps for *counterparty* headers, so a bad value corrupts our view of one
-//! remote chain rather than opening an attack surface: a governance footgun, not an
-//! escalation. Both edges are asserted on the exact stored value, so a change in
-//! either direction surfaces rather than passing silently.
+//! Advisory, not enforced: `add_state_machines` is upstream's own extrinsic and takes no
+//! hook, and it is root-only. What the tests below do enforce is that the value *we*
+//! whitelist Hyperbridge with is inside these bounds.
 
-/// Lower bound, in milliseconds. Below this a chain is not producing blocks in any
-/// meaningful sense, and zero is actively dangerous — see the module docs.
-#[allow(dead_code)]
+/// Lower bound. Below this a chain is not producing blocks in any meaningful sense, and
+/// zero is actively dangerous — see the module docs.
 pub const MIN_SLOT_DURATION_MS: u64 = 1_000;
 
-/// Upper bound, in milliseconds — one hour.
-///
-/// Far above any real chain (Polkadot 6s, Ethereum 12s) and low enough that
-/// `slot * slot_duration` cannot overflow `u64` for any reachable slot number:
-/// `u64::MAX / 3_600_000` is roughly 5.1e12 slots, about 580 million years at one
-/// slot per hour.
-#[allow(dead_code)]
+/// Upper bound, one hour: far above any real chain, and low enough that
+/// `slot * slot_duration` cannot overflow `u64` for a reachable slot number
+/// (`u64::MAX / 3_600_000` ≈ 5.1e12 slots).
 pub const MAX_SLOT_DURATION_MS: u64 = 3_600_000;
 
-/// Returns whether `slot_duration` is safe to whitelist.
-///
-/// See the module docs for what each bound prevents.
-#[allow(dead_code)]
 pub const fn validate_slot_duration(slot_duration: u64) -> bool {
 	slot_duration >= MIN_SLOT_DURATION_MS && slot_duration <= MAX_SLOT_DURATION_MS
 }
+
+/// Compile-time check on the value this runtime whitelists the coprocessor with.
+///
+/// The bounds cannot gate upstream's extrinsic, but they can gate *our* constant: a
+/// build with an out-of-range `HYPERBRIDGE_SLOT_DURATION_MS` fails here rather than
+/// producing a chain whose challenge-period checks are vacuous.
+const _: () = assert!(validate_slot_duration(
+	super::network::HYPERBRIDGE_SLOT_DURATION_MS
+));
 
 #[cfg(test)]
 mod tests {
 	use super::*;
 
+	/// The value the setup path actually whitelists Hyperbridge with must be safe.
+	///
+	/// This is the only caller-facing assertion here: the bounds cannot gate upstream's
+	/// extrinsic, but a typo in our own constant is a mistake we can catch.
+	#[test]
+	fn the_hyperbridge_slot_duration_we_whitelist_is_within_bounds() {
+		assert!(validate_slot_duration(
+			super::super::network::HYPERBRIDGE_SLOT_DURATION_MS
+		));
+	}
+
 	#[test]
 	fn rejects_the_values_that_break_timestamp_derivation() {
-		// Zero makes every header timestamp to 0.
 		assert!(!validate_slot_duration(0));
-		// u64::MAX overflows `slot * slot_duration` on any non-zero slot.
 		assert!(!validate_slot_duration(u64::MAX));
-		// Just outside each bound.
 		assert!(!validate_slot_duration(MIN_SLOT_DURATION_MS - 1));
 		assert!(!validate_slot_duration(MAX_SLOT_DURATION_MS + 1));
 	}
@@ -68,8 +65,6 @@ mod tests {
 
 	#[test]
 	fn max_bound_cannot_overflow_the_timestamp_multiply() {
-		// Upstream computes `slot * slot_duration` unchecked. At MAX the slot number
-		// would have to exceed ~5.1e12 to overflow, which no chain reaches.
 		let max_slots = u64::MAX / MAX_SLOT_DURATION_MS;
 		assert!(max_slots > 5_000_000_000_000);
 		assert!(max_slots.checked_mul(MAX_SLOT_DURATION_MS).is_some());

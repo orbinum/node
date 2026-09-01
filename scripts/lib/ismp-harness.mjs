@@ -16,10 +16,9 @@ export const HYPERBRIDGE_MAINNET_PARA_ID = 3367;
 /**
  * The slot duration of the chain being whitelisted — Hyperbridge, not Orbinum.
  *
- * The two happen to coincide at 6000 ms today, and this constant previously described
- * itself as both. They are different chains' block times: if Orbinum's ever changed, a
- * rename-free edit here would corrupt the whitelist entry with a value that belongs to
- * the wrong chain.
+ * They are different chains' block times, coinciding at 6000 ms today. Prefer
+ * {@link hyperbridgeSlotDuration}, which reads the runtime's own constant; this fallback
+ * exists only for callers without an api handle.
  */
 export const HYPERBRIDGE_SLOT_DURATION_MS = 6000;
 
@@ -206,13 +205,24 @@ export const coprocessor = async (api) => {
 };
 
 /**
+ * The slot duration this runtime whitelists the coprocessor with, read from the node.
+ *
+ * The runtime enforces its own bounds on this value at compile time, so reading it here
+ * means the suites cannot whitelist something the runtime would have rejected.
+ */
+export const hyperbridgeSlotDuration = async (api) => {
+  const raw = await api.rpc.state.call('OrbinumIsmpApi_hyperbridge_slot_duration', '0x');
+  return api.createType('u64', raw).toNumber();
+};
+
+/**
  * The Hyperbridge whitelist entry for the network this node was built against.
  *
- * Derived from the runtime, never hardcoded — see {@link coprocessor}.
+ * Both halves come from the runtime, never hardcoded — see {@link coprocessor}.
  */
-export const hyperbridgeEntry = async (api, slotDuration = HYPERBRIDGE_SLOT_DURATION_MS) => ({
+export const hyperbridgeEntry = async (api, slotDuration) => ({
   stateMachine: (await coprocessor(api)).toJSON(),
-  slotDuration,
+  slotDuration: slotDuration ?? (await hyperbridgeSlotDuration(api)),
 });
 
 /**

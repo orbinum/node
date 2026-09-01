@@ -18,6 +18,13 @@ pub const HYPERBRIDGE_MAINNET_PARA_ID: u32 = 3367;
 #[allow(dead_code)]
 pub const HYPERBRIDGE_TESTNET_PARA_ID: u32 = 4009;
 
+/// Hyperbridge's slot duration, in milliseconds — the value to whitelist it with.
+///
+/// This is the *counterparty's* block time, not Orbinum's; they coincide at 6s today.
+/// It reaches the chain through `ismp_grandpa::add_state_machines`, so the setup scripts
+/// read it from here rather than restating it.
+pub const HYPERBRIDGE_SLOT_DURATION_MS: u64 = 6_000;
+
 /// Orbinum's own four-byte identifier on the ISMP network.
 ///
 /// Remote chains use this both to address requests to Orbinum and to accept requests

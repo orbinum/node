@@ -184,23 +184,23 @@ const whitelistIntegrity = async (api, checks, { alice }) => {
 /**
  * Boundary values, and whether the chain survives them.
  *
- * `slot_duration` is stored unvalidated by upstream (see
- * `configs/ismp/slot_duration.rs` for the full analysis). These cases record that
- * behaviour and assert the chain does not panic or stall because of it.
+ * `slot_duration` is stored unvalidated by upstream: `add_state_machines` inserts
+ * whatever root passes. These cases record that behaviour and assert the chain does not
+ * panic or stall because of it.
  */
 const boundaryValues = async (api, checks, { alice }) => {
   console.log('\n[4] Boundary and malformed values');
 
-  // Zero makes every header timestamp to 0, so unbonding/challenge checks against
-  // that chain become vacuous. Upstream accepts it; Orbinum guards it runtime-side.
+  // Zero makes every header timestamp 0, so unbonding/challenge checks against that
+  // chain become vacuous. Upstream accepts it, and nothing runtime-side can refuse it —
+  // the bounds only gate the value Orbinum itself whitelists, at compile time.
   const zero = await sudoOutcome(
     api, api.tx.ismpGrandpa.addStateMachines([{ stateMachine: { Polkadot: FIXTURE.ZERO_SLOT }, slotDuration: 0 }]), alice
   );
   const zeroStored = await whitelistedStateMachine(api, { Polkadot: FIXTURE.ZERO_SLOT });
-  // Assert the exact value so a change in EITHER direction fails. On 2512,
-  // `substrate-state-machine/src/lib.rs:391` derives the header timestamp as a raw
-  // `*slot * slot_duration` with no zero-guard, so 0 yields a vacuous timestamp rather
-  // than an error. 2606 added the guard.
+  // Assert the exact value so a change in EITHER direction fails. The published
+  // `substrate-state-machine` still derives the timestamp as a raw `*slot *
+  // slot_duration` with no zero-guard, so 0 yields a vacuous timestamp, not an error.
   checks.add(
     'slot_duration=0 is stored verbatim by upstream (no validation)',
     zero.ok && zeroStored !== null && zeroStored.toNumber() === 0,
@@ -234,7 +234,7 @@ const boundaryValues = async (api, checks, { alice }) => {
   checks.add(
     'note: unsafe slot_duration values are bounded at our call sites only',
     true,
-    'configs/ismp/slot_duration.rs — MIN=1000ms MAX=3600000ms, unit-tested (advisory, not a dispatch filter)'
+    'MIN=1000ms MAX=3600000ms, enforced at compile time on the value we whitelist; upstream dispatch is unfiltered'
   );
 
   // A batch large enough to matter must not brick block production.
