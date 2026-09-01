@@ -4,6 +4,7 @@
 #
 # Usage:
 #   ./scripts/benchmarks/merge-weights.sh <output.rs> <part1.rs> <part2.rs> ...
+#   ./scripts/benchmarks/merge-weights.sh --allow-partial <output.rs> <part.rs>
 #
 # Why this exists: `benchmark pallet --extrinsic <one>` emits a file whose `WeightInfo`
 # trait declares only that one function, so it does not satisfy the pallet's real trait.
@@ -22,12 +23,32 @@ if [[ $# -lt 2 ]]; then
     exit 1
 fi
 
+ALLOW_PARTIAL=0
+if [[ "${1:-}" == "--allow-partial" ]]; then ALLOW_PARTIAL=1; shift; fi
+
 OUTPUT="$1"; shift
 PARTS=("$@")
 
 for part in "${PARTS[@]}"; do
     [[ -s "$part" ]] || { echo "Error: missing or empty part: $part" >&2; exit 1; }
 done
+
+# Refuse to overwrite a complete weights file with fewer functions than it already has.
+# A partial merge compiles only if the trait happens to match, and when it does not the
+# error points at the runtime rather than here — but the real damage is the silent case:
+# a file that compiles while missing an extrinsic's real cost. If one part was killed,
+# the merge must fail, not quietly narrow the file.
+if [[ -s "$OUTPUT" && $ALLOW_PARTIAL -eq 0 ]]; then
+    existing=$(grep -cE "^[[:space:]]+fn [a-z_]+\(.*-> Weight;" "$OUTPUT" || true)
+    incoming=${#PARTS[@]}
+    if [[ "$existing" -gt 0 && "$incoming" -lt "$existing" ]]; then
+        echo "Error: $OUTPUT already declares $existing weight functions, but only" >&2
+        echo "       $incoming part(s) were given. Merging would drop the rest." >&2
+        echo "       Re-run the missing extrinsics, or pass --allow-partial if you" >&2
+        echo "       really mean to shrink the file." >&2
+        exit 1
+    fi
+fi
 
 # Guard against silently mixing runs that are not comparable. The header records the
 # machine and the step/repeat counts, so a mismatch there means the numbers came from
