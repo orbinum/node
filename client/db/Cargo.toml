@@ -37,7 +37,6 @@ fp-consensus = { workspace = true, features = ["default"], optional = true }
 fp-rpc = { workspace = true, features = ["default"], optional = true }
 fp-storage = { workspace = true, features = ["default"] }
 
-
 [features]
 default = ["rocksdb"]
 rocksdb = [

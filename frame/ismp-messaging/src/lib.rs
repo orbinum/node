@@ -130,9 +130,15 @@ pub mod pallet {
 			found: u32,
 		},
 		/// A request we dispatched expired without being delivered.
-		RequestTimedOut { dest: StateMachine },
-		SourceAccepted { source: StateMachine },
-		SourceRemoved { source: StateMachine },
+		RequestTimedOut {
+			dest: StateMachine,
+		},
+		SourceAccepted {
+			source: StateMachine,
+		},
+		SourceRemoved {
+			source: StateMachine,
+		},
 	}
 
 	/// Why an inbound message was not acted on.
