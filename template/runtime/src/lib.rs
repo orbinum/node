@@ -470,7 +470,6 @@ mod benches {
 		[pallet_relayer, Relayer]
 		[pallet_validator_set, ValidatorSet]
 		[ismp_grandpa, IsmpGrandpa]
-		[pallet_ismp, Ismp]
 		[pallet_ismp_messaging, IsmpMessaging]
 	);
 }
@@ -601,8 +600,11 @@ impl_runtime_apis! {
 	}
 
 	impl sp_session::SessionKeys<Block> for Runtime {
-		fn generate_session_keys(seed: Option<Vec<u8>>) -> Vec<u8> {
-			opaque::SessionKeys::generate(seed)
+		fn generate_session_keys(
+			owner: Vec<u8>,
+			seed: Option<Vec<u8>>,
+		) -> sp_session::OpaqueGeneratedSessionKeys {
+			opaque::SessionKeys::generate(&owner, seed).into()
 		}
 
 		fn decode_session_keys(

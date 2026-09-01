@@ -126,6 +126,7 @@ where
 			telemetry.as_ref().map(|(_, telemetry)| telemetry.handle()),
 			executor,
 			true,
+			Vec::new(),
 		)?;
 	let client = Arc::new(client);
 
@@ -375,6 +376,7 @@ where
 	let (network, system_rpc_tx, tx_handler_controller, sync_service) =
 		sc_service::build_network(sc_service::BuildNetworkParams {
 			config: &config,
+			spawn_essential_handle: task_manager.spawn_essential_handle(),
 			net_config,
 			client: client.clone(),
 			transaction_pool: transaction_pool.clone(),

@@ -29,7 +29,6 @@
 //! `MAXIMUM_BLOCK_LENGTH` is 8 MiB at an 85% normal ratio because of this pallet:
 //! GRANDPA proofs do not fit the previous 5 MiB budget.
 
-pub mod consensus_guard;
 pub mod network;
 pub mod slot_duration;
 
@@ -123,10 +122,11 @@ impl pallet_ismp::Config for Runtime {
 	/// Only the GRANDPA client. That single choice is what lets a sovereign chain
 	/// participate without surrendering consensus.
 	///
-	/// Wrapped in [`consensus_guard::GuardedGrandpaConsensusClient`], which restores a
-	/// check the 2512 client is missing — live for us, since we track Hyperbridge as
-	/// `Kusama(4009)`. See that module.
-	type ConsensusClients = (consensus_guard::GuardedGrandpaConsensusClient,);
+	/// The 2606 client carries the envelope/state-machine binding built in
+	/// (`envelope_matches_state_machine`), so the local `consensus_guard` backport that
+	/// existed on 2512 is gone. The wiring test below still asserts the rejection, so a
+	/// downgrade or a fork without the check cannot pass silently.
+	type ConsensusClients = (ismp_grandpa::consensus::GrandpaConsensusClient<Runtime>,);
 
 	/// No offchain MMR: Orbinum's message flow does not need proof generation.
 	type OffchainDB = ();
@@ -140,11 +140,6 @@ impl pallet_ismp::Config for Runtime {
 		IsmpTreasuryPalletId,
 		false,
 	>;
-
-	/// Benchmarked: the unit impl returns `Weight::zero()` for every drain step, which
-	/// would let the `on_idle` legacy-drain loop run unmetered. Inert on a chain with
-	/// no legacy state, but metered by accounting rather than by luck.
-	type MigrationWeightInfo = crate::weights::pallet_ismp::SubstrateWeight<Runtime>;
 }
 
 impl ismp_grandpa::Config for Runtime {
@@ -310,4 +305,91 @@ impl pallet_ismp_messaging::Config for Runtime {
 	/// and swap this for `pallet_ismp_messaging::weights::SubstrateWeight<Runtime>`.
 	/// The unit impl is conservative by hand, not measured.
 	type WeightInfo = ();
+}
+
+#[cfg(test)]
+mod consensus_binding_tests {
+	use super::*;
+	use grandpa_verifier_primitives::{ConsensusState, FinalityProof};
+	use ismp::host::IsmpHost;
+	use ismp_grandpa::messages::{ConsensusMessage, StandaloneChainMessage};
+	use scale_codec::Encode;
+
+	/// On 2512 this binding lived in a local wrapper (`consensus_guard.rs`); 2606 builds
+	/// it into the client. The wrapper is gone, so this drives the client **the runtime
+	/// actually wires** and asserts upstream's own rejection — a fork or downgrade that
+	/// drops the check fails here instead of passing silently.
+	#[test]
+	fn configured_consensus_client_rejects_mismatched_envelope() {
+		sp_io::TestExternalities::default().execute_with(|| {
+			let err = verify_with_envelope(standalone_envelope())
+				.expect_err("a relay envelope under a parachain tracker must be rejected");
+			assert!(
+				format!("{err:?}").contains("envelope does not match"),
+				"expected the envelope-binding rejection, got: {err:?}"
+			);
+		});
+	}
+
+	/// The mirror case: a *correct* pairing must get past the binding check. The proof
+	/// is garbage, so verification still fails — but with a different error, which is
+	/// what distinguishes "envelope rejected" from "envelope accepted, proof bad".
+	#[test]
+	fn correct_envelope_passes_the_binding_check() {
+		sp_io::TestExternalities::default().execute_with(|| {
+			let err = verify_with_envelope(ConsensusMessage::Polkadot(
+				ismp_grandpa::messages::RelayChainMessage {
+					finality_proof: empty_proof(),
+					parachain_headers: Default::default(),
+				},
+			))
+			.expect_err("garbage proof cannot verify");
+			assert!(
+				!format!("{err:?}").contains("envelope does not match"),
+				"the correct pairing must not trip the binding check: {err:?}"
+			);
+		});
+	}
+
+	fn verify_with_envelope(
+		message: ConsensusMessage,
+	) -> Result<(alloc::vec::Vec<u8>, ismp::consensus::VerifiedCommitments), ismp::error::Error> {
+		let clients = pallet_ismp::Pallet::<Runtime>::default().consensus_clients();
+		let grandpa = clients
+			.iter()
+			.find(|c| c.consensus_client_id() == ismp_grandpa::consensus::GRANDPA_CONSENSUS_ID)
+			.expect("the GRANDPA client must be wired into `ConsensusClients`");
+
+		// Hyperbridge's testnet deployment is a parachain tracker; `StandaloneChain` is
+		// the envelope the upstream advisory names as the smuggling vector.
+		let trusted = ConsensusState {
+			current_authorities: Default::default(),
+			current_set_id: 0,
+			latest_height: 0,
+			latest_hash: Default::default(),
+			slot_duration: 6_000,
+			state_machine: StateMachine::Kusama(network::HYPERBRIDGE_TESTNET_PARA_ID),
+		};
+
+		grandpa.verify_consensus(
+			&pallet_ismp::Pallet::<Runtime>::default(),
+			*b"PAS0",
+			trusted.encode(),
+			message.encode(),
+		)
+	}
+
+	fn empty_proof() -> FinalityProof<ismp_grandpa::messages::SubstrateHeader> {
+		FinalityProof {
+			block: Default::default(),
+			justification: Default::default(),
+			unknown_headers: Default::default(),
+		}
+	}
+
+	fn standalone_envelope() -> ConsensusMessage {
+		ConsensusMessage::StandaloneChain(StandaloneChainMessage {
+			finality_proof: empty_proof(),
+		})
+	}
 }

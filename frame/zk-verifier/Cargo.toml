@@ -21,17 +21,17 @@ serde = { version = "1.0", default-features = false, features = ["derive", "allo
 
 # Substrate primitives
 
-sp-io = { version = "44.0.0", default-features = false }
-sp-runtime = { version = "45.0.0", default-features = false }
+sp-io = { version = "48.0.0", default-features = false }
+sp-runtime = { version = "48.0.0", default-features = false }
 sp-std = { version = "14.0.0", default-features = false }
 
 # Logging (optional for std)
 log = { version = "0.4", default-features = false, optional = true }
 
 # FRAME dependencies
-frame-benchmarking = { version = "45.0.3", default-features = false, optional = true }
-frame-support = { version = "45.1.3", default-features = false }
-frame-system = { version = "45.0.0", default-features = false }
+frame-benchmarking = { version = "49.0.0", default-features = false, optional = true }
+frame-support = { version = "48.0.0", default-features = false }
+frame-system = { version = "48.0.0", default-features = false }
 
 # Local dependencies
 ark-bn254 = { version = "0.5.0", default-features = false, features = ["curve"], optional = true }

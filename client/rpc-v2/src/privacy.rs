@@ -34,11 +34,8 @@ mod serde_u128_str {
 	}
 }
 use sp_blockchain::HeaderBackend;
-use sp_core::{
-	hashing::{blake2_128, twox_128},
-	storage::StorageKey,
-	H256,
-};
+use sp_core::{storage::StorageKey, H256};
+use sp_crypto_hashing::{blake2_128, twox_128};
 use sp_runtime::traits::Block as BlockT;
 use std::{marker::PhantomData, sync::Arc};
 
@@ -431,7 +428,7 @@ where
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use sp_core::hashing::twox_128;
+	use sp_crypto_hashing::twox_128;
 
 	// -------------------------------------------------------------------------
 	// Storage key helpers

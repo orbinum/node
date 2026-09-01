@@ -181,8 +181,8 @@ pub mod pallet {
 			// what clippy::assertions_on_constants asks for.
 			const {
 				assert!(
-					!cfg!(feature = "skip-proof-verification") ||
-						cfg!(feature = "runtime-benchmarks"),
+					!cfg!(feature = "skip-proof-verification")
+						|| cfg!(feature = "runtime-benchmarks"),
 					"pallet-zk-verifier compiled with `skip-proof-verification` but without \
 					 `runtime-benchmarks`: ZK proof verification is disabled outside a \
 					 benchmark build. This must never run on a live chain."
@@ -2143,4 +2143,3 @@ mod tests {
 		});
 	}
 }
-

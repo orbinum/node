@@ -101,7 +101,7 @@ fn add_validator_requires_root() {
 		.execute_with(|| {
 			assert_noop!(
 				ValidatorSet::add_validator(RuntimeOrigin::signed(1), 42),
-				frame_support::error::BadOrigin
+				sp_runtime::traits::BadOrigin
 			);
 		});
 }
@@ -188,7 +188,7 @@ fn remove_validator_requires_root() {
 		.execute_with(|| {
 			assert_noop!(
 				ValidatorSet::remove_validator(RuntimeOrigin::signed(1), 2),
-				frame_support::error::BadOrigin
+				sp_runtime::traits::BadOrigin
 			);
 		});
 }

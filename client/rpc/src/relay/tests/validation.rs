@@ -75,10 +75,10 @@ fn rejects_calldata_196_bytes_old_wrong_limit() {
 /// with this file would satisfy equality while rejecting every real call.
 #[test]
 fn selectors_are_keccak_of_the_abi_signatures() {
-	let pt = sp_core::hashing::keccak_256(
+	let pt = sp_io::hashing::keccak_256(
 		b"privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)",
 	);
-	let un = sp_core::hashing::keccak_256(
+	let un = sp_io::hashing::keccak_256(
 		b"unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)",
 	);
 	assert_eq!(pt[..4], SELECTOR_PRIVATE_TRANSFER);

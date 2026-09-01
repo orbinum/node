@@ -87,7 +87,6 @@ pub use types::{
 
 use frame_support::pallet_prelude::{Decode, DecodeWithMemTracking, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
-use sp_runtime::RuntimeDebug;
 
 /// Who submitted a relayed spend, as established by the dispatch path itself.
 ///
@@ -101,7 +100,7 @@ use sp_runtime::RuntimeDebug;
 	PartialEq,
 	Eq,
 	Clone,
-	RuntimeDebug,
+	Debug,
 	Encode,
 	Decode,
 	DecodeWithMemTracking,
@@ -516,8 +515,8 @@ pub mod pallet {
 			// what clippy::assertions_on_constants asks for.
 			const {
 				assert!(
-					!cfg!(feature = "skip-proof-verification") ||
-						cfg!(feature = "runtime-benchmarks"),
+					!cfg!(feature = "skip-proof-verification")
+						|| cfg!(feature = "runtime-benchmarks"),
 					"pallet-shielded-pool compiled with `skip-proof-verification` but without \
 					 `runtime-benchmarks`: shield/unshield/transfer proofs are NOT verified \
 					 outside a benchmark build. This must never run on a live chain."
@@ -1181,7 +1180,11 @@ pub mod pallet {
 	/// Validate unsigned private_transfer and unshield transactions before
 	/// they enter the transaction pool.  Full ZK proof verification happens
 	/// inside the extrinsic; here we do lightweight anti-spam checks only.
+	// `ValidateUnsigned` is deprecated in favour of `#[pallet::authorize]` (removal
+	// slated for 2027); migrating is a behavioural change scheduled separately. The
+	// extra allows cover the macro-expanded code, which trips `-D warnings` on its own.
 	#[pallet::validate_unsigned]
+	#[allow(deprecated)]
 	impl<T: Config> sp_runtime::traits::ValidateUnsigned for Pallet<T> {
 		type Call = Call<T>;
 

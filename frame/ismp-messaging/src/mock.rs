@@ -110,7 +110,6 @@ impl pallet_ismp::Config for Test {
 		TreasuryPalletId,
 		false,
 	>;
-	type MigrationWeightInfo = ();
 }
 
 impl pallet_ismp_messaging::Config for Test {

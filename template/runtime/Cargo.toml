@@ -62,7 +62,6 @@ pallet-ismp-messaging = { workspace = true }
 pallet-ismp-runtime-api = { workspace = true }
 ismp = { workspace = true }
 ismp-grandpa = { workspace = true }
-grandpa-verifier-primitives = { workspace = true }
 anyhow = { workspace = true }
 
 # Frontier
@@ -100,6 +99,10 @@ cumulus-pallet-weight-reclaim = { workspace = true }
 
 [build-dependencies]
 substrate-wasm-builder = { workspace = true, optional = true, features = ["metadata-hash"] }
+
+[dev-dependencies]
+# Only the consensus-binding tests build fixtures from it.
+grandpa-verifier-primitives = { workspace = true, features = ["std"] }
 
 [features]
 default = ["std", "with-rocksdb-weights", "poseidon-native-runtime"]
@@ -158,7 +161,6 @@ std = [
 	"pallet-ismp-runtime-api/std",
 	"ismp/std",
 	"ismp-grandpa/std",
-	"grandpa-verifier-primitives/std",
 	"anyhow/std",
 	"pallet-timestamp/std",
 	"pallet-transaction-payment/std",

@@ -14,8 +14,17 @@ parameter_types! {
 	/// Note the ratio: block LENGTH uses 85% (`BLOCK_LENGTH_NORMAL_RATIO`), not the
 	/// 75% `NORMAL_DISPATCH_RATIO` that bounds weights. ISMP needs the extra headroom
 	/// for GRANDPA consensus proofs; weights are deliberately left where they were.
+	// Replaces the deprecated `max_with_normal_ratio(max, ratio)`: every class gets
+	// `max`, Normal gets `ratio * max` — same semantics, spelled with the builder.
+	// (The deprecation note names a `normal_ratio` builder method that does not exist
+	// on this release.)
 	pub BlockLength: frame_system::limits::BlockLength = frame_system::limits::BlockLength
-		::max_with_normal_ratio(MAXIMUM_BLOCK_LENGTH, BLOCK_LENGTH_NORMAL_RATIO);
+		::builder()
+		.max_length(MAXIMUM_BLOCK_LENGTH)
+		.modify_max_length_for_class(frame_support::dispatch::DispatchClass::Normal, |len| {
+			*len = BLOCK_LENGTH_NORMAL_RATIO * MAXIMUM_BLOCK_LENGTH;
+		})
+		.build();
 	pub const SS58Prefix: u8 = 42;
 }
 

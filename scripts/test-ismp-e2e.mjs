@@ -66,7 +66,8 @@ const checkPalletsPresent = (api, checks) => {
   const storage = Object.keys(api.query.ismp ?? {});
   checks.add(
     'ISMP consensus storage present',
-    ['consensusStates', 'stateCommitments', 'challengePeriod'].every((k) => storage.includes(k)),
+    // 2606 dropped the legacy `StateCommitments`; the bounded map is the only one.
+    ['consensusStates', 'boundedStateCommitments', 'challengePeriod'].every((k) => storage.includes(k)),
     `${storage.length} storage items`
   );
 };
@@ -194,28 +195,16 @@ const checkRuntimeApiReadsLiveStorage = async (api, checks, endpoint) => {
     `storage=${cpStorage.isNone ? 'none' : cpStorage.toString()} rpc=${JSON.stringify(cpRpc.result ?? null)}`
   );
 
-  // The map the update-time bug was about. Asserting the *bounded* map is the one the
-  // pallet writes; the legacy single map must stay empty.
-  const boundedKeys = await api.query.ismp.boundedStateMachineUpdateTime.keys();
-  const legacyKeys = await api.query.ismp.stateMachineUpdateTime.keys();
-  checks.add(
-    'legacy StateMachineUpdateTime is drained/unused',
-    legacyKeys.length === 0,
-    `legacy=${legacyKeys.length} entries, bounded=${boundedKeys.length} entries`
-  );
-
-  // On 2512 the legacy map still carries `#[pallet::getter(fn
-  // state_machine_update_time)]`, so `api.query.ismp.stateMachineUpdateTime` is the
-  // name that *looks* right and is permanently empty. Upstream removed it in 2606 and
-  // moved the getter onto the bounded map. Until we can take 2606, this asserts both
-  // names still exist and that we read the populated one — if a refactor ever swapped
-  // them, every challenge-period check would silently go blind.
+  // The map the update-time bug was about. On 2512 a legacy `StateMachineUpdateTime`
+  // map coexisted with the bounded one and carried the getter, so the name that looked
+  // right was permanently empty. 2606 removed it: the bounded map must be the ONLY one,
+  // and its reappearance would mean a downgrade or a fork resurrecting the trap.
   const ismpStorage = Object.keys(api.query.ismp ?? {});
   checks.add(
-    'both update-time maps present; runtime API uses the bounded one',
+    'bounded update-time map is the only one (legacy map gone in 2606)',
     ismpStorage.includes('boundedStateMachineUpdateTime') &&
-      ismpStorage.includes('stateMachineUpdateTime'),
-    'runtime API reads boundedStateMachineUpdateTime (see lib.rs)'
+      !ismpStorage.includes('stateMachineUpdateTime'),
+    `update-time maps present: ${ismpStorage.filter((k) => k.toLowerCase().includes('updatetime')).join(', ')}`
   );
 
   // Every storage item the API delegates to must exist under the names used.
