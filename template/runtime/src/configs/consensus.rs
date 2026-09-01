@@ -150,7 +150,3 @@ impl pallet_grandpa::Config for Runtime {
 	type KeyOwnerProof = sp_core::Void;
 	type EquivocationReportSystem = ();
 }
-
-impl cumulus_pallet_weight_reclaim::Config for Runtime {
-	type WeightInfo = ();
-}

@@ -942,7 +942,7 @@ pub mod pallet {
 		#[allow(clippy::too_many_arguments)]
 		pub fn private_transfer(
 			origin: OriginFor<T>,
-			#[allow(unused_variables)] proof: BoundedVec<u8, ConstU32<512>>,
+			proof: BoundedVec<u8, ConstU32<512>>,
 			merkle_root: Hash,
 			nullifiers: BoundedVec<Nullifier, ConstU32<2>>,
 			commitments: BoundedVec<Commitment, ConstU32<2>>,
@@ -1001,7 +1001,7 @@ pub mod pallet {
 		#[allow(clippy::too_many_arguments)]
 		pub fn unshield(
 			origin: OriginFor<T>,
-			#[allow(unused_variables)] proof: BoundedVec<u8, ConstU32<512>>,
+			proof: BoundedVec<u8, ConstU32<512>>,
 			merkle_root: Hash,
 			nullifier: Nullifier,
 			asset_id: u32,

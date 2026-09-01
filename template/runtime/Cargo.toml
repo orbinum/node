@@ -94,9 +94,6 @@ pallet-zk-verifier-runtime-api = { workspace = true }
 # Polkadot
 polkadot-runtime-common = { workspace = true }
 
-# Cumulus primitives
-cumulus-pallet-weight-reclaim = { workspace = true }
-
 [build-dependencies]
 substrate-wasm-builder = { workspace = true, optional = true, features = ["metadata-hash"] }
 
@@ -192,8 +189,6 @@ std = [
 	"pallet-zk-verifier-runtime-api/std",
 	# Polkadot
 	"polkadot-runtime-common/std",
-	# Cumulus primitives
-	"cumulus-pallet-weight-reclaim/std",
 ]
 
 runtime-benchmarks = [
@@ -225,7 +220,6 @@ skip-proof-verification = [
 
 try-runtime = [
 	"frame-try-runtime/try-runtime",
-	"cumulus-pallet-weight-reclaim/try-runtime",
 	"fp-self-contained/try-runtime",
 	"frame-executive/try-runtime",
 	"frame-support/try-runtime",

@@ -204,12 +204,11 @@ substrate-wasm-builder = { version = "34.0.0" }
 polkadot-runtime-common = { version = "29.0.0", default-features = false }
 
 # Cumulus primitives
-cumulus-pallet-weight-reclaim = { version = "0.11.0", default-features = false }
 cumulus-primitives-proof-size-hostfunction = { version = "0.20.0", default-features = false }
 cumulus-primitives-storage-weight-reclaim = { version = "20.0.0", default-features = false }
 
 # XCM
-xcm = { package = "staging-xcm", version = "24.0.0", default-features = false }
+xcm = { package = "staging-xcm", version = "24.1.0", default-features = false }
 
 # Arkworks
 ark-bls12-377 = { version = "0.4.0", default-features = false, features = ["curve"] }

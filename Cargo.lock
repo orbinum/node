@@ -9995,7 +9995,6 @@ name = "orbinum-runtime"
 version = "0.2.0"
 dependencies = [
  "anyhow",
- "cumulus-pallet-weight-reclaim",
  "ethereum",
  "fp-evm",
  "fp-rpc",
