@@ -1,4 +1,4 @@
-//! The Substrate Node Template runtime. This can be compiled with `#[no_std]`, ready for Wasm.
+//! The Orbinum runtime. Compiles with `#[no_std]` for Wasm.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 // `construct_runtime!` does a lot of recursion and requires us to increase the limit to 256.
@@ -21,7 +21,6 @@ mod weights;
 #[cfg(test)]
 mod runtime_tests;
 
-// Make the WASM binary available.
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
@@ -46,7 +45,6 @@ use sp_runtime::{
 	ApplyExtrinsicResult, ConsensusEngineId, ExtrinsicInclusionMode, Perbill, Permill,
 };
 use sp_version::RuntimeVersion;
-// Substrate FRAME
 #[cfg(feature = "with-paritydb-weights")]
 use frame_support::weights::constants::ParityDbWeight as RuntimeDbWeight;
 #[cfg(feature = "with-rocksdb-weights")]
@@ -61,13 +59,11 @@ use frame_support::{
 use pallet_transaction_payment::FungibleAdapter;
 use polkadot_runtime_common::SlowAdjustingFeeUpdate;
 use sp_genesis_builder::PresetId;
-// Frontier
 use fp_evm::weight_per_gas;
 use fp_rpc::TransactionStatus;
 use pallet_ethereum::{Call::transact, PostLogContent, Transaction as EthereumTransaction};
 use pallet_evm::{Account as EVMAccount, FeeCalculator, Runner};
 
-// A few exports that help ease life for downstream crates.
 pub use frame_system::Call as SystemCall;
 pub use pallet_balances::Call as BalancesCall;
 pub use pallet_timestamp::Call as TimestampCall;
@@ -78,54 +74,29 @@ pub use evm_account::{
 use evm_account::{EeSuffixAddressMapping, EnsureAddressMatches};
 use precompiles::FrontierPrecompiles;
 
-/// Type of block number.
 pub type BlockNumber = u32;
 
-/// Alias to 512-bit hash when used in the context of a transaction signature on the chain.
-/// OrbinumSignature unifies sr25519, ed25519, and ECDSA with EVM-compatible AccountId
-/// derivation for ECDSA keys: `[eth_addr | 0x00×12]` — same as `EeSuffixAddressMapping`.
+/// ECDSA keys derive their `AccountId` as `[eth_addr | 0x00×12]` — the same layout
+/// `EeSuffixAddressMapping` uses, so an EVM address and its Substrate account agree.
 pub use orbinum_signature::OrbinumSignature;
 pub type Signature = OrbinumSignature;
 
-/// Account id is always 32 bytes (AccountId32 for Substrate-native accounts)
-/// EVM addresses (20 bytes) are mapped to AccountId32 for compatibility
 pub type AccountId = sp_runtime::AccountId32;
-
-/// The type for looking up accounts. We don't expect more than 4 billion of them, but you
-/// never know...
 pub type AccountIndex = u32;
-
-/// Balance of an account.
 pub type Balance = u128;
-
-/// Index of a transaction in the chain.
 pub type Nonce = u32;
-
-/// A hash of some data used by the chain.
 pub type Hash = H256;
-
-/// The hashing algorithm used by the chain.
 pub type Hashing = BlakeTwo256;
-
-/// Digest item type.
 pub type DigestItem = generic::DigestItem;
-
-/// The address format for describing accounts.
 pub type Address = AccountId;
-
-/// Block header type as expected by this runtime.
 pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
-
-/// Block type as expected by this runtime.
 pub type Block = generic::Block<Header, UncheckedExtrinsic>;
-
-/// A Block signed with a Justification
 pub type SignedBlock = generic::SignedBlock<Block>;
-
-/// BlockId type as expected by this runtime.
 pub type BlockId = generic::BlockId<Block>;
 
-/// The SignedExtension to the basic transaction logic.
+/// Order is wire format, not style: Tesseract builds signed payloads against this exact
+/// tuple, so it must end in `ChargeTransactionPayment` → `CheckMetadataHash`. Reordering
+/// or inserting an extension invalidates every signature the relayer produces.
 pub type SignedExtra = (
 	frame_system::CheckNonZeroSender<Runtime>,
 	frame_system::CheckSpecVersion<Runtime>,
@@ -173,27 +144,21 @@ pub type Executive = frame_executive::Executive<
 	Migrations,
 >;
 
-// Time is measured by number of blocks.
 pub const MILLISECS_PER_BLOCK: u64 = 6000;
 pub const SLOT_DURATION: u64 = MILLISECS_PER_BLOCK;
 pub const MINUTES: BlockNumber = 60_000 / (MILLISECS_PER_BLOCK as BlockNumber);
 pub const HOURS: BlockNumber = MINUTES * 60;
 pub const DAYS: BlockNumber = HOURS * 24;
 
-/// Opaque types. These are used by the CLI to instantiate machinery that don't need to know
-/// the specifics of the runtime. They can then be made to be agnostic over specific formats
-/// of data like extrinsics, allowing for them to continue syncing the network through upgrades
-/// to even the core data structures.
+/// Extrinsic-agnostic types for the CLI, so a node keeps syncing across upgrades that
+/// change the core data structures.
 pub mod opaque {
 	use super::*;
 
 	pub use sp_runtime::OpaqueExtrinsic as UncheckedExtrinsic;
 
-	/// Opaque block header type.
 	pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
-	/// Opaque block type.
 	pub type Block = generic::Block<Header, UncheckedExtrinsic>;
-	/// Opaque block identifier type.
 	pub type BlockId = generic::BlockId<Block>;
 
 	impl_opaque_keys! {
@@ -232,16 +197,13 @@ pub const MAXIMUM_BLOCK_WEIGHT: Weight = Weight::from_parts(
 	WEIGHT_MILLISECS_PER_BLOCK * WEIGHT_REF_TIME_PER_MILLIS,
 	u64::MAX,
 );
-/// 8 MiB, raised from 5 MiB for ISMP: GRANDPA proofs do not fit the old budget. The
-/// 85% ratio below applies to block LENGTH only — `NORMAL_DISPATCH_RATIO` still governs
-/// weights at 75%.
+/// 8 MiB: GRANDPA consensus proofs do not fit the 5 MiB this was before ISMP.
 ///
-/// Bigger blocks widen the DoS surface: re-run benchmarks and confirm validators keep
+/// Bigger blocks widen the DoS surface — re-run benchmarks and confirm validators keep
 /// up under load before mainnet.
 pub const MAXIMUM_BLOCK_LENGTH: u32 = 8 * 1024 * 1024;
 
-/// Normal-dispatch ratio for block LENGTH only: 85% so a GRANDPA proof fits in a
-/// normal extrinsic.
+/// Applies to block LENGTH only; weights stay at `NORMAL_DISPATCH_RATIO`.
 pub const BLOCK_LENGTH_NORMAL_RATIO: Perbill = Perbill::from_percent(85);
 
 // Pallet `Config` impls live in `configs/`, grouped by domain. They are plain
@@ -483,12 +445,9 @@ mod benches {
 
 /// Orbinum-local ISMP runtime API.
 ///
-/// Upstream's `IsmpRuntimeApi` has no accessor for the coprocessor, and neither
-/// `Coprocessor` nor `HostStateMachine` is a `#[pallet::constant]`, so neither reaches
-/// metadata. That left the value deciding which relay chain our state commitments are
-/// recorded under undiscoverable from a running node — the suites hardcoded it and were
-/// wrong for the testnet build with nothing failing. Exposing it lets them read the
-/// answer off the node instead of restating it.
+/// Upstream has no coprocessor accessor, and neither `Coprocessor` nor
+/// `HostStateMachine` is a `#[pallet::constant]`, so neither reaches metadata. Without
+/// this, the value is undiscoverable from a running node and callers must restate it.
 pub mod runtime_api {
 	use ismp::host::StateMachine;
 

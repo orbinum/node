@@ -10,7 +10,6 @@ use frame_support::parameter_types;
 impl pallet_aura::Config for Runtime {
 	type AuthorityId = AuraId;
 	type MaxAuthorities = ConstU32<32>;
-	// Session manages disabled validators when pallet-session is active.
 	type DisabledValidators = Session;
 	type AllowMultipleBlocksPerSlot = ConstBool<false>;
 	type SlotDuration = pallet_aura::MinimumPeriodTimesTwo<Runtime>;
@@ -23,9 +22,7 @@ parameter_types! {
 	pub const Offset: u32 = 0;
 }
 
-/// Identity converter: `AccountId` → `Option<AccountId>` (always `Some`).
-///
-/// Used as `pallet_session::Config::ValidatorIdOf` when `ValidatorId = AccountId`.
+/// `pallet_session::Config::ValidatorIdOf` for `ValidatorId = AccountId`.
 pub struct IdentityValidatorId;
 impl Convert<AccountId, Option<AccountId>> for IdentityValidatorId {
 	fn convert(a: AccountId) -> Option<AccountId> {
@@ -35,32 +32,26 @@ impl Convert<AccountId, Option<AccountId>> for IdentityValidatorId {
 
 impl pallet_session::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	/// Validators are identified by their `AccountId`.
 	type ValidatorId = AccountId;
-	/// Identity mapping: stash AccountId → ValidatorId (same type).
 	type ValidatorIdOf = IdentityValidatorId;
-	/// Sessions rotate every `Period` blocks.
 	type ShouldEndSession = pallet_session::PeriodicSessions<Period, Offset>;
 	type NextSessionRotation = pallet_session::PeriodicSessions<Period, Offset>;
-	/// Validator set is managed by our custom `ValidatorSet` pallet (sudo-gated).
 	type SessionManager = ValidatorSet;
-	/// Session handlers: Aura + GRANDPA are notified on each session change.
 	type SessionHandler = <opaque::SessionKeys as OpaqueKeys>::KeyTypeIdProviders;
 	type Keys = opaque::SessionKeys;
-	/// No disabling strategy — validators are never automatically disabled.
+	/// Validators are never disabled automatically.
 	type DisablingStrategy = ();
-	/// Balances pallet handles key-deposit holds.
 	type Currency = Balances;
-	/// No deposit required to set session keys (testnet).
+	/// No deposit to set session keys, on testnet.
 	type KeyDeposit = ConstU128<0>;
 	type WeightInfo = ();
 }
 
 /// Verifies that an account can actually author before it joins the active set.
 ///
-/// [`has_session_keys`] checks that `pallet_session::NextKeys` holds an entry for
-/// `who`, i.e. the operator called `session.setKeys` with their Aura + GRANDPA
-/// keys. Without them the account would hold a slot without producing blocks.
+/// Checks `pallet_session::NextKeys` for `who`, i.e. that the operator called
+/// `session.setKeys` with their Aura + GRANDPA keys. Without them the account would hold
+/// a slot without producing blocks.
 pub struct ValidatorPrerequisiteChecker;
 
 impl pallet_validator_set::ValidatorPrerequisites<AccountId> for ValidatorPrerequisiteChecker {
@@ -106,13 +97,9 @@ impl pallet_validator_set::OnValidatorRemoved<AccountId> for RelayerCleanup {
 }
 
 impl pallet_validator_set::Config for Runtime {
-	/// Only sudo (EnsureRoot) can add and remove validators.
 	type AddRemoveOrigin = frame_system::EnsureRoot<AccountId>;
-	/// Maximum 32 validators in the approved (active) set.
 	type MaxValidators = ConstU32<32>;
-	/// Gate on `add_validator`: the account must already have session keys.
 	type Prerequisites = ValidatorPrerequisiteChecker;
-	/// Drop the EVM relay binding when an account leaves the set.
 	type OnValidatorRemoved = RelayerCleanup;
 	type WeightInfo = pallet_validator_set::weights::SubstrateWeight<Runtime>;
 }
@@ -122,11 +109,8 @@ impl pallet_authorship::Config for Runtime {
 	type EventHandler = ();
 }
 
-/// Maps an Aura authority index to its `AccountId32`.
-///
-/// `pallet_aura::AuraAuthorId` implements `FindAuthor<u32>` (authority index).
-/// This wrapper looks up the AuraId at that index and converts its 32-byte
-/// sr25519 public key into an `AccountId32`.
+/// Maps an Aura authority index to its `AccountId32`: upstream's `AuraAuthorId` yields
+/// the index, and the sr25519 public key at that index is the account's 32 bytes.
 pub struct FindAuthorAccountId;
 impl FindAuthor<AccountId> for FindAuthorAccountId {
 	fn find_author<'a, I>(digests: I) -> Option<AccountId>
