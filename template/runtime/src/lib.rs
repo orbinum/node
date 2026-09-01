@@ -109,32 +109,18 @@ pub type SignedExtra = (
 	frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
 );
 
-/// Unchecked extrinsic type as expected by this runtime.
 pub type UncheckedExtrinsic =
 	fp_self_contained::UncheckedExtrinsic<Address, RuntimeCall, Signature, SignedExtra>;
 
-/// Extrinsic type that has already been checked.
 pub type CheckedExtrinsic =
 	fp_self_contained::CheckedExtrinsic<AccountId, RuntimeCall, SignedExtra, H160>;
 
-/// The payload being signed in transactions.
 pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 
-/// Storage migrations run on runtime upgrade, oldest first.
-///
-/// Drop an entry once every live chain has passed its version — a migration
-/// that can no longer run is dead weight that could be re-armed by mistake.
-/// Empty: every live chain is past v3.
-///
-/// Deliberately does NOT include `pallet_ismp::migrations::SeedCommitmentCaps`, which
-/// 2606 ships: it seeds retention caps for `Evm(56)` and `Evm(137)` (BSC, Polygon),
-/// state machines we have no consensus client for — our `ConsensusClients` is GRANDPA
-/// alone. Hyperbridge itself wires it only on its mainnet runtime and deliberately not
-/// on its testnet one. The default cap applies instead, which is the right value for
-/// us; see the note on `MAX_STATE_MACHINE_COMMITMENTS` in `configs::ismp`.
+/// Runs on upgrade, oldest first. Drop an entry once every live chain has passed its
+/// version: a migration that can no longer run could be re-armed by mistake.
 pub type Migrations = ();
 
-/// Executive: handles dispatch to the various modules.
 pub type Executive = frame_executive::Executive<
 	Runtime,
 	Block,
@@ -1028,23 +1014,11 @@ impl_runtime_apis! {
 			pallet_ismp::ConsensusStates::<Runtime>::get(id)
 		}
 
-		/// The host's *local* timestamp when this height was committed. This is the
-		/// clock the challenge period is measured against — not the counterparty's
-		/// own block timestamp, which lives in `StateCommitment.timestamp`.
+		/// The host's *local* timestamp when this height was committed — the clock the
+		/// challenge period is measured against, not the counterparty's own block
+		/// timestamp, which lives in `StateCommitment.timestamp`.
 		///
-		/// Reads `BoundedStateMachineUpdateTime`, **not** the similarly named
-		/// `StateMachineUpdateTime`. On 2512 the latter is a legacy map that nothing
-		/// writes any more (outside benchmarks) and that `on_idle` drains to empty,
-		/// yet it still carries the `#[pallet::getter(fn state_machine_update_time)]`
-		/// attribute — so the obvious-looking read returns `None` forever, leaving
-		/// relayers unable to tell when a challenge period has elapsed and no error
-		/// to point at.
-		///
-		/// On 2606 the trap is gone: upstream deleted the legacy map and moved the
-		/// getter onto the bounded one, so the explicit read below is now simply
-		/// naming the only map there is. `pallet_ismp`'s own
-		/// `IsmpHost::state_machine_update_time` reads the same bounded map. Kept
-		/// explicit so a future rename cannot silently redirect it.
+		/// The map is named explicitly so a future rename cannot silently redirect it.
 		fn state_machine_update_time(id: StateMachineHeight) -> Option<u64> {
 			pallet_ismp::BoundedStateMachineUpdateTime::<Runtime>::get(id.id, id.height)
 		}
@@ -1061,15 +1035,10 @@ impl_runtime_apis! {
 			Ismp::requests(request_commitments)
 		}
 
-		/// Returns `GetResponse`, not `Response`: ISMP has no first-class POST
-		/// response — an application replies with a POST in the opposite direction.
-		/// The published docs show `Vec<Response>` here, which does not compile
-		/// against this version.
-		///
-		/// That asymmetry is the design, not a gap waiting on an API: `IsmpDispatcher`
-		/// declares `dispatch_request` and nothing else, on 2512, on 2606, and on
-		/// Hyperbridge's unpublished `main` alike. Request/reply is built by dispatching
-		/// a POST back from state recorded in `on_accept`, a block later.
+		/// Returns `GetResponse`, not `Response`: ISMP has no first-class POST response,
+		/// by design — `IsmpDispatcher` declares only `dispatch_request`, so an
+		/// application replies with a POST in the opposite direction, a block later. The
+		/// published docs show `Vec<Response>`, which does not compile.
 		fn responses(response_commitments: Vec<H256>) -> Vec<GetResponse> {
 			Ismp::responses(response_commitments)
 		}

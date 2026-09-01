@@ -1,11 +1,8 @@
 //! Which Hyperbridge deployment this runtime talks to, and how Orbinum names itself.
 //!
 //! Hyperbridge is the transport, not the destination: these constants say where the
-//! bridge itself lives, not which chains we exchange messages with. Destinations are
+//! bridge lives, not which chains we exchange messages with. Destinations are
 //! per-message (`dispatch_post`) and per-counterparty (`AcceptedSources`).
-//!
-//! Kept apart from the pallet wiring in [`super`]: these are the per-network values,
-//! and the ones most likely to be edited by someone not otherwise touching ISMP.
 
 use ismp::host::StateMachine;
 
@@ -61,13 +58,9 @@ mod tests {
 
 	#[test]
 	fn para_id_follows_the_build_feature() {
-		// Guards against the two ids being accidentally unified during a refactor —
-		// which would silently point testnet builds at mainnet, or vice versa.
 		assert_ne!(HYPERBRIDGE_MAINNET_PARA_ID, HYPERBRIDGE_TESTNET_PARA_ID);
 
-		// Asserted through `coprocessor()` rather than a standalone constant: that is
-		// the value the runtime actually consults, and the para id alone is not the
-		// identifier — the relay variant is half of it.
+		// Read through `coprocessor()`: that is the value the runtime consults.
 		let expected = if cfg!(feature = "hyperbridge-testnet") {
 			HYPERBRIDGE_TESTNET_PARA_ID
 		} else {
@@ -82,11 +75,8 @@ mod tests {
 
 	#[test]
 	fn coprocessor_names_the_right_relay_chain() {
-		// The para id alone is not the identifier — `Polkadot(4009)` and
-		// `Kusama(4009)` are distinct SCALE variants that `is_allowed_proxy`
-		// compares with `==`. An earlier version of this file returned
-		// `Polkadot(4009)` for Paseo, which would have rejected every proxied
-		// request from Hyperbridge's testnet. Assert the whole variant.
+		// The para id alone is not the identifier: `is_allowed_proxy` compares the
+		// whole variant with `==`, so assert the whole variant.
 		#[cfg(feature = "hyperbridge-testnet")]
 		assert_eq!(
 			coprocessor(),
@@ -101,18 +91,14 @@ mod tests {
 
 	#[test]
 	fn polkadot_and_kusama_variants_are_not_interchangeable() {
-		// The property the bug above violated, stated directly.
 		assert_ne!(
 			StateMachine::Polkadot(HYPERBRIDGE_TESTNET_PARA_ID),
 			StateMachine::Kusama(HYPERBRIDGE_TESTNET_PARA_ID)
 		);
 	}
 
-	/// The runtime API must report the same coprocessor the pallet is configured with.
-	///
-	/// The API exists so the test suites can read this off a running node instead of
-	/// hardcoding it. If the two ever diverged, the suites would derive a confident
-	/// wrong answer — the same failure the API was added to prevent, one layer up.
+	/// The API and the pallet must agree, or a suite reading the API derives a
+	/// confident wrong answer.
 	#[test]
 	fn runtime_api_reports_the_configured_coprocessor() {
 		use crate::runtime_api::runtime_decl_for_orbinum_ismp_api::OrbinumIsmpApiV1;

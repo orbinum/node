@@ -1,19 +1,9 @@
 //! Cross-chain messaging over ISMP, with Hyperbridge as the transport.
 //!
-//! Hyperbridge is the **coprocessor**: it verifies our consensus and carries the
-//! message. It is the route, not the recipient — so [`Call::dispatch_post`] takes
-//! `dest` as a parameter and `pallet-ismp` handles routing on its own. An earlier
-//! version pinned the destination to the coprocessor, which let Orbinum talk *to*
-//! Hyperbridge but never *through* it.
-//!
-//! `pallet_ismp` exposes no send extrinsic — its calls are only `handle_unsigned`,
-//! `create_consensus_client`, `update_consensus_state`, `fund_message` and
-//! `update_commitment_caps` — so originating a request means calling
-//! [`ismp::dispatcher::IsmpDispatcher`] from a pallet of your own. That is why this
-//! one exists.
-//!
-//! [`outbound`] builds and dispatches; [`inbound`] handles the `IsmpModule` callbacks;
-//! [`payload`] is the versioned wire format.
+//! Exists because `pallet_ismp` has no send extrinsic: originating a request means
+//! calling [`ismp::dispatcher::IsmpDispatcher`] from a pallet of your own.
+//! [`Call::dispatch_post`] takes `dest` as a parameter — Hyperbridge is the route, not
+//! the recipient.
 //!
 //! Deliberately not feature-gated: a pallet that exists only under `--features test`
 //! means the binary being validated is not the binary that ships.
@@ -44,9 +34,8 @@ use pallet_ismp::pallet::ModuleId;
 /// This pallet's ISMP module identifier — how counterparties address messages to us.
 ///
 /// `ModuleId::from_bytes` infers the variant **from the length alone**: 8 bytes is a
-/// pallet, 20 an EVM contract, 32 an account, anything else an error. An earlier value
-/// here was 7 bytes, which parses as nothing; it went unnoticed only because our own
-/// router ignored the id, while Hyperbridge's runtime would have rejected every message.
+/// pallet, 20 an EVM contract, 32 an account, anything else an error — so this must stay
+/// exactly 8 bytes.
 ///
 /// Wire format: changing it once messages are in flight orphans them.
 pub const PALLET_ID: ModuleId = ModuleId::Pallet(PalletId(*b"orb/msgs"));
@@ -88,16 +77,14 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxBodyLen: Get<u32>;
 
-		/// Benchmarked weights.
 		type WeightInfo: WeightInfo;
 	}
 
 	/// State machines whose messages this chain will accept.
 	///
-	/// `pallet-ismp` proves an inbound request was included in its source chain's state
-	/// or proxied by our coprocessor; it does **not** decide whether we want to hear
-	/// from that chain. This map is that decision, and the extension point for reaching
-	/// more chains — one entry per counterparty. Empty means accept nothing.
+	/// `pallet-ismp` proves an inbound request was included in its source chain's state;
+	/// it does **not** decide whether we want to hear from that chain. This map is that
+	/// decision — one entry per counterparty, empty means accept nothing.
 	#[pallet::storage]
 	pub type AcceptedSources<T: Config> =
 		StorageMap<_, Blake2_128Concat, StateMachine, (), OptionQuery>;
@@ -117,46 +104,34 @@ pub mod pallet {
 		RequestDispatched {
 			/// The chain it is addressed to — not necessarily the coprocessor.
 			dest: StateMachine,
-			/// The receiving module on `dest`.
 			to: Vec<u8>,
-			/// Commitment, which is how the request is looked up over RPC.
+			/// How the request is looked up over RPC.
 			commitment: sp_core::H256,
 		},
 		/// A message arrived and was handled.
 		MessageReceived {
-			/// Which chain it came from.
 			source: StateMachine,
-			/// The sending module on that chain, recorded but not authorised — see
-			/// [`inbound`] for why.
+			/// Recorded but not authorised — see [`inbound`] for why.
 			from: Vec<u8>,
-			/// Body length. The body itself is not emitted: it is remote-controlled
-			/// data and every event is stored in the block.
+			/// The body itself is not emitted: it is remote-controlled data and every
+			/// event is stored in the block.
 			body_len: u32,
 		},
-		/// A message arrived from an accepted source but could not be understood.
-		///
-		/// Deliberately not an error. See [`inbound`].
+		/// Arrived from an accepted source but could not be understood. Deliberately not
+		/// an error — see [`inbound`].
 		MessageRejected {
-			/// Which chain it came from.
 			source: StateMachine,
-			/// Why it was not handled.
 			reason: RejectReason,
 		},
 		/// A response to one of our GET requests arrived.
 		GetResponseReceived {
-			/// How many keys were queried.
 			keys: u32,
-			/// How many of them existed. `keys - found` were proven absent.
+			/// `keys - found` were proven absent.
 			found: u32,
 		},
 		/// A request we dispatched expired without being delivered.
-		RequestTimedOut {
-			/// Where it had been addressed.
-			dest: StateMachine,
-		},
-		/// A counterparty was added to [`AcceptedSources`].
+		RequestTimedOut { dest: StateMachine },
 		SourceAccepted { source: StateMachine },
-		/// A counterparty was removed from [`AcceptedSources`].
 		SourceRemoved { source: StateMachine },
 	}
 
@@ -174,21 +149,19 @@ pub mod pallet {
 		MaxEncodedLen
 	)]
 	pub enum RejectReason {
-		/// Body exceeded [`Config::MaxBodyLen`].
 		TooLarge,
-		/// Body did not decode as a [`Message`].
+		/// Did not decode as a [`Message`].
 		Undecodable,
 	}
 
 	#[pallet::error]
 	pub enum Error<T> {
-		/// No coprocessor configured, so nothing can carry the message.
+		/// Nothing can carry the message.
 		CoprocessorNotSet,
-		/// Body exceeded [`Config::MaxBodyLen`].
+		/// Exceeded [`Config::MaxBodyLen`].
 		BodyTooLarge,
-		/// `to` is not a valid module id: it must be 8, 20 or 32 bytes.
+		/// See [`PALLET_ID`] for the accepted lengths.
 		InvalidModuleId,
-		/// The destination is this chain.
 		DestinationIsSelf,
 		/// `pallet-ismp` refused the request.
 		DispatchFailed,
@@ -214,7 +187,6 @@ pub mod pallet {
 			outbound::post::<T>(dest, to, body, timeout)
 		}
 
-		/// Start accepting messages from `source`.
 		#[pallet::call_index(1)]
 		#[pallet::weight(T::WeightInfo::accept_source())]
 		pub fn accept_source(origin: OriginFor<T>, source: StateMachine) -> DispatchResult {
@@ -224,7 +196,6 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Stop accepting messages from `source`.
 		#[pallet::call_index(2)]
 		#[pallet::weight(T::WeightInfo::remove_source())]
 		pub fn remove_source(origin: OriginFor<T>, source: StateMachine) -> DispatchResult {

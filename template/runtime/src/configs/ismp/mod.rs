@@ -1,33 +1,13 @@
 //! ISMP / Hyperbridge configuration.
 //!
-//! # Why the solochain path
+//! Solochain path — [`ismp_grandpa::consensus::GrandpaConsensusClient`], never
+//! `ismp-parachain`: Hyperbridge verifies Orbinum's own GRANDPA finality instead of
+//! taking consensus over, so the validator set stays sovereign.
 //!
-//! Orbinum is a sovereign L1: it runs its own NPoS validator set and finalises with
-//! GRANDPA. Becoming a parachain would hand finalisation to a relay chain's validators
-//! — the sovereignty the chain exists to keep. Hyperbridge's *solochain* path verifies
-//! our consensus instead of taking it: `ismp-grandpa` checks Orbinum's own finality
-//! proofs, so the chain reaches Polkadot trustlessly while keeping its validator set.
-//!
-//! Hence [`ismp_grandpa::consensus::GrandpaConsensusClient`] and **not**
-//! `ismp-parachain`, which is for chains that borrow relay-chain consensus.
-//!
-//! # The unsigned entry point
-//!
-//! `pallet_ismp::handle_unsigned` takes no signature and charges no fee, so relayers
-//! can deliver consensus updates without a funded account on every chain they serve.
-//! `#[pallet::validate_unsigned]` runs the full message pipeline and rejects forged
-//! proofs, unknown consensus state ids and empty batches at the transaction pool. We
-//! deliberately do not filter the call itself: that would break the relayer path this
-//! integration exists to enable.
-//!
-//! What that does not cover: validation runs before any fee logic, so a batch of
-//! almost-valid messages costs a node full verification and the submitter nothing.
-//! Nothing lands on chain, but the CPU is spent. Bounding it would need a
-//! `BaseCallFilter` entry — transaction-pool limits only cap how many candidates
-//! queue, not what each one costs to validate.
-//!
-//! `MAXIMUM_BLOCK_LENGTH` is 8 MiB at an 85% normal ratio because of this pallet:
-//! GRANDPA proofs do not fit the previous 5 MiB budget.
+//! `handle_unsigned` is unsigned and fee-less by design, so a relayer needs no funded
+//! account here; `validate_unsigned` rejects forged proofs at the pool. Known gap: a
+//! batch of almost-valid messages costs a node full verification and the submitter
+//! nothing. Bounding it would need a chain-wide `BaseCallFilter`.
 
 pub mod network;
 pub mod slot_duration;
@@ -39,13 +19,11 @@ use frame_system::EnsureRoot;
 use ismp::{host::StateMachine, router::IsmpRouter};
 
 parameter_types! {
-	/// The coprocessor performs the costly consensus and state-proof verification on
-	/// Orbinum's behalf. Which deployment that is depends on the build — see
-	/// [`network::HYPERBRIDGE_PARA_ID`].
+	/// Verifies consensus and state proofs on Orbinum's behalf; which deployment depends
+	/// on the build feature. See [`network::coprocessor`].
 	pub const Coprocessor: Option<StateMachine> = network::coprocessor();
 
-	/// Orbinum's identifier on the ISMP network. See
-	/// [`network::HOST_STATE_MACHINE_ID`] for why it must never change.
+	/// See [`network::HOST_STATE_MACHINE_ID`] for why it must never change.
 	pub const HostStateMachine: StateMachine = network::host_state_machine();
 
 	/// Destination for ISMP relayer fees.
@@ -109,8 +87,7 @@ impl IsmpRouter for Router {
 }
 
 impl pallet_ismp::Config for Runtime {
-	/// Root-only: adding or reconfiguring a consensus client changes whose
-	/// cross-chain proofs this chain will trust.
+	/// Root-only: it decides whose cross-chain proofs this chain trusts.
 	type AdminOrigin = EnsureRoot<AccountId>;
 	type HostStateMachine = HostStateMachine;
 	type TimestampProvider = Timestamp;
@@ -119,16 +96,11 @@ impl pallet_ismp::Config for Runtime {
 	type Router = Router;
 	type Coprocessor = Coprocessor;
 
-	/// Only the GRANDPA client. That single choice is what lets a sovereign chain
-	/// participate without surrendering consensus.
-	///
-	/// The 2606 client carries the envelope/state-machine binding built in
-	/// (`envelope_matches_state_machine`), so the local `consensus_guard` backport that
-	/// existed on 2512 is gone. The wiring test below still asserts the rejection, so a
-	/// downgrade or a fork without the check cannot pass silently.
+	/// GRANDPA only: the client carries `envelope_matches_state_machine` internally, and
+	/// the wiring test below asserts that rejection so a fork without it cannot pass
+	/// silently.
 	type ConsensusClients = (ismp_grandpa::consensus::GrandpaConsensusClient<Runtime>,);
 
-	/// No offchain MMR: Orbinum's message flow does not need proof generation.
 	type OffchainDB = ();
 
 	/// `POLICY = false` disables relayer fee charging: `on_executed` returns `Pays::No`
@@ -142,24 +114,14 @@ impl pallet_ismp::Config for Runtime {
 	>;
 }
 
-// State-commitment retention is left at the pallet default, deliberately.
-//
-// 2606 raised `MAX_STATE_MACHINE_COMMITMENTS` from 1,024 to 10,240 and rebuilt eviction
-// as an O(1) FIFO queue. Against a 6s counterparty that is ~17h of provable heights
-// retained, up from ~1.7h — a free win from the version bump, and far more headroom than
-// any challenge period needs.
-//
-// The cap only bounds retention *depth*: too shallow prunes heights a relayer still
-// needs to prove against, which fails liveness, never soundness. `update_commitment_caps`
-// (root, new in 2606) is the governance lever to override per chain — worth reaching for
-// only if we add a consensus client for a sub-second chain, where 10,240 blocks would be
-// a much shorter wall-clock window.
+// Commitment retention stays at the pallet default: 10,240 heights is ~17h against a 6s
+// counterparty. `update_commitment_caps` (root) overrides it per chain, worth reaching for
+// only if we add a client for a sub-second chain.
 
 impl ismp_grandpa::Config for Runtime {
 	type IsmpHost = pallet_ismp::Pallet<Runtime>;
 
-	/// Root-only: the whitelist decides whose consensus proofs this chain will look at
-	/// — the pallet drops datagrams from anything absent from it.
+	/// Root-only: the pallet drops datagrams from any chain absent from the whitelist.
 	type RootOrigin = EnsureRoot<AccountId>;
 
 	/// Benchmarked: the unit impl charges a flat 10 ms regardless of `n`, so a
@@ -172,15 +134,8 @@ mod tests {
 	use super::*;
 	use ismp::module::IsmpModule;
 
-	/// The asymmetry in [`UnroutedModule`] is deliberate, and nothing else asserts it.
-	///
-	/// `on_accept`/`on_response` reject because Orbinum hosts no application module;
-	/// `on_timeout` must **not**, because the timeout handler resolves the module
-	/// before it deletes the commitment and propagates the error with `?`. "Tidying"
-	/// the three to match would leave every request Orbinum dispatches impossible to
-	/// time out, with escrowed fees stranded — and would not fail a single other test
-	/// in the suite. Stating both halves in one test makes the asymmetry legible as
-	/// intent rather than oversight.
+	/// Asserts both halves of the [`UnroutedModule`] asymmetry — see its docs for why
+	/// "tidying" the three to match would strand our own outbound requests.
 	#[test]
 	fn unrouted_module_rejects_delivery_but_never_timeouts() {
 		let module = UnroutedModule;
@@ -201,16 +156,8 @@ mod tests {
 		);
 	}
 
-	/// The router must resolve for *any* id, including ones no module claims.
-	///
-	/// The timeout path calls `module_for_id` with the `from` of a request Orbinum
-	/// itself dispatched, so a future real router that matches known ids and errs on
-	/// the fallback arm would reintroduce the same stranding through a different door.
-	/// Our own id must reach our own module.
-	///
-	/// `router_resolves_every_id` cannot catch a deleted match arm: with the arm gone
-	/// every id still resolves to `UnroutedModule`, so it stays green while inbound
-	/// messaging is silently dead. This is the test that notices.
+	/// `router_resolves_every_id` stays green with the match arm deleted — every id
+	/// falls through to `UnroutedModule`. This is the test that notices.
 	#[test]
 	fn router_resolves_our_id_to_our_module() {
 		sp_io::TestExternalities::default().execute_with(|| {
@@ -232,8 +179,6 @@ mod tests {
 		});
 	}
 
-	/// A near-miss id must NOT reach our module.
-	///
 	/// Catches a comparison loosened to `starts_with` or a truncating match.
 	#[test]
 	fn near_miss_ids_do_not_reach_our_module() {
@@ -328,10 +273,8 @@ mod consensus_binding_tests {
 	use ismp_grandpa::messages::{ConsensusMessage, StandaloneChainMessage};
 	use scale_codec::Encode;
 
-	/// On 2512 this binding lived in a local wrapper (`consensus_guard.rs`); 2606 builds
-	/// it into the client. The wrapper is gone, so this drives the client **the runtime
-	/// actually wires** and asserts upstream's own rejection — a fork or downgrade that
-	/// drops the check fails here instead of passing silently.
+	/// Drives the client the runtime actually wires and asserts upstream's own envelope
+	/// rejection, so a fork or downgrade that drops the check fails here.
 	#[test]
 	fn configured_consensus_client_rejects_mismatched_envelope() {
 		sp_io::TestExternalities::default().execute_with(|| {
