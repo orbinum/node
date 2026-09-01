@@ -38,6 +38,14 @@ Orbinum is built using Substrate's FRAME framework and implements Clean Architec
 - **Client**: RPC layer and blockchain infrastructure
 - **Circuits**: Circom zero-knowledge circuits (`value_proof`, `transfer`, `unshield`)
 
+## Building
+
+Requires the [Rust toolchain](https://rustup.rs) (version pinned in `rust-toolchain.toml`) and `protoc`, the protobuf compiler (`brew install protobuf` / `apt install protobuf-compiler`) — required by the networking stack since polkadot-sdk 2606.
+
+```sh
+cargo build --release
+```
+
 ## License
 
 Orbinum is dual-licensed under:
