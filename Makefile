@@ -63,9 +63,11 @@ integration-test: build-release integration-test-lint
 	cd ts-tests && npm run build && npm run test && npm run test-sql
 
 .PHONY: benchmark benchmark-pallet
-# Run all runtime benchmarks
+# Run all runtime benchmarks. Replaces the interactive vendored script: this one is
+# non-interactive, writes each pallet's weights to its real destination, and survives
+# the OOM window (see the script's header).
 benchmark:
-	./scripts/benchmark.sh
+	./scripts/benchmarks/run_benchmarks.sh
 # Run benchmark for specific pallet (usage: make benchmark-pallet PALLET=pallet-shielded-pool)
 benchmark-pallet:
 	@if [ -z "$(PALLET)" ]; then \
@@ -73,7 +75,7 @@ benchmark-pallet:
 		exit 1; \
 	fi
 	cargo build --release --features=runtime-benchmarks,skip-proof-verification
-	./target/release/orbinum-node benchmark pallet --chain=dev --pallet=$(PALLET) --extrinsic='*' --steps=50 --repeat=20 --output=./frame/$(PALLET)/src/weights.rs --template=./scripts/frame-weight-template.hbs
+	./target/release/orbinum-node benchmark pallet --chain=dev --pallet=$(PALLET) --extrinsic='*' --steps=50 --repeat=20 --output=./frame/$(PALLET)/src/weights.rs --template=./scripts/benchmarks/frame-weight-template.hbs
 
 .PHONY: run-dev
 run-dev:

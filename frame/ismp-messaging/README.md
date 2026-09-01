@@ -82,10 +82,10 @@ cargo build --release -p orbinum-node --features runtime-benchmarks
   --steps=50 --repeat=20 \
   --wasm-execution=compiled \
   --output=./frame/ismp-messaging/src/weights.rs \
-  --template=./scripts/frame-weight-template.hbs
+  --template=./scripts/benchmarks/frame-weight-template.hbs
 ```
 
-Or `./scripts/run_benchmarks.sh`, which covers this pallet plus `ismp_grandpa` and
+Or `./scripts/benchmarks/run_benchmarks.sh`, which covers this pallet plus `ismp_grandpa` and
 `pallet_ismp` — none of the three were in it before.
 
 Then point the runtime at the measured values, in `configs/ismp/mod.rs`:

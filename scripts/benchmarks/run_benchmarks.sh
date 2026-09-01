@@ -5,11 +5,11 @@
 # Runs runtime-registered pallets through a unified benchmarking workflow.
 #
 # Usage:
-#   ./scripts/run_benchmarks.sh                                  # every pallet
-#   ./scripts/run_benchmarks.sh --pallet pallet_ismp_messaging   # just one
-#   ./scripts/run_benchmarks.sh --group ismp                     # the ISMP set
-#   ./scripts/run_benchmarks.sh --steps 20 --repeat 5            # quicker, less precise
-#   ./scripts/run_benchmarks.sh --storage-info                   # restore the screen dump
+#   ./scripts/benchmarks/run_benchmarks.sh                                  # every pallet
+#   ./scripts/benchmarks/run_benchmarks.sh --pallet pallet_ismp_messaging   # just one
+#   ./scripts/benchmarks/run_benchmarks.sh --group ismp                     # the ISMP set
+#   ./scripts/benchmarks/run_benchmarks.sh --steps 20 --repeat 5            # quicker, less precise
+#   ./scripts/benchmarks/run_benchmarks.sh --storage-info                   # restore the screen dump
 #
 # Publishable weights need the defaults (50/20) on a machine with stable timing — a
 # dedicated VPS, not a laptop. Lowering --steps/--repeat gives numbers good for shape,
@@ -37,6 +37,18 @@
 #
 # Then lower --db-cache, then benchmark one pallet at a time so a kill does not discard
 # the work already done.
+#
+# If a single pallet still cannot fit, measure one extrinsic per process and stitch the
+# results together — `--extrinsic <name>` alone emits a file whose trait declares only
+# that function, which does not compile against the pallet:
+#
+#   for e in dispatch_post accept_source …; do
+#     ./target/release/orbinum-node benchmark pallet --chain dev \
+#       --pallet <pallet> --extrinsic "$e" --steps 50 --repeat 20 \
+#       --wasm-execution=compiled --no-storage-info \
+#       --output "/tmp/parts/$e.rs" --template ./scripts/benchmarks/frame-weight-template.hbs
+#   done
+#   ./scripts/benchmarks/merge-weights.sh <destination>.rs /tmp/parts/*.rs
 
 set -euo pipefail
 
@@ -81,7 +93,7 @@ echo "------------------------------------------------------"
 # kept out of release builds (an integrity_test panics if it reaches a live chain).
 FEATURES="runtime-benchmarks,skip-proof-verification,poseidon-native"
 NODE="./target/release/orbinum-node"
-TEMPLATE="./scripts/frame-weight-template.hbs"
+TEMPLATE="./scripts/benchmarks/frame-weight-template.hbs"
 SCRATCH_DIR="./target/benchmark-weights"
 
 # Every pallet registered in the runtime's `define_benchmarks!`, paired with where its
@@ -99,6 +111,14 @@ PALLETS=(
     "pallet_validator_set:./frame/validator-set/src/weights.rs:core"
     # ISMP crates we do not own: the WeightInfo trait belongs to the upstream crate, so
     # the generated impl lives runtime-side rather than in the pallet.
+    #
+    # `ismp_grandpa` NEEDS A MANUAL EDIT after regenerating. The CLI always emits a
+    # local `pub trait WeightInfo` plus an `impl WeightInfo for ()`, but the runtime has
+    # to implement the upstream trait. Fix the generated file by deleting the local trait
+    # and the `for ()` impl, then pointing the remaining impl at upstream's:
+    #   impl<T: frame_system::Config> ismp_grandpa::weights::WeightInfo for SubstrateWeight<T>
+    # Without that, `cargo check -p orbinum-runtime` fails with "the trait bound
+    # `SubstrateWeight<Runtime>: ismp_grandpa::WeightInfo` is not satisfied".
     "pallet_ismp_messaging:./frame/ismp-messaging/src/weights.rs:ismp"
     "ismp_grandpa:./template/runtime/src/weights/ismp_grandpa.rs:ismp"
     # Runtime pallets with no versioned weights destination in this repo.
