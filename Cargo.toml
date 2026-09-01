@@ -198,7 +198,6 @@ substrate-frame-rpc-system = { version = "53.0.0" }
 # crates that were previously fine, including our own. The real fix is upstream
 # publishing this crate, or dropping these vendored tests. Tracked in
 # MIGRACION_2606_TODO.md alongside the rest of the Frontier work.
-substrate-test-runtime-client = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2606" }
 substrate-wasm-builder = { version = "34.0.0" }
 
 # Polkadot

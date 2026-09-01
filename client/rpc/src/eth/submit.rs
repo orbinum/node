@@ -330,7 +330,8 @@ mod tests {
 		TransactionAction, TransactionV3,
 	};
 	use rlp::RlpStream;
-	use sp_core::{hashing::keccak_256, H160, H256, U256};
+	use sp_core::{H160, H256, U256};
+	use sp_io::hashing::keccak_256;
 
 	fn legacy_tx_with_v(v: u64) -> TransactionV3 {
 		let nonce = U256::zero();

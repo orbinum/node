@@ -37,15 +37,6 @@ fp-consensus = { workspace = true, features = ["default"], optional = true }
 fp-rpc = { workspace = true, features = ["default"], optional = true }
 fp-storage = { workspace = true, features = ["default"] }
 
-[dev-dependencies]
-futures = { workspace = true }
-maplit = "1.0.2"
-tempfile = "3.21.0"
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-# Substrate
-sc-block-builder = { workspace = true }
-sp-consensus = { workspace = true }
-substrate-test-runtime-client = { workspace = true }
 
 [features]
 default = ["rocksdb"]
