@@ -9,55 +9,27 @@
 #   ./scripts/benchmarks/run_benchmarks.sh --pallet pallet_ismp_messaging   # just one
 #   ./scripts/benchmarks/run_benchmarks.sh --group ismp                     # the ISMP set
 #   ./scripts/benchmarks/run_benchmarks.sh --steps 20 --repeat 5            # quicker, less precise
-#   ./scripts/benchmarks/run_benchmarks.sh --storage-info                   # restore the screen dump
 #
-# Publishable weights need the defaults (50/20) on a machine with stable timing — a
-# dedicated VPS, not a laptop. Lowering --steps/--repeat gives numbers good for shape,
-# not for committing.
+# Run this on the reference hardware: a Hetzner CPX62 (16 vCPU / 32 GB), which is where
+# every committed weights.rs was measured — check the HOSTNAME line in any of them.
+# Weights from different machines are not comparable with each other, and a 16 GB host
+# is not enough: the analysis phase of a pallet with several linear components reaches
+# ~15 GB and gets OOM-killed there.
 #
-# On memory: `--no-storage-info` is passed by default, and it is not cosmetic. Without
-# it the runner spends most of its wall time in a post-processing phase that clones a
-# `BenchmarkResult` per storage prefix per run (upstream `pallet/command.rs`, the
-# `storage_per_prefix` map), swinging between megabytes and ~5 GB. Measured on this
-# pallet, 16 GiB and no swap: the default run peaked at 4.7 GB and was OOM-killed after
-# 672s, while `--no-storage-info` finished in 196s. The peak is similar either way —
-# what changes is how long the process sits in the danger zone.
+# Publishable weights need the defaults (50/20). Lowering --steps/--repeat gives numbers
+# good for shape, not for committing.
 #
-# The flag only suppresses the *screen* dump. Upstream documents it as "independent of
-# the storage info appearing in the output file", the weights are recomputed by the
-# writer afterwards, and the generated file is byte-comparable. Pass --storage-info when
-# you actually need to read the per-key table.
-#
-# Still getting killed? Check swap first — a host with 0B swap (the Hetzner default) has
-# nowhere to put a transient spike and the kernel reaps the process instantly:
-#
-#   free -h                                             # Swap: 0B is the problem
-#   sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile
-#   sudo mkswap /swapfile && sudo swapon /swapfile       # not persisted across reboot
-#
-# Then lower --db-cache, then benchmark one pallet at a time so a kill does not discard
-# the work already done.
-#
-# If a single pallet still cannot fit, measure one extrinsic per process and stitch the
-# results together — `--extrinsic <name>` alone emits a file whose trait declares only
-# that function, which does not compile against the pallet:
-#
-#   for e in dispatch_post accept_source …; do
-#     ./target/release/orbinum-node benchmark pallet --chain dev \
-#       --pallet <pallet> --extrinsic "$e" --steps 50 --repeat 20 \
-#       --wasm-execution=compiled --no-storage-info \
-#       --output "/tmp/parts/$e.rs" --template ./scripts/benchmarks/frame-weight-template.hbs
-#   done
-#   ./scripts/benchmarks/merge-weights.sh <destination>.rs /tmp/parts/*.rs
+# On a smaller host, --db-cache and --no-storage-info reduce the footprint, and
+# merge-weights.sh assembles a pallet from per-extrinsic runs. Those are workarounds;
+# the right fix is to use the reference machine.
 
 set -euo pipefail
 
 STEPS=50
 REPEAT=20
-DB_CACHE=1024
+DB_CACHE_ARG=""
 HEAP_PAGES=4096
-# On by default: see the note above — it is what keeps the run out of the OOM window.
-STORAGE_INFO_ARG="--no-storage-info"
+STORAGE_INFO_ARG=""
 ONLY_PALLET=""
 GROUP=""
 
@@ -72,11 +44,11 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --steps)      STEPS="$2"; shift 2 ;;
         --repeat)     REPEAT="$2"; shift 2 ;;
-        --db-cache)   DB_CACHE="$2"; shift 2 ;;
+        --db-cache)   DB_CACHE_ARG="--db-cache=$2"; shift 2 ;;
         --heap-pages) HEAP_PAGES="$2"; shift 2 ;;
         --pallet)     ONLY_PALLET="$2"; shift 2 ;;
         --group)      GROUP="$2"; shift 2 ;;
-        --storage-info) STORAGE_INFO_ARG=""; shift ;;
+        --no-storage-info) STORAGE_INFO_ARG="--no-storage-info"; shift ;;
         -h|--help)    usage 0 ;;
         *)
             echo "Unknown option: $1" >&2
@@ -154,8 +126,7 @@ run_bench() {
         --repeat "$REPEAT" \
         --wasm-execution=compiled \
         --heap-pages="$HEAP_PAGES" \
-        --db-cache="$DB_CACHE" \
-        $STORAGE_INFO_ARG \
+        $DB_CACHE_ARG $STORAGE_INFO_ARG \
         --output "$output" \
         --template "$TEMPLATE" || rc=$?
 
@@ -165,13 +136,11 @@ run_bench() {
         # 137 = 128 + SIGKILL. The OOM killer leaves no other trace, and the generic
         # advice ("check the logs") is useless because the process is simply gone.
         if [[ $rc -eq 137 ]]; then
-            echo "  > Exit 137 is SIGKILL — almost always the OOM killer." >&2
-            echo "  > Check for swap first: 'free -h'. A host with 0B swap dies on any" >&2
-            echo "  > transient spike, and this phase spikes by gigabytes." >&2
-            echo "  > Then retry the pallet alone, with a smaller db cache:" >&2
-            echo "  >   $0 --pallet $pallet --db-cache 256" >&2
-            echo "  > Keep --steps/--repeat at their defaults for weights you intend" >&2
-            echo "  > to commit; lower them only to rehearse the run." >&2
+            echo "  > Exit 137 is SIGKILL — the OOM killer." >&2
+            echo "  > Check the host first: this needs the reference machine (CPX62," >&2
+            echo "  > 16 vCPU / 32 GB). A 16 GB box is killed during the analysis" >&2
+            echo "  > phase, and no flag makes that fit — measured at ~15 GB resident." >&2
+            echo "  > On the right host this simply works." >&2
         fi
         return $rc
     fi
@@ -219,7 +188,7 @@ mkdir -p "$SCRATCH_DIR"
 
 echo ""
 echo "[2/3] Running ${#selected[@]} benchmark(s) — steps=$STEPS repeat=$REPEAT"
-echo "      heap-pages=$HEAP_PAGES db-cache=${DB_CACHE}MiB"
+echo "      heap-pages=$HEAP_PAGES ${DB_CACHE_ARG:+$DB_CACHE_ARG }${STORAGE_INFO_ARG}"
 
 failed=()
 for entry in "${selected[@]}"; do
