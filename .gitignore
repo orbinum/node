@@ -50,3 +50,6 @@ docker/testnet/origin.key
 
 # Generated chain specs (canonical copy lives in node-deploy)
 scripts/generate-specs/dist/
+
+# Contiene mnemonics en claro — nunca commitear
+scripts/vk/add-validators.cjs

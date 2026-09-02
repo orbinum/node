@@ -180,7 +180,7 @@ impl Precompile for Bn128Pairing {
 			handle.record_cost(Bn128Pairing::BASE_GAS_COST)?;
 			U256::one()
 		} else {
-			if handle.input().len() % 192 > 0 {
+			if !handle.input().len().is_multiple_of(192) {
 				return Err(PrecompileFailure::Error {
 					exit_status: ExitError::Other("bad elliptic curve pairing size".into()),
 				});

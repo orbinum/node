@@ -254,7 +254,7 @@ cargo build --release --features runtime-benchmarks
   --steps=50 \
   --repeat=20 \
   --output=frame/relayer/src/weights.rs \
-  --template=./scripts/frame-weight-template.hbs
+  --template=./scripts/benchmarks/frame-weight-template.hbs
 ```
 
 ---

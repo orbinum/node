@@ -251,7 +251,7 @@ where
 			.into_iter()
 			.filter_map(|tx| {
 				let pubkey = match public_key(&tx) {
-					Ok(pk) => H160::from(H256::from(sp_core::hashing::keccak_256(&pk))),
+					Ok(pk) => H160::from(H256::from(sp_io::hashing::keccak_256(&pk))),
 					Err(_err) => {
 						// Skip transactions with invalid public keys
 						return None;
@@ -330,7 +330,8 @@ mod tests {
 		TransactionAction, TransactionV3,
 	};
 	use rlp::RlpStream;
-	use sp_core::{hashing::keccak_256, H160, H256, U256};
+	use sp_core::{H160, H256, U256};
+	use sp_io::hashing::keccak_256;
 
 	fn legacy_tx_with_v(v: u64) -> TransactionV3 {
 		let nonce = U256::zero();

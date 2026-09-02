@@ -9,7 +9,6 @@
 use frame_support::{BoundedVec, pallet_prelude::*};
 use parity_scale_codec::{Decode, DecodeWithMemTracking, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
-use sp_runtime::RuntimeDebug;
 use sp_std::vec::Vec;
 
 // EncryptedMemo (concrete, FRAME-compatible — used in storage & extrinsics)
@@ -27,7 +26,7 @@ pub const MAX_ENCRYPTED_MEMO_SIZE: u32 = 180;
 	DecodeWithMemTracking,
 	MaxEncodedLen,
 	TypeInfo,
-	RuntimeDebug,
+	Debug,
 	Default
 )]
 pub struct EncryptedMemo(pub BoundedVec<u8, ConstU32<MAX_ENCRYPTED_MEMO_SIZE>>);

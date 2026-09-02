@@ -47,7 +47,7 @@ impl MerkleTreeService {
 		let mut current_index = local;
 
 		for (level, frontier_slot) in frontier.iter_mut().enumerate() {
-			if current_index % 2 == 0 {
+			if current_index.is_multiple_of(2) {
 				// Left node: save in frontier, pair with zero-sibling
 				*frontier_slot = current_hash;
 				let zero = get_zero_hash_cached(level);

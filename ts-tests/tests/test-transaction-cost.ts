@@ -1,19 +1,33 @@
 import { expect } from "chai";
+import { ethers } from "ethers";
 import { step } from "mocha-steps";
 
+import { CHAIN_ID, GENESIS_ACCOUNT_PRIVATE_KEY } from "./config";
 import { describeWithFrontier, customRequest } from "./util";
 
 describeWithFrontier("Frontier RPC (Transaction cost)", (context) => {
+	// Signed here rather than pasted as a raw hex blob: a hardcoded transaction
+	// carries its own chain id and signature, so it silently stops testing what it
+	// claims the moment either changes. Signing with a chain id keeps it EIP-155
+	// protected — unprotected legacy transactions are refused by RPC policy before
+	// they reach the pool, and the rejection under test would never be reached.
+	//
+	// ethers signs a zero gas limit; web3 rejects it client-side.
 	step("should take transaction cost into account and not submit it to the pool", async function () {
-		// Simple transfer with gas limit 0 manually signed to prevent web3 from rejecting client-side.
-		const tx = await customRequest(context.web3, "eth_sendRawTransaction", [
-			"0xf86180843b9aca00809412cb274aad8251c875c0bf6872b67d9983e53fdd01801ca00e28ba2dd3c5a3fd467\
-			d4afd7aefb4a34b373314fff470bb9db743a84d674a0aa06e5994f2d07eafe1c37b4ce5471caecec29011f6f5b\
-			f0b1a552c55ea348df35f",
-		]);
-		let msg = "intrinsic gas too low";
+		const wallet = new ethers.Wallet(GENESIS_ACCOUNT_PRIVATE_KEY);
+		const rawTransaction = await wallet.signTransaction({
+			to: "0x12cb274aad8251c875c0bf6872b67d9983e53fdd",
+			value: 1,
+			gasPrice: "0x3B9ACA00",
+			gasLimit: 0, // below the 21000 intrinsic minimum
+			nonce: 0,
+			chainId: CHAIN_ID,
+		});
+
+		const tx = await customRequest(context.web3, "eth_sendRawTransaction", [rawTransaction]);
+
 		expect(tx.error).to.include({
-			message: msg,
+			message: "intrinsic gas too low",
 		});
 	});
 });

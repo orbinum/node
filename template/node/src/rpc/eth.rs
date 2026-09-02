@@ -239,7 +239,7 @@ where
 				io.merge(OrbinumRelay::new(client.clone(), pool.clone(), signer).into_rpc())?;
 			}
 			Err(e) => {
-				log::error!(target: "rpc", "Invalid --evm-relayer-key: {e}");
+				log::error!(target: "rpc", "Invalid EVM relay key: {e}");
 			}
 		}
 	}

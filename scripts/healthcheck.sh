@@ -142,6 +142,30 @@ if [[ "$CHECK_RUNTIME" == "true" ]]; then
   if [[ "$SPEC_VERSION" -lt 1 ]]; then
     fail "Invalid spec_version: $SPEC_VERSION"
   fi
+
+  # ISMP identities, read off the chain that was just upgraded.
+  #
+  # `host_state_machine` is the exact call Tesseract makes to derive our identity, so a
+  # deploy that does not answer it leaves the relayer unable to start. The coprocessor is
+  # only warned about: this script does not know which environment it is pointed at, and
+  # a wrong one is a build mistake that `verify-coprocessor.sh` catches before release.
+  ISMP_HOST=$(rpc_call "state_call" '["IsmpRuntimeApi_host_state_machine","0x"]' \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',''))" 2>/dev/null || echo "")
+
+  if [[ "$ISMP_HOST" == "0x036f726269" ]]; then
+    ok "ISMP host_state_machine: Substrate(\"orbi\")"
+    ISMP_COP=$(rpc_call "state_call" '["OrbinumIsmpApi_coprocessor","0x"]' \
+      | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',''))" 2>/dev/null || echo "")
+    case "$ISMP_COP" in
+      0x0102a90f0000) ok  "ISMP coprocessor: Kusama(4009) — testnet build"   ;;
+      0x0101270d0000) ok  "ISMP coprocessor: Polkadot(3367) — mainnet build" ;;
+      *)              warn "ISMP coprocessor unrecognised: '$ISMP_COP'"      ;;
+    esac
+  elif [[ -z "$ISMP_HOST" ]]; then
+    warn "ISMP runtime API absent — this runtime predates the ISMP integration"
+  else
+    fail "ISMP host_state_machine is '$ISMP_HOST', not Substrate(\"orbi\"); Tesseract will not start"
+  fi
 else
   log "[5/5] Skipping spec_version check (no --check-runtime)"
 fi

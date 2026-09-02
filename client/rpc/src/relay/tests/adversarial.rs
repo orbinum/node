@@ -184,7 +184,7 @@ fn attack_calldata_fuzz_never_panics() {
 		seed = seed
 			.wrapping_mul(6364136223846793005)
 			.wrapping_add(1442695040888963407);
-		if seed % 3 == 0 {
+		if seed.is_multiple_of(3) {
 			let cut = (seed >> 33) as usize % data.len().max(1);
 			data.truncate(cut);
 		}

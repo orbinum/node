@@ -13,7 +13,7 @@ access changes.
 ## What changed vs. the older guide
 
 The benchmark pipeline no longer needs the `groth16-proofs` sibling checkout or
-the `convert-vk` binary, and `verify_proof` is now self-contained:
+the `pack-verifying-key` binary, and `verify_proof` is now self-contained:
 
 - **Feature set:** builds use `runtime-benchmarks,skip-proof-verification,poseidon-native`.
   `skip-proof-verification` lets `verify_proof` record weight even though its
@@ -69,11 +69,11 @@ git checkout main   # or the branch whose weights you are regenerating
 
 ## 3. Run the benchmark script
 
-`scripts/run_benchmarks.sh` builds the node with the correct feature set and runs
+`scripts/benchmarks/run_benchmarks.sh` builds the node with the correct feature set and runs
 every own pallet plus the standard Substrate pallets. First build takes ~30-60 min.
 
 ```bash
-./scripts/run_benchmarks.sh --steps 50 --repeat 20
+./scripts/benchmarks/run_benchmarks.sh --steps 50 --repeat 20
 ```
 
 This overwrites the four committed `weights.rs` files:
@@ -100,7 +100,7 @@ cargo build --release --features runtime-benchmarks,skip-proof-verification,pose
   --extrinsic '*' \
   --steps 50 --repeat 20 \
   --wasm-execution=compiled --heap-pages=4096 \
-  --template ./scripts/frame-weight-template.hbs \
+  --template ./scripts/benchmarks/frame-weight-template.hbs \
   --output frame/zk-verifier/src/weights.rs
 ```
 
@@ -148,7 +148,7 @@ git push
 For pre-mainnet precision:
 
 ```bash
-./scripts/run_benchmarks.sh --steps 100 --repeat 50
+./scripts/benchmarks/run_benchmarks.sh --steps 100 --repeat 50
 ```
 
 ---

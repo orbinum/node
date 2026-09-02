@@ -81,6 +81,5 @@ pub(crate) fn properties() -> Properties {
 	properties.insert("tokenSymbol".into(), "ORB".into());
 	properties.insert("tokenDecimals".into(), 18.into());
 	properties.insert("ss58Format".into(), SS58Prefix::get().into());
-	properties.insert("isEthereum".into(), true.into());
 	properties
 }

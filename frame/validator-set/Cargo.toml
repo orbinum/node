@@ -5,7 +5,7 @@ description = "Sudo-controlled validator set for Orbinum. Validators can only jo
 authors = { workspace = true }
 license = "GPL-3.0-or-later"
 edition = "2024"
-repository = "https://github.com/orbinum/orbinum-node"
+repository = "https://github.com/orbinum/node"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]

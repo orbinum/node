@@ -1,4 +1,4 @@
-//! The Substrate Node Template runtime. This can be compiled with `#[no_std]`, ready for Wasm.
+//! The Orbinum runtime. Compiles with `#[no_std]` for Wasm.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 // `construct_runtime!` does a lot of recursion and requires us to increase the limit to 256.
@@ -21,32 +21,14 @@ mod weights;
 #[cfg(test)]
 mod runtime_tests;
 
-// Make the WASM binary available.
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
 use alloc::{borrow::Cow, vec, vec::Vec};
 use core::marker::PhantomData;
 use ethereum::AuthorizationList;
-use scale_codec::{Decode, Encode};
-use sp_api::impl_runtime_apis;
-use sp_consensus_aura::sr25519::AuthorityId as AuraId;
-use sp_consensus_grandpa::{AuthorityId as GrandpaId, AuthorityList as GrandpaAuthorityList};
-use sp_core::{
-	crypto::{ByteArray, KeyTypeId},
-	ConstU128, OpaqueMetadata, H160, H256, U256,
-};
-use sp_runtime::{
-	generic, impl_opaque_keys,
-	traits::{
-		BlakeTwo256, Block as BlockT, Convert, DispatchInfoOf, Dispatchable, Get, IdentityLookup,
-		NumberFor, OpaqueKeys, PostDispatchInfoOf, UniqueSaturatedInto,
-	},
-	transaction_validity::{TransactionSource, TransactionValidity, TransactionValidityError},
-	ApplyExtrinsicResult, ConsensusEngineId, ExtrinsicInclusionMode, Perbill, Permill,
-};
-use sp_version::RuntimeVersion;
-// Substrate FRAME
+use fp_evm::weight_per_gas;
+use fp_rpc::TransactionStatus;
 #[cfg(feature = "with-paritydb-weights")]
 use frame_support::weights::constants::ParityDbWeight as RuntimeDbWeight;
 #[cfg(feature = "with-rocksdb-weights")]
@@ -58,16 +40,30 @@ use frame_support::{
 	weights::{constants::WEIGHT_REF_TIME_PER_MILLIS, IdentityFee, Weight},
 	PalletId,
 };
-use pallet_transaction_payment::FungibleAdapter;
-use polkadot_runtime_common::SlowAdjustingFeeUpdate;
-use sp_genesis_builder::PresetId;
-// Frontier
-use fp_evm::weight_per_gas;
-use fp_rpc::TransactionStatus;
 use pallet_ethereum::{Call::transact, PostLogContent, Transaction as EthereumTransaction};
 use pallet_evm::{Account as EVMAccount, FeeCalculator, Runner};
+use pallet_transaction_payment::FungibleAdapter;
+use polkadot_runtime_common::SlowAdjustingFeeUpdate;
+use scale_codec::{Decode, Encode};
+use sp_api::impl_runtime_apis;
+use sp_consensus_aura::sr25519::AuthorityId as AuraId;
+use sp_consensus_grandpa::{AuthorityId as GrandpaId, AuthorityList as GrandpaAuthorityList};
+use sp_core::{
+	crypto::{ByteArray, KeyTypeId},
+	ConstU128, OpaqueMetadata, H160, H256, U256,
+};
+use sp_genesis_builder::PresetId;
+use sp_runtime::{
+	generic, impl_opaque_keys,
+	traits::{
+		BlakeTwo256, Block as BlockT, Convert, DispatchInfoOf, Dispatchable, Get, IdentityLookup,
+		NumberFor, OpaqueKeys, PostDispatchInfoOf, UniqueSaturatedInto,
+	},
+	transaction_validity::{TransactionSource, TransactionValidity, TransactionValidityError},
+	ApplyExtrinsicResult, ConsensusEngineId, ExtrinsicInclusionMode, Perbill, Permill,
+};
+use sp_version::RuntimeVersion;
 
-// A few exports that help ease life for downstream crates.
 pub use frame_system::Call as SystemCall;
 pub use pallet_balances::Call as BalancesCall;
 pub use pallet_timestamp::Call as TimestampCall;
@@ -78,54 +74,29 @@ pub use evm_account::{
 use evm_account::{EeSuffixAddressMapping, EnsureAddressMatches};
 use precompiles::FrontierPrecompiles;
 
-/// Type of block number.
 pub type BlockNumber = u32;
 
-/// Alias to 512-bit hash when used in the context of a transaction signature on the chain.
-/// OrbinumSignature unifies sr25519, ed25519, and ECDSA with EVM-compatible AccountId
-/// derivation for ECDSA keys: `[eth_addr | 0x00×12]` — same as `EeSuffixAddressMapping`.
+/// ECDSA keys derive their `AccountId` as `[eth_addr | 0x00×12]` — the same layout
+/// `EeSuffixAddressMapping` uses, so an EVM address and its Substrate account agree.
 pub use orbinum_signature::OrbinumSignature;
 pub type Signature = OrbinumSignature;
 
-/// Account id is always 32 bytes (AccountId32 for Substrate-native accounts)
-/// EVM addresses (20 bytes) are mapped to AccountId32 for compatibility
 pub type AccountId = sp_runtime::AccountId32;
-
-/// The type for looking up accounts. We don't expect more than 4 billion of them, but you
-/// never know...
 pub type AccountIndex = u32;
-
-/// Balance of an account.
 pub type Balance = u128;
-
-/// Index of a transaction in the chain.
 pub type Nonce = u32;
-
-/// A hash of some data used by the chain.
 pub type Hash = H256;
-
-/// The hashing algorithm used by the chain.
 pub type Hashing = BlakeTwo256;
-
-/// Digest item type.
 pub type DigestItem = generic::DigestItem;
-
-/// The address format for describing accounts.
 pub type Address = AccountId;
-
-/// Block header type as expected by this runtime.
 pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
-
-/// Block type as expected by this runtime.
 pub type Block = generic::Block<Header, UncheckedExtrinsic>;
-
-/// A Block signed with a Justification
 pub type SignedBlock = generic::SignedBlock<Block>;
-
-/// BlockId type as expected by this runtime.
 pub type BlockId = generic::BlockId<Block>;
 
-/// The SignedExtension to the basic transaction logic.
+/// Order is wire format, not style: Tesseract builds signed payloads against this exact
+/// tuple, so it must end in `ChargeTransactionPayment` → `CheckMetadataHash`. Reordering
+/// or inserting an extension invalidates every signature the relayer produces.
 pub type SignedExtra = (
 	frame_system::CheckNonZeroSender<Runtime>,
 	frame_system::CheckSpecVersion<Runtime>,
@@ -138,25 +109,18 @@ pub type SignedExtra = (
 	frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
 );
 
-/// Unchecked extrinsic type as expected by this runtime.
 pub type UncheckedExtrinsic =
 	fp_self_contained::UncheckedExtrinsic<Address, RuntimeCall, Signature, SignedExtra>;
 
-/// Extrinsic type that has already been checked.
 pub type CheckedExtrinsic =
 	fp_self_contained::CheckedExtrinsic<AccountId, RuntimeCall, SignedExtra, H160>;
 
-/// The payload being signed in transactions.
 pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 
-/// Storage migrations run on runtime upgrade, oldest first.
-///
-/// Drop an entry once every live chain has passed its version — a migration
-/// that can no longer run is dead weight that could be re-armed by mistake.
-/// Empty: every live chain is past v3.
+/// Runs on upgrade, oldest first. Drop an entry once every live chain has passed its
+/// version: a migration that can no longer run could be re-armed by mistake.
 pub type Migrations = ();
 
-/// Executive: handles dispatch to the various modules.
 pub type Executive = frame_executive::Executive<
 	Runtime,
 	Block,
@@ -166,27 +130,21 @@ pub type Executive = frame_executive::Executive<
 	Migrations,
 >;
 
-// Time is measured by number of blocks.
 pub const MILLISECS_PER_BLOCK: u64 = 6000;
 pub const SLOT_DURATION: u64 = MILLISECS_PER_BLOCK;
 pub const MINUTES: BlockNumber = 60_000 / (MILLISECS_PER_BLOCK as BlockNumber);
 pub const HOURS: BlockNumber = MINUTES * 60;
 pub const DAYS: BlockNumber = HOURS * 24;
 
-/// Opaque types. These are used by the CLI to instantiate machinery that don't need to know
-/// the specifics of the runtime. They can then be made to be agnostic over specific formats
-/// of data like extrinsics, allowing for them to continue syncing the network through upgrades
-/// to even the core data structures.
+/// Extrinsic-agnostic types for the CLI, so a node keeps syncing across upgrades that
+/// change the core data structures.
 pub mod opaque {
 	use super::*;
 
 	pub use sp_runtime::OpaqueExtrinsic as UncheckedExtrinsic;
 
-	/// Opaque block header type.
 	pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
-	/// Opaque block type.
 	pub type Block = generic::Block<Header, UncheckedExtrinsic>;
-	/// Opaque block identifier type.
 	pub type BlockId = generic::BlockId<Block>;
 
 	impl_opaque_keys! {
@@ -202,7 +160,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: Cow::Borrowed("orbinum"),
 	impl_name: Cow::Borrowed("orbinum"),
 	authoring_version: 1,
-	spec_version: 10,
+	spec_version: 11,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 3,
@@ -225,12 +183,31 @@ pub const MAXIMUM_BLOCK_WEIGHT: Weight = Weight::from_parts(
 	WEIGHT_MILLISECS_PER_BLOCK * WEIGHT_REF_TIME_PER_MILLIS,
 	u64::MAX,
 );
-pub const MAXIMUM_BLOCK_LENGTH: u32 = 5 * 1024 * 1024;
+/// 8 MiB: GRANDPA consensus proofs do not fit the 5 MiB this was before ISMP.
+///
+/// Bigger blocks widen the DoS surface — re-run benchmarks and confirm validators keep
+/// up under load before mainnet.
+pub const MAXIMUM_BLOCK_LENGTH: u32 = 8 * 1024 * 1024;
+
+/// Applies to block LENGTH only; weights stay at `NORMAL_DISPATCH_RATIO`.
+pub const BLOCK_LENGTH_NORMAL_RATIO: Perbill = Perbill::from_percent(85);
 
 // Pallet `Config` impls live in `configs/`, grouped by domain. They are plain
 // `impl` items, so moving them out changes nothing about assembly — unlike the
 // macro blocks below, which must stay whole.
 pub use configs::{consensus::*, evm::*, privacy::*, system::*};
+
+// Imported rather than fully qualified: the qualified paths bury the runtime-API
+// signatures. `IsmpEvent`/`IsmpRequest` are aliased because bare `Event`/`Request`
+// collide with runtime types of the same name.
+use ismp::{
+	consensus::{ConsensusClientId, StateMachineHeight, StateMachineId},
+	events::Event as IsmpEvent,
+	host::StateMachine,
+	router::{GetResponse, Request as IsmpRequest},
+};
+// `configs::ismp` is deliberately not glob-imported: it would shadow the `ismp` crate.
+// Its `Config` impls apply regardless of imports.
 
 parameter_types! {
 	pub storage EnableManualSeal: bool = false;
@@ -338,6 +315,17 @@ mod runtime {
 
 	#[runtime::pallet_index(18)]
 	pub type Session = pallet_session;
+
+	// ISMP / Hyperbridge. `IsmpGrandpa` is the consensus client that lets Hyperbridge
+	// verify this chain's own finality — what keeps Orbinum sovereign, not a parachain.
+	#[runtime::pallet_index(19)]
+	pub type Ismp = pallet_ismp;
+
+	#[runtime::pallet_index(20)]
+	pub type IsmpGrandpa = ismp_grandpa;
+
+	#[runtime::pallet_index(21)]
+	pub type IsmpMessaging = pallet_ismp_messaging;
 }
 
 #[derive(Clone)]
@@ -436,7 +424,31 @@ mod benches {
 		[pallet_shielded_pool, ShieldedPool]
 		[pallet_relayer, Relayer]
 		[pallet_validator_set, ValidatorSet]
+		[ismp_grandpa, IsmpGrandpa]
+		[pallet_ismp_messaging, IsmpMessaging]
 	);
+}
+
+/// Orbinum-local ISMP runtime API.
+///
+/// Upstream has no coprocessor accessor, and neither `Coprocessor` nor
+/// `HostStateMachine` is a `#[pallet::constant]`, so neither reaches metadata. Without
+/// this, the value is undiscoverable from a running node and callers must restate it.
+pub mod runtime_api {
+	use ismp::host::StateMachine;
+
+	sp_api::decl_runtime_apis! {
+		/// Build-dependent ISMP identities that are otherwise compile-time only.
+		pub trait OrbinumIsmpApi {
+			/// The configured coprocessor, i.e. which Hyperbridge deployment this
+			/// build talks to. `None` would mean ISMP proxying is disabled.
+			fn coprocessor() -> Option<StateMachine>;
+
+			/// The slot duration to whitelist the coprocessor with, so callers derive
+			/// it from the runtime instead of restating it.
+			fn hyperbridge_slot_duration() -> u64;
+		}
+	}
 }
 
 impl_runtime_apis! {
@@ -544,8 +556,11 @@ impl_runtime_apis! {
 	}
 
 	impl sp_session::SessionKeys<Block> for Runtime {
-		fn generate_session_keys(seed: Option<Vec<u8>>) -> Vec<u8> {
-			opaque::SessionKeys::generate(seed)
+		fn generate_session_keys(
+			owner: Vec<u8>,
+			seed: Option<Vec<u8>>,
+		) -> sp_session::OpaqueGeneratedSessionKeys {
+			opaque::SessionKeys::generate(&owner, seed).into()
 		}
 
 		fn decode_session_keys(
@@ -980,7 +995,69 @@ impl_runtime_apis! {
 		}
 	}
 
-	// Relayer Runtime API implementation
+	// ISMP Runtime API — the read path relayers depend on:
+	//   relayer -> RPC (ismp_query*) -> this runtime API -> offchain DB
+	//
+	// Thin delegations; the pallet owns the logic. `requests`/`responses` read the
+	// offchain DB, populated only when offchain indexing is on — `command.rs` forces
+	// it, because a node without it answers every query with an empty list and no error.
+	impl pallet_ismp_runtime_api::IsmpRuntimeApi<Block, <Block as BlockT>::Hash> for Runtime {
+		fn host_state_machine() -> StateMachine {
+			configs::ismp::network::host_state_machine()
+		}
+
+		fn block_events() -> Vec<IsmpEvent> {
+			Ismp::block_events()
+		}
+
+		fn block_events_with_metadata() -> Vec<(IsmpEvent, Option<u32>)> {
+			Ismp::block_events_with_metadata()
+		}
+
+		fn consensus_state(id: ConsensusClientId) -> Option<Vec<u8>> {
+			pallet_ismp::ConsensusStates::<Runtime>::get(id)
+		}
+
+		/// The host's *local* timestamp when this height was committed — the clock the
+		/// challenge period is measured against, not the counterparty's own block
+		/// timestamp, which lives in `StateCommitment.timestamp`.
+		///
+		/// The map is named explicitly so a future rename cannot silently redirect it.
+		fn state_machine_update_time(id: StateMachineHeight) -> Option<u64> {
+			pallet_ismp::BoundedStateMachineUpdateTime::<Runtime>::get(id.id, id.height)
+		}
+
+		fn challenge_period(id: StateMachineId) -> Option<u64> {
+			pallet_ismp::ChallengePeriod::<Runtime>::get(id)
+		}
+
+		fn latest_state_machine_height(id: StateMachineId) -> Option<u64> {
+			pallet_ismp::LatestStateMachineHeight::<Runtime>::get(id)
+		}
+
+		fn requests(request_commitments: Vec<H256>) -> Vec<IsmpRequest> {
+			Ismp::requests(request_commitments)
+		}
+
+		/// Returns `GetResponse`, not `Response`: ISMP has no first-class POST response,
+		/// by design — `IsmpDispatcher` declares only `dispatch_request`, so an
+		/// application replies with a POST in the opposite direction, a block later. The
+		/// published docs show `Vec<Response>`, which does not compile.
+		fn responses(response_commitments: Vec<H256>) -> Vec<GetResponse> {
+			Ismp::responses(response_commitments)
+		}
+	}
+
+	impl crate::runtime_api::OrbinumIsmpApi<Block> for Runtime {
+		fn coprocessor() -> Option<StateMachine> {
+			configs::ismp::network::coprocessor()
+		}
+
+		fn hyperbridge_slot_duration() -> u64 {
+			configs::ismp::network::HYPERBRIDGE_SLOT_DURATION_MS
+		}
+	}
+
 	impl pallet_relayer_runtime_api::RelayerRuntimeApi<Block> for Runtime {
 		fn is_relayer(account: sp_runtime::AccountId32) -> bool {
 			pallet_relayer::RelayerByAccount::<Runtime>::contains_key(&account)

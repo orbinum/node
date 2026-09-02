@@ -488,7 +488,7 @@ mod tests {
 		let mut path = Vec::with_capacity(20);
 		let mut target = leaf_index;
 		for level in 0..20 {
-			if current_level.len() % 2 != 0 {
+			if !current_level.len().is_multiple_of(2) {
 				current_level.push(get_zero_hash_cached(level));
 			}
 			let sibling_idx = target ^ 1;

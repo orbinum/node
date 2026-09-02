@@ -57,7 +57,28 @@ impl SubstrateCli for Cli {
 
 /// Parse and run command line arguments
 pub fn run() -> sc_cli::Result<()> {
-	let cli = Cli::from_args();
+	let mut cli = Cli::from_args();
+
+	// ── ISMP requirements, forced rather than left to the operator ───────────────
+	//
+	// `pallet-ismp` persists outgoing requests through `sp_io::offchain_index::set`,
+	// a **no-op when offchain indexing is disabled**. A node started without it
+	// answers `ismp_queryRequests` with an empty list and no error, so relayers never
+	// see our messages — invisible from the outside, hence forced here.
+	cli.run.offchain_worker_params.indexing_enabled = true;
+
+	// GRANDPA consensus proofs are large; the defaults (15 MiB) truncate them.
+	cli.run.rpc_params.rpc_max_request_size = 150;
+	cli.run.rpc_params.rpc_max_response_size = 150;
+
+	// The ISMP query methods are not in Substrate's Safe set, so under the default a
+	// remote relayer cannot call `ismp_queryStateProof` — proof fetching fails while
+	// local calls keep working, a confusing way to find out. Hyperbridge's own node
+	// does the same.
+	//
+	// This exposes the rest of the unsafe namespace, so a public endpoint belongs
+	// behind a method-allowlisting proxy. A deployment concern, not the binary's.
+	cli.run.rpc_params.rpc_methods = sc_cli::RpcMethods::Unsafe;
 
 	match &cli.subcommand {
 		Some(Subcommand::Key(cmd)) => cmd.run(&cli),

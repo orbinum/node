@@ -40,9 +40,19 @@ check-release:
 # Build all binaries with debug profile
 build:
 	WASM_BUILD_TYPE=debug cargo build
-# Build all binaries with release profile
+# Build all binaries with release profile.
+#
+# FEATURES selects the Hyperbridge deployment the runtime is compiled against, and it is
+# not optional for a testnet build: the default targets `Polkadot(3367)` (mainnet), and
+# `Polkadot(id)` / `Kusama(id)` are distinct SCALE variants that `is_allowed_proxy`
+# compares with `==`. A testnet chain running a mainnet-coprocessor runtime rejects every
+# proxied request, and it does so at relay time, not at deploy time.
+#
+#   make build-release                                # mainnet
+#   make build-release FEATURES=hyperbridge-testnet   # testnet
+FEATURES ?=
 build-release:
-	WASM_BUILD_TYPE=release cargo build --release
+	WASM_BUILD_TYPE=release cargo build --release $(if $(FEATURES),--features $(FEATURES),)
 
 .PHONY: test test-release
 # Run all unit tests with debug profile
@@ -63,9 +73,11 @@ integration-test: build-release integration-test-lint
 	cd ts-tests && npm run build && npm run test && npm run test-sql
 
 .PHONY: benchmark benchmark-pallet
-# Run all runtime benchmarks
+# Run all runtime benchmarks. Replaces the interactive vendored script: this one is
+# non-interactive, writes each pallet's weights to its real destination, and survives
+# the OOM window (see the script's header).
 benchmark:
-	./scripts/benchmark.sh
+	./scripts/benchmarks/run_benchmarks.sh
 # Run benchmark for specific pallet (usage: make benchmark-pallet PALLET=pallet-shielded-pool)
 benchmark-pallet:
 	@if [ -z "$(PALLET)" ]; then \
@@ -73,7 +85,7 @@ benchmark-pallet:
 		exit 1; \
 	fi
 	cargo build --release --features=runtime-benchmarks,skip-proof-verification
-	./target/release/orbinum-node benchmark pallet --chain=dev --pallet=$(PALLET) --extrinsic='*' --steps=50 --repeat=20 --output=./frame/$(PALLET)/src/weights.rs --template=./scripts/frame-weight-template.hbs
+	./target/release/orbinum-node benchmark pallet --chain=dev --pallet=$(PALLET) --extrinsic='*' --steps=50 --repeat=20 --output=./frame/$(PALLET)/src/weights.rs --template=./scripts/benchmarks/frame-weight-template.hbs
 
 .PHONY: run-dev
 run-dev:

@@ -9,25 +9,11 @@ exclude-dev = true
 # Ignore advisories for transitive dependencies that cannot be resolved
 # without upgrading polkadot-sdk or ZK crates upstream.
 ignore = [
-    # wasmtime 35.0.0 — pinned by polkadot-sdk stable2512 via sc-executor-wasmtime
-    # No upgrade path within current SDK pinning.
-    "RUSTSEC-2026-0006",  # segfault with f64.copysign on x86-64
-    "RUSTSEC-2026-0114",  # panic allocating table exceeding host address space
-    "RUSTSEC-2026-0086",  # out-of-bounds write/crash transcoding component model strings
-    "RUSTSEC-2026-0087",  # panic transcoding misaligned component model UTF-16 strings
-    "RUSTSEC-2026-0088",  # heap OOB read in component model UTF-16 → latin1+utf16 transcoding
-    "RUSTSEC-2026-0089",  # improperly masked return value from table.grow (Winch backend)
-    "RUSTSEC-2026-0091",  # sandbox-escaping memory access with Winch compiler backend
-    "RUSTSEC-2026-0092",  # miscompiled guest heap access enables sandbox escape on aarch64
-    "RUSTSEC-2026-0093",  # wasmtime vulnerability
-    "RUSTSEC-2026-0094",  # wasmtime vulnerability
-    "RUSTSEC-2026-0095",  # wasmtime vulnerability
-    "RUSTSEC-2026-0096",  # wasmtime vulnerability
-    "RUSTSEC-2025-0118",  # unsound API access to WebAssembly shared linear memory
-    "RUSTSEC-2026-0020",  # guest-controlled resource exhaustion in WASI implementations
-    "RUSTSEC-2026-0021",  # panic adding excessive fields to wasi:http/types.fields
-    "RUSTSEC-2026-0085",  # panic when lifting flags component value
-    "RUSTSEC-2026-0222",  # stores can mix up type indices between engines
+    # The 17 wasmtime advisories that lived here were pinned by stable2512's wasmtime
+    # 35.0.0 — three of them sandbox escapes. SDK 2606 brings wasmtime 36.0.14, which
+    # fixes every one: with this list emptied, `cargo deny check advisories` reports none
+    # of them against the current graph. Re-check on the next SDK bump rather than
+    # re-adding blind; an ignore that suppresses nothing hides the ones that do.
 
     # tracing-subscriber 0.2.25 — pinned by ark-relations (ZK crates), no upgrade path
     "RUSTSEC-2025-0055",

@@ -7,21 +7,11 @@
 use frame_support::{BoundedVec, pallet_prelude::*};
 use parity_scale_codec::{Decode, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
-use sp_runtime::RuntimeDebug;
 
 // AssetMetadata
 
 /// Asset metadata for multi-asset shielded pool.
-#[derive(
-	Clone,
-	PartialEq,
-	Eq,
-	Encode,
-	Decode,
-	MaxEncodedLen,
-	TypeInfo,
-	RuntimeDebug
-)]
+#[derive(Clone, PartialEq, Eq, Encode, Decode, MaxEncodedLen, TypeInfo, Debug)]
 pub struct AssetMetadata<AccountId, BlockNumber> {
 	pub id: u32,
 	pub name: BoundedVec<u8, ConstU32<64>>,

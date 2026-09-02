@@ -65,11 +65,11 @@ fn register_relayer_requires_signed() {
 		let (evm, sig) = proof_for(1, seeds::ALICE);
 		assert_noop!(
 			Relayer::register_relayer(RuntimeOrigin::none(), evm, sig.clone()),
-			frame_support::error::BadOrigin,
+			sp_runtime::traits::BadOrigin,
 		);
 		assert_noop!(
 			Relayer::register_relayer(RuntimeOrigin::root(), evm, sig),
-			frame_support::error::BadOrigin,
+			sp_runtime::traits::BadOrigin,
 		);
 	});
 }
@@ -199,7 +199,7 @@ fn unregister_requires_signed() {
 	new_test_ext().execute_with(|| {
 		assert_noop!(
 			Relayer::unregister_relayer(RuntimeOrigin::none()),
-			frame_support::error::BadOrigin,
+			sp_runtime::traits::BadOrigin,
 		);
 	});
 }

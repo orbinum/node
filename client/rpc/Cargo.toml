@@ -66,14 +66,8 @@ pallet-relayer-runtime-api = { workspace = true, features = ["std"] }
 pallet-shielded-pool-runtime-api = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
-tempfile = "3.21.0"
 # Substrate
-sc-block-builder = { workspace = true }
-sc-client-db = { workspace = true, features = ["rocksdb"] }
-sp-consensus = { workspace = true }
-substrate-test-runtime-client = { workspace = true }
 # Frontier
-fc-db = { workspace = true }
 
 [features]
 default = ["aura", "rocksdb"]
@@ -84,7 +78,6 @@ aura = [
 ]
 rocksdb = [
 	"sc-service/rocksdb",
-	"fc-db/rocksdb",
 	"fc-mapping-sync/rocksdb",
 ]
 txpool = ["fc-rpc-core/txpool"]

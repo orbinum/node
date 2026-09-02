@@ -1,0 +1,46 @@
+# LOCAL validation against Paseo. The Orbinum node runs on this machine, not production.
+#
+# `signer` OMITTED, not empty. An empty string is hex-decoded and fails with
+# "Invalid seed length"; absent generates a throwaway key and leaves the chain
+# inbound-only. `log-consensus-state` is read-only anyway.
+
+[hyperbridge]
+type = "substrate"
+rpc_ws = "wss://gargantua.rpc.polytope.technology"
+consensus_state_id = "PAS0"
+state_machine = "KUSAMA-4009"
+hashing = "Keccak"
+
+[hyperbridge.consensus]
+type = "grandpa"
+# Paseo's RELAY chain — Hyperbridge is a parachain, its finality comes from there.
+rpc = "wss://pas-rpc.stakeworld.io"
+slot_duration = 6000
+para_ids = [4009]
+
+[orbinum]
+type = "substrate"
+# Local node, not the production one.
+rpc_ws = "ws://host.docker.internal:9944"
+consensus_state_id = "ORBI"
+state_machine = "SUBSTRATE-orbi"
+hashing = "Blake2"
+# Dev account, funded from //Alice via `balances.transferKeepAlive`.
+# Tesseract calls `from_seed_slice(hex)`: this is a 32-byte mini-secret, NOT a mnemonic
+# and NOT a `//Alice` path — that path cannot be expressed as a raw seed, so the
+# resulting account differs from Alice and has to be funded.
+# 5DfhGyQdFobKM8NsWvEeAKk5EQQgYe9AydgJ7rMB6E1EqRzV
+signer = "0xfac7959dbfe72f052e5a0c3c8d6530f202b02fd8f9f5ca3580ec8deb7797479e"
+
+[orbinum.consensus]
+type = "grandpa"
+# Solochain: prueba su propia finalidad, sin relay ni para_ids.
+rpc = "ws://host.docker.internal:9944"
+slot_duration = 6000
+para_ids = []
+
+[relayer]
+maximum_update_intervals = [
+    [{ state_id = "KUSAMA-4009", consensus_state_id = "PAS0" }, 180],
+    [{ state_id = "SUBSTRATE-orbi", consensus_state_id = "ORBI" }, 180],
+]

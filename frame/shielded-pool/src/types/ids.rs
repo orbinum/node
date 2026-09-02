@@ -11,7 +11,6 @@
 use parity_scale_codec::{Decode, DecodeWithMemTracking, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
 use sp_core::H256;
-use sp_runtime::RuntimeDebug;
 
 // Commitment
 
@@ -28,7 +27,7 @@ use sp_runtime::RuntimeDebug;
 	DecodeWithMemTracking,
 	MaxEncodedLen,
 	TypeInfo,
-	RuntimeDebug,
+	Debug,
 	Default
 )]
 pub struct Commitment(pub [u8; 32]);
@@ -85,7 +84,7 @@ impl AsRef<[u8]> for Commitment {
 	DecodeWithMemTracking,
 	MaxEncodedLen,
 	TypeInfo,
-	RuntimeDebug,
+	Debug,
 	Default
 )]
 pub struct Nullifier(pub [u8; 32]);
@@ -139,7 +138,7 @@ impl AsRef<[u8]> for Nullifier {
 	Decode,
 	MaxEncodedLen,
 	TypeInfo,
-	RuntimeDebug,
+	Debug,
 	Default,
 	PartialOrd,
 	Ord

@@ -5,7 +5,7 @@ description = "Zero-Knowledge proof verification pallet for Orbinum"
 authors = ["Orbinum Team"]
 license = "GPL-3.0-or-later"
 edition = "2024"
-repository = "https://github.com/orbinum/orbinum-node"
+repository = "https://github.com/orbinum/node"
 readme = "README.md"
 
 [package.metadata.docs.rs]
@@ -21,17 +21,17 @@ serde = { version = "1.0", default-features = false, features = ["derive", "allo
 
 # Substrate primitives
 
-sp-io = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
-sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
-sp-std = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
+sp-io = { version = "48.0.0", default-features = false }
+sp-runtime = { version = "48.0.0", default-features = false }
+sp-std = { version = "14.0.0", default-features = false }
 
 # Logging (optional for std)
 log = { version = "0.4", default-features = false, optional = true }
 
 # FRAME dependencies
-frame-benchmarking = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false, optional = true }
-frame-support = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
-frame-system = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512", default-features = false }
+frame-benchmarking = { version = "49.0.0", default-features = false, optional = true }
+frame-support = { version = "48.0.0", default-features = false }
+frame-system = { version = "48.0.0", default-features = false }
 
 # Local dependencies
 ark-bn254 = { version = "0.5.0", default-features = false, features = ["curve"], optional = true }
