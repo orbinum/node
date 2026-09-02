@@ -10,18 +10,34 @@
 //! ## Hand-corrected value
 //!
 //! `dispatch_post`'s `proof_size` is set to **3550**, not the generator's output. The CLI
-//! emitted `2585700789447993344` (~2.5 exabytes) against a measured 85 bytes: the call
-//! reads ~50 `RequestCommitments` keys owned by `pallet-ismp`, which declares no
-//! `MaxEncodedLen`, and `min_squares_iqr` writes its intercept without the `.max(0f64)`
-//! clamp that `median_slopes` applies (`frame-benchmarking-49.0.0/src/analysis.rs:419`
-//! vs `:338`). The value is not even deterministic — a second run produced
-//! `8126544059662763008`.
+//! emitted `2585700789447993344` (~2.5 exabytes) against a measured 85 bytes, and not
+//! even deterministically — a second run produced `8126544059662763008`.
 //!
-//! 3550 is what the same benchmark produces at `--steps 3`, where the analysis does not
-//! blow up, and it sits inside this pallet's own range (1504-3606).
+//! Cause, per the upstream fix: the call reads ~50 `RequestCommitments` keys owned by
+//! `pallet-ismp`, which declares no `MaxEncodedLen`, so they land in the analysis as
+//! `UNKNOWN KEY`. `min_squares_iqr` runs per storage prefix, and a prefix observed at
+//! only one component value makes the OLS design matrix rank-deficient; `linregress`'s
+//! pseudo-inverse then returns an intercept in the 10^18 range. That also explains the
+//! non-determinism, and why `--steps 3` looks fine: with fewer steps the prefix is
+//! usually seen at more than one `x`, so the matrix is not singular.
 //!
-//! **Regenerating this file will reintroduce the bad value.** Check `dispatch_post`'s
-//! `proof_size` against the other extrinsics before committing. Reported upstream.
+//! 3550 is what the same benchmark produces at `--steps 3`, and it sits inside this
+//! pallet's own range (1504-3606).
+//!
+//! It is also what the fixed CLI produces at `--steps 50`: patching the upstream fix
+//! into our vendored crates and re-running on the reference hardware emitted
+//! `Weight::from_parts(32_066_596, 3550)` — the same `proof_size`, reached by a
+//! different route, which is why this value is trusted rather than merely plausible.
+//! The `test/upstream-13073-proof-size` branch carries the script that reproduces it.
+//!
+//! **Regenerating this file with an unfixed CLI will reintroduce the bad value.** Check
+//! `dispatch_post`'s `proof_size` against the other extrinsics before committing.
+//!
+//! Reported as paritytech/polkadot-sdk#13066; fix proposed in PR #13073 (falls back to
+//! the median model when there is one unique `x`, and fails the run when an analyzed
+//! `proof_size` exceeds `u32::MAX` instead of writing it out). It targets `master`,
+//! while `pallet-ismp` pins us to `polkadot-sdk =2606.0.0`, so this note stands until
+//! we move SDK lines. Then drop it and regenerate.
 
 // Executed Command:
 // ./target/release/orbinum-node
