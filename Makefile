@@ -40,9 +40,19 @@ check-release:
 # Build all binaries with debug profile
 build:
 	WASM_BUILD_TYPE=debug cargo build
-# Build all binaries with release profile
+# Build all binaries with release profile.
+#
+# FEATURES selects the Hyperbridge deployment the runtime is compiled against, and it is
+# not optional for a testnet build: the default targets `Polkadot(3367)` (mainnet), and
+# `Polkadot(id)` / `Kusama(id)` are distinct SCALE variants that `is_allowed_proxy`
+# compares with `==`. A testnet chain running a mainnet-coprocessor runtime rejects every
+# proxied request, and it does so at relay time, not at deploy time.
+#
+#   make build-release                                # mainnet
+#   make build-release FEATURES=hyperbridge-testnet   # testnet
+FEATURES ?=
 build-release:
-	WASM_BUILD_TYPE=release cargo build --release
+	WASM_BUILD_TYPE=release cargo build --release $(if $(FEATURES),--features $(FEATURES),)
 
 .PHONY: test test-release
 # Run all unit tests with debug profile

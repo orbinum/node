@@ -1,0 +1,53 @@
+# What the Docker build context must not carry.
+#
+# CI never needed this file: a fresh checkout has no target/ and no node_modules. A
+# developer's clone does — target/ alone is >100 GB here — and `COPY . .` would ship all
+# of it to the daemon before the first line compiles. Anyone building these images
+# locally (to reproduce a release, or to check a build-arg) needs the same context CI
+# gets.
+
+# Build artifacts
+target/
+**/target/
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Test suites — not needed to build the node
+ts-tests/
+
+# NOT excluded: .git/
+#
+# `template/node/build.rs` calls substrate's `generate_cargo_keys`, which reads
+# `.git/HEAD` to stamp the commit hash into `--version` (0.2.0-ca11f057e7c). CI checks
+# out with fetch-depth: 0, so released images carry that hash today; excluding .git here
+# would silently drop it and leave every image reporting a bare 0.2.0. 763 MB of context
+# is a fair price for being able to tell which commit an image came from.
+
+# CI definitions
+.github/
+
+# Docker's own files
+Dockerfile
+**/Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# IDE / OS noise
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*~
+
+# Secrets — never send to a build context
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Scratch
+*.tmp
+*.log
