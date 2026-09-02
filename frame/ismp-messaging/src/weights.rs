@@ -7,8 +7,20 @@
 //! change in an unrelated file. Both upstream reference modules do exactly that.
 //!
 //! Conservative hand-written values, not benchmark output — over-charging costs
-//! throughput, under-charging costs safety. Regenerate with
-//! `benchmark pallet --pallet=pallet_ismp_messaging --extrinsic='*'`.
+//! throughput, under-charging costs safety.
+//!
+//! Regenerating: `--extrinsic='*'` holds every result in memory through the analysis
+//! phase and gets OOM-killed on a 16 GiB Linux host (measured: 15.4 GB resident before
+//! the kernel reaped it). Benchmark one extrinsic per process and stitch the parts with
+//! `scripts/benchmarks/merge-weights.sh` — see that script and the header of
+//! `run_benchmarks.sh` for the full procedure.
+//!
+//! `on_response` resists even that: it is the one extrinsic whose analysis phase blows
+//! past the memory of a 16 GiB Linux box on its own. Measured on macOS, where it does
+//! complete, the real cost is ~3.4M ps against the 30M charged here — this value
+//! over-charges by ~9x, so keeping it costs a little throughput and risks nothing. It is
+//! also the cheapest handler in the pallet (two `len()` calls over at most 64 values and
+//! one event), and with `POLICY = false` its weight is discarded before it is read.
 
 use frame_support::weights::{Weight, constants::RocksDbWeight};
 

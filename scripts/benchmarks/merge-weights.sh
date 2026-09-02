@@ -5,6 +5,8 @@
 # Usage:
 #   ./scripts/benchmarks/merge-weights.sh <output.rs> <part1.rs> <part2.rs> ...
 #   ./scripts/benchmarks/merge-weights.sh --allow-partial <output.rs> <part.rs>
+#     ^ bypasses the completeness check. The result only compiles if the parts cover
+#       every function the pallet's trait declares.
 #
 # Why this exists: `benchmark pallet --extrinsic <one>` emits a file whose `WeightInfo`
 # trait declares only that one function, so it does not satisfy the pallet's real trait.
@@ -43,9 +45,13 @@ if [[ -s "$OUTPUT" && $ALLOW_PARTIAL -eq 0 ]]; then
     incoming=${#PARTS[@]}
     if [[ "$existing" -gt 0 && "$incoming" -lt "$existing" ]]; then
         echo "Error: $OUTPUT already declares $existing weight functions, but only" >&2
-        echo "       $incoming part(s) were given. Merging would drop the rest." >&2
-        echo "       Re-run the missing extrinsics, or pass --allow-partial if you" >&2
-        echo "       really mean to shrink the file." >&2
+        echo "       $incoming part(s) were given. Merging would drop the rest, and the" >&2
+        echo "       trait would stop satisfying the pallet — verified: the build fails" >&2
+        echo "       with \"no function named <dropped> found for WeightInfo\"." >&2
+        echo "" >&2
+        echo "       Benchmark the missing extrinsics, or keep the current file and" >&2
+        echo "       splice the fresh bodies in by hand. --allow-partial only bypasses" >&2
+        echo "       this check; it does not carry the missing functions over." >&2
         exit 1
     fi
 fi
