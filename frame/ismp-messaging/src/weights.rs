@@ -7,6 +7,22 @@
 //! HOSTNAME: `ubuntu-32gb-hel1-1`, CPU: `AMD EPYC-Genoa Processor`
 //! EXECUTION: , WASM-EXECUTION: Compiled, CHAIN: Some("dev"), DB CACHE: 1024
 
+//! ## Hand-corrected value
+//!
+//! `dispatch_post`'s `proof_size` is set to **3550**, not the generator's output. The CLI
+//! emitted `2585700789447993344` (~2.5 exabytes) against a measured 85 bytes: the call
+//! reads ~50 `RequestCommitments` keys owned by `pallet-ismp`, which declares no
+//! `MaxEncodedLen`, and `min_squares_iqr` writes its intercept without the `.max(0f64)`
+//! clamp that `median_slopes` applies (`frame-benchmarking-49.0.0/src/analysis.rs:419`
+//! vs `:338`). The value is not even deterministic — a second run produced
+//! `8126544059662763008`.
+//!
+//! 3550 is what the same benchmark produces at `--steps 3`, where the analysis does not
+//! blow up, and it sits inside this pallet's own range (1504-3606).
+//!
+//! **Regenerating this file will reintroduce the bad value.** Check `dispatch_post`'s
+//! `proof_size` against the other extrinsics before committing. Reported upstream.
+
 // Executed Command:
 // ./target/release/orbinum-node
 // benchmark
@@ -163,9 +179,9 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	fn dispatch_post(b: u32, ) -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `85`
-		//  Estimated: `2585700789447993344 + b * (21 ±0)`
+		//  Estimated: `3550 + b * (21 ±0)` (hand-corrected, see the header)
 		// Minimum execution time: 28_610_000 picoseconds.
-		Weight::from_parts(31_725_511, 2585700789447993344)
+		Weight::from_parts(31_725_511, 3550)
 			// Standard Error: 8
 			.saturating_add(Weight::from_parts(6_400, 0).saturating_mul(b.into()))
 			.saturating_add(T::DbWeight::get().reads(6_u64))
@@ -389,9 +405,9 @@ impl WeightInfo for () {
 	fn dispatch_post(b: u32, ) -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `85`
-		//  Estimated: `2585700789447993344 + b * (21 ±0)`
+		//  Estimated: `3550 + b * (21 ±0)` (hand-corrected, see the header)
 		// Minimum execution time: 28_610_000 picoseconds.
-		Weight::from_parts(31_725_511, 2585700789447993344)
+		Weight::from_parts(31_725_511, 3550)
 			// Standard Error: 8
 			.saturating_add(Weight::from_parts(6_400, 0).saturating_mul(b.into()))
 			.saturating_add(RocksDbWeight::get().reads(6_u64))

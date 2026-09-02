@@ -19,6 +19,14 @@
 # Publishable weights need the defaults (50/20). Lowering --steps/--repeat gives numbers
 # good for shape, not for committing.
 #
+# `--default-pov-mode measured` records the storage footprint actually observed instead
+# of the theoretical maximum. It is a no-op for a pallet whose maps declare their size
+# (verified: relayer, validator-set and zk-verifier produce identical proof sizes either
+# way), but it is what keeps `pallet_ismp_messaging::dispatch_post` honest: that call
+# touches ~50 `RequestCommitments` keys owned by `pallet-ismp`, which declares no
+# `max_size`, so the default `max-encoded-len` mode assumes --map-size (1,000,000) per
+# key and overflows to a nonsense 2.5-exabyte estimate against 85 bytes measured.
+#
 # `--db-cache` and `--no-storage-info` exist to trim the footprint on a smaller host,
 # but they do not make a 16 GB box sufficient — use the reference machine instead.
 
@@ -125,6 +133,7 @@ run_bench() {
         --repeat "$REPEAT" \
         --wasm-execution=compiled \
         --heap-pages="$HEAP_PAGES" \
+        --default-pov-mode measured \
         $DB_CACHE_ARG $STORAGE_INFO_ARG \
         --output "$output" \
         --template "$TEMPLATE" || rc=$?

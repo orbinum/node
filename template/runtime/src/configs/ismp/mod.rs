@@ -258,11 +258,7 @@ impl pallet_ismp_messaging::Config for Runtime {
 	/// are measured over. Keep this and the benchmark's upper bound equal.
 	type MaxBodyLen = ConstU32<8192>;
 
-	/// Regenerate with:
-	/// `benchmark pallet --pallet=pallet_ismp_messaging --extrinsic='*'`
-	/// and swap this for `pallet_ismp_messaging::weights::SubstrateWeight<Runtime>`.
-	/// The unit impl is conservative by hand, not measured.
-	type WeightInfo = ();
+	type WeightInfo = pallet_ismp_messaging::weights::SubstrateWeight<Runtime>;
 }
 
 #[cfg(test)]
