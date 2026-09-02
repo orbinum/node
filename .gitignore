@@ -53,3 +53,7 @@ scripts/generate-specs/dist/
 
 # Contiene mnemonics en claro — nunca commitear
 scripts/vk/add-validators.cjs
+
+# Vendored crate sources — written by scripts/benchmarks/test-upstream-13073.sh when
+# testing an unreleased SDK fix. Several GB, and reproducible with `cargo vendor`.
+/vendor/
