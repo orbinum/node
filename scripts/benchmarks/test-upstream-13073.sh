@@ -94,6 +94,26 @@ apply_one() {
 apply_one "substrate/frame/benchmarking/src/analysis.rs" 4 "$FB" "analysis"
 apply_one "src/pallet/writer.rs" 5 "$CLI" "writer"
 
+# Cargo verifies every file in a vendored directory against `.cargo-checksum.json` and
+# refuses to build when one differs ("directory sources are not intended to be edited").
+# Patching is exactly that edit, so re-hash the files we touched. Only these two: any
+# other mismatch is real corruption and should still fail the build.
+refresh_checksum() {
+    local crate_dir="$1" rel="$2"
+    python3 - "$crate_dir" "$rel" <<'PYEOF'
+import hashlib, json, pathlib, sys
+crate, rel = pathlib.Path(sys.argv[1]), sys.argv[2]
+manifest = crate / ".cargo-checksum.json"
+data = json.loads(manifest.read_text())
+data["files"][rel] = hashlib.sha256((crate / rel).read_bytes()).hexdigest()
+manifest.write_text(json.dumps(data, separators=(",", ":")))
+PYEOF
+    echo "   re-hashed: ${crate_dir##*/}/$rel"
+}
+
+refresh_checksum "$FB" "src/analysis.rs"
+refresh_checksum "$CLI" "src/pallet/writer.rs"
+
 say "4/6  redirecting cargo at the vendored sources"
 # This redirect is what makes the build use the patched sources. If it silently fails,
 # cargo compiles the unpatched crates from crates.io and the run "passes" while testing
