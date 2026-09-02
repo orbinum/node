@@ -19,9 +19,8 @@
 # Publishable weights need the defaults (50/20). Lowering --steps/--repeat gives numbers
 # good for shape, not for committing.
 #
-# On a smaller host, --db-cache and --no-storage-info reduce the footprint, and
-# merge-weights.sh assembles a pallet from per-extrinsic runs. Those are workarounds;
-# the right fix is to use the reference machine.
+# `--db-cache` and `--no-storage-info` exist to trim the footprint on a smaller host,
+# but they do not make a 16 GB box sufficient — use the reference machine instead.
 
 set -euo pipefail
 
