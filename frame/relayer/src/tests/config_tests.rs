@@ -39,7 +39,7 @@ fn set_min_relay_fee_requires_manage_origin() {
 	new_test_ext().execute_with(|| {
 		assert_noop!(
 			Relayer::set_min_relay_fee(RuntimeOrigin::signed(1), 0u128),
-			frame_support::error::BadOrigin,
+			sp_runtime::traits::BadOrigin,
 		);
 	});
 }
@@ -115,7 +115,7 @@ fn set_allowed_selectors_requires_manage_origin() {
 	new_test_ext().execute_with(|| {
 		assert_noop!(
 			Relayer::set_allowed_selectors(RuntimeOrigin::signed(1), vec![]),
-			frame_support::error::BadOrigin,
+			sp_runtime::traits::BadOrigin,
 		);
 	});
 }

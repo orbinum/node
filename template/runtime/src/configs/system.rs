@@ -11,44 +11,36 @@ parameter_types! {
 	pub const BlockHashCount: BlockNumber = 256;
 	pub BlockWeights: frame_system::limits::BlockWeights = frame_system::limits::BlockWeights
 		::with_sensible_defaults(MAXIMUM_BLOCK_WEIGHT, NORMAL_DISPATCH_RATIO);
+	/// Block LENGTH uses 85% (`BLOCK_LENGTH_NORMAL_RATIO`), not the 75%
+	/// `NORMAL_DISPATCH_RATIO` that bounds weights: ISMP needs the headroom for GRANDPA
+	/// proofs, weights stay where they were.
+	// Spelled with the builder because `max_with_normal_ratio` is deprecated, and the
+	// `normal_ratio` builder method its note names does not exist on this release.
 	pub BlockLength: frame_system::limits::BlockLength = frame_system::limits::BlockLength
-		::max_with_normal_ratio(MAXIMUM_BLOCK_LENGTH, NORMAL_DISPATCH_RATIO);
-	/// TODO: register a unique SS58 prefix for Orbinum at
-	/// https://github.com/paritytech/ss58-registry before mainnet.
-	/// 42 is the generic Substrate default and will conflict with other chains in
-	/// tools like polkadot.js. Changing this value invalidates all existing
-	/// encoded addresses — coordinate with explorer / wallet teams before bumping.
+		::builder()
+		.max_length(MAXIMUM_BLOCK_LENGTH)
+		.modify_max_length_for_class(frame_support::dispatch::DispatchClass::Normal, |len| {
+			*len = BLOCK_LENGTH_NORMAL_RATIO * MAXIMUM_BLOCK_LENGTH;
+		})
+		.build();
 	pub const SS58Prefix: u8 = 42;
 }
 
-// Configure FRAME pallets to include in runtime.
 #[derive_impl(frame_system::config_preludes::SolochainDefaultConfig as frame_system::DefaultConfig)]
 impl frame_system::Config for Runtime {
-	/// Block & extrinsics weights: base values and limits.
 	type BlockWeights = BlockWeights;
-	/// The maximum length of a block (in bytes).
 	type BlockLength = BlockLength;
-	/// The index type for storing how many extrinsics an account has signed.
 	type Nonce = Nonce;
-	/// The type for hashing blocks and tries.
 	type Hash = Hash;
-	/// The hashing algorithm used.
 	type Hashing = Hashing;
-	/// The identifier used to distinguish between accounts.
 	type AccountId = AccountId;
-	/// The lookup mechanism to get account ID from whatever is passed in dispatchers.
 	type Lookup = IdentityLookup<AccountId>;
-	/// The block type.
 	type Block = Block;
-	/// Maximum number of block number to block hash mappings to keep (oldest pruned first).
 	type BlockHashCount = BlockHashCount;
-	/// The weight of database operations that the runtime can invoke.
 	type DbWeight = RuntimeDbWeight;
-	/// Version of the runtime.
 	type Version = Version;
-	/// The data to be stored in an account.
 	type AccountData = pallet_balances::AccountData<Balance>;
-	/// This is used as an identifier of the chain. 42 is the generic substrate prefix.
+	/// 42 is the generic Substrate prefix.
 	type SS58Prefix = SS58Prefix;
 	type MaxConsumers = ConstU32<16>;
 }

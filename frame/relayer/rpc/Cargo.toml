@@ -10,7 +10,7 @@ hex = "0.4"
 jsonrpsee = { version = "0.24.9", features = ["server", "macros", "client"] }
 pallet-relayer-runtime-api = { path = "../runtime-api" }
 serde = { version = "1.0", features = ["derive"] }
-sp-api = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512" }
-sp-blockchain = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512" }
-sp-core = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512" }
-sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk", branch = "stable2512" }
+sp-api = { version = "43.0.0" }
+sp-blockchain = { version = "46.0.0" }
+sp-core = { version = "43.0.0" }
+sp-runtime = { version = "48.0.0" }

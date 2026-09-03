@@ -87,7 +87,6 @@ pub use types::{
 
 use frame_support::pallet_prelude::{Decode, DecodeWithMemTracking, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
-use sp_runtime::RuntimeDebug;
 
 /// Who submitted a relayed spend, as established by the dispatch path itself.
 ///
@@ -101,7 +100,7 @@ use sp_runtime::RuntimeDebug;
 	PartialEq,
 	Eq,
 	Clone,
-	RuntimeDebug,
+	Debug,
 	Encode,
 	Decode,
 	DecodeWithMemTracking,
@@ -510,12 +509,19 @@ pub mod pallet {
 		}
 
 		fn integrity_test() {
-			assert!(
-				!cfg!(feature = "skip-proof-verification") || cfg!(feature = "runtime-benchmarks"),
-				"pallet-shielded-pool compiled with `skip-proof-verification` but without \
-				 `runtime-benchmarks`: shield/unshield/transfer proofs are NOT verified \
-				 outside a benchmark build. This must never run on a live chain."
-			);
+			// `const` block: both operands are `cfg!`, so this resolves at compile time
+			// and a bad feature combination fails the build rather than the runtime's
+			// integrity check. Strictly stronger than asserting at runtime, and it is
+			// what clippy::assertions_on_constants asks for.
+			const {
+				assert!(
+					!cfg!(feature = "skip-proof-verification")
+						|| cfg!(feature = "runtime-benchmarks"),
+					"pallet-shielded-pool compiled with `skip-proof-verification` but without \
+					 `runtime-benchmarks`: shield/unshield/transfer proofs are NOT verified \
+					 outside a benchmark build. This must never run on a live chain."
+				);
+			}
 
 			assert_eq!(
 				T::MaxTreeDepth::get(),
@@ -936,7 +942,7 @@ pub mod pallet {
 		#[allow(clippy::too_many_arguments)]
 		pub fn private_transfer(
 			origin: OriginFor<T>,
-			#[allow(unused_variables)] proof: BoundedVec<u8, ConstU32<512>>,
+			proof: BoundedVec<u8, ConstU32<512>>,
 			merkle_root: Hash,
 			nullifiers: BoundedVec<Nullifier, ConstU32<2>>,
 			commitments: BoundedVec<Commitment, ConstU32<2>>,
@@ -995,7 +1001,7 @@ pub mod pallet {
 		#[allow(clippy::too_many_arguments)]
 		pub fn unshield(
 			origin: OriginFor<T>,
-			#[allow(unused_variables)] proof: BoundedVec<u8, ConstU32<512>>,
+			proof: BoundedVec<u8, ConstU32<512>>,
 			merkle_root: Hash,
 			nullifier: Nullifier,
 			asset_id: u32,
@@ -1174,7 +1180,11 @@ pub mod pallet {
 	/// Validate unsigned private_transfer and unshield transactions before
 	/// they enter the transaction pool.  Full ZK proof verification happens
 	/// inside the extrinsic; here we do lightweight anti-spam checks only.
+	// `ValidateUnsigned` is deprecated in favour of `#[pallet::authorize]` (removal
+	// slated for 2027); migrating is a behavioural change scheduled separately. The
+	// extra allows cover the macro-expanded code, which trips `-D warnings` on its own.
 	#[pallet::validate_unsigned]
+	#[allow(deprecated)]
 	impl<T: Config> sp_runtime::traits::ValidateUnsigned for Pallet<T> {
 		type Call = Call<T>;
 

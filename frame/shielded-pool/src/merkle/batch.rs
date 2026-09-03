@@ -22,7 +22,7 @@ pub fn compute_root_from_leaves_poseidon<const DEPTH: usize>(leaves: &[Hash]) ->
 	let mut current_level: Vec<Hash> = leaves.to_vec();
 
 	for level in 0..DEPTH {
-		if current_level.len() % 2 != 0 {
+		if !current_level.len().is_multiple_of(2) {
 			current_level.push(zero_hashes[level]);
 		}
 		let mut next_level = Vec::new();
@@ -51,7 +51,7 @@ pub fn compute_root_from_leaves<const DEPTH: usize>(leaves: &[Hash]) -> Hash {
 	}
 	let mut current_level: Vec<Hash> = leaves.to_vec();
 	for level in 0..DEPTH {
-		if current_level.len() % 2 != 0 {
+		if !current_level.len().is_multiple_of(2) {
 			let mut zero = [0u8; 32];
 			for _ in 0..level {
 				zero = hash_pair(&zero, &zero);

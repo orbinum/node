@@ -28,7 +28,7 @@ use sp_runtime::{
 		IdentifyAccount, LazyExtrinsic, MaybeDisplay, Member, TransactionExtension,
 	},
 	transaction_validity::{InvalidTransaction, TransactionValidityError},
-	OpaqueExtrinsic, RuntimeDebug,
+	OpaqueExtrinsic,
 };
 
 use crate::{CheckedExtrinsic, CheckedSignature, SelfContainedCall};
@@ -42,7 +42,7 @@ use crate::{CheckedExtrinsic, CheckedSignature, SelfContainedCall};
 	Encode,
 	Decode,
 	DecodeWithMemTracking,
-	RuntimeDebug,
+	Debug,
 	TypeInfo
 )]
 pub struct UncheckedExtrinsic<Address, Call, Signature, Extension>(
@@ -153,7 +153,12 @@ where
 {
 	const VERSIONS: &'static [u8] =
 		generic::UncheckedExtrinsic::<Address, Call, Signature, Extension>::VERSIONS;
-	type TransactionExtensions = Extension;
+	type TransactionExtensionPipelines = <generic::UncheckedExtrinsic<
+		Address,
+		Call,
+		Signature,
+		Extension,
+	> as ExtrinsicMetadata>::TransactionExtensionPipelines;
 }
 
 impl<Address, Call, Signature, Extension> ExtrinsicCall
@@ -202,11 +207,13 @@ where
 }
 
 #[cfg(feature = "serde")]
-impl<'a, Address: Decode, Signature: Decode, Call, Extension> serde::Deserialize<'a>
+impl<'a, Address, Signature, Call, Extension> serde::Deserialize<'a>
 	for UncheckedExtrinsic<Address, Call, Signature, Extension>
 where
-	Call: Decode + Dispatchable + DecodeWithMemTracking,
-	Extension: Decode + TransactionExtension<Call>,
+	Address: DecodeWithMemTracking,
+	Signature: DecodeWithMemTracking,
+	Call: Dispatchable + DecodeWithMemTracking,
+	Extension: DecodeWithMemTracking + TransactionExtension<Call>,
 {
 	fn deserialize<D>(de: D) -> Result<Self, D::Error>
 	where

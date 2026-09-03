@@ -20,8 +20,17 @@ WORKDIR /orbinum
 # Copy source code
 COPY . .
 
+# Which Hyperbridge deployment the runtime is compiled against. It is a compile-time
+# constant, so a testnet image must be built with `hyperbridge-testnet` or it ships
+# mainnet's `Polkadot(3367)`: `is_allowed_proxy` compares the whole SCALE variant with
+# `==`, so the mismatch rejects every proxied request — at relay time, not at deploy
+# time. The release workflow passes this per environment; `scripts/verify-coprocessor.sh`
+# checks the result rather than trusting the flag.
+ARG CARGO_FEATURES=""
+
 # Build the node in release mode
-RUN cargo build --release --package orbinum-node
+RUN cargo build --release --package orbinum-node \
+    ${CARGO_FEATURES:+--features "$CARGO_FEATURES"}
 
 # Stage 2: Create minimal runtime image
 FROM debian:bookworm-slim

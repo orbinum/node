@@ -11,7 +11,8 @@ use jsonrpsee::{
 use sc_client_api::StorageProvider as ScStorageProvider;
 use scale_codec::Decode;
 use sp_blockchain::HeaderBackend;
-use sp_core::{crypto::Ss58Codec, hashing::twox_128, storage::StorageKey};
+use sp_core::{crypto::Ss58Codec, storage::StorageKey};
+use sp_crypto_hashing::twox_128;
 use sp_runtime::{traits::Block as BlockT, AccountId32};
 use std::{marker::PhantomData, sync::Arc};
 
@@ -124,7 +125,7 @@ where
 #[cfg(test)]
 mod tests {
 	use super::aura_authorities_key;
-	use sp_core::hashing::twox_128;
+	use sp_crypto_hashing::twox_128;
 
 	#[test]
 	fn aura_authorities_key_is_32_bytes() {

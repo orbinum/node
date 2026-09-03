@@ -3,13 +3,18 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Regenerates the Groth16 proof fixture for pallet-zk-verifier benchmarks.",
+  "description": "Node-side dev scripts: bench fixtures and the ISMP end-to-end check.",
   "scripts": {
-    "generate": "node generate-bench-fixtures.mjs"
+    "generate": "node generate-bench-fixtures.mjs",
+    "test:ismp": "./run-ismp-tests.sh e2e",
+    "test:ismp:security": "./run-ismp-tests.sh security",
+    "test:ismp:all": "./run-ismp-tests.sh all"
   },
   "dependencies": {
     "@orbinum/circuits": "^0.9.0",
     "@orbinum/groth16-proofs": "^3.0.0",
+    "@polkadot/api": "^16.5.6",
+    "@polkadot/util-crypto": "^14.0.3",
     "circomlibjs": "^0.1.7",
     "snarkjs": "^0.7.6"
   }

@@ -327,7 +327,7 @@ impl Precompile for Bls12377G1MultiExp {
 		handle.record_cost(gas_cost)?;
 
 		let k = handle.input().len() / 160;
-		if handle.input().is_empty() || handle.input().len() % 160 != 0 {
+		if handle.input().is_empty() || !handle.input().len().is_multiple_of(160) {
 			return Err(PrecompileFailure::Error {
 				exit_status: ExitError::Other("invalid input length".into()),
 			});
@@ -474,7 +474,7 @@ impl Precompile for Bls12377G2MultiExp {
 		handle.record_cost(gas_cost)?;
 
 		let k = handle.input().len() / 288;
-		if handle.input().is_empty() || handle.input().len() % 288 != 0 {
+		if handle.input().is_empty() || !handle.input().len().is_multiple_of(288) {
 			return Err(PrecompileFailure::Error {
 				exit_status: ExitError::Other("invalid input length".into()),
 			});
@@ -528,7 +528,7 @@ impl Precompile for Bls12377Pairing {
 	/// >   Output is a `32` bytes where last single byte is `0x01` if pairing result is equal to multiplicative identity in a pairing target field and `0x00` otherwise
 	/// >   (which is equivalent of Big Endian encoding of Solidity values `uint256(1)` and `uin256(0)` respectively).
 	fn execute(handle: &mut impl PrecompileHandle) -> PrecompileResult {
-		if handle.input().is_empty() || handle.input().len() % 384 != 0 {
+		if handle.input().is_empty() || !handle.input().len().is_multiple_of(384) {
 			return Err(PrecompileFailure::Error {
 				exit_status: ExitError::Other("invalid input length".into()),
 			});

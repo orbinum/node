@@ -131,7 +131,21 @@ jobs:
         run: make setup
 
       - name: Build release binary and WASM
-        run: make build-release
+        run: |
+          # The coprocessor is a compile-time constant: a testnet release must carry the
+          # hyperbridge-testnet feature or it ships mainnet's `Polkadot(3367)`.
+          if [ "${{ needs.metadata.outputs.environment }}" = "testnet" ]; then
+            make build-release FEATURES=hyperbridge-testnet
+          else
+            make build-release
+          fi
+
+      - name: Verify the built runtime targets ${{ needs.metadata.outputs.environment }}
+        run: |
+          # Reads the coprocessor back off the binary instead of trusting the flag above.
+          # A mismatch here is a wrong deployment that would only surface once a relayer
+          # tried to work, long after the deploy reported success.
+          bash scripts/verify-coprocessor.sh "${{ needs.metadata.outputs.environment }}"
 
       - name: Verify WASM size (< 1.5 MB)
         run: |
@@ -235,6 +249,20 @@ jobs:
       contents: read
       packages: write
     steps:
+      # Same reason as the `build` job, plus one more: `load: true` below materialises
+      # the image in the runner's local store on top of the build cache, so this job now
+      # needs headroom for both. A stock runner has ~14 GB free.
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -259,19 +287,77 @@ jobs:
             type=raw,value=latest,enable=${{ needs.metadata.outputs.is_prerelease == 'false' }}
             type=raw,value=testnet-latest,enable=${{ needs.metadata.outputs.is_prerelease == 'true' }}
 
-      - name: Build and push Docker image
+      # Build, verify, then push — in that order, deliberately. This image is what
+      # Watchtower installs on the validators, and `deploy-runtime` extracts the runtime
+      # WASM from it for the on-chain setCode. The `build` job verifies its own binary,
+      # but that binary is not this image: this job compiles independently, so a wrong
+      # `build-args` here passes `build` green and ships the wrong deployment. Once a tag
+      # is pushed to GHCR the nodes may pull it before anyone can delete it, so the check
+      # has to gate the push rather than follow it.
+      #
+      # `load: true` (instead of platforms: linux/amd64) puts the image in the runner's
+      # local store so it can be inspected; the runner is amd64, so the artifact is the
+      # same. The push step repeats identical inputs and is served from cache.
+      - name: Build Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
-          push: true
+          load: true
+          # Same feature selection as the binary build above: the image the validators
+          # actually run must target the same deployment as the runtime being deployed.
+          build-args: |
+            CARGO_FEATURES=${{ needs.metadata.outputs.environment == 'testnet' && 'hyperbridge-testnet' || '' }}
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
           cache-from: type=gha
           # ignore-error: a flaky gha cache backend (intermittent "not_found" on
           # export) must not fail a job whose image already pushed successfully.
           cache-to: type=gha,mode=max,ignore-error=true
-          platforms: linux/amd64
+
+      - name: Verify the image targets ${{ needs.metadata.outputs.environment }}
+        run: |
+          # Reads the coprocessor back out of the image's own binary. Testnet must report
+          # Kusama(4009) — the identifier Hyperbridge's Paseo deployment uses, per their
+          # solochain docs — and mainnet Polkadot(3367).
+          #
+          # The binary is copied out and run on the runner rather than inside the
+          # container: verify-coprocessor.sh binds RPC to localhost only, so an in-
+          # container node would need --network host to be reachable anyway. This works
+          # because the runner (ubuntu-latest) and the image (debian:bookworm-slim) are
+          # both amd64 glibc with libssl3. If this step ever fails with a loader error
+          # rather than a coprocessor mismatch, that assumption is what broke.
+          # metadata-action emits several tags; they all name the same image, so any one
+          # works. Fail loudly rather than run `docker create ""` if the list is empty.
+          IMAGE=$(echo "${{ steps.docker_meta.outputs.tags }}" | head -1)
+          if [ -z "$IMAGE" ]; then
+            echo "No tag produced by docker_meta — nothing to verify." >&2
+            exit 1
+          fi
+          echo "Verifying $IMAGE"
+          CID=$(docker create "$IMAGE")
+          docker cp "$CID:/usr/local/bin/orbinum-node" ./node-from-image
+          docker rm "$CID"
+          chmod +x ./node-from-image
+          bash scripts/verify-coprocessor.sh \
+            "${{ needs.metadata.outputs.environment }}" ./node-from-image
+
+      - name: Push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          build-args: |
+            CARGO_FEATURES=${{ needs.metadata.outputs.environment == 'testnet' && 'hyperbridge-testnet' || '' }}
+          tags: ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,ignore-error=true
+          # Deliberately no `platforms:` — it must match the Build step above or the two
+          # get different cache keys, which would recompile the node from scratch here
+          # (~25 min) and push an image other than the one just verified. The runner is
+          # amd64, so the default single-platform build produces linux/amd64 either way.
 
   # ── 6. Crear GitHub Release ───────────────────────────────────────────────
   github-release:

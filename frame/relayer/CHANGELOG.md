@@ -185,8 +185,8 @@ Node side:
   check and gains an `ApprovedValidators` read (r:1 w:0, max_size 1025), now
   visible in the regenerated proof size. **Weights were regenerated on a dev
   machine (macOS ARM), not the usual benchmark host (AMD EPYC-Genoa, 32 GB) —
-  rerun `scripts/run_benchmarks.sh` there before release.**
-- `scripts/run_benchmarks.sh` gains `pallet_validator_set`, which was registered
+  rerun `scripts/benchmarks/run_benchmarks.sh` there before release.**
+- `scripts/benchmarks/run_benchmarks.sh` gains `pallet_validator_set`, which was registered
   in `define_benchmarks!` but missing from the runner, so its weights were never
   regenerated.
 

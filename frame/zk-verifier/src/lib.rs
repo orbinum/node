@@ -175,12 +175,19 @@ pub mod pallet {
 		/// (the benchmark runner). Enabling it alone means a release runtime with no
 		/// verification, so abort construction in that case.
 		fn integrity_test() {
-			assert!(
-				!cfg!(feature = "skip-proof-verification") || cfg!(feature = "runtime-benchmarks"),
-				"pallet-zk-verifier compiled with `skip-proof-verification` but without \
-				 `runtime-benchmarks`: ZK proof verification is disabled outside a \
-				 benchmark build. This must never run on a live chain."
-			);
+			// `const` block: both operands are `cfg!`, so this resolves at compile time
+			// and a bad feature combination fails the build rather than the runtime's
+			// integrity check. Strictly stronger than asserting at runtime, and it is
+			// what clippy::assertions_on_constants asks for.
+			const {
+				assert!(
+					!cfg!(feature = "skip-proof-verification")
+						|| cfg!(feature = "runtime-benchmarks"),
+					"pallet-zk-verifier compiled with `skip-proof-verification` but without \
+					 `runtime-benchmarks`: ZK proof verification is disabled outside a \
+					 benchmark build. This must never run on a live chain."
+				);
+			}
 		}
 	}
 

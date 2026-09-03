@@ -27,13 +27,12 @@ use pallet_evm_polkavm_uapi::{ReturnErrorCode, ReturnFlags};
 use scale_codec::{Decode, Encode};
 use scale_info::TypeInfo;
 use sp_core::{H160, H256, U256};
-use sp_runtime::RuntimeDebug;
 
 use super::{LOG_TARGET, SENTINEL};
 use crate::{Config, ConvertPolkaVmGas, WeightInfo};
 
 /// Output of a contract call or instantiation which ran to completion.
-#[derive(Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug, TypeInfo, Default)]
+#[derive(Clone, PartialEq, Eq, Encode, Decode, Debug, TypeInfo, Default)]
 pub struct ExecReturnValue {
 	/// Flags passed along by `seal_return`. Empty when `seal_return` was never called.
 	pub flags: ReturnFlags,
@@ -62,7 +61,7 @@ pub trait Memory {
 	/// Returns `Err` if one of the following conditions occurs:
 	///
 	/// - requested buffer is not within the bounds of the sandbox memory.
-	fn read_into_buf(&self, ptr: u32, buf: &mut [u8]) -> Result<(), SupervisorError>;
+	fn read_into_buf(&mut self, ptr: u32, buf: &mut [u8]) -> Result<(), SupervisorError>;
 
 	/// Write the given buffer to the designated location in the sandbox memory.
 	///
@@ -83,40 +82,40 @@ pub trait Memory {
 	/// Returns `Err` if one of the following conditions occurs:
 	///
 	/// - requested buffer is not within the bounds of the sandbox memory.
-	fn read(&self, ptr: u32, len: u32) -> Result<Vec<u8>, SupervisorError> {
+	fn read(&mut self, ptr: u32, len: u32) -> Result<Vec<u8>, SupervisorError> {
 		let mut buf = vec![0u8; len as usize];
 		self.read_into_buf(ptr, buf.as_mut_slice())?;
 		Ok(buf)
 	}
 
 	/// Same as `read` but reads into a fixed size buffer.
-	fn read_array<const N: usize>(&self, ptr: u32) -> Result<[u8; N], SupervisorError> {
+	fn read_array<const N: usize>(&mut self, ptr: u32) -> Result<[u8; N], SupervisorError> {
 		let mut buf = [0u8; N];
 		self.read_into_buf(ptr, &mut buf)?;
 		Ok(buf)
 	}
 
 	/// Read a `u32` from the sandbox memory.
-	fn read_u32(&self, ptr: u32) -> Result<u32, SupervisorError> {
+	fn read_u32(&mut self, ptr: u32) -> Result<u32, SupervisorError> {
 		let buf: [u8; 4] = self.read_array(ptr)?;
 		Ok(u32::from_le_bytes(buf))
 	}
 
 	/// Read a `U256` from the sandbox memory.
-	fn read_u256(&self, ptr: u32) -> Result<U256, SupervisorError> {
+	fn read_u256(&mut self, ptr: u32) -> Result<U256, SupervisorError> {
 		let buf: [u8; 32] = self.read_array(ptr)?;
 		Ok(U256::from_little_endian(&buf))
 	}
 
 	/// Read a `H160` from the sandbox memory.
-	fn read_h160(&self, ptr: u32) -> Result<H160, SupervisorError> {
+	fn read_h160(&mut self, ptr: u32) -> Result<H160, SupervisorError> {
 		let mut buf = H160::default();
 		self.read_into_buf(ptr, buf.as_bytes_mut())?;
 		Ok(buf)
 	}
 
 	/// Read a `H256` from the sandbox memory.
-	fn read_h256(&self, ptr: u32) -> Result<H256, SupervisorError> {
+	fn read_h256(&mut self, ptr: u32) -> Result<H256, SupervisorError> {
 		let mut code_hash = H256::default();
 		self.read_into_buf(ptr, code_hash.as_bytes_mut())?;
 		Ok(code_hash)
@@ -143,7 +142,7 @@ pub trait PolkaVmInstance: Memory {
 // in the streaming implementation while it could fail with a segfault in the copy implementation.
 #[cfg(feature = "runtime-benchmarks")]
 impl Memory for [u8] {
-	fn read_into_buf(&self, ptr: u32, buf: &mut [u8]) -> Result<(), SupervisorError> {
+	fn read_into_buf(&mut self, ptr: u32, buf: &mut [u8]) -> Result<(), SupervisorError> {
 		let ptr = ptr as usize;
 		let bound_checked = self
 			.get(ptr..ptr + buf.len())
@@ -167,7 +166,7 @@ impl Memory for [u8] {
 }
 
 impl Memory for polkavm::RawInstance {
-	fn read_into_buf(&self, ptr: u32, buf: &mut [u8]) -> Result<(), SupervisorError> {
+	fn read_into_buf(&mut self, ptr: u32, buf: &mut [u8]) -> Result<(), SupervisorError> {
 		self.read_memory_into(ptr, buf)
 			.map(|_| ())
 			.map_err(|_| SupervisorError::OutOfBounds)
@@ -220,7 +219,7 @@ impl From<&ExecReturnValue> for ReturnErrorCode {
 }
 
 /// The data passed through when a contract uses `seal_return`.
-#[derive(RuntimeDebug)]
+#[derive(Debug)]
 pub struct ReturnData {
 	/// The flags as passed through by the contract. They are still unchecked and
 	/// will later be parsed into a `ReturnFlags` bitflags struct.
@@ -229,7 +228,7 @@ pub struct ReturnData {
 	data: Vec<u8>,
 }
 
-#[derive(RuntimeDebug)]
+#[derive(Debug)]
 pub enum SupervisorError {
 	OutOfBounds,
 	ExecutionFailed,
@@ -249,7 +248,7 @@ pub enum SupervisorError {
 /// occurred (the SupervisorError variant).
 /// The other case is where the trap does not constitute an error but rather was invoked
 /// as a quick way to terminate the application (all other variants).
-#[derive(RuntimeDebug)]
+#[derive(Debug)]
 pub enum TrapReason {
 	/// The supervisor trapped the contract because of an error condition occurred during
 	/// execution in privileged code.

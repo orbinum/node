@@ -9,5 +9,6 @@
 
 pub mod consensus;
 pub mod evm;
+pub mod ismp;
 pub mod privacy;
 pub mod system;

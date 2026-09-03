@@ -217,6 +217,26 @@ fn decode_g2(input: &[u8], offset: usize) -> Result<G2Projective, PrecompileFail
 	}
 }
 
+fn ensure_g1_subgroup(p: G1Projective) -> Result<G1Affine, PrecompileFailure> {
+	let p = p.into_affine();
+	if !p.is_in_correct_subgroup_assuming_on_curve() {
+		return Err(PrecompileFailure::Error {
+			exit_status: ExitError::Other("g1 point is not on correct subgroup".into()),
+		});
+	}
+	Ok(p)
+}
+
+fn ensure_g2_subgroup(p: G2Projective) -> Result<G2Affine, PrecompileFailure> {
+	let p = p.into_affine();
+	if !p.is_in_correct_subgroup_assuming_on_curve() {
+		return Err(PrecompileFailure::Error {
+			exit_status: ExitError::Other("g2 point is not on correct subgroup".into()),
+		});
+	}
+	Ok(p)
+}
+
 /// Bls12381 implements EIP-2537 G1Add precompile.
 pub struct Bls12381G1Add;
 
@@ -327,7 +347,7 @@ impl Precompile for Bls12381G1MultiExp {
 		handle.record_cost(gas_cost)?;
 
 		let k = handle.input().len() / 160;
-		if handle.input().is_empty() || handle.input().len() % 160 != 0 {
+		if handle.input().is_empty() || !handle.input().len().is_multiple_of(160) {
 			return Err(PrecompileFailure::Error {
 				exit_status: ExitError::Other("invalid input length".into()),
 			});
@@ -341,10 +361,10 @@ impl Precompile for Bls12381G1MultiExp {
 		for idx in 0..k {
 			let offset = idx * 160;
 			// Decode G1 point
-			let p = decode_g1(input, offset)?;
+			let p = ensure_g1_subgroup(decode_g1(input, offset)?)?;
 			// Decode scalar value
 			let scalar = decode_fr(input, offset + 128);
-			points.push(p.into_affine());
+			points.push(p);
 			scalars.push(scalar);
 		}
 
@@ -474,7 +494,7 @@ impl Precompile for Bls12381G2MultiExp {
 		handle.record_cost(gas_cost)?;
 
 		let k = handle.input().len() / 288;
-		if handle.input().is_empty() || handle.input().len() % 288 != 0 {
+		if handle.input().is_empty() || !handle.input().len().is_multiple_of(288) {
 			return Err(PrecompileFailure::Error {
 				exit_status: ExitError::Other("invalid input length".into()),
 			});
@@ -488,10 +508,10 @@ impl Precompile for Bls12381G2MultiExp {
 		for idx in 0..k {
 			let offset = idx * 288;
 			// Decode G2 point
-			let p = decode_g2(input, offset)?;
+			let p = ensure_g2_subgroup(decode_g2(input, offset)?)?;
 			// Decode scalar value
 			let scalar = decode_fr(input, offset + 256);
-			points.push(p.into_affine());
+			points.push(p);
 			scalars.push(scalar);
 		}
 
@@ -528,7 +548,7 @@ impl Precompile for Bls12381Pairing {
 	/// >   Output is a `32` bytes where last single byte is `0x01` if pairing result is equal to multiplicative identity in a pairing target field and `0x00` otherwise
 	/// >   (which is equivalent of Big Endian encoding of Solidity values `uint256(1)` and `uin256(0)` respectively).
 	fn execute(handle: &mut impl PrecompileHandle) -> PrecompileResult {
-		if handle.input().is_empty() || handle.input().len() % 384 != 0 {
+		if handle.input().is_empty() || !handle.input().len().is_multiple_of(384) {
 			return Err(PrecompileFailure::Error {
 				exit_status: ExitError::Other("invalid input length".into()),
 			});
