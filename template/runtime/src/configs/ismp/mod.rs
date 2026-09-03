@@ -103,8 +103,13 @@ impl pallet_ismp::Config for Runtime {
 
 	type OffchainDB = ();
 
-	/// `POLICY = false` disables relayer fee charging: `on_executed` returns `Pays::No`
-	/// before touching balances. Switching it on is a mainnet-economics decision.
+	/// `POLICY = false` makes message *delivery* free for the submitter: `on_executed`
+	/// returns `Pays::No` before charging anyone (`fee_handler.rs:172`).
+	///
+	/// This is the inbound side, and it is separate from the relayer fee an outbound
+	/// message carries — that one lives in `FeeMetadata` and is zero because Orbinum
+	/// self-relays. Turning `POLICY` on would bill whoever submits an inbound message
+	/// for its execution weight, which is a mainnet-economics decision.
 	type FeeHandler = pallet_ismp::fee_handler::WeightFeeHandler<
 		AccountId,
 		Balances,
