@@ -59,7 +59,7 @@ impl<Inner: PrecompileSet, T: Config> PrecompileSet for PolkaVmSet<Inner, T> {
 	) -> Option<Result<PrecompileOutput, PrecompileFailure>> {
 		let code_address = handle.code_address();
 		let code = pallet_evm::AccountCodes::<T>::get(code_address);
-		if code[0..8] == vm::PREFIX {
+		if code.get(0..8) == Some(&vm::PREFIX[..]) {
 			let mut run = || {
 				let prepared_call: vm::PreparedCall<'_, T, _> = vm::PreparedCall::load(handle)?;
 				prepared_call.call()
@@ -90,7 +90,7 @@ impl<Inner: PrecompileSet, T: Config> PrecompileSet for PolkaVmSet<Inner, T> {
 
 	fn is_precompile(&self, address: H160, remaining_gas: u64) -> IsPrecompileResult {
 		let code = pallet_evm::AccountCodes::<T>::get(address);
-		if code[0..8] == vm::PREFIX {
+		if code.get(0..8) == Some(&vm::PREFIX[..]) {
 			IsPrecompileResult::Answer {
 				is_precompile: true,
 				extra_cost: 0,
@@ -134,6 +134,14 @@ pub mod pallet {
 		NotPolkaVmContract,
 		/// Contract already exist in state.
 		AlreadyExist,
+		/// The code is not a parseable PolkaVM program blob.
+		InvalidProgramBlob,
+		/// The blob declares an instruction set this chain does not accept.
+		///
+		/// Only `ReviveV1` and `JamV1` are allowed. The `Latest32`/`Latest64` sets include
+		/// the `sbrk` opcode, which lets a contract grow its heap at run time — memory
+		/// growth changes gas consumption, and this is consensus code.
+		UnsupportedInstructionSet,
 	}
 
 	#[pallet::call]
@@ -150,8 +158,14 @@ pub mod pallet {
 				return Err(Error::<T>::MaxCodeSizeExceeded.into());
 			}
 
-			if code[0..8] != crate::vm::PREFIX {
+			if code.get(0..8) != Some(&crate::vm::PREFIX[..]) {
 				return Err(Error::<T>::NotPolkaVmContract.into());
+			}
+
+			let blob = polkavm::ProgramBlob::parse(code[8..].to_vec().into())
+				.map_err(|_| Error::<T>::InvalidProgramBlob)?;
+			if !crate::vm::is_accepted_isa(blob.isa()) {
+				return Err(Error::<T>::UnsupportedInstructionSet.into());
 			}
 
 			let caller = ensure_signed(origin)?;
