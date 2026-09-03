@@ -67,6 +67,18 @@ jobs:
         run: make build-release
         # Builds node binary AND runtime WASM (no need to rebuild separately)
 
+      - name: Check the PolkaVM guest ABI
+        run: |
+          # `frame/evm-polkavm/uapi` compiles its host-function ABI under
+          # `cfg(target_arch = "riscv64")`. Nothing else in the workspace builds for that
+          # target, so this half went unchecked from the commit that added it until
+          # someone tried by hand — and it did not compile. The target is installed here
+          # rather than in rust-toolchain.toml so a normal `cargo build` does not pay for
+          # a ~100 MB std nobody else needs.
+          rustup target add riscv64imac-unknown-none-elf
+          cargo check -p pallet-evm-polkavm-uapi \
+            --target riscv64imac-unknown-none-elf
+
       - name: Upload node binary
         uses: actions/upload-artifact@v4
         with:

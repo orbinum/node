@@ -61,7 +61,7 @@ pub trait Memory {
 	/// Returns `Err` if one of the following conditions occurs:
 	///
 	/// - requested buffer is not within the bounds of the sandbox memory.
-	fn read_into_buf(&self, ptr: u32, buf: &mut [u8]) -> Result<(), SupervisorError>;
+	fn read_into_buf(&mut self, ptr: u32, buf: &mut [u8]) -> Result<(), SupervisorError>;
 
 	/// Write the given buffer to the designated location in the sandbox memory.
 	///
@@ -82,40 +82,40 @@ pub trait Memory {
 	/// Returns `Err` if one of the following conditions occurs:
 	///
 	/// - requested buffer is not within the bounds of the sandbox memory.
-	fn read(&self, ptr: u32, len: u32) -> Result<Vec<u8>, SupervisorError> {
+	fn read(&mut self, ptr: u32, len: u32) -> Result<Vec<u8>, SupervisorError> {
 		let mut buf = vec![0u8; len as usize];
 		self.read_into_buf(ptr, buf.as_mut_slice())?;
 		Ok(buf)
 	}
 
 	/// Same as `read` but reads into a fixed size buffer.
-	fn read_array<const N: usize>(&self, ptr: u32) -> Result<[u8; N], SupervisorError> {
+	fn read_array<const N: usize>(&mut self, ptr: u32) -> Result<[u8; N], SupervisorError> {
 		let mut buf = [0u8; N];
 		self.read_into_buf(ptr, &mut buf)?;
 		Ok(buf)
 	}
 
 	/// Read a `u32` from the sandbox memory.
-	fn read_u32(&self, ptr: u32) -> Result<u32, SupervisorError> {
+	fn read_u32(&mut self, ptr: u32) -> Result<u32, SupervisorError> {
 		let buf: [u8; 4] = self.read_array(ptr)?;
 		Ok(u32::from_le_bytes(buf))
 	}
 
 	/// Read a `U256` from the sandbox memory.
-	fn read_u256(&self, ptr: u32) -> Result<U256, SupervisorError> {
+	fn read_u256(&mut self, ptr: u32) -> Result<U256, SupervisorError> {
 		let buf: [u8; 32] = self.read_array(ptr)?;
 		Ok(U256::from_little_endian(&buf))
 	}
 
 	/// Read a `H160` from the sandbox memory.
-	fn read_h160(&self, ptr: u32) -> Result<H160, SupervisorError> {
+	fn read_h160(&mut self, ptr: u32) -> Result<H160, SupervisorError> {
 		let mut buf = H160::default();
 		self.read_into_buf(ptr, buf.as_bytes_mut())?;
 		Ok(buf)
 	}
 
 	/// Read a `H256` from the sandbox memory.
-	fn read_h256(&self, ptr: u32) -> Result<H256, SupervisorError> {
+	fn read_h256(&mut self, ptr: u32) -> Result<H256, SupervisorError> {
 		let mut code_hash = H256::default();
 		self.read_into_buf(ptr, code_hash.as_bytes_mut())?;
 		Ok(code_hash)
@@ -142,7 +142,7 @@ pub trait PolkaVmInstance: Memory {
 // in the streaming implementation while it could fail with a segfault in the copy implementation.
 #[cfg(feature = "runtime-benchmarks")]
 impl Memory for [u8] {
-	fn read_into_buf(&self, ptr: u32, buf: &mut [u8]) -> Result<(), SupervisorError> {
+	fn read_into_buf(&mut self, ptr: u32, buf: &mut [u8]) -> Result<(), SupervisorError> {
 		let ptr = ptr as usize;
 		let bound_checked = self
 			.get(ptr..ptr + buf.len())
@@ -166,7 +166,7 @@ impl Memory for [u8] {
 }
 
 impl Memory for polkavm::RawInstance {
-	fn read_into_buf(&self, ptr: u32, buf: &mut [u8]) -> Result<(), SupervisorError> {
+	fn read_into_buf(&mut self, ptr: u32, buf: &mut [u8]) -> Result<(), SupervisorError> {
 		self.read_memory_into(ptr, buf)
 			.map(|_| ())
 			.map_err(|_| SupervisorError::OutOfBounds)
