@@ -49,6 +49,12 @@ type = "grandpa"
 # Hyperbridge is a parachain: its GRANDPA finality comes from the RELAY chain
 # (Paseo), not from Hyperbridge itself.
 rpc = "wss://pas-rpc.stakeworld.io"   # dwellir stopped resolving (2026-08-27)
+# Required, not optional: `HostConfig` (tesseract/consensus/grandpa/src/lib.rs:85)
+# has no default, so omitting it fails with "missing field `slot_duration`" before
+# the relayer connects to anything. 6000 on Paseo; Polkadot mainnet would be 12000.
+slot_duration = 6000
+# How often to exchange consensus proofs, per the upstream docs.
+consensus_update_frequency = 60
 # Hyperbridge's para id on Paseo. Listing it is what makes the relayer ship
 # proofs that verify Hyperbridge *through* its relay's GRANDPA.
 para_ids = [4009]
@@ -68,6 +74,10 @@ consensus_state_id = "ORBI"
 type = "grandpa"
 # Orbinum is standalone, so this points at Orbinum itself.
 rpc = "wss://rpc-1.testnet.orbinum.io"
+# Orbinum's own block time, and the value the runtime whitelists Hyperbridge with
+# (`HYPERBRIDGE_SLOT_DURATION_MS`). Required, same as above.
+slot_duration = 6000
+consensus_update_frequency = 60
 # Empty: we are not a relay chain with parachains to prove.
 para_ids = []
 

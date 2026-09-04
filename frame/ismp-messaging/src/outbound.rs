@@ -62,8 +62,15 @@ pub fn post<T: Config>(
 	let commitment = pallet_ismp::Pallet::<T>::default()
 		.dispatch_request(
 			DispatchRequest::Post(post),
-			// Zero fee: relayer fees are disabled runtime-wide. A non-zero value would
-			// escrow funds that only a timeout releases.
+			// Zero fee, deliberately: Orbinum self-relays, and Hyperbridge's docs call
+			// that the intended integration — the relayer is paid offchain in BRIDGE
+			// rather than per-message on-chain. `dispatch_request` skips the transfer
+			// entirely when the fee is zero, so nothing is escrowed and nobody is owed.
+			//
+			// A non-zero fee is what Hyperbridge's permissionless relayer network reads
+			// to decide whether a message is worth delivering. Setting one only makes
+			// sense alongside dropping self-relay, and `Currency` would have to stop
+			// being the native token first — an external relayer cannot sell it.
 			FeeMetadata {
 				payer: payer::<T>(),
 				fee: Default::default(),
