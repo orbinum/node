@@ -9958,6 +9958,7 @@ dependencies = [
  "sc-consensus",
  "sc-consensus-aura",
  "sc-consensus-grandpa",
+ "sc-consensus-grandpa-rpc",
  "sc-consensus-manual-seal",
  "sc-executor",
  "sc-network",

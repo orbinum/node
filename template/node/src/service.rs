@@ -438,8 +438,24 @@ where
 
 	let evm_key = crate::evm_relay_key::resolve(&config);
 
+	// GRANDPA pieces for the RPC, pulled out before `grandpa_link` is moved into the
+	// voter below. `shared_voter_state` is created here rather than at the voter so both
+	// sides hold the same one — a detached state leaves `grandpa_roundState` reporting
+	// zeroed rounds forever.
+	let shared_voter_state = sc_consensus_grandpa::SharedVoterState::empty();
+	let grandpa_shared_authority_set = grandpa_link.shared_authority_set().clone();
+	let grandpa_justification_stream = grandpa_link.justification_stream().clone();
+	let grandpa_finality_provider = sc_consensus_grandpa::FinalityProofProvider::new_for_service(
+		backend.clone(),
+		Some(grandpa_shared_authority_set.clone()),
+	);
+
 	let rpc_builder = {
 		let client = client.clone();
+		let shared_voter_state = shared_voter_state.clone();
+		let grandpa_shared_authority_set = grandpa_shared_authority_set.clone();
+		let grandpa_justification_stream = grandpa_justification_stream.clone();
+		let grandpa_finality_provider = grandpa_finality_provider.clone();
 		// Cloned before the closure takes ownership: the outer `backend` is still
 		// needed after this point (see the mapping-sync setup below).
 		let rpc_backend = backend.clone();
@@ -522,6 +538,12 @@ where
 				},
 				keystore: keystore.clone(),
 				eth: eth_deps,
+				grandpa: crate::rpc::GrandpaDeps {
+					shared_voter_state: shared_voter_state.clone(),
+					shared_authority_set: grandpa_shared_authority_set.clone(),
+					justification_stream: grandpa_justification_stream.clone(),
+					finality_provider: grandpa_finality_provider.clone(),
+				},
 			};
 			crate::rpc::create_full(
 				deps,
@@ -677,7 +699,7 @@ where
 				notification_service: grandpa_notification_service,
 				voting_rule: sc_consensus_grandpa::VotingRulesBuilder::default().build(),
 				prometheus_registry,
-				shared_voter_state: sc_consensus_grandpa::SharedVoterState::empty(),
+				shared_voter_state,
 				telemetry: telemetry.as_ref().map(|x| x.handle()),
 				offchain_tx_pool_factory: OffchainTransactionPoolFactory::new(transaction_pool),
 			})?;
