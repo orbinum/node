@@ -19,7 +19,7 @@ use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_core::H256;
 use sp_inherents::CreateInherentDataProviders;
 use sp_keystore::Keystore;
-use sp_runtime::traits::Block as BlockT;
+use sp_runtime::traits::{Block as BlockT, NumberFor};
 // Runtime
 use orbinum_runtime::{AccountId, Balance, Hash, Nonce};
 
@@ -29,6 +29,29 @@ mod storage_override;
 pub use self::eth::{create_eth, EthDeps, LogsJournalConfig};
 use self::relayer_author::{RelayerAuthor, RelayerAuthorApiServer};
 use self::storage_override::EeSuffixStorageOverride;
+
+/// GRANDPA-specific dependencies.
+///
+/// Wiring these is what lets a chain be verified from the outside: Hyperbridge's relayer
+/// builds Orbinum finality proofs through `grandpa_proveFinality`, and without the RPC it
+/// reports the method as missing rather than as unauthorised.
+///
+/// Everything here serves finality data for blocks that are already final — public by
+/// definition, and independently verifiable against the authority set. No keys, no
+/// private state. `sc-consensus-grandpa-rpc` marks none of the three methods `unsafe`,
+/// so they are served under the `--rpc-methods Safe` the public endpoint runs with.
+pub struct GrandpaDeps<B: BlockT, BE> {
+	/// Shared with the voter, not a fresh empty one: a detached state makes
+	/// `grandpa_roundState` answer with zeroed rounds instead of failing, which reads as
+	/// "working" while telling the caller nothing.
+	pub shared_voter_state: sc_consensus_grandpa::SharedVoterState,
+	/// Current authority set, for `grandpa_roundState`.
+	pub shared_authority_set: sc_consensus_grandpa::SharedAuthoritySet<B::Hash, NumberFor<B>>,
+	/// Justification notifications, for `grandpa_subscribeJustifications`.
+	pub justification_stream: sc_consensus_grandpa::GrandpaJustificationStream<B>,
+	/// Serves `grandpa_proveFinality`.
+	pub finality_provider: Arc<sc_consensus_grandpa::FinalityProofProvider<BE, B>>,
+}
 
 /// Full client dependencies.
 pub struct FullDeps<B: BlockT, C, P, BE, CT, CIDP> {
@@ -45,6 +68,8 @@ pub struct FullDeps<B: BlockT, C, P, BE, CT, CIDP> {
 	pub keystore: Arc<dyn Keystore>,
 	/// Ethereum-compatibility specific dependencies.
 	pub eth: EthDeps<B, C, P, CT, CIDP>,
+	/// GRANDPA finality RPC dependencies.
+	pub grandpa: GrandpaDeps<B, BE>,
 }
 
 pub struct DefaultEthConfig<C, BE>(std::marker::PhantomData<(C, BE)>);
@@ -94,11 +119,13 @@ where
 	u64: From<<<B as BlockT>::Header as sp_runtime::traits::Header>::Number>,
 	CIDP: CreateInherentDataProviders<B, ()> + Send + 'static,
 	CT: fp_rpc::ConvertTransaction<<B as BlockT>::Extrinsic> + Send + Sync + 'static,
+	NumberFor<B>: sc_consensus_grandpa::BlockNumberOps,
 {
 	use pallet_ismp_rpc::{IsmpApiServer, IsmpRpcHandler};
 	use pallet_relayer_rpc::{Relayer, RelayerApiServer};
 	use pallet_transaction_payment_rpc::{TransactionPayment, TransactionPaymentApiServer};
 	use pallet_zk_verifier_rpc::{ZkVerifier, ZkVerifierApiServer};
+	use sc_consensus_grandpa_rpc::{Grandpa, GrandpaApiServer};
 	use sc_consensus_manual_seal::rpc::{ManualSeal, ManualSealApiServer};
 	use substrate_frame_rpc_system::{System, SystemApiServer};
 
@@ -113,9 +140,20 @@ where
 		command_sink,
 		keystore,
 		eth,
+		grandpa,
 	} = deps;
 
 	io.merge(System::new(client.clone(), pool.clone()).into_rpc())?;
+	io.merge(
+		Grandpa::new(
+			subscription_task_executor.clone(),
+			grandpa.shared_authority_set,
+			grandpa.shared_voter_state,
+			grandpa.justification_stream,
+			grandpa.finality_provider,
+		)
+		.into_rpc(),
+	)?;
 	io.merge(TransactionPayment::new(client.clone()).into_rpc())?;
 	io.merge(ZkVerifier::new(client.clone()).into_rpc())?;
 	io.merge(Relayer::new(client.clone()).into_rpc())?;
