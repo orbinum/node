@@ -19,6 +19,8 @@
 set -euo pipefail
 
 ENVIRONMENT="${1:-}"
+# Relative to the CALLER's cwd, not this script's directory — run it from the repo
+# root, which is what CI does. Pass an explicit path otherwise.
 NODE="${2:-./target/release/orbinum-node}"
 
 # SCALE encodings of `Option<StateMachine>`: 0x01 = Some, then the variant index, then
