@@ -1,5 +1,23 @@
 # LOCAL validation against Paseo. The Orbinum node runs on this machine, not production.
 #
+# Use this to exercise the whole relayer flow against real Paseo before pointing anything
+# at the deployed chain.
+#
+#   cargo build --release -p orbinum-node --features hyperbridge-testnet
+#   ./target/release/orbinum-node --dev --tmp --rpc-port 9944 --rpc-methods Unsafe
+#
+#   docker run --network=host --platform linux/amd64 \
+#     -v $PWD/scripts/hyperbridge/relayer.local.toml:/root/relayer.toml \
+#     polytopelabs/tesseract:latest \
+#     --config=/root/relayer.toml --db=/root/relayer.db
+#
+# `--features hyperbridge-testnet` matters: without it the runtime targets Polkadot(3367)
+# and every Paseo proof fails to verify SILENTLY. `scripts/verify-coprocessor.sh testnet`
+# reads the value back off the binary.
+#
+# `host.docker.internal` is how the container reaches a node on the host. On Linux add
+# `--add-host=host.docker.internal:host-gateway`.
+#
 # `signer` OMITTED, not empty. An empty string is hex-decoded and fails with
 # "Invalid seed length"; absent generates a throwaway key and leaves the chain
 # inbound-only. `log-consensus-state` is read-only anyway.
@@ -17,6 +35,11 @@ type = "grandpa"
 rpc = "wss://pas-rpc.stakeworld.io"
 slot_duration = 6000
 para_ids = [4009]
+# Same reason as in relayer.paseo.toml: the default of 2400 cannot close the gap against
+# Paseo's ~14400 blocks a day, so the relayer falls further behind every cycle and the
+# Hyperbridge -> Orbinum direction goes quiet with no error. Validating locally against
+# real Paseo hits exactly the same wall, so the value belongs here too.
+max_block_range = 10000
 
 [orbinum]
 type = "substrate"
@@ -40,7 +63,10 @@ slot_duration = 6000
 para_ids = []
 
 [relayer]
+# 900s, not 180s. Measured against production: the first proof takes ~3 min from startup,
+# so at 180s the watchdog fired before it landed and restarted the relayer — which
+# restarted the clock, a loop that never completes. A local run is slower, not faster.
 maximum_update_intervals = [
-    [{ state_id = "KUSAMA-4009", consensus_state_id = "PAS0" }, 180],
-    [{ state_id = "SUBSTRATE-orbi", consensus_state_id = "ORBI" }, 180],
+    [{ state_id = "KUSAMA-4009", consensus_state_id = "PAS0" }, 900],
+    [{ state_id = "SUBSTRATE-orbi", consensus_state_id = "ORBI" }, 900],
 ]

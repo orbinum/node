@@ -116,22 +116,39 @@ pub mod pallet {
 			/// The body itself is not emitted: it is remote-controlled data and every
 			/// event is stored in the block.
 			body_len: u32,
+			/// The sender's commitment for this request, so an observer can join this
+			/// arrival to the `Request` the other chain emitted. Derived with the
+			/// protocol's own `hash_request`, so it is the same value `pallet-ismp`
+			/// reports in `PostRequestHandled` for the very same message.
+			commitment: sp_core::H256,
 		},
 		/// Arrived from an accepted source but could not be understood. Deliberately not
 		/// an error — see [`inbound`].
 		MessageRejected {
 			source: StateMachine,
 			reason: RejectReason,
+			/// Present for the same reason as on [`Event::MessageReceived`]: without it a
+			/// rejection cannot be attributed to a message, and the sender sees only a
+			/// timeout.
+			commitment: sp_core::H256,
 		},
 		/// A response to one of our GET requests arrived.
 		GetResponseReceived {
 			keys: u32,
 			/// `keys - found` were proven absent.
 			found: u32,
+			/// Commitment of the GET this answers — `hash_request` over the original
+			/// request, which is what `RequestDispatched` recorded. Without it the two
+			/// counters describe an anonymous event that cannot be tied to any request.
+			commitment: sp_core::H256,
 		},
 		/// A request we dispatched expired without being delivered.
 		RequestTimedOut {
 			dest: StateMachine,
+			/// Which request expired. `on_timeout` receives the whole `Request`, so this
+			/// is recoverable at no cost — and it is the only thing that closes out the
+			/// `RequestDispatched` row this expiry belongs to.
+			commitment: sp_core::H256,
 		},
 		SourceAccepted {
 			source: StateMachine,

@@ -20,7 +20,66 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
-### spec 10 — tx 3 — [Unreleased]
+### spec 12 — tx 3 — [Unreleased]
+
+Every `ismpMessaging` message event now carries the request's `commitment`.
+**`transaction_version` stays at 3** — no dispatch signature changes; only event
+metadata moves, so offline-signed extrinsics stay valid.
+
+**No migration, no storage change.**
+
+Four variants gained `commitment: H256` — `MessageReceived`, `MessageRejected`,
+`RequestTimedOut` and `GetResponseReceived`. Until now they were anonymous: an
+arrival could not be attributed to any message, a rejection looked to the sender
+like a plain timeout, and an expiry could not be matched to the
+`RequestDispatched` it closed out. Only `RequestDispatched` carried a commitment,
+which made the whole inbound half of the bridge unindexable.
+
+The value is derived with the protocol's own `hash_request`, not invented
+locally. `pallet_ismp::dispatch_request` hashes the request exactly the same way
+(`pallet-ismp-2606.1.0/src/impls.rs:91`), so it is the same commitment the
+sender recorded and the same one `PostRequestHandled` reports for that message —
+verified on a dev node, where our `RequestDispatched` and the protocol pallet's
+`ismp.Request` emit an identical hash. A local counter or a hash of our own
+would have produced an identifier no other chain has ever seen, which is worse
+than none.
+
+Cheap by construction: `on_timeout` already received the whole `Request` and
+discarded everything but `dest`, and `on_accept` hashes once before its three
+exit paths rather than per branch.
+
+**Weights are left as they are.** The three callbacks now do one keccak256 that
+the benchmarks did not measure, so the numbers are slight under-estimates. Safe
+to ship: all three are `IsmpModule` callbacks reached through `handle_unsigned`,
+whose declared weight is the caller's, and `on_accept`'s existing per-byte term
+(222/byte) is the same shape as the hashing cost. Re-benchmark on the reference
+hardware when convenient.
+
+**Indexers must treat the field as optional.** Blocks produced before this
+version genuinely have no commitment on those four events, so anything reading
+history has to tolerate its absence rather than requiring it.
+
+### spec 11 — tx 3 — 2026-09-03
+
+**Recorded after the fact.** This row was missed when the version was bumped in
+`0da2c698` (#140), which is the one rule this file has — noted here rather than
+silently backfilled, since a gap in the log is worse than a late entry. Released
+in `v0.1.0-rc.20` and **live on the public testnet**, confirmed by reading
+`state_getRuntimeVersion` from `rpc-1`.
+
+polkadot-sdk 2512 → 2606, and Hyperbridge integration for cross-chain messaging
+with Paseo. **`transaction_version` stays at 3** — the SDK move and the new
+pallets change metadata, not extrinsic encoding.
+
+Adds `pallet-ismp`, `pallet-ismp-grandpa` and our own `pallet-ismp-messaging`
+(indices 19, 20, 21), the ISMP runtime APIs, and the offchain DB the protocol
+needs for its commitment tree. Also carries portable Frontier security and
+correctness patches, sent upstream as polkadot-evm/frontier#1923.
+
+See `scripts/hyperbridge/README.md` for the onboarding procedure and
+`frame/ismp-messaging/README.md` for the pallet's own decisions.
+
+### spec 10 — tx 3 — 2026-08-21
 
 Validator onboarding moves off-chain, and the EVM relay identity becomes the
 operator's to choose. Ships **validator-set 0.3.0** and **relayer 0.4.0**.
@@ -30,8 +89,8 @@ wallets must ship alongside the runtime.
 
 **No migration**, on two verified conditions rather than assumptions:
 
-- `PendingValidators` must be empty on testnet before release. A chain with a
-  live queue would need one.
+- `PendingValidators` was empty on testnet at release. A chain with a live queue
+  would need one.
 - Every `RelayerByAccount` holder must already be in `ApprovedValidators`. The
   new rules do not reach backwards, so a binding created by the old sudo-gated
   call for a non-validator would keep resolving in the fee path forever. This
@@ -42,9 +101,9 @@ iterate `RelayerByAccount` and `clear_relayer` any holder outside the set.
 
 **Relay guards**
 
-Folded into this same version — spec 10 has not shipped, so these release with
-the onboarding change. `transaction_version` is unaffected: no dispatch
-signature changes.
+Folded into this same version: spec 10 had not shipped when these landed, so
+they released together with the onboarding change. `transaction_version` is
+unaffected — no dispatch signature changes.
 
 - `set_min_relay_fee` is capped by a new `Config::MaxMinRelayFee` (1 ORB, a
   thousand times the default) and rejects above it with `MinRelayFeeTooHigh`.
