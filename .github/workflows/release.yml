@@ -1,8 +1,8 @@
 name: Release & Deploy
 
 # Triggers:
-#   - Tag push v*.*.* → full release: build binary + WASM + deploy to testnet
-#   - workflow_dispatch → manual deploy (elegir ambiente)
+#   - Tag push v*.*.* → full release: build binary + WASM, publish image, GitHub Release
+#   - workflow_dispatch → manual deploy (choose environment)
 on:
   push:
     tags:
@@ -31,18 +31,15 @@ on:
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false # nunca cancelar un deploy en progreso
+  cancel-in-progress: false # never cancel an in-flight deploy
 
 env:
-  CARGO_TERM_COLOR: always
-  RUSTC_WRAPPER: "sccache"
-  SCCACHE_GHA_ENABLED: "true"
-  BINARY_NAME: "orbinum-node"
-  RUNTIME_WASM: "target/release/wbuild/orbinum-runtime/orbinum_runtime.compact.compressed.wasm"
+  BINARY: "dist/orbinum-node"
+  WASM: "dist/orbinum_runtime.compact.compressed.wasm"
 
 # ──────────────────────────────────────────────────────────────────────────────
 jobs:
-  # ── 1. Extraer metadata del tag/versión ───────────────────────────────────
+  # ── 1. Extract tag/version metadata ───────────────────────────────────────
   metadata:
     name: Release Metadata
     runs-on: ubuntu-latest
@@ -54,7 +51,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # necesario para git verify-tag
+          fetch-depth: 0 # required by git verify-tag
 
       - name: Verify GPG tag signature
         if: github.event_name == 'push'
@@ -74,25 +71,29 @@ jobs:
             IS_PRE="true"
           else
             VERSION="${GITHUB_REF#refs/tags/}"
-            # rc / alpha / beta tags van a testnet
+            # rc / alpha / beta tags go to testnet
             if [[ "$VERSION" =~ -(rc|alpha|beta|pre) ]]; then
               IS_PRE="true"
               ENV="testnet"
             else
               IS_PRE="false"
-              ENV="testnet"   # mainnet requiere aprobación manual — ver deployment protection
+              ENV="testnet"   # mainnet requires manual approval — see deployment protection
             fi
           fi
           echo "version=$VERSION"        >> "$GITHUB_OUTPUT"
           echo "environment=$ENV"        >> "$GITHUB_OUTPUT"
           echo "is_prerelease=$IS_PRE"   >> "$GITHUB_OUTPUT"
 
-  # ── 2. Build del binario y runtime WASM ──────────────────────────────────
+  # ── 2. Build binary + runtime WASM (single compile, inside the Dockerfile) ──
+  # The Dockerfile is the only build definition. Compiling here and exporting the
+  # `artifacts` stage to ./dist means the GitHub Release, the Docker image and the
+  # on-chain runtime all come from the same bytes, built against the image's own glibc.
   build:
     name: Build Release Artifacts
     runs-on: ubuntu-latest
     needs: metadata
     steps:
+      # A substrate release build needs ~20 GB; a stock runner has ~14 GB free.
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -107,72 +108,57 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang libclang-dev protobuf-compiler
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Cache cargo registry
-        uses: actions/cache@v5
+      - name: Compile (export `artifacts` stage to ./dist)
+        uses: docker/build-push-action@v6
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-release-
-            ${{ runner.os }}-cargo-
-
-      - name: Run sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-
-      - name: Install Rust toolchain
-        run: make setup
-
-      - name: Build release binary and WASM
-        run: |
+          context: .
+          file: docker/Dockerfile
+          target: artifacts
+          outputs: type=local,dest=dist
           # The coprocessor is a compile-time constant: a testnet release must carry the
           # hyperbridge-testnet feature or it ships mainnet's `Polkadot(3367)`.
-          if [ "${{ needs.metadata.outputs.environment }}" = "testnet" ]; then
-            make build-release FEATURES=hyperbridge-testnet
-          else
-            make build-release
-          fi
+          build-args: |
+            CARGO_FEATURES=${{ needs.metadata.outputs.environment == 'testnet' && 'hyperbridge-testnet' || '' }}
+          platforms: linux/amd64
+          # No gha layer cache on purpose: `COPY . .` invalidates the compile layer on
+          # every release, so the only thing a cache ever stored was a ~3 GB builder blob
+          # that never hit again and evicted the test workflow's cargo cache.
 
-      - name: Verify the built runtime targets ${{ needs.metadata.outputs.environment }}
+      - name: Verify the binary targets ${{ needs.metadata.outputs.environment }}
         run: |
           # Reads the coprocessor back off the binary instead of trusting the flag above.
           # A mismatch here is a wrong deployment that would only surface once a relayer
-          # tried to work, long after the deploy reported success.
-          bash scripts/verify-coprocessor.sh "${{ needs.metadata.outputs.environment }}"
+          # tried to work, long after the deploy reported success. The binary is built on
+          # bookworm (glibc 2.36) and runs on the newer runner glibc; the reverse would
+          # not be guaranteed, which is why CI compiles inside the image, not on the runner.
+          chmod +x "$BINARY"
+          bash scripts/verify-coprocessor.sh "${{ needs.metadata.outputs.environment }}" "$BINARY"
 
       - name: Verify WASM size (< 1.5 MB)
         run: |
-          SIZE=$(wc -c < "${{ env.RUNTIME_WASM }}")
-          SIZE_KB=$((SIZE / 1024))
-          echo "Runtime WASM size: ${SIZE_KB} KB"
-          if [ $SIZE -gt $((1536 * 1024)) ]; then
-            echo "ERROR: Runtime WASM ${SIZE_KB} KB supera el límite de 1.5 MB"
+          SIZE=$(wc -c < "$WASM")
+          echo "Runtime WASM size: $((SIZE / 1024)) KB"
+          if [ "$SIZE" -gt $((1536 * 1024)) ]; then
+            echo "ERROR: Runtime WASM $((SIZE / 1024)) KB exceeds the 1.5 MB limit"
             exit 1
           fi
 
       - name: Compute checksums
         run: |
-          sha256sum target/release/${{ env.BINARY_NAME }} > target/release/${{ env.BINARY_NAME }}.sha256
-          sha256sum ${{ env.RUNTIME_WASM }} > ${{ env.RUNTIME_WASM }}.sha256
-          echo "Binary SHA256:"
-          cat target/release/${{ env.BINARY_NAME }}.sha256
-          echo "WASM SHA256:"
-          cat ${{ env.RUNTIME_WASM }}.sha256
+          # Written from inside dist/ so the recorded paths are bare filenames and
+          # `sha256sum -c` works wherever the artifacts are downloaded.
+          cd dist && for f in *; do sha256sum "$f" | tee "$f.sha256"; done
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: orbinum-node-${{ needs.metadata.outputs.version }}
           path: |
-            target/release/${{ env.BINARY_NAME }}
-            target/release/${{ env.BINARY_NAME }}.sha256
+            ${{ env.BINARY }}
+            ${{ env.BINARY }}.sha256
           retention-days: 30
 
       - name: Upload WASM artifact
@@ -180,11 +166,11 @@ jobs:
         with:
           name: orbinum-runtime-wasm-${{ needs.metadata.outputs.version }}
           path: |
-            ${{ env.RUNTIME_WASM }}
-            ${{ env.RUNTIME_WASM }}.sha256
+            ${{ env.WASM }}
+            ${{ env.WASM }}.sha256
           retention-days: 30
 
-  # ── 3. Deploy runtime on-chain ─────────────────────
+  # ── 3. Deploy runtime on-chain ────────────────────────────────────────────
   deploy-runtime:
     name: Runtime Upgrade (on-chain)
     runs-on: ubuntu-latest
@@ -238,8 +224,10 @@ jobs:
           RPC_URL: ${{ secrets.TESTNET_RPC_URL }}
         run: bash scripts/healthcheck.sh --check-runtime "$RPC_URL"
 
-  # ── 4. Publicar imagen Docker en GHCR ────────────────────────────────────
-  # El binario de los nodos se actualiza vía Watchtower siguiendo `testnet-latest`.
+  # ── 4. Publish Docker image to GHCR ──────────────────────────────────────
+  # Node binaries are updated via Watchtower following `testnet-latest`.
+  # No compilation: `build-contexts` replaces the Dockerfile's `artifacts` stage with
+  # the files already verified in `build`, so the image carries exactly those bytes.
   docker-publish:
     name: Publish Docker Image
     runs-on: ubuntu-latest
@@ -249,22 +237,17 @@ jobs:
       contents: read
       packages: write
     steps:
-      # Same reason as the `build` job, plus one more: `load: true` below materialises
-      # the image in the runner's local store on top of the build cache, so this job now
-      # needs headroom for both. A stock runner has ~14 GB free.
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
-
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Verify checksums match the `build` job
+        run: cd dist && sha256sum -c -- *.sha256
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -287,84 +270,23 @@ jobs:
             type=raw,value=latest,enable=${{ needs.metadata.outputs.is_prerelease == 'false' }}
             type=raw,value=testnet-latest,enable=${{ needs.metadata.outputs.is_prerelease == 'true' }}
 
-      # Build, verify, then push — in that order, deliberately. This image is what
-      # Watchtower installs on the validators, and `deploy-runtime` extracts the runtime
-      # WASM from it for the on-chain setCode. The `build` job verifies its own binary,
-      # but that binary is not this image: this job compiles independently, so a wrong
-      # `build-args` here passes `build` green and ships the wrong deployment. Once a tag
-      # is pushed to GHCR the nodes may pull it before anyone can delete it, so the check
-      # has to gate the push rather than follow it.
-      #
-      # `load: true` (instead of platforms: linux/amd64) puts the image in the runner's
-      # local store so it can be inspected; the runner is amd64, so the artifact is the
-      # same. The push step repeats identical inputs and is served from cache.
-      - name: Build Docker image
+      - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
-          load: true
-          # Same feature selection as the binary build above: the image the validators
-          # actually run must target the same deployment as the runtime being deployed.
-          build-args: |
-            CARGO_FEATURES=${{ needs.metadata.outputs.environment == 'testnet' && 'hyperbridge-testnet' || '' }}
-          tags: ${{ steps.docker_meta.outputs.tags }}
-          labels: ${{ steps.docker_meta.outputs.labels }}
-          cache-from: type=gha
-          # ignore-error: a flaky gha cache backend (intermittent "not_found" on
-          # export) must not fail a job whose image already pushed successfully.
-          cache-to: type=gha,mode=max,ignore-error=true
-
-      - name: Verify the image targets ${{ needs.metadata.outputs.environment }}
-        run: |
-          # Reads the coprocessor back out of the image's own binary. Testnet must report
-          # Kusama(4009) — the identifier Hyperbridge's Paseo deployment uses, per their
-          # solochain docs — and mainnet Polkadot(3367).
-          #
-          # The binary is copied out and run on the runner rather than inside the
-          # container: verify-coprocessor.sh binds RPC to localhost only, so an in-
-          # container node would need --network host to be reachable anyway. This works
-          # because the runner (ubuntu-latest) and the image (debian:bookworm-slim) are
-          # both amd64 glibc with libssl3. If this step ever fails with a loader error
-          # rather than a coprocessor mismatch, that assumption is what broke.
-          # metadata-action emits several tags; they all name the same image, so any one
-          # works. Fail loudly rather than run `docker create ""` if the list is empty.
-          IMAGE=$(echo "${{ steps.docker_meta.outputs.tags }}" | head -1)
-          if [ -z "$IMAGE" ]; then
-            echo "No tag produced by docker_meta — nothing to verify." >&2
-            exit 1
-          fi
-          echo "Verifying $IMAGE"
-          CID=$(docker create "$IMAGE")
-          docker cp "$CID:/usr/local/bin/orbinum-node" ./node-from-image
-          docker rm "$CID"
-          chmod +x ./node-from-image
-          bash scripts/verify-coprocessor.sh \
-            "${{ needs.metadata.outputs.environment }}" ./node-from-image
-
-      - name: Push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/Dockerfile
+          build-contexts: artifacts=./dist
           push: true
-          build-args: |
-            CARGO_FEATURES=${{ needs.metadata.outputs.environment == 'testnet' && 'hyperbridge-testnet' || '' }}
+          platforms: linux/amd64
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max,ignore-error=true
-          # Deliberately no `platforms:` — it must match the Build step above or the two
-          # get different cache keys, which would recompile the node from scratch here
-          # (~25 min) and push an image other than the one just verified. The runner is
-          # amd64, so the default single-platform build produces linux/amd64 either way.
 
-  # ── 6. Crear GitHub Release ───────────────────────────────────────────────
+  # ── 5. Create GitHub Release ──────────────────────────────────────────────
   github-release:
     name: GitHub Release
     runs-on: ubuntu-latest
     needs: [metadata, build]
-    # Solo en tags reales (no workflow_dispatch)
+    # Real tags only (not workflow_dispatch)
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write

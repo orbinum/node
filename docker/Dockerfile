@@ -1,8 +1,19 @@
-# Multi-stage build for Orbinum Node
-# Stage 1: Build the node binary
-FROM rust:1.88-bookworm AS builder
+# syntax=docker/dockerfile:1
+# Orbinum node image. Three stages:
+#   builder   — compiles binary + runtime WASM from source
+#   artifacts — the two build outputs, flat, nothing else
+#   (final)   — minimal runtime image
+#
+# CI compiles once: the release workflow exports `artifacts` to disk
+# (`--target artifacts --output type=local`), verifies and publishes those files, then
+# builds the final image with `--build-context artifacts=./dist` so the image carries
+# byte-identical outputs without compiling again. A plain `docker build .` still
+# compiles from source.
 
-# Install dependencies
+# Exact patch pinned to match rust-toolchain.toml, so rustup finds the toolchain
+# already installed instead of downloading it on every build.
+FROM rust:1.93.0-bookworm AS builder
+
 RUN apt-get update && apt-get install -y \
     build-essential \
     clang \
@@ -14,10 +25,7 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /orbinum
-
-# Copy source code
 COPY . .
 
 # Which Hyperbridge deployment the runtime is compiled against. It is a compile-time
@@ -27,15 +35,21 @@ COPY . .
 # time. The release workflow passes this per environment; `scripts/verify-coprocessor.sh`
 # checks the result rather than trusting the flag.
 ARG CARGO_FEATURES=""
+ENV WASM_BUILD_TYPE=release
 
-# Build the node in release mode
+# rustup picks the toolchain from rust-toolchain.toml (channel, wasm32v1-none target).
 RUN cargo build --release --package orbinum-node \
-    ${CARGO_FEATURES:+--features "$CARGO_FEATURES"}
+    ${CARGO_FEATURES:+--features "$CARGO_FEATURES"} \
+    && mkdir /out \
+    && cp target/release/orbinum-node \
+          target/release/wbuild/orbinum-runtime/orbinum_runtime.compact.compressed.wasm \
+          /out/
 
-# Stage 2: Create minimal runtime image
+FROM scratch AS artifacts
+COPY --from=builder /out/ /
+
 FROM debian:bookworm-slim
 
-# Install runtime dependencies
 # curl is needed for inserting session keys via the local RPC (docker exec)
 RUN apt-get update && apt-get install -y \
     ca-certificates \
@@ -43,34 +57,23 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create user
 RUN useradd -m -u 1000 -U -s /bin/sh orbinum && \
     mkdir -p /data && \
     chown -R orbinum:orbinum /data
 
-# Copy binary from builder
-COPY --from=builder /orbinum/target/release/orbinum-node /usr/local/bin/orbinum-node
+COPY --from=artifacts /orbinum-node /usr/local/bin/orbinum-node
 
-# Copy the runtime WASM built alongside the binary. Bundling it lets the deploy
-# job pull the exact runtime the nodes run (docker cp from this image) instead of
-# recompiling — guaranteeing the on-chain setCode matches the nodes' binary.
-COPY --from=builder \
-    /orbinum/target/release/wbuild/orbinum-runtime/orbinum_runtime.compact.compressed.wasm \
+# The runtime WASM ships inside the image so `deploy-runtime` can docker-cp the exact
+# runtime the nodes run for the on-chain setCode.
+COPY --from=artifacts /orbinum_runtime.compact.compressed.wasm \
     /usr/local/share/orbinum/orbinum_runtime.compact.compressed.wasm
 
-# Set user
 USER orbinum
 
-# Expose ports
-# 30333: P2P
-# 9944: WebSocket RPC
-# 9933: HTTP RPC (if enabled)
-# 9615: Prometheus metrics
+# 30333: P2P · 9944: WebSocket RPC · 9933: HTTP RPC · 9615: Prometheus
 EXPOSE 30333 9944 9933 9615
 
-# Set volume for chain data
 VOLUME ["/data"]
 
-# Default command
 ENTRYPOINT ["/usr/local/bin/orbinum-node"]
 CMD ["--help"]
