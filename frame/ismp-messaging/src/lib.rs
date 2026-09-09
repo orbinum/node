@@ -107,6 +107,20 @@ pub mod pallet {
 			to: Vec<u8>,
 			/// How the request is looked up over RPC.
 			commitment: sp_core::H256,
+			/// The nonce this message went out with, read before the dispatcher consumed
+			/// it. `next_nonce` returns the pre-increment value
+			/// (`pallet-ismp-2606.1.0/src/host.rs:117`), so this is the nonce a receiver
+			/// will see and the one `pallet_ismp`'s own `Request` event reports.
+			nonce: u64,
+			/// Absolute expiry in unix seconds, reproducing the dispatcher's own branch
+			/// (`dispatcher.rs:134`): **`0` means never expires**, not "expired in 1970".
+			/// Anything downstream that renders this as a date must special-case zero.
+			timeout_timestamp: u64,
+			/// Size of the body, which is deliberately not emitted — it is the only thing
+			/// this event says about the payload.
+			body_len: u32,
+			/// Always `Post` today. Present so a future `dispatch_get` needs no new event.
+			kind: RequestKind,
 		},
 		/// A message arrived and was handled.
 		MessageReceived {
@@ -121,6 +135,11 @@ pub mod pallet {
 			/// protocol's own `hash_request`, so it is the same value `pallet-ismp`
 			/// reports in `PostRequestHandled` for the very same message.
 			commitment: sp_core::H256,
+			/// The SENDER's nonce, from the request itself — not one of ours. Lets an
+			/// arrival be checked against what the other chain said it sent.
+			nonce: u64,
+			/// The deadline the sender set, in unix seconds. `0` means never expires.
+			timeout_timestamp: u64,
 		},
 		/// Arrived from an accepted source but could not be understood. Deliberately not
 		/// an error — see [`inbound`].
@@ -131,6 +150,12 @@ pub mod pallet {
 			/// rejection cannot be attributed to a message, and the sender sees only a
 			/// timeout.
 			commitment: sp_core::H256,
+			/// Size of what was refused. Emitted here and the body deliberately is not:
+			/// this is the one event whose firing a remote sender controls, so the payload
+			/// stays off-chain while its size — already computed — is recorded.
+			body_len: u32,
+			nonce: u64,
+			timeout_timestamp: u64,
 		},
 		/// A response to one of our GET requests arrived.
 		GetResponseReceived {
@@ -141,6 +166,16 @@ pub mod pallet {
 			/// request, which is what `RequestDispatched` recorded. Without it the two
 			/// counters describe an anonymous event that cannot be tied to any request.
 			commitment: sp_core::H256,
+			/// The chain that was read.
+			dest: StateMachine,
+			/// The REMOTE block height the read was proven against.
+			///
+			/// The only genuine remote block number this pallet ever sees. An inbound POST
+			/// carries none: its proof is verified against Hyperbridge's state rather than
+			/// the origin's, so the origin's height never travels on the wire.
+			height: u64,
+			nonce: u64,
+			timeout_timestamp: u64,
 		},
 		/// A request we dispatched expired without being delivered.
 		RequestTimedOut {
@@ -149,13 +184,49 @@ pub mod pallet {
 			/// is recoverable at no cost — and it is the only thing that closes out the
 			/// `RequestDispatched` row this expiry belongs to.
 			commitment: sp_core::H256,
+			/// POST or GET. Two different failures: a POST never reached the destination,
+			/// a GET's answer never came back.
+			kind: RequestKind,
+			nonce: u64,
+			timeout_timestamp: u64,
+			/// `0` for a GET, which has no body.
+			body_len: u32,
 		},
+		// `source` is deliberately absent from this event: `on_timeout` only fires for
+		// requests we hold a commitment for (`handlers/timeout.rs:145` — "if we have a
+		// commitment, it came from us"), so it is always `HostStateMachine` and would be a
+		// constant on the wire. Same rule that keeps `from`/`to` off the events where they
+		// cannot vary.
 		SourceAccepted {
 			source: StateMachine,
 		},
 		SourceRemoved {
 			source: StateMachine,
 		},
+	}
+
+	/// Which kind of ISMP request an event refers to.
+	///
+	/// One byte, and `Get` is unreachable today — this pallet only dispatches POSTs. It
+	/// exists so a future `dispatch_get` reuses these events rather than reshaping them:
+	/// a POST expiring and a GET expiring are different failures (the POST never reached
+	/// the destination, the GET's answer never came back) and an indexer cannot tell them
+	/// apart from `RequestTimedOut` alone.
+	#[derive(
+		Clone,
+		Copy,
+		PartialEq,
+		Eq,
+		Debug,
+		Encode,
+		Decode,
+		DecodeWithMemTracking,
+		TypeInfo,
+		MaxEncodedLen
+	)]
+	pub enum RequestKind {
+		Post,
+		Get,
 	}
 
 	/// Why an inbound message was not acted on.

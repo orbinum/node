@@ -522,3 +522,332 @@ fn a_get_response_names_the_request_not_the_response() {
 		assert_eq!(emitted_commitment(), Some(expected));
 	});
 }
+
+// ─── Runtime spec 13: the wire fields ─────────────────────────────────────────
+//
+// Everything below is a field that existed in the callback arguments and was discarded.
+// The tests pin the two things that are easy to get wrong: a timeout of 0 means NEVER,
+// and the nonce must be read before the dispatcher consumes it.
+
+/// A fixed wall clock for the dispatch tests, in unix SECONDS.
+const NOW_SECS: u64 = 1_788_900_000;
+
+/// The `RequestDispatched` payload, for the tests that assert on its new fields.
+fn dispatched_event() -> Option<(sp_core::H256, u64, u64, u32, crate::RequestKind)> {
+	frame_system::Pallet::<Test>::events()
+		.into_iter()
+		.find_map(|r| match r.event {
+			crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::RequestDispatched {
+				commitment,
+				nonce,
+				timeout_timestamp,
+				body_len,
+				kind,
+				..
+			}) => Some((commitment, nonce, timeout_timestamp, body_len, kind)),
+			_ => None,
+		})
+}
+
+#[test]
+fn dispatch_reports_the_wire_nonce_expiry_and_size() {
+	new_test_ext().execute_with(|| {
+		// Pinned, so the absolute deadline can be asserted exactly rather than as a range.
+		// The mock's timestamp reads 0 at genesis, which would make `now + timeout`
+		// indistinguishable from a relative value leaking through.
+		pallet_timestamp::Pallet::<Test>::set_timestamp(NOW_SECS * 1_000);
+
+		let body = Message::Ping { nonce: 1 }.encode();
+		let expected_len = body.len() as u32;
+		// Read before the dispatch: `next_nonce` hands out this value and then increments,
+		// so it is the nonce the message actually goes out with.
+		let nonce_before = pallet_ismp::Nonce::<Test>::get();
+
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::root(),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(),
+			body,
+			3_600,
+		));
+
+		let (_, nonce, timeout_timestamp, body_len, kind) =
+			dispatched_event().expect("dispatch must emit RequestDispatched");
+
+		assert_eq!(
+			nonce, nonce_before,
+			"the event must report the nonce that went out"
+		);
+		assert_eq!(
+			pallet_ismp::Nonce::<Test>::get(),
+			nonce_before + 1,
+			"and the dispatcher must have consumed it"
+		);
+		assert_eq!(body_len, expected_len);
+		assert_eq!(kind, crate::RequestKind::Post);
+		// The clock is pinned above, so this asserts the ARITHMETIC and not merely that
+		// the number is large: `now + timeout`, in seconds, exactly as the dispatcher
+		// computes it. A relative value leaking through would fail here.
+		assert_eq!(
+			timeout_timestamp,
+			NOW_SECS + 3_600,
+			"a relative timeout must be reported as an absolute deadline"
+		);
+	});
+}
+
+#[test]
+fn dispatch_with_zero_timeout_reports_never_expires() {
+	new_test_ext().execute_with(|| {
+		// A non-zero clock, so a `now + 0` bug would be visible instead of coinciding
+		// with the correct answer at genesis.
+		pallet_timestamp::Pallet::<Test>::set_timestamp(NOW_SECS * 1_000);
+
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::root(),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(),
+			Message::Ping { nonce: 1 }.encode(),
+			0,
+		));
+
+		let (_, _, timeout_timestamp, _, _) = dispatched_event().expect("must emit");
+		// THE case this test exists for. Upstream has an explicit branch: a timeout of 0
+		// stays 0 and means the message never expires. Computing `now + 0` instead would
+		// emit a deadline in the past, and anything downstream would call the message
+		// expired the moment it was sent.
+		assert_eq!(
+			timeout_timestamp, 0,
+			"a zero timeout means never expires, not `now + 0`"
+		);
+	});
+}
+
+#[test]
+fn dispatched_fields_rebuild_the_committed_request() {
+	new_test_ext().execute_with(|| {
+		pallet_timestamp::Pallet::<Test>::set_timestamp(NOW_SECS * 1_000);
+
+		let body = Message::Ping { nonce: 42 }.encode();
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::root(),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(),
+			body.clone(),
+			3_600,
+		));
+
+		let (commitment, nonce, timeout_timestamp, body_len, _) =
+			dispatched_event().expect("must emit");
+
+		// The point of this test: reconstruct the request from the EVENT ALONE and check it
+		// hashes to the commitment the pallet emitted. That makes the event fields
+		// self-consistent with the message the network sees — and if upstream ever changes
+		// how `timeout_timestamp` is derived, this fails instead of silently emitting a
+		// value that no longer matches the wire.
+		let rebuilt = Request::Post(PostRequest {
+			source: StateMachine::Substrate(*b"orbi"),
+			dest: COUNTERPARTY,
+			nonce,
+			from: PALLET_ID_BYTES.to_vec(),
+			to: b"demo/mod".to_vec(),
+			timeout_timestamp,
+			body,
+		});
+
+		assert_eq!(
+			ismp::messaging::hash_request::<pallet_ismp::Pallet<Test>>(&rebuilt),
+			commitment,
+			"the emitted fields must describe the request that was actually committed"
+		);
+		assert_eq!(
+			body_len as usize,
+			Message::Ping { nonce: 42 }.encode().len()
+		);
+	});
+}
+
+#[test]
+fn an_arrival_reports_the_senders_nonce_and_expiry() {
+	new_test_ext().execute_with(|| {
+		AcceptedSources::<Test>::insert(COPROCESSOR, ());
+		let mut request = post_from(COPROCESSOR, Message::Ping { nonce: 7 }.encode());
+		// The SENDER's values, not ours — an arrival is checked against what the other
+		// chain said it sent.
+		request.nonce = 99;
+		request.timeout_timestamp = 1_788_970_000;
+
+		assert_ok!(IsmpModuleCallback::<Test>::default().on_accept(request));
+
+		let found = frame_system::Pallet::<Test>::events()
+			.into_iter()
+			.find_map(|r| match r.event {
+				crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::MessageReceived {
+					nonce,
+					timeout_timestamp,
+					body_len,
+					..
+				}) => Some((nonce, timeout_timestamp, body_len)),
+				_ => None,
+			})
+			.expect("must emit MessageReceived");
+
+		assert_eq!(found.0, 99);
+		assert_eq!(found.1, 1_788_970_000);
+		assert!(found.2 > 0);
+	});
+}
+
+#[test]
+fn a_rejection_reports_size_and_identity_without_the_body() {
+	new_test_ext().execute_with(|| {
+		AcceptedSources::<Test>::insert(COPROCESSOR, ());
+		// Undecodable rather than oversized, so the body is a realistic size and the
+		// assertion is about what the event carries rather than about the size bound.
+		let mut request = post_from(COPROCESSOR, alloc::vec![0xff; 12]);
+		request.nonce = 5;
+		request.timeout_timestamp = 0;
+
+		assert_ok!(IsmpModuleCallback::<Test>::default().on_accept(request));
+
+		let found = frame_system::Pallet::<Test>::events()
+			.into_iter()
+			.find_map(|r| match r.event {
+				crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::MessageRejected {
+					reason,
+					body_len,
+					nonce,
+					timeout_timestamp,
+					..
+				}) => Some((reason, body_len, nonce, timeout_timestamp)),
+				_ => None,
+			})
+			.expect("must emit MessageRejected");
+
+		assert_eq!(found.0, crate::RejectReason::Undecodable);
+		assert_eq!(found.1, 12, "the size of what was refused");
+		assert_eq!(found.2, 5);
+		assert_eq!(found.3, 0);
+	});
+}
+
+#[test]
+fn a_timeout_names_kind_nonce_expiry_and_size() {
+	new_test_ext().execute_with(|| {
+		let body = Message::Ping { nonce: 3 }.encode();
+		let expected_len = body.len() as u32;
+		let request = Request::Post(PostRequest {
+			source: StateMachine::Substrate(*b"orbi"),
+			dest: COUNTERPARTY,
+			nonce: 11,
+			from: PALLET_ID_BYTES.to_vec(),
+			to: b"demo/mod".to_vec(),
+			timeout_timestamp: 1_788_970_000,
+			body,
+		});
+
+		assert_ok!(IsmpModuleCallback::<Test>::default().on_timeout(request));
+
+		let found = frame_system::Pallet::<Test>::events()
+			.into_iter()
+			.find_map(|r| match r.event {
+				crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::RequestTimedOut {
+					kind,
+					nonce,
+					timeout_timestamp,
+					body_len,
+					..
+				}) => Some((kind, nonce, timeout_timestamp, body_len)),
+				_ => None,
+			})
+			.expect("must emit RequestTimedOut");
+
+		assert_eq!(found.0, crate::RequestKind::Post);
+		assert_eq!(found.1, 11);
+		assert_eq!(found.2, 1_788_970_000);
+		assert_eq!(found.3, expected_len);
+	});
+}
+
+#[test]
+fn a_get_timeout_is_named_a_get_and_carries_no_body() {
+	new_test_ext().execute_with(|| {
+		// A GET expiring and a POST expiring are different failures, and `body_len` has no
+		// meaning for a GET — 0, not the size of something else.
+		let request = Request::Get(GetRequest {
+			source: StateMachine::Substrate(*b"orbi"),
+			dest: COUNTERPARTY,
+			nonce: 4,
+			from: PALLET_ID_BYTES.to_vec(),
+			keys: alloc::vec![alloc::vec![1u8; 32]],
+			height: 500,
+			context: alloc::vec![],
+			timeout_timestamp: 0,
+		});
+
+		assert_ok!(IsmpModuleCallback::<Test>::default().on_timeout(request));
+
+		let found = frame_system::Pallet::<Test>::events()
+			.into_iter()
+			.find_map(|r| match r.event {
+				crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::RequestTimedOut {
+					kind,
+					body_len,
+					nonce,
+					..
+				}) => Some((kind, body_len, nonce)),
+				_ => None,
+			})
+			.expect("must emit RequestTimedOut");
+
+		assert_eq!(found.0, crate::RequestKind::Get);
+		assert_eq!(found.1, 0, "a GET has no body");
+		assert_eq!(found.2, 4);
+	});
+}
+
+#[test]
+fn a_get_response_reports_dest_height_and_nonce() {
+	new_test_ext().execute_with(|| {
+		let get = GetRequest {
+			source: StateMachine::Substrate(*b"orbi"),
+			dest: COUNTERPARTY,
+			nonce: 8,
+			from: PALLET_ID_BYTES.to_vec(),
+			keys: alloc::vec![alloc::vec![1u8; 32]],
+			// The remote height the read was proven against — the only genuine remote
+			// block number this pallet ever sees.
+			height: 10_403_542,
+			context: alloc::vec![],
+			timeout_timestamp: 1_788_970_000,
+		};
+		let response = ismp::router::GetResponse {
+			get,
+			values: alloc::vec![ismp::router::StorageValue {
+				key: alloc::vec![1u8; 32],
+				value: Some(alloc::vec![9u8]),
+			}],
+		};
+
+		assert_ok!(IsmpModuleCallback::<Test>::default().on_response(response));
+
+		let found = frame_system::Pallet::<Test>::events()
+			.into_iter()
+			.find_map(|r| match r.event {
+				crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::GetResponseReceived {
+					dest,
+					height,
+					nonce,
+					timeout_timestamp,
+					..
+				}) => Some((dest, height, nonce, timeout_timestamp)),
+				_ => None,
+			})
+			.expect("must emit GetResponseReceived");
+
+		assert_eq!(found.0, COUNTERPARTY);
+		assert_eq!(found.1, 10_403_542);
+		assert_eq!(found.2, 8);
+		assert_eq!(found.3, 1_788_970_000);
+	});
+}

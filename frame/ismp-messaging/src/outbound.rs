@@ -5,9 +5,9 @@
 //! actually wants to reach. Pinning `dest` to the coprocessor — which an earlier
 //! revision did — reduces the bridge to a conversation with the bridge.
 
-use crate::{Config, Error, Event, PALLET_ID_BYTES, Pallet};
+use crate::{Config, Error, Event, PALLET_ID_BYTES, Pallet, RequestKind};
 use alloc::vec::Vec;
-use frame_support::{ensure, traits::Get};
+use frame_support::{ensure, traits::Get, traits::UnixTime};
 use ismp::{
 	dispatcher::{DispatchPost, DispatchRequest, FeeMetadata, IsmpDispatcher},
 	host::StateMachine,
@@ -51,6 +51,26 @@ pub fn post<T: Config>(
 		Error::<T>::CoprocessorNotSet
 	);
 
+	// Captured BEFORE the dispatch, and before `body` is moved into `DispatchPost`.
+	//
+	// The nonce must be read pre-dispatch: `next_nonce` returns the value it then
+	// increments (`pallet-ismp-2606.1.0/src/host.rs:117`), so reading it afterwards would
+	// report the NEXT message's nonce. Reading it here costs nothing extra — the dispatch
+	// touches the same storage item in the same overlay.
+	let nonce = pallet_ismp::Nonce::<T>::get();
+	let body_len = body.len() as u32;
+
+	// Reproduces the dispatcher's own branch (`dispatcher.rs:134`) rather than assuming
+	// `now + timeout`: a timeout of 0 stays 0 and means "never expires". Computing
+	// `now + 0` here would emit a deadline in the past for a message that has none.
+	let timeout_timestamp = if timeout == 0 {
+		0
+	} else {
+		<<T as pallet_ismp::Config>::TimestampProvider as UnixTime>::now()
+			.as_secs()
+			.saturating_add(timeout)
+	};
+
 	let post = DispatchPost {
 		dest,
 		from: PALLET_ID_BYTES.to_vec(),
@@ -82,6 +102,10 @@ pub fn post<T: Config>(
 		dest,
 		to,
 		commitment,
+		nonce,
+		timeout_timestamp,
+		body_len,
+		kind: RequestKind::Post,
 	});
 	Ok(())
 }

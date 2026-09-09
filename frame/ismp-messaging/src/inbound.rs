@@ -27,7 +27,8 @@
 //! deletes the receipt and leaves the request able to time out so the sender recovers.
 
 use crate::{
-	AcceptedSources, Config, Event, InboundCount, Message, Pallet, RejectReason, WeightInfo,
+	AcceptedSources, Config, Event, InboundCount, Message, Pallet, RejectReason, RequestKind,
+	WeightInfo,
 };
 use core::marker::PhantomData;
 use frame_support::traits::Get;
@@ -64,6 +65,8 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 		}
 
 		let body_len = request.body.len() as u32;
+		let nonce = request.nonce;
+		let timeout_timestamp = request.timeout_timestamp;
 
 		// Hashed once, before any early return: every exit from this callback emits an
 		// event and all three need the same value. `Request::Post` is the shape the
@@ -77,6 +80,9 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 				source: request.source,
 				reason: RejectReason::TooLarge,
 				commitment,
+				body_len,
+				nonce,
+				timeout_timestamp,
 			});
 			return Ok(T::WeightInfo::on_accept(body_len));
 		}
@@ -87,6 +93,9 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 				source: request.source,
 				reason: RejectReason::Undecodable,
 				commitment,
+				body_len,
+				nonce,
+				timeout_timestamp,
 			});
 			return Ok(T::WeightInfo::on_accept(body_len));
 		};
@@ -97,6 +106,8 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 			from: request.from,
 			body_len,
 			commitment,
+			nonce,
+			timeout_timestamp,
 		});
 
 		// No dispatch from inside a callback: it would write a commitment inside a
@@ -112,6 +123,14 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 		// `value` is an `Option` because a proof of *absence* is a valid answer.
 		let found = response.values.iter().filter(|v| v.value.is_some()).count() as u32;
 
+		// Read off `response.get` BEFORE it is moved into `Request::Get` below. `height` is
+		// the one real remote block number this pallet ever sees — the height on the other
+		// chain that the read was proven against.
+		let dest = response.get.dest;
+		let height = response.get.height;
+		let nonce = response.get.nonce;
+		let timeout_timestamp = response.get.timeout_timestamp;
+
 		// The GET we dispatched, not the response: `RequestDispatched` recorded the
 		// request's commitment, so hashing the request is what joins the two. Hashing the
 		// response instead would produce a value nothing else on this chain has seen.
@@ -121,6 +140,10 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 			keys,
 			found,
 			commitment,
+			dest,
+			height,
+			nonce,
+			timeout_timestamp,
 		});
 		Ok(T::WeightInfo::on_response(keys))
 	}
@@ -131,9 +154,25 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 		// strands our own commitment and any escrowed fee. Upstream's
 		// `pallet-ismp-demo` errs on `Request::Get` — copying that would be a live bug
 		// the moment we dispatch one.
-		let dest = match &request {
-			Request::Post(post) => post.dest,
-			Request::Get(get) => get.dest,
+		// One match over borrows, extended to a tuple rather than reaching for
+		// `request.body()` / `request.source_module()`: those accessors CLONE the body, and
+		// this callback runs inside a `Pays::No` extrinsic where the weight is not ours to
+		// spend. A GET has no body, hence 0.
+		let (dest, kind, nonce, timeout_timestamp, body_len) = match &request {
+			Request::Post(post) => (
+				post.dest,
+				RequestKind::Post,
+				post.nonce,
+				post.timeout_timestamp,
+				post.body.len() as u32,
+			),
+			Request::Get(get) => (
+				get.dest,
+				RequestKind::Get,
+				get.nonce,
+				get.timeout_timestamp,
+				0,
+			),
 		};
 
 		// Same hash `dispatch_request` returned when this was sent, so the expiry closes
@@ -141,7 +180,14 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 		// hand and previously discarded, which left a timeout unattributable.
 		let commitment = hash_request::<pallet_ismp::Pallet<T>>(&request);
 
-		Pallet::<T>::deposit_event(Event::RequestTimedOut { dest, commitment });
+		Pallet::<T>::deposit_event(Event::RequestTimedOut {
+			dest,
+			commitment,
+			kind,
+			nonce,
+			timeout_timestamp,
+			body_len,
+		});
 		Ok(T::WeightInfo::on_timeout())
 	}
 }
