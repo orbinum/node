@@ -13,6 +13,13 @@
 //! sending module would break the general case for no security gain. It is recorded in
 //! the event instead. A decision, not an oversight.
 //!
+//! Every event here carries the request's `commitment`. It is not in the callback
+//! arguments, but it is free to derive: `hash_request` over the request we were handed is
+//! the protocol's own canonical hash — the same value `dispatch_request` returns to the
+//! sender and that `pallet-ismp` puts in `PostRequestHandled`. Emitting it is what lets an
+//! indexer join an arrival, a rejection or an expiry to the message it belongs to; without
+//! it those events are anonymous and a timeout can never be matched to what timed out.
+//!
 //! **A malformed payload returns `Ok`.** `handle_unsigned` is `#[transactional]` and
 //! collects per-request results with `collect::<Result<Vec<_>, _>>()`, so one `Err`
 //! reverts the whole batch — including unrelated messages a relayer delivered
@@ -26,6 +33,7 @@ use core::marker::PhantomData;
 use frame_support::traits::Get;
 use ismp::{
 	error::Error as IsmpError,
+	messaging::hash_request,
 	module::IsmpModule,
 	router::{GetResponse, PostRequest, Request},
 };
@@ -57,11 +65,18 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 
 		let body_len = request.body.len() as u32;
 
+		// Hashed once, before any early return: every exit from this callback emits an
+		// event and all three need the same value. `Request::Post` is the shape the
+		// sender committed to, so this reproduces its commitment exactly rather than
+		// inventing a local identifier.
+		let commitment = hash_request::<pallet_ismp::Pallet<T>>(&Request::Post(request.clone()));
+
 		// Size before decode, so decoding cost is bounded by a value we chose.
 		if body_len > T::MaxBodyLen::get() {
 			Pallet::<T>::deposit_event(Event::MessageRejected {
 				source: request.source,
 				reason: RejectReason::TooLarge,
+				commitment,
 			});
 			return Ok(T::WeightInfo::on_accept(body_len));
 		}
@@ -71,6 +86,7 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 			Pallet::<T>::deposit_event(Event::MessageRejected {
 				source: request.source,
 				reason: RejectReason::Undecodable,
+				commitment,
 			});
 			return Ok(T::WeightInfo::on_accept(body_len));
 		};
@@ -80,6 +96,7 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 			source: request.source,
 			from: request.from,
 			body_len,
+			commitment,
 		});
 
 		// No dispatch from inside a callback: it would write a commitment inside a
@@ -95,7 +112,16 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 		// `value` is an `Option` because a proof of *absence* is a valid answer.
 		let found = response.values.iter().filter(|v| v.value.is_some()).count() as u32;
 
-		Pallet::<T>::deposit_event(Event::GetResponseReceived { keys, found });
+		// The GET we dispatched, not the response: `RequestDispatched` recorded the
+		// request's commitment, so hashing the request is what joins the two. Hashing the
+		// response instead would produce a value nothing else on this chain has seen.
+		let commitment = hash_request::<pallet_ismp::Pallet<T>>(&Request::Get(response.get));
+
+		Pallet::<T>::deposit_event(Event::GetResponseReceived {
+			keys,
+			found,
+			commitment,
+		});
 		Ok(T::WeightInfo::on_response(keys))
 	}
 
@@ -110,7 +136,12 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 			Request::Get(get) => get.dest,
 		};
 
-		Pallet::<T>::deposit_event(Event::RequestTimedOut { dest });
+		// Same hash `dispatch_request` returned when this was sent, so the expiry closes
+		// out the exact `RequestDispatched` it belongs to. The information was already in
+		// hand and previously discarded, which left a timeout unattributable.
+		let commitment = hash_request::<pallet_ismp::Pallet<T>>(&request);
+
+		Pallet::<T>::deposit_event(Event::RequestTimedOut { dest, commitment });
 		Ok(T::WeightInfo::on_timeout())
 	}
 }

@@ -1,7 +1,34 @@
 # Tesseract relayer — Orbinum <-> Hyperbridge on Paseo
 #
-# TEMPLATE. Running the daemon needs a real `signer` seed; keep that copy out of the
-# repository. See README.md for the procedure.
+# TEMPLATE. Copy it, fill the two `signer` lines, and keep that copy out of the
+# repository — Tesseract does not expand environment variables in this file, so the seeds
+# have to be written in literally.
+#
+# ── Running it ────────────────────────────────────────────────────────────────
+#   cp relayer.paseo.toml relayer.toml
+#   $EDITOR relayer.toml          # both signer lines
+#
+#   docker run --network=host --platform linux/amd64 \
+#     -v $PWD/relayer.toml:/root/relayer.toml \
+#     polytopelabs/tesseract:latest \
+#     --config=/root/relayer.toml --db=/root/relayer.db
+#
+# The daemon restarts itself until the node it points at has synced enough to answer;
+# that is expected on a fresh box. Add `log-consensus-state KUSAMA-4009` as a final
+# argument to print a consensus blob instead of running the relayer — that subcommand is
+# read-only and needs no signer.
+#
+# ── Checking it works ─────────────────────────────────────────────────────────
+# This number must climb. It is Hyperbridge's view of Orbinum's height, and it only
+# advances when Hyperbridge accepts one of our GRANDPA proofs:
+#
+#   curl -s -H 'Content-Type: application/json' \
+#     -d '{"jsonrpc":"2.0","id":1,"method":"ismp_queryStateMachineLatestHeight",
+#          "params":[{"state_id":"SUBSTRATE-orbi","consensus_state_id":"ORBI"}]}' \
+#     https://gargantua.rpc.polytope.technology
+#
+# Anyone may run one of these. The relayer holds no authority — it carries proofs, and a
+# forged one is rejected by verification on the receiving side. Postman, not notary.
 #
 # Exchanges GRANDPA finality proofs in both directions. Neither side trusts the
 # relayer: each verifies the other's proofs cryptographically, which is what lets
@@ -58,6 +85,14 @@ consensus_update_frequency = 60
 # Hyperbridge's para id on Paseo. Listing it is what makes the relayer ship
 # proofs that verify Hyperbridge *through* its relay's GRANDPA.
 para_ids = [4009]
+# How far ahead of the stored consensus state one proof may reach. The default is
+# 2400 (`tesseract/consensus/grandpa/src/lib.rs:39`), which cannot recover from
+# being behind: Paseo produces ~14400 blocks a day, so a relayer limited to 2400
+# per cycle falls further behind each cycle and never converges. That is exactly
+# what happened here — the stored state sat at relay block 909397 while Paseo was
+# at 974819, and the HB -> Orbinum direction produced nothing for hours with no
+# error, because the grandpa loop swallows them.
+max_block_range = 10000
 
 # ── Orbinum ───────────────────────────────────────────────────────────────────
 [orbinum]
@@ -83,9 +118,16 @@ para_ids = []
 
 # ── Watchdog ──────────────────────────────────────────────────────────────────
 [relayer]
-# Restart if either consensus client goes stale for 3 minutes. A silently stalled
-# relayer looks identical to a quiet one, so this timeout is the only signal.
+# Restart if either consensus client goes stale. A silently stalled relayer looks
+# identical to a quiet one, so this timeout is the only signal.
+#
+# 900s, not the 180s this started with: that was a guess, and it was wrong in the
+# direction that matters. Measured on 2026-09-07, the first Orbinum -> Hyperbridge proof
+# took ~3 min from startup, and Hyperbridge's BEEFY proofs coming back are slower to build
+# than our GRANDPA ones. At 180s the watchdog fired before the first inbound update landed
+# and restarted the relayer, which restarted the clock — a loop that never completes.
+# Long enough to let a slow first cycle finish, short enough to still catch a real stall.
 maximum_update_intervals = [
-    [{ state_id = "KUSAMA-4009", consensus_state_id = "PAS0" }, 180],
-    [{ state_id = "SUBSTRATE-orbi", consensus_state_id = "ORBI" }, 180],
+    [{ state_id = "KUSAMA-4009", consensus_state_id = "PAS0" }, 900],
+    [{ state_id = "SUBSTRATE-orbi", consensus_state_id = "ORBI" }, 900],
 ]

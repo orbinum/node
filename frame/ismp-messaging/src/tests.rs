@@ -74,6 +74,7 @@ use crate::{
 use frame_support::{assert_noop, assert_ok};
 use ismp::{
 	host::StateMachine,
+	messaging::hash_request,
 	module::IsmpModule,
 	router::{GetRequest, GetResponse, PostRequest, Request, StorageValue},
 };
@@ -371,9 +372,153 @@ fn on_response_distinguishes_present_from_absent_keys() {
 				crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::GetResponseReceived {
 					keys: 2,
 					found: 1,
+					..
 				})
 			)
 		});
 		assert!(seen, "absent keys must not be counted as found");
+	});
+}
+
+/// Reads the commitment out of whichever of our events carries one.
+///
+/// Matching the variant by name would let a test pass while the *other* events lost their
+/// commitment, so this deliberately accepts any of them.
+fn emitted_commitment() -> Option<sp_core::H256> {
+	frame_system::Pallet::<Test>::events()
+		.into_iter()
+		.find_map(|r| match r.event {
+			crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::MessageReceived {
+				commitment,
+				..
+			})
+			| crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::MessageRejected {
+				commitment,
+				..
+			})
+			| crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::GetResponseReceived {
+				commitment,
+				..
+			})
+			| crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::RequestTimedOut {
+				commitment,
+				..
+			}) => Some(commitment),
+			_ => None,
+		})
+}
+
+#[test]
+fn an_arrival_reports_the_senders_own_commitment() {
+	new_test_ext().execute_with(|| {
+		AcceptedSources::<Test>::insert(COPROCESSOR, ());
+		let request = post_from(COPROCESSOR, Message::Ping { nonce: 7 }.encode());
+
+		// The value the sending chain committed to, computed the way the protocol does.
+		// Deriving it any other way — a local counter, a hash of our own — would produce
+		// an identifier no other chain has ever seen, which is worse than none.
+		let expected = hash_request::<pallet_ismp::Pallet<Test>>(&Request::Post(request.clone()));
+
+		assert_ok!(IsmpModuleCallback::<Test>::default().on_accept(request));
+		assert_eq!(
+			emitted_commitment(),
+			Some(expected),
+			"MessageReceived must carry the request's canonical commitment"
+		);
+	});
+}
+
+#[test]
+fn a_rejection_is_still_attributable() {
+	new_test_ext().execute_with(|| {
+		AcceptedSources::<Test>::insert(COPROCESSOR, ());
+		let request = post_from(COPROCESSOR, alloc::vec![0xff, 0xff]);
+		let expected = hash_request::<pallet_ismp::Pallet<Test>>(&Request::Post(request.clone()));
+
+		// A rejection used to be anonymous: the sender saw only a timeout and no observer
+		// could say which message was refused.
+		assert_ok!(IsmpModuleCallback::<Test>::default().on_accept(request));
+		assert_eq!(emitted_commitment(), Some(expected));
+	});
+}
+
+#[test]
+fn a_timeout_closes_out_the_dispatch_it_belongs_to() {
+	new_test_ext().execute_with(|| {
+		// Dispatch for real, so the commitment compared against is the one the pallet
+		// actually recorded rather than one recomputed by the test.
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::root(),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(),
+			Message::Ping { nonce: 1 }.encode(),
+			0,
+		));
+
+		let dispatched = frame_system::Pallet::<Test>::events()
+			.into_iter()
+			.find_map(|r| match r.event {
+				crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::RequestDispatched {
+					commitment,
+					..
+				}) => Some(commitment),
+				_ => None,
+			})
+			.expect("dispatch must emit RequestDispatched");
+
+		// The request as the dispatcher built it: `from` is our pallet id and the nonce is
+		// the one just consumed. Reconstructing it is what proves the two commitments are
+		// the same value and not merely both non-zero.
+		let request = Request::Post(PostRequest {
+			source: StateMachine::Substrate(*b"orbi"),
+			dest: COUNTERPARTY,
+			nonce: pallet_ismp::Nonce::<Test>::get().saturating_sub(1),
+			from: PALLET_ID_BYTES.to_vec(),
+			to: b"demo/mod".to_vec(),
+			timeout_timestamp: 0,
+			body: Message::Ping { nonce: 1 }.encode(),
+		});
+
+		frame_system::Pallet::<Test>::reset_events();
+		assert_ok!(IsmpModuleCallback::<Test>::default().on_timeout(request));
+
+		assert_eq!(
+			emitted_commitment(),
+			Some(dispatched),
+			"the expiry must name the very request that was dispatched"
+		);
+	});
+}
+
+#[test]
+fn a_get_response_names_the_request_not_the_response() {
+	new_test_ext().execute_with(|| {
+		let get = GetRequest {
+			source: StateMachine::Substrate(*b"orbi"),
+			dest: COUNTERPARTY,
+			nonce: 0,
+			from: PALLET_ID_BYTES.to_vec(),
+			keys: alloc::vec![alloc::vec![1]],
+			height: 0,
+			context: alloc::vec![],
+			timeout_timestamp: 0,
+		};
+
+		// `RequestDispatched` recorded the *request's* commitment, so that is the only
+		// value that joins this answer to anything. Hashing the response instead would
+		// yield something no other row on this chain carries.
+		let expected = hash_request::<pallet_ismp::Pallet<Test>>(&Request::Get(get.clone()));
+
+		assert_ok!(
+			IsmpModuleCallback::<Test>::default().on_response(GetResponse {
+				get,
+				values: alloc::vec![StorageValue {
+					key: alloc::vec![1],
+					value: Some(alloc::vec![1])
+				}],
+			})
+		);
+
+		assert_eq!(emitted_commitment(), Some(expected));
 	});
 }
