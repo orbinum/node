@@ -20,7 +20,63 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
-### spec 12 — tx 3 — [Unreleased]
+### spec 13 — tx 3 — [Unreleased]
+
+Every `ismpMessaging` event now carries what the callback already had in hand.
+**`transaction_version` stays at 3** — events are metadata, so no call signature,
+extrinsic encoding or storage layout changed and offline-signed extrinsics stay
+valid.
+
+**No migration, no storage change. Weights unchanged.**
+
+Spec 12 made the inbound events attributable by adding `commitment`. This adds
+the rest of what was being discarded, so no further runtime upgrade is needed for
+cross-chain observability:
+
+| event | new fields |
+|---|---|
+| `RequestDispatched` | `nonce`, `timeout_timestamp`, `body_len`, `kind` |
+| `MessageReceived` | `nonce`, `timeout_timestamp` |
+| `MessageRejected` | `body_len`, `nonce`, `timeout_timestamp` |
+| `GetResponseReceived` | `dest`, `height`, `nonce`, `timeout_timestamp` |
+| `RequestTimedOut` | `kind`, `nonce`, `timeout_timestamp`, `body_len` |
+
+New enum `RequestKind { Post, Get }`, one byte, so a future `dispatch_get` reuses
+these events rather than reshaping them.
+
+**`timeout_timestamp` has three states downstream and conflating any two is a
+bug.** `0` means the message never expires — reproducing upstream's explicit
+branch (`ismp-2606.1.0/src/dispatcher.rs:134`), NOT `now + 0`. A `NULL` in an
+indexer means the block predates this runtime. Anything else is a real unix-seconds
+deadline. Rendering `0` as a date claims the message expired in 1970.
+
+`GetResponseReceived.height` is the only genuine remote block number this pallet
+ever emits: an inbound POST carries none, because its proof is verified against
+Hyperbridge's state rather than the origin's, so the origin's height never travels
+on the wire.
+
+**Deliberately omitted**, so the omissions are not mistaken for oversights:
+
+- `body`, `keys`, `context`, `values` — unbounded and remote-controlled, on
+  callbacks that run under `Pays::No`.
+- `from` on `MessageRejected` — a remote `Vec` on the one event whose firing a
+  remote sender controls. Its `body_len` is emitted instead.
+- `source` on `RequestTimedOut` — constant. `on_timeout` only fires for requests we
+  hold a commitment for (`handlers/timeout.rs:145`), so it is always
+  `HostStateMachine`.
+- `payer`, `fee` — constants while `DispatchOrigin` is Root. Opening the origin is
+  an upgrade with its own review.
+- The proof height on inbound events — it is Hyperbridge's, not the origin's, and it
+  is already in the arguments of the same `handle_unsigned` extrinsic.
+
+Weights are unchanged on purpose: the dispatch adds one read of `Nonce` and one of
+`Timestamp` that `dispatch_request` performs anyway in the same overlay, and the
+callbacks copy values already in memory.
+
+**Indexers must treat every new field as optional.** Blocks produced before this
+runtime genuinely lack them, and a re-index reads that history.
+
+### spec 12 — tx 3 — 2026-09-08 (`v0.1.0-rc.22`)
 
 Every `ismpMessaging` message event now carries the request's `commitment`.
 **`transaction_version` stays at 3** — no dispatch signature changes; only event
