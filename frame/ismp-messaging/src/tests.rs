@@ -1185,9 +1185,8 @@ fn a_get_response_is_accepted_without_any_accepted_source() {
 				value: Some(alloc::vec![9])
 			}],
 		}));
-		assert_eq!(
+		assert!(
 			emitted_commitment().is_some(),
-			true,
 			"GetResponseReceived must be emitted"
 		);
 
