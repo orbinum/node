@@ -97,6 +97,13 @@ The input gates the deploy job:
 | Input | Job | Effect |
 |-------|-----|--------|
 | `deploy_runtime: true` | `deploy-runtime` | `sudo.setCode(wasm)` — **runtime upgrade** on-chain |
+| `image_tag` | — | Which published image to take the WASM from (e.g. `0.1.0-rc.24`) |
+| `environment` | — | Selects the GitHub Environment, and so the RPC + sudo seed. `mainnet` requires a reviewer |
+
+A dispatch **does not compile**: `build` only runs on a tag push. The runtime WASM
+comes out of the already-published image, and four preflight guards (registry
+resolution, build provenance, `spec_version` strictly rising, and the RPC node
+already running the matching binary) run before any chain state is touched.
 
 The **binary update is not a workflow job** — nodes run Watchtower, which pulls the
 new `testnet-latest` image and restarts them automatically once the tag's
@@ -105,7 +112,13 @@ runtime upgrade; the binary follows on its own.
 
 > Ordering note: because Watchtower is autonomous, the binary may swap *before* the
 > setCode. Harmless — a new binary is backward-compatible with the old runtime, and
-> the setCode then bumps the runtime under it.
+> the setCode then bumps the runtime under it. Preflight guard 4 asserts the node
+> got there first rather than trusting the timing.
+
+> Recovery note: Watchtower now also revives a node that a bad image left `created`
+> or `restarting`, and keeps the previous image on disk. Before that, a node killed
+> by a broken image was invisible to Watchtower (it scans running containers only)
+> and needed a human on every host — which is exactly what `v0.1.0-rc.23` cost.
 
 ---
 

@@ -66,7 +66,7 @@ jobs:
         id: meta
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION="${{ github.sha }}"
+            VERSION="${{ github.event.inputs.image_tag }}"
             ENV="${{ github.event.inputs.environment }}"
             IS_PRE="true"
           else
@@ -92,6 +92,7 @@ jobs:
     name: Build Release Artifacts
     runs-on: ubuntu-latest
     needs: metadata
+    if: github.event_name == 'push'
     steps:
       # A substrate release build needs ~20 GB; a stock runner has ~14 GB free.
       - name: Free disk space
@@ -177,12 +178,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: [metadata]
     if: github.event.inputs.deploy_runtime == 'true'
+    environment: ${{ github.event.inputs.environment }}
     permissions:
       contents: read
       packages: read
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the preflight reads the runtime source at the deployed tag
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -190,6 +194,68 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Preflight — the image, the runtime and the chain must agree
+        id: preflight
+        env:
+          RPC_URL: ${{ secrets.RPC_URL }}
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository_owner }}/node:$IMAGE_TAG"
+
+          # 1. The tag resolves. A floating tag pointing at nothing, or a typo, fails here
+          #    rather than three steps later with a confusing docker error.
+          DIGEST="sha256:$(docker buildx imagetools inspect "$IMAGE" --raw | sha256sum | cut -d' ' -f1)"
+          echo "image  $IMAGE"
+          echo "digest $DIGEST"
+
+          # 2. The image was built from the commit the tag names. `image_tag` is a registry
+          #    tag and can be re-pointed by hand; the binary reports its own build commit
+          #    (`0.2.0-<short-sha>`), so comparing the two is what ties the artifact being
+          #    deployed to reviewed source. Skipped for a floating tag like
+          #    `testnet-latest`, which by definition is not a git ref.
+          if git rev-parse -q --verify "refs/tags/v$IMAGE_TAG" >/dev/null; then
+            WANT_SHA=$(git rev-list -n1 "v$IMAGE_TAG" | cut -c1-9)
+            # `--platform`: the image is linux/amd64 only, and being explicit turns a
+            # runner-architecture surprise into a clear error instead of a manifest one.
+            GOT_VER=$(docker run --rm --platform linux/amd64 \
+              --entrypoint /usr/local/bin/orbinum-node "$IMAGE" --version)
+            echo "binary $GOT_VER  (expected to contain $WANT_SHA)"
+            case "$GOT_VER" in
+              *"$WANT_SHA"*) : ;;
+              *) echo "::error::image $IMAGE_TAG was not built from v$IMAGE_TAG ($WANT_SHA)"; exit 1 ;;
+            esac
+            SRC_REF="v$IMAGE_TAG"
+          else
+            echo "note: $IMAGE_TAG is not a git tag — skipping the build-provenance check"
+            SRC_REF="HEAD"
+          fi
+
+          # 3. spec_version must RISE. A setCode to an equal or lower spec is rejected by
+          #    the runtime and applies nothing — `deploy-runtime.sh` used to warn and exit
+          #    0, so a no-op upgrade reported success. The expected value is read from the
+          #    runtime source at the deployed ref, not from the workflow's checkout.
+          EXPECTED=$(git show "$SRC_REF:template/runtime/src/lib.rs" \
+            | grep -oE 'spec_version: *[0-9]+' | head -1 | grep -oE '[0-9]+')
+          ONCHAIN=$(curl -sf --max-time 10 -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"state_getRuntimeVersion"}' \
+            "${RPC_URL/wss:\/\//https://}" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["specVersion"])')
+          echo "spec   on-chain=$ONCHAIN  image=$EXPECTED"
+          if [ "$EXPECTED" -le "$ONCHAIN" ]; then
+            echo "::error::spec_version $EXPECTED is not above the on-chain $ONCHAIN — setCode would apply nothing"
+            exit 1
+          fi
+          echo "expected_spec=$EXPECTED" >> "$GITHUB_OUTPUT"
+
+          # 4. The node we are about to upgrade already runs the matching binary. The
+          #    runbook says "make sure every node picked up the image before the setCode";
+          #    this asserts it for the node the transaction goes through, instead of
+          #    trusting that Watchtower got there first.
+          if [ "$SRC_REF" != "HEAD" ]; then
+            bash scripts/check-deployment.sh --expect-impl "$WANT_SHA" "$RPC_URL"
+          fi
 
       - name: Extract runtime WASM from published image
         run: |
@@ -213,17 +279,19 @@ jobs:
 
       - name: Deploy runtime upgrade to ${{ needs.metadata.outputs.environment }}
         env:
-          RPC_URL: ${{ secrets.TESTNET_RPC_WS }}
-          SUDO_SEED: ${{ secrets.TESTNET_SUDO_SEED }}
+          RPC_URL: ${{ secrets.RPC_WS }}
+          SUDO_SEED: ${{ secrets.SUDO_SEED }}
         run: |
           WASM_FILE=$(find ./artifacts -name "*.wasm" | head -1)
           echo "Deploying WASM: $WASM_FILE"
           bash scripts/deploy-runtime.sh "$WASM_FILE" "$RPC_URL" "$SUDO_SEED"
 
-      - name: Verify runtime upgrade
+      - name: Verify the runtime upgrade landed
         env:
-          RPC_URL: ${{ secrets.TESTNET_RPC_URL }}
-        run: bash scripts/healthcheck.sh --check-runtime "$RPC_URL"
+          RPC_URL: ${{ secrets.RPC_URL }}
+        run: |
+          bash scripts/check-deployment.sh \
+            --expect-spec "${{ steps.preflight.outputs.expected_spec }}" "$RPC_URL"
 
   # ── 4. Publish Docker image to GHCR ──────────────────────────────────────
   # Node binaries are updated via Watchtower following `testnet-latest`.
@@ -298,6 +366,27 @@ jobs:
           # `deploy-runtime` docker-cps it out for the on-chain setCode.
           docker run --rm --entrypoint sh "$IMAGE" -c \
             'test -s /usr/local/share/orbinum/orbinum_runtime.compact.compressed.wasm'
+
+      # Every tag this release pushed — the version AND the floating `<network>-latest`
+      # that ~50 nodes follow through Watchtower — must resolve to the digest we just ran.
+      # By construction they do (one push, many tags), so this exists for the day someone
+      # re-tags by hand or a registry hiccup leaves the floating tag on an older manifest:
+      # that is a fleet-wide rollout of the wrong image, and it should fail here, not there.
+      - name: Verify every pushed tag resolves to the verified digest
+        run: |
+          WANT="${{ steps.build.outputs.digest }}"
+          # A tag's digest is the sha256 of its manifest bytes as the registry stores them,
+          # so `--raw | sha256sum` IS the resolution — no template field to get wrong, and
+          # no dependence on the buildx version's `--format` support (the local desktop
+          # build ignored `{{ .Manifest.Digest }}` outright).
+          echo "${{ steps.docker_meta.outputs.tags }}" | while read -r TAG; do
+            [ -n "$TAG" ] || continue
+            GOT="sha256:$(docker buildx imagetools inspect "$TAG" --raw | sha256sum | cut -d' ' -f1)"
+            if [ "$GOT" != "$WANT" ]; then
+              echo "::error::$TAG resolves to $GOT, expected $WANT"; exit 1
+            fi
+            echo "ok  $TAG -> $GOT"
+          done
 
   # ── 5. Create GitHub Release ──────────────────────────────────────────────
   github-release:

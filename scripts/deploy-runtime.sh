@@ -129,7 +129,17 @@ const [,, wasmFile, rpcWs, sudoSeed] = process.argv;
   const newVersion = api2.runtimeVersion.specVersion.toNumber();
   console.log(`[verify] new on-chain spec_version: ${newVersion}`);
   if (newVersion <= currentVersion) {
-    console.warn(`[warn] spec_version did not rise (${currentVersion} → ${newVersion}). Did you forget to bump it in lib.rs?`);
+    // Hard failure, not a warning. A setCode whose spec_version does not exceed the
+    // on-chain one is rejected by the runtime and applies NOTHING, so warning-and-exit-0
+    // reported a successful upgrade that never happened. The caller has no other way to
+    // tell the two apart.
+    console.error(
+      `[fatal] spec_version did not rise (${currentVersion} -> ${newVersion}). The runtime ` +
+      `was NOT upgraded: either spec_version was not bumped in template/runtime/src/lib.rs, ` +
+      `or the WASM deployed is the one already on-chain.`,
+    );
+    await api2.disconnect();
+    process.exit(1);
   }
   await api2.disconnect();
   process.exit(0);
