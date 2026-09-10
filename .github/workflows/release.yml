@@ -49,7 +49,7 @@ jobs:
       is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0 # required by git verify-tag
 
@@ -106,7 +106,7 @@ jobs:
           swap-storage: true
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -123,6 +123,7 @@ jobs:
           build-args: |
             CARGO_FEATURES=${{ needs.metadata.outputs.environment == 'testnet' && 'hyperbridge-testnet' || '' }}
           platforms: linux/amd64
+          provenance: false
           # No gha layer cache on purpose: `COPY . .` invalidates the compile layer on
           # every release, so the only thing a cache ever stored was a ~3 GB builder blob
           # that never hit again and evicted the test workflow's cargo cache.
@@ -153,7 +154,7 @@ jobs:
           cd dist && for f in *; do sha256sum "$f" | tee "$f.sha256"; done
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: orbinum-node-${{ needs.metadata.outputs.version }}
           path: |
@@ -162,7 +163,7 @@ jobs:
           retention-days: 30
 
       - name: Upload WASM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: orbinum-runtime-wasm-${{ needs.metadata.outputs.version }}
           path: |
@@ -181,7 +182,7 @@ jobs:
       packages: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -203,9 +204,9 @@ jobs:
           ls -l ./artifacts
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: Install deploy dependencies
         run: npm install --prefix ./scripts @polkadot/api @polkadot/keyring
@@ -238,11 +239,12 @@ jobs:
       packages: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
+          pattern: orbinum-*-${{ needs.metadata.outputs.version }}
           path: dist
           merge-multiple: true
 
@@ -292,11 +294,12 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - name: Download release artifacts
+        uses: actions/download-artifact@v5
         with:
+          pattern: orbinum-*-${{ needs.metadata.outputs.version }}
           path: ./release-artifacts/
 
       - name: Package artifacts
