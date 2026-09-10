@@ -115,6 +115,8 @@ impl pallet_ismp::Config for Test {
 impl pallet_ismp_messaging::Config for Test {
 	type DispatchOrigin = frame_system::EnsureRoot<AccountId>;
 	type MaxBodyLen = ConstU32<8192>;
+	// Small on purpose, so the TooManyKeys path is cheap to exercise.
+	type MaxGetKeys = ConstU32<4>;
 	type WeightInfo = ();
 }
 

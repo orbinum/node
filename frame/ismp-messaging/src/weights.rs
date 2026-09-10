@@ -71,6 +71,7 @@ use core::marker::PhantomData;
 /// Weight functions needed for pallet_ismp_messaging.
 pub trait WeightInfo {
 	fn dispatch_post(b: u32, ) -> Weight;
+	fn dispatch_get(k: u32, ) -> Weight;
 	fn accept_source() -> Weight;
 	fn remove_source() -> Weight;
 	fn on_accept(b: u32, ) -> Weight;
@@ -203,6 +204,24 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(6_u64))
 			.saturating_add(T::DbWeight::get().writes(4_u64))
 			.saturating_add(Weight::from_parts(0, 21).saturating_mul(b.into()))
+	}
+	/// NOT BENCHMARKED — derived from `dispatch_post`, deliberately.
+	///
+	/// A GET walks the same dispatch path as a POST (one `Ismp::Nonce` read/write, the
+	/// commitment write, the event) and its only per-item cost is encoding the keys, the
+	/// same shape as encoding a body. So `dispatch_post`'s measured base is reused and the
+	/// per-item term scaled up: a key is a `Vec<u8>` with its own length prefix, not one
+	/// byte, so 256x the per-byte term covers a key of any realistic size.
+	///
+	/// Over-estimating is the safe direction: it charges more block weight than the call
+	/// needs, and never lets an under-priced call through. Replace with a real benchmark
+	/// (linear over key count) when the suite is next run.
+	fn dispatch_get(k: u32, ) -> Weight {
+		Weight::from_parts(31_725_511, 3550)
+			.saturating_add(Weight::from_parts(1_638_400, 0).saturating_mul(k.into()))
+			.saturating_add(T::DbWeight::get().reads(6_u64))
+			.saturating_add(T::DbWeight::get().writes(4_u64))
+			.saturating_add(Weight::from_parts(0, 5376).saturating_mul(k.into()))
 	}
 	/// Storage: `System::Number` (r:1 w:0)
 	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
@@ -429,6 +448,24 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(6_u64))
 			.saturating_add(RocksDbWeight::get().writes(4_u64))
 			.saturating_add(Weight::from_parts(0, 21).saturating_mul(b.into()))
+	}
+	/// NOT BENCHMARKED — derived from `dispatch_post`, deliberately.
+	///
+	/// A GET walks the same dispatch path as a POST (one `Ismp::Nonce` read/write, the
+	/// commitment write, the event) and its only per-item cost is encoding the keys, the
+	/// same shape as encoding a body. So `dispatch_post`'s measured base is reused and the
+	/// per-item term scaled up: a key is a `Vec<u8>` with its own length prefix, not one
+	/// byte, so 256x the per-byte term covers a key of any realistic size.
+	///
+	/// Over-estimating is the safe direction: it charges more block weight than the call
+	/// needs, and never lets an under-priced call through. Replace with a real benchmark
+	/// (linear over key count) when the suite is next run.
+	fn dispatch_get(k: u32, ) -> Weight {
+		Weight::from_parts(31_725_511, 3550)
+			.saturating_add(Weight::from_parts(1_638_400, 0).saturating_mul(k.into()))
+			.saturating_add(RocksDbWeight::get().reads(6_u64))
+			.saturating_add(RocksDbWeight::get().writes(4_u64))
+			.saturating_add(Weight::from_parts(0, 5376).saturating_mul(k.into()))
 	}
 	/// Storage: `System::Number` (r:1 w:0)
 	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)

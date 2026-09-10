@@ -20,9 +20,23 @@ pub const HYPERBRIDGE_TESTNET_PARA_ID: u32 = 4009;
 
 /// Hyperbridge's slot duration, in milliseconds — the value to whitelist it with.
 ///
-/// This is the *counterparty's* block time, not Orbinum's; they coincide at 6s today.
-/// It reaches the chain through `ismp_grandpa::add_state_machines`, so the setup scripts
-/// read it from here rather than restating it.
+/// This is the *counterparty's* Aura slot, not Orbinum's block time, and it differs per
+/// deployment: **6000 on Paseo, 12000 on Polkadot** (`developers/polkadot/solochains`,
+/// the `consensus.toml` sample; confirmed live against `aura.slotDuration` on both
+/// chains). It is load-bearing: `ismp-grandpa` rebuilds every Hyperbridge header
+/// timestamp as `aura_slot * slot_duration`
+/// (`ismp-grandpa-2606.0.0/src/consensus.rs:134,182`), so whitelisting mainnet with the
+/// testnet value would date every state commitment at half its real age — measured live,
+/// ~10 000 days early — and every challenge-period and timeout check would run off that.
+///
+/// Switches with the build feature, like [`coprocessor`], so the two cannot drift apart.
+/// It reaches the chain through `ismp_grandpa::add_state_machines`; the setup scripts read
+/// it from here (via `OrbinumIsmpApi::hyperbridge_slot_duration`) rather than restating it.
+#[cfg(not(feature = "hyperbridge-testnet"))]
+pub const HYPERBRIDGE_SLOT_DURATION_MS: u64 = 12_000;
+
+/// See the mainnet variant above.
+#[cfg(feature = "hyperbridge-testnet")]
 pub const HYPERBRIDGE_SLOT_DURATION_MS: u64 = 6_000;
 
 /// Orbinum's own four-byte identifier on the ISMP network.
@@ -94,6 +108,20 @@ mod tests {
 			coprocessor(),
 			Some(StateMachine::Polkadot(HYPERBRIDGE_MAINNET_PARA_ID))
 		);
+	}
+
+	/// The slot duration is the docs' number for the coprocessor this build targets —
+	/// derived from the coprocessor, not restated, so the two constants cannot be
+	/// switched independently.
+	#[test]
+	fn slot_duration_follows_the_coprocessor() {
+		// `developers/polkadot/solochains`, `consensus.toml`: Paseo 6000, Polkadot 12000.
+		let documented = match coprocessor() {
+			Some(StateMachine::Kusama(HYPERBRIDGE_TESTNET_PARA_ID)) => 6_000,
+			Some(StateMachine::Polkadot(HYPERBRIDGE_MAINNET_PARA_ID)) => 12_000,
+			other => panic!("no documented slot duration for coprocessor {other:?}"),
+		};
+		assert_eq!(HYPERBRIDGE_SLOT_DURATION_MS, documented);
 	}
 
 	#[test]

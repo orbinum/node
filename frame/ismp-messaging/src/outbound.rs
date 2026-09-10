@@ -9,7 +9,7 @@ use crate::{Config, Error, Event, PALLET_ID_BYTES, Pallet, RequestKind};
 use alloc::vec::Vec;
 use frame_support::{ensure, traits::Get, traits::UnixTime};
 use ismp::{
-	dispatcher::{DispatchPost, DispatchRequest, FeeMetadata, IsmpDispatcher},
+	dispatcher::{DispatchGet, DispatchPost, DispatchRequest, FeeMetadata, IsmpDispatcher},
 	host::StateMachine,
 };
 use pallet_ismp::pallet::ModuleId;
@@ -106,6 +106,100 @@ pub fn post<T: Config>(
 		timeout_timestamp,
 		body_len,
 		kind: RequestKind::Post,
+	});
+	Ok(())
+}
+
+/// Read state from `dest` at `height`.
+///
+/// The mirror of [`post`], and the asymmetry is what makes it useful: a POST is handed to a
+/// module on the destination, which may refuse it — `pallet-ismp-demo` on Hyperbridge, for
+/// one, rejects any `Substrate(_)` source outright. A GET is answered by a relayer reading
+/// the destination's storage and proving it, so nothing on the far side can turn us away.
+/// The answer lands back here in our own `on_response` — carried by our own relaying
+/// script for now, since Tesseract only delivers GET responses to EVM sources.
+///
+/// `timeout` is **relative seconds**; `0` means the request never expires.
+pub fn get<T: Config>(
+	dest: StateMachine,
+	keys: Vec<Vec<u8>>,
+	height: u64,
+	timeout: u64,
+) -> DispatchResult {
+	// Reading our own state over ISMP is never meaningful: the round trip proves something
+	// we can already read directly.
+	ensure!(
+		dest != <T as pallet_ismp::Config>::HostStateMachine::get(),
+		Error::<T>::DestinationIsSelf
+	);
+
+	// A keyless GET still costs a dispatch, a relayer round trip and a response, and
+	// answers nothing.
+	ensure!(!keys.is_empty(), Error::<T>::NoKeysRequested);
+
+	// Each key is a separate membership proof the destination must produce, so this bounds
+	// work we impose on someone else — the same reason a body is bounded.
+	ensure!(
+		keys.len() as u32 <= T::MaxGetKeys::get(),
+		Error::<T>::TooManyKeys
+	);
+
+	// Rejected here rather than left to expire. `handlers/response.rs:71` requires the
+	// proof height to EQUAL the requested height, so a height no relayer can prove is not
+	// a slow request — it is one that can never be answered, and failing now says so.
+	ensure!(height > 0, Error::<T>::InvalidGetHeight);
+
+	// Same reasoning as `post`: not the destination, just proof a route exists.
+	ensure!(
+		<T as pallet_ismp::Config>::Coprocessor::get().is_some(),
+		Error::<T>::CoprocessorNotSet
+	);
+
+	// Captured before the dispatch consumes the nonce, and before `keys` is moved.
+	let nonce = pallet_ismp::Nonce::<T>::get();
+	let timeout_timestamp = if timeout == 0 {
+		0
+	} else {
+		<<T as pallet_ismp::Config>::TimestampProvider as UnixTime>::now()
+			.as_secs()
+			.saturating_add(timeout)
+	};
+
+	let get = DispatchGet {
+		dest,
+		from: PALLET_ID_BYTES.to_vec(),
+		keys,
+		height,
+		timeout,
+		// Application metadata travels with the request and comes back on the response.
+		// Nothing here needs it, and it is remote-visible, so it stays empty.
+		context: Default::default(),
+	};
+
+	let commitment = pallet_ismp::Pallet::<T>::default()
+		.dispatch_request(
+			DispatchRequest::Get(get),
+			// Zero fee, for the same reason as `post` — see the note there.
+			FeeMetadata {
+				payer: payer::<T>(),
+				fee: Default::default(),
+			},
+		)
+		.map_err(|_| Error::<T>::DispatchFailed)?;
+
+	Pallet::<T>::deposit_event(Event::RequestDispatched {
+		dest,
+		// A GET addresses storage, not a module, so there is no `to`. Our own module id
+		// goes here because that is what the protocol records as `from` and what the
+		// response is routed back to.
+		to: PALLET_ID_BYTES.to_vec(),
+		commitment,
+		nonce,
+		timeout_timestamp,
+		// A GET has no body. Reported as 0 rather than omitted so the column means the
+		// same thing on every row.
+		body_len: 0,
+		kind: RequestKind::Get,
 	});
 	Ok(())
 }

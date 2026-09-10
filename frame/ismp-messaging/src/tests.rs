@@ -851,3 +851,351 @@ fn a_get_response_reports_dest_height_and_nonce() {
 		assert_eq!(found.3, 1_788_970_000);
 	});
 }
+
+// ─── dispatch_get ─────────────────────────────────────────────────────────────
+//
+// A GET exists as a separate path because a POST can be refused by a module on the
+// destination and a GET cannot: nobody runs code there. The relayer reads the requested
+// keys, proves them, and the answer comes back to OUR `on_response`. These tests pin the
+// guards that make an unanswerable GET fail immediately instead of hanging until expiry.
+
+/// A GET to the counterparty with `n` distinct keys.
+fn get_keys(n: usize) -> alloc::vec::Vec<alloc::vec::Vec<u8>> {
+	(0..n).map(|i| alloc::vec![i as u8; 32]).collect()
+}
+
+#[test]
+fn dispatch_get_reports_kind_get_and_no_body() {
+	new_test_ext().execute_with(|| {
+		pallet_timestamp::Pallet::<Test>::set_timestamp(NOW_SECS * 1_000);
+		let nonce_before = pallet_ismp::Nonce::<Test>::get();
+
+		assert_ok!(crate::Pallet::<Test>::dispatch_get(
+			RuntimeOrigin::root(),
+			COUNTERPARTY,
+			get_keys(2),
+			10_403_542,
+			3_600,
+		));
+
+		let (_, nonce, timeout_timestamp, body_len, kind) =
+			dispatched_event().expect("dispatch_get must emit RequestDispatched");
+
+		assert_eq!(
+			kind,
+			crate::RequestKind::Get,
+			"a GET must not report itself as a POST"
+		);
+		// 0 rather than omitted: the field means the same thing on every row, and a GET
+		// genuinely has no body.
+		assert_eq!(body_len, 0);
+		assert_eq!(nonce, nonce_before);
+		assert_eq!(timeout_timestamp, NOW_SECS + 3_600);
+	});
+}
+
+#[test]
+fn dispatch_get_with_zero_timeout_never_expires() {
+	new_test_ext().execute_with(|| {
+		pallet_timestamp::Pallet::<Test>::set_timestamp(NOW_SECS * 1_000);
+
+		assert_ok!(crate::Pallet::<Test>::dispatch_get(
+			RuntimeOrigin::root(),
+			COUNTERPARTY,
+			get_keys(1),
+			10_403_542,
+			0,
+		));
+
+		let (_, _, timeout_timestamp, _, _) = dispatched_event().expect("must emit");
+		// Same branch as a POST: 0 means never, not `now + 0`.
+		assert_eq!(timeout_timestamp, 0);
+	});
+}
+
+#[test]
+fn dispatch_get_rejects_a_request_for_nothing() {
+	new_test_ext().execute_with(|| {
+		// A keyless GET still costs a dispatch, a relayer round trip and a response, and
+		// answers nothing.
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_get(
+				RuntimeOrigin::root(),
+				COUNTERPARTY,
+				alloc::vec![],
+				10_403_542,
+				0,
+			),
+			crate::Error::<Test>::NoKeysRequested
+		);
+	});
+}
+
+#[test]
+fn dispatch_get_bounds_the_work_it_asks_of_the_destination() {
+	new_test_ext().execute_with(|| {
+		// Each key is a separate membership proof the remote chain must produce. The mock
+		// caps this at 4, so 5 is over.
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_get(
+				RuntimeOrigin::root(),
+				COUNTERPARTY,
+				get_keys(5),
+				10_403_542,
+				0,
+			),
+			crate::Error::<Test>::TooManyKeys
+		);
+		// The boundary itself is allowed.
+		assert_ok!(crate::Pallet::<Test>::dispatch_get(
+			RuntimeOrigin::root(),
+			COUNTERPARTY,
+			get_keys(4),
+			10_403_542,
+			0,
+		));
+	});
+}
+
+#[test]
+fn dispatch_get_rejects_an_unprovable_height() {
+	new_test_ext().execute_with(|| {
+		// `handlers/response.rs:71` compares the proof height for EQUALITY, so height 0 is
+		// not a slow request — it is one no relayer can ever answer. Failing now says so,
+		// rather than leaving it to expire silently.
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_get(
+				RuntimeOrigin::root(),
+				COUNTERPARTY,
+				get_keys(1),
+				0,
+				0,
+			),
+			crate::Error::<Test>::InvalidGetHeight
+		);
+	});
+}
+
+#[test]
+fn dispatch_get_rejects_reading_our_own_state() {
+	new_test_ext().execute_with(|| {
+		// A round trip to prove something we can read directly.
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_get(
+				RuntimeOrigin::root(),
+				StateMachine::Substrate(*b"orbi"),
+				get_keys(1),
+				10_403_542,
+				0,
+			),
+			crate::Error::<Test>::DestinationIsSelf
+		);
+	});
+}
+
+#[test]
+fn dispatch_get_rejects_non_root() {
+	new_test_ext().execute_with(|| {
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_get(
+				RuntimeOrigin::signed(1),
+				COUNTERPARTY,
+				get_keys(1),
+				10_403_542,
+				0,
+			),
+			sp_runtime::DispatchError::BadOrigin
+		);
+	});
+}
+
+#[test]
+fn a_get_response_closes_out_the_get_it_answers() {
+	new_test_ext().execute_with(|| {
+		pallet_timestamp::Pallet::<Test>::set_timestamp(NOW_SECS * 1_000);
+		let keys = get_keys(2);
+
+		assert_ok!(crate::Pallet::<Test>::dispatch_get(
+			RuntimeOrigin::root(),
+			COUNTERPARTY,
+			keys.clone(),
+			10_403_542,
+			0,
+		));
+		let (dispatched, nonce, timeout_timestamp, _, _) = dispatched_event().expect("must emit");
+
+		// Rebuild the GET from the event's own fields and answer it. This is the GET
+		// counterpart of `dispatched_fields_rebuild_the_committed_request`: if the emitted
+		// nonce, height or timeout did not describe the request that was actually
+		// committed, the two commitments would differ and this fails.
+		let response = ismp::router::GetResponse {
+			get: GetRequest {
+				source: StateMachine::Substrate(*b"orbi"),
+				dest: COUNTERPARTY,
+				nonce,
+				from: PALLET_ID_BYTES.to_vec(),
+				keys: keys.clone(),
+				height: 10_403_542,
+				context: alloc::vec![],
+				timeout_timestamp,
+			},
+			values: keys
+				.iter()
+				.map(|k| ismp::router::StorageValue {
+					key: k.clone(),
+					value: Some(alloc::vec![7u8]),
+				})
+				.collect(),
+		};
+
+		frame_system::Pallet::<Test>::reset_events();
+		assert_ok!(IsmpModuleCallback::<Test>::default().on_response(response));
+
+		assert_eq!(
+			emitted_commitment(),
+			Some(dispatched),
+			"the response must name the very GET that was dispatched"
+		);
+
+		// And the spec-13 fields describe the read that was actually performed.
+		let found = frame_system::Pallet::<Test>::events()
+			.into_iter()
+			.find_map(|r| match r.event {
+				crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::GetResponseReceived {
+					dest,
+					height,
+					keys,
+					found,
+					..
+				}) => Some((dest, height, keys, found)),
+				_ => None,
+			})
+			.expect("must emit GetResponseReceived");
+		assert_eq!(found.0, COUNTERPARTY);
+		assert_eq!(
+			found.1, 10_403_542,
+			"the remote height the read was proven against"
+		);
+		assert_eq!(found.2, 2);
+		assert_eq!(found.3, 2);
+	});
+}
+
+// ── the commitment's wire encoding ───────────────────────────────────────────────
+
+/// A commitment is `keccak256(abi.encode(request))` — Solidity ABI, **not SCALE**.
+///
+/// `Request::encode()` is an inherent method that shadows the SCALE `Encode` trait
+/// (`ismp-2606.1.0/src/router.rs:263-266`), so Rust code reads as if it were SCALE while
+/// producing 32-byte-word ABI output. Nothing in this pallet chooses that; it inherits it.
+/// But everything off-chain that rebuilds a commitment — the probe, an indexer, a relayer
+/// — has to know, and a SCALE-based rebuild fails silently: it hashes fine and the chain
+/// answers `UnknownRequest` much later. Pinning the exact bytes here gives those tools a
+/// ground truth to test against, and fails loudly if an upstream bump changes the wire.
+///
+/// The two vectors below are shared with `scripts/hyperbridge/lib/harness.mjs`. Change one
+/// side only if you change both.
+#[test]
+fn commitments_hash_the_abi_encoding_not_scale() {
+	let post = Request::Post(PostRequest {
+		source: StateMachine::Substrate(*b"orbi"),
+		dest: COPROCESSOR,
+		nonce: 4,
+		from: PALLET_ID_BYTES.to_vec(),
+		to: b"demo/mod".to_vec(),
+		timeout_timestamp: 0,
+		body: alloc::vec![1, 2, 3, 4],
+	});
+	let get = Request::Get(GetRequest {
+		source: StateMachine::Substrate(*b"orbi"),
+		dest: COPROCESSOR,
+		nonce: 7,
+		from: PALLET_ID_BYTES.to_vec(),
+		keys: alloc::vec![alloc::vec![0xaa; 32]],
+		height: 4242,
+		context: alloc::vec![],
+		timeout_timestamp: 0,
+	});
+
+	new_test_ext().execute_with(|| {
+		let hash =
+			|r: &Request| alloc::format!("{:?}", hash_request::<pallet_ismp::Pallet<Test>>(r));
+		assert_eq!(
+			hash(&post),
+			"0xe51e536288e74f85fb16bc89fe4d43feb49c15049776de908bb402310bd389bc"
+		);
+		assert_eq!(
+			hash(&get),
+			"0xc7f995f640ae3d0ccab18b0ff1280f68d5c906c60e5d62862aa457150d8792ee"
+		);
+
+		// The state machines travel as their DISPLAY strings ("SUBSTRATE-orbi",
+		// "KUSAMA-4009"), not as SCALE variants — `abi.rs:64-76`. That is why the
+		// human-readable form `ismp_queryRequests` returns can be hashed as-is.
+		let abi = post.encode();
+		assert!(abi.windows(14).any(|w| w == b"SUBSTRATE-orbi"));
+		assert!(abi.windows(11).any(|w| w == b"KUSAMA-4009"));
+		assert_eq!(
+			abi.len() % 32,
+			0,
+			"abi.encode output is whole 32-byte words"
+		);
+
+		// And the SCALE encoding — reachable only through the trait, fully qualified —
+		// is a different byte string with a different hash. This is the trap.
+		let scale = <Request as Encode>::encode(&post);
+		assert_ne!(scale, abi);
+		assert_ne!(
+			alloc::format!("{:?}", sp_core::H256(sp_io::hashing::keccak_256(&scale))),
+			hash(&post),
+			"a SCALE-based rebuild must not accidentally reproduce the commitment"
+		);
+	});
+}
+
+/// A GET response is accepted with `AcceptedSources` EMPTY, while a POST from the very same
+/// chain is refused.
+///
+/// This is why the self-relayed GET works on testnet without touching `AcceptedSources`:
+/// `on_response` answers a request WE dispatched — the response handler already proved it
+/// against our own commitment (`handlers/response.rs:65-71`) — so there is no remote sender
+/// to vet. `AcceptedSources` gates who may *initiate* a message to us, which is a POST.
+#[test]
+fn a_get_response_is_accepted_without_any_accepted_source() {
+	new_test_ext().execute_with(|| {
+		assert!(
+			AcceptedSources::<Test>::iter().next().is_none(),
+			"the default must be to accept no POST source"
+		);
+
+		let module = IsmpModuleCallback::<Test>::default();
+		assert_ok!(module.on_response(GetResponse {
+			get: GetRequest {
+				source: StateMachine::Substrate(*b"orbi"),
+				dest: COPROCESSOR,
+				nonce: 0,
+				from: PALLET_ID_BYTES.to_vec(),
+				keys: alloc::vec![alloc::vec![1u8; 32]],
+				height: 10,
+				context: alloc::vec![],
+				timeout_timestamp: 0,
+			},
+			values: alloc::vec![StorageValue {
+				key: alloc::vec![1u8; 32],
+				value: Some(alloc::vec![9])
+			}],
+		}));
+		assert_eq!(
+			emitted_commitment().is_some(),
+			true,
+			"GetResponseReceived must be emitted"
+		);
+
+		// Same chain, opposite direction: refused, because nobody accepted it as a source.
+		assert!(
+			module
+				.on_accept(post_from(COPROCESSOR, Message::Ping { nonce: 1 }.encode()))
+				.is_err()
+		);
+	});
+}
