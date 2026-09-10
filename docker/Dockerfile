@@ -61,7 +61,12 @@ RUN useradd -m -u 1000 -U -s /bin/sh orbinum && \
     mkdir -p /data && \
     chown -R orbinum:orbinum /data
 
-COPY --from=artifacts /orbinum-node /usr/local/bin/orbinum-node
+# `--chmod=755` is load-bearing, not tidiness. When CI reuses prebuilt artifacts
+# (`--build-context artifacts=./dist`), the files come from a directory that
+# `actions/upload-artifact` round-tripped through a zip — which does NOT preserve the
+# executable bit. Without this the image builds and pushes green, then every container
+# dies at startup with `exec: "/usr/local/bin/orbinum-node": permission denied`.
+COPY --from=artifacts --chmod=755 /orbinum-node /usr/local/bin/orbinum-node
 
 # The runtime WASM ships inside the image so `deploy-runtime` can docker-cp the exact
 # runtime the nodes run for the on-chain setCode.

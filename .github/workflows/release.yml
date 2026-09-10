@@ -273,6 +273,7 @@ jobs:
             type=raw,value=testnet-latest,enable=${{ needs.metadata.outputs.is_prerelease == 'true' }}
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -282,6 +283,21 @@ jobs:
           platforms: linux/amd64
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
+
+      # rc.23 published an image whose binary had no executable bit: CI chmods the
+      # artifact on the RUNNER, and `upload-artifact` round-trips through a zip, which does
+      # not preserve the bit. Every step was green and every node then died at startup with
+      # `exec: ... permission denied`. Running the binary in the image we just pushed is
+      # what makes "the image works" an assertion rather than an assumption.
+      - name: Verify the published image actually runs
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/node@${{ steps.build.outputs.digest }}"
+          echo "Running --version inside $IMAGE"
+          docker run --rm --entrypoint /usr/local/bin/orbinum-node "$IMAGE" --version
+          # And the runtime WASM it ships must be readable by the unprivileged user, since
+          # `deploy-runtime` docker-cps it out for the on-chain setCode.
+          docker run --rm --entrypoint sh "$IMAGE" -c \
+            'test -s /usr/local/share/orbinum/orbinum_runtime.compact.compressed.wasm'
 
   # ── 5. Create GitHub Release ──────────────────────────────────────────────
   github-release:
