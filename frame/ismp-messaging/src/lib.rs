@@ -77,6 +77,16 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxBodyLen: Get<u32>;
 
+		/// Largest number of storage keys a single GET may request.
+		///
+		/// Bounds work we impose on someone else: every key in a GET is a separate
+		/// membership proof the relayer must fetch from the destination and the
+		/// destination must include. An unbounded GET is a cheap way to make a remote
+		/// chain and a relayer do expensive work, so it is capped for the same reason
+		/// [`Config::MaxBodyLen`] caps a body.
+		#[pallet::constant]
+		type MaxGetKeys: Get<u32>;
+
 		type WeightInfo: WeightInfo;
 	}
 
@@ -259,6 +269,16 @@ pub mod pallet {
 		DestinationIsSelf,
 		/// `pallet-ismp` refused the request.
 		DispatchFailed,
+		/// A GET with no keys asks for nothing and would still cost a round trip.
+		NoKeysRequested,
+		/// Exceeded [`Config::MaxGetKeys`].
+		TooManyKeys,
+		/// A GET must name the height to read at, and `0` is never a real one.
+		///
+		/// The response handler requires the proof height to equal the requested height
+		/// exactly (`ismp-2606.1.0/src/handlers/response.rs:71`), so a height nobody can
+		/// prove leaves the request hanging until it expires rather than failing fast.
+		InvalidGetHeight,
 	}
 
 	#[pallet::call]
@@ -279,6 +299,43 @@ pub mod pallet {
 		) -> DispatchResult {
 			T::DispatchOrigin::ensure_origin(origin)?;
 			outbound::post::<T>(dest, to, body, timeout)
+		}
+
+		/// Read state from `dest` over ISMP.
+		///
+		/// A GET is answered differently from a POST, and the difference is the point: no
+		/// module runs on the destination. A relayer reads the requested keys, proves them
+		/// against a state commitment we already hold, and the answer arrives back here as
+		/// [`Event::GetResponseReceived`] via our own `on_response`. So a destination
+		/// cannot refuse us the way a receiving module can refuse a POST.
+		///
+		/// "A relayer" is not the public one: Tesseract delivers GET responses only to EVM
+		/// sources (`tesseract/messaging/messaging/src/events.rs:314-336`), so on this chain
+		/// the answer is carried by `scripts/hyperbridge/relay-get-response.mjs`. The proof
+		/// is verified here regardless of who submits it.
+		///
+		/// `height` must be one this chain can already prove — a height for which
+		/// `pallet-ismp` holds a state commitment of `dest`. The response handler compares
+		/// it for equality, not as a lower bound, so an unprovable height means the request
+		/// simply expires.
+		///
+		/// `keys` are proven against what this chain holds of `dest`. For the coprocessor
+		/// that is its ISMP **child trie** root, not its state root
+		/// (`ismp-grandpa/src/consensus.rs:142-150`), so a GET to Hyperbridge can only read
+		/// keys inside `:child_storage:default:ISMPv2`.
+		///
+		/// `timeout` is **relative seconds**; `0` means *never expires*.
+		#[pallet::call_index(3)]
+		#[pallet::weight(T::WeightInfo::dispatch_get(keys.len() as u32))]
+		pub fn dispatch_get(
+			origin: OriginFor<T>,
+			dest: StateMachine,
+			keys: Vec<Vec<u8>>,
+			height: u64,
+			timeout: u64,
+		) -> DispatchResult {
+			T::DispatchOrigin::ensure_origin(origin)?;
+			outbound::get::<T>(dest, keys, height, timeout)
 		}
 
 		#[pallet::call_index(1)]

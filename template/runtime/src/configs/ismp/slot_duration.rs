@@ -57,8 +57,8 @@ mod tests {
 
 	#[test]
 	fn accepts_real_chain_slot_durations() {
-		assert!(validate_slot_duration(6_000)); // Polkadot, Orbinum
-		assert!(validate_slot_duration(12_000)); // Ethereum
+		assert!(validate_slot_duration(6_000)); // Hyperbridge on Paseo, Orbinum
+		assert!(validate_slot_duration(12_000)); // Hyperbridge on Polkadot, Ethereum
 		assert!(validate_slot_duration(MIN_SLOT_DURATION_MS));
 		assert!(validate_slot_duration(MAX_SLOT_DURATION_MS));
 	}

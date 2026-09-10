@@ -263,6 +263,14 @@ impl pallet_ismp_messaging::Config for Runtime {
 	/// are measured over. Keep this and the benchmark's upper bound equal.
 	type MaxBodyLen = ConstU32<8192>;
 
+	/// Storage keys per GET.
+	///
+	/// Low on purpose: this bounds work we impose on a REMOTE chain and a relayer, since
+	/// every key is a separate membership proof they must produce and include. 16 covers
+	/// any realistic read — a handful of storage items, or one map's worth of entries —
+	/// and a caller who needs more can send a second request.
+	type MaxGetKeys = ConstU32<16>;
+
 	type WeightInfo = pallet_ismp_messaging::weights::SubstrateWeight<Runtime>;
 }
 

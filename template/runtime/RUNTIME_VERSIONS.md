@@ -41,8 +41,64 @@ cross-chain observability:
 | `GetResponseReceived` | `dest`, `height`, `nonce`, `timeout_timestamp` |
 | `RequestTimedOut` | `kind`, `nonce`, `timeout_timestamp`, `body_len` |
 
-New enum `RequestKind { Post, Get }`, one byte, so a future `dispatch_get` reuses
-these events rather than reshaping them.
+New enum `RequestKind { Post, Get }`, one byte, shared by `RequestDispatched` and
+`RequestTimedOut`.
+
+**New extrinsic `dispatch_get` (`call_index(3)`).** `transaction_version` stays at
+3: adding a call index leaves indices 0-2 and their argument encodings untouched,
+so an offline-signed extrinsic still decodes. Per this file's own rule, `tx` moves
+only when the encoding of existing extrinsics changes.
+
+It exists because a POST can be refused and a GET cannot. A POST is handed to a
+module on the destination, which may reject it — `pallet-ismp-demo` on Hyperbridge
+rejects any `Substrate(_)` source outright (`modules/pallets/demo/src/lib.rs:372-395`),
+and the relayer dry-runs before submitting, so such a message is silently dropped
+rather than delivered. A GET has no receiving module: whoever answers it reads the
+requested keys on `dest`, and this chain verifies that read against a state commitment
+of `dest` it already holds (`ismp-2606.1.0/src/handlers/response.rs`,
+`SubstrateStateMachine::verify_state_proof`). Nothing on the far side can turn us away.
+
+**Who answers it is the honest caveat.** The public relayer does not, today: Tesseract
+resolves GETs on Hyperbridge (`tesseract/messaging/messaging/src/get_requests.rs` →
+`StateCoprocessor.handle_unsigned`) and delivers the response **only to EVM sources** —
+`events.rs:314-336`, *"Substrate sinks can't verify the mmr proof, so they are
+skipped"*. So a GET dispatched here is answered by our own relaying script
+(`scripts/hyperbridge/relay-get-response.mjs`), which is a legitimate ISMP relayer: it
+carries a `state_getReadProof` of Hyperbridge at `height` into `Ismp.handle_unsigned`,
+and the chain verifies it against the GRANDPA-tracked commitment. The relayer adds no
+trust; it adds bytes. Until upstream delivers to Substrate sinks, `dispatch_get` without
+that script is a request nobody will answer.
+
+**What of Hyperbridge is readable: its ISMP child trie, not its global state.** For the
+coprocessor, `ismp-grandpa` records `state_root = child_trie_root` and
+`overlay_root = mmr_root` (`ismp-grandpa-2606.0.0/src/consensus.rs:142-150`) — verified
+live: our stored commitment equals Gargantua's `ismp.childTrieRoot` at that height, not its
+header's `state_root`. So a GET to Hyperbridge must name keys inside `:child_storage:default:ISMPv2`
+(a `RequestReceipts`/`RequestCommitments` entry), the proof is `ismp_queryChildTrieProof`
+with Hyperbridge's hasher (Keccak), and a GET for a global key such as `Ismp::Nonce` can never
+verify here. This holds for any relayer, not only ours.
+
+Three guards make an unanswerable GET fail at dispatch instead of hanging until it
+expires: no keys (asks nothing, still costs a round trip), more than
+`MaxGetKeys` = 16 (each key is a membership proof a REMOTE chain must produce, so this
+bounds work we impose on someone else), and `height == 0` — the response handler
+compares the proof height for *equality*
+(`ismp-2606.1.0/src/handlers/response.rs:71`), so a height nobody can prove can never
+be answered.
+
+`dispatch_get`'s weight is **not benchmarked**: it reuses `dispatch_post`'s measured
+base with a deliberately generous per-key term, which over-charges rather than
+under-charges. Noted in `weights.rs` for whoever next runs the suite.
+
+**Mainnet builds now whitelist Hyperbridge with `slot_duration = 12000`** (was 6000
+for both targets). The value is the counterparty's Aura slot, and it differs per
+deployment: Paseo 6000, Polkadot 12000 (`developers/polkadot/solochains`; confirmed live
+against `aura.slotDuration` on Gargantua and Nexus). `ismp-grandpa` reconstructs every
+Hyperbridge header timestamp as `aura_slot * slot_duration`, so the old value would have
+dated every mainnet state commitment ~28 years early. **Testnet builds are unchanged**
+(`--features hyperbridge-testnet` still yields 6000), so nothing on the live chain moves;
+the constant now follows the build feature exactly as `coprocessor()` does. Not a storage
+change — it only affects what `setup-deployed.mjs` whitelists on a fresh mainnet chain.
 
 **`timeout_timestamp` has three states downstream and conflating any two is a
 bug.** `0` means the message never expires — reproducing upstream's explicit
