@@ -131,6 +131,40 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 		let nonce = response.get.nonce;
 		let timeout_timestamp = response.get.timeout_timestamp;
 
+		// A delivery confirmation is an ordinary GET whose context names the POST it
+		// proves, so it is detected rather than routed: the protocol offers no way to tell
+		// two GETs apart, and a storage map keyed on dispatch would strand an entry every
+		// time one expired.
+		//
+		// The receipt's VALUE is the relayer the destination recorded. A present value is
+		// the whole proof — `handlers/request.rs:122-125` deletes the receipt when the
+		// receiving module errs, so its existence means delivered *and* executed.
+		//
+		// Matched by KEY, never by position: `verify_state_proof` returns a `BTreeMap`
+		// (`state-machines/substrate/src/lib.rs:246`), so `values` arrives sorted by key
+		// bytes and deduplicated — not in the order the keys were requested. Indexing it
+		// happens to work while a confirmation asks for exactly one key, and would start
+		// reading the wrong value the day one asks for two.
+		//
+		// An absent value emits nothing. It proves the receipt was not there at `height`,
+		// which is indistinguishable from asking too early, and there is no event in this
+		// pallet that can claim a message failed to arrive.
+		if let Some(confirmed) = crate::receipts::confirmed_commitment(&response.get.context) {
+			let want = crate::receipts::request_receipt_key(confirmed);
+			if let Some(relayer) = response
+				.values
+				.iter()
+				.find(|v| v.key == want)
+				.and_then(|v| v.value.clone())
+			{
+				Pallet::<T>::deposit_event(Event::DeliveryConfirmed {
+					commitment: confirmed,
+					relayer,
+					height,
+				});
+			}
+		}
+
 		// The GET we dispatched, not the response: `RequestDispatched` recorded the
 		// request's commitment, so hashing the request is what joins the two. Hashing the
 		// response instead would produce a value nothing else on this chain has seen.

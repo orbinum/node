@@ -11547,6 +11547,7 @@ dependencies = [
  "frame-benchmarking",
  "frame-support",
  "frame-system",
+ "hex-literal",
  "ismp",
  "pallet-balances",
  "pallet-ismp",
