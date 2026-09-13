@@ -20,7 +20,53 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
-### spec 13 — tx 3 — [Unreleased]
+### spec 14 — tx 3 — [Unreleased]
+
+**On-chain proof that an outbound message was delivered.**
+
+Until now a delivered POST and one still in flight were indistinguishable from this
+chain's own state, and the explorer had to ask a public BSC RPC to tell them apart —
+an answer nothing could verify. This makes the question answerable with a proof.
+
+**Why it cannot be done the obvious way.** Upstream #840 removed `PostResponse` from
+the protocol: `IsmpModule` has three callbacks and `on_response` takes a concrete
+`GetResponse`, so a destination *cannot* reply to a POST. What it does leave behind is
+a receipt — `handlers/request.rs:112` writes `RequestReceipts[commitment] = relayer`
+before invoking the receiving module and `:122-125` deletes it again if that module
+errs. Its presence therefore proves **delivered and executed successfully**, which is
+a stronger claim than the `PostRequestHandled` event, and it is ordinary storage, so a
+GET can prove it.
+
+| addition | detail |
+|---|---|
+| `confirm_delivery` (`call_index(4)`) | Root. Dispatches a GET for the receipt of a given commitment |
+| `DeliveryConfirmed` event | `commitment`, `relayer`, `height` |
+| `receipts` module | `RequestReceipts` key derivation, pinned against a receipt read live from Gargantua |
+
+**Correlation carries no storage.** The confirming GET has its own commitment, unrelated
+to the POST it proves, so the link travels in `DispatchGet.context` — which comes back
+inside `GetResponse.get`. A storage map keyed on dispatch would strand an entry every
+time a GET expired; this strands nothing.
+
+**What it proves, precisely.** The receipt read is *Hyperbridge's*, not the final
+destination's: `ismp-grandpa` gives this chain the coprocessor's ISMP child trie root and
+nothing else, so an `Evm(_)` destination's storage is not provable here. Hyperbridge's
+proxy re-dispatches through the same `on_accept` that writes receipts, so a receipt there
+means the coprocessor **accepted and forwarded** the message — one hop short of execution
+on the far side, but proven rather than taken on an RPC's word.
+
+**There is no negative event.** An empty answer proves the receipt was absent *at that
+height*, which is indistinguishable from asking before delivery. Nothing in this pallet
+can say a message failed to arrive.
+
+**No migration, no storage change. Weights: `confirm_delivery` reuses
+`dispatch_get(1)`** — it is a one-key GET, which is exactly what that curve measures.
+
+**`transaction_version` stays at 3**, for the same reason as spec 13: adding call index 4
+leaves indices 0-3 and their encodings untouched, so offline-signed extrinsics still
+decode.
+
+### spec 13 — tx 3 — 2026-09-10 (`v0.1.0-rc.24`)
 
 Every `ismpMessaging` event now carries what the callback already had in hand.
 **`transaction_version` stays at 3** — events are metadata, so no call signature,

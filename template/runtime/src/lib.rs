@@ -160,7 +160,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: Cow::Borrowed("orbinum"),
 	impl_name: Cow::Borrowed("orbinum"),
 	authoring_version: 1,
-	spec_version: 13,
+	spec_version: 14,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 3,

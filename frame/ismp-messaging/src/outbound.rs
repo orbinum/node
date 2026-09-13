@@ -125,6 +125,7 @@ pub fn get<T: Config>(
 	keys: Vec<Vec<u8>>,
 	height: u64,
 	timeout: u64,
+	context: Vec<u8>,
 ) -> DispatchResult {
 	// Reading our own state over ISMP is never meaningful: the round trip proves something
 	// we can already read directly.
@@ -142,6 +143,15 @@ pub fn get<T: Config>(
 	ensure!(
 		keys.len() as u32 <= T::MaxGetKeys::get(),
 		Error::<T>::TooManyKeys
+	);
+
+	// `context` travels on the wire and comes back inside `GetResponse.get`, so it is
+	// attacker-visible bytes whose cost nothing else bounds: `dispatch_get`'s weight is
+	// measured per KEY, not per context byte. Reuses `MaxBodyLen` because it is the same
+	// kind of thing a POST body is — opaque application bytes we agree to carry.
+	ensure!(
+		context.len() as u32 <= T::MaxBodyLen::get(),
+		Error::<T>::BodyTooLarge
 	);
 
 	// Rejected here rather than left to expire. `handlers/response.rs:71` requires the
@@ -171,9 +181,7 @@ pub fn get<T: Config>(
 		keys,
 		height,
 		timeout,
-		// Application metadata travels with the request and comes back on the response.
-		// Nothing here needs it, and it is remote-visible, so it stays empty.
-		context: Default::default(),
+		context,
 	};
 
 	let commitment = pallet_ismp::Pallet::<T>::default()

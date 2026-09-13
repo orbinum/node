@@ -15,6 +15,7 @@ extern crate alloc;
 pub mod inbound;
 pub mod outbound;
 pub mod payload;
+pub mod receipts;
 pub mod weights;
 
 #[cfg(feature = "runtime-benchmarks")]
@@ -207,6 +208,24 @@ pub mod pallet {
 		// commitment, it came from us"), so it is always `HostStateMachine` and would be a
 		// constant on the wire. Same rule that keeps `from`/`to` off the events where they
 		// cannot vary.
+		/// A message this chain dispatched was proven delivered.
+		///
+		/// Emitted when a [`Call::confirm_delivery`] GET comes back with the receipt
+		/// present. There is deliberately **no negative counterpart**: an empty answer
+		/// proves the receipt was absent at the height read, which may simply be a height
+		/// before delivery. Nothing here can ever say "not delivered".
+		DeliveryConfirmed {
+			/// The POST being confirmed — read back from the GET's `context`, not the
+			/// GET's own commitment, which is a different message entirely.
+			commitment: sp_core::H256,
+			/// The account that delivered it, as the destination recorded it. Opaque
+			/// bytes: a Substrate account is 32 bytes, an EVM relayer 20.
+			relayer: Vec<u8>,
+			/// The remote height the receipt was proven at. The same field
+			/// [`Event::GetResponseReceived`] carries, and the only real remote block
+			/// number this pallet ever observes.
+			height: u64,
+		},
 		SourceAccepted {
 			source: StateMachine,
 		},
@@ -335,7 +354,57 @@ pub mod pallet {
 			timeout: u64,
 		) -> DispatchResult {
 			T::DispatchOrigin::ensure_origin(origin)?;
-			outbound::get::<T>(dest, keys, height, timeout)
+			// No context: a plain read has nothing to correlate. `confirm_delivery` is the
+			// call that fills it.
+			outbound::get::<T>(dest, keys, height, timeout, Default::default())
+		}
+
+		/// Ask the coprocessor to prove that `commitment` was delivered.
+		///
+		/// A POST leaves no trace here once dispatched: upstream #840 removed
+		/// `PostResponse`, so the destination cannot answer, and nothing on this chain
+		/// changes when a message lands. What the destination *does* write is a receipt,
+		/// and this dispatches a GET that reads it — see [`crate::receipts`].
+		///
+		/// **What it proves.** The receipt read is Hyperbridge's, not the final
+		/// destination's: `ismp-grandpa` gives this chain the coprocessor's ISMP child trie
+		/// root and nothing else, so an `Evm(_)` destination's storage is not provable here
+		/// at all. Hyperbridge's proxy re-dispatches through the same `on_accept` that
+		/// writes receipts, so a receipt there means **the coprocessor accepted and
+		/// forwarded it** — one hop short of execution on the far side, but proven rather
+		/// than taken on an RPC's word.
+		///
+		/// **`height` must be one this chain can already prove**, and the handler compares
+		/// it for equality rather than as a lower bound
+		/// (`ismp/src/handlers/response.rs:71`). Since nothing tells us which block the
+		/// receipt was written in, confirming means retrying at heights we hold commitments
+		/// for until one answers. A height we cannot prove does not fail fast — it expires.
+		///
+		/// A GET that comes back empty proves the receipt was **absent at that height**,
+		/// which is not the same as undelivered: it may simply predate it. Hence
+		/// [`Event::DeliveryConfirmed`] and no negative counterpart.
+		#[pallet::call_index(4)]
+		#[pallet::weight(T::WeightInfo::dispatch_get(1))]
+		pub fn confirm_delivery(
+			origin: OriginFor<T>,
+			commitment: sp_core::H256,
+			height: u64,
+			timeout: u64,
+		) -> DispatchResult {
+			T::DispatchOrigin::ensure_origin(origin)?;
+
+			// The coprocessor, not the message's destination: it is the only chain whose
+			// state this runtime can verify, and the only one whose receipt is reachable.
+			let dest = <T as pallet_ismp::Config>::Coprocessor::get()
+				.ok_or(Error::<T>::CoprocessorNotSet)?;
+
+			outbound::get::<T>(
+				dest,
+				receipts::confirmation_keys(commitment),
+				height,
+				timeout,
+				commitment.as_bytes().to_vec(),
+			)
 		}
 
 		#[pallet::call_index(1)]

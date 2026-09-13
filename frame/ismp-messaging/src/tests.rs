@@ -1198,3 +1198,246 @@ fn a_get_response_is_accepted_without_any_accepted_source() {
 		);
 	});
 }
+
+// ── Delivery confirmation ────────────────────────────────────────────────────────────
+
+/// Builds a `GetResponse` shaped like the answer to a `confirm_delivery` GET.
+fn confirmation_response(
+	context: alloc::vec::Vec<u8>,
+	value: Option<alloc::vec::Vec<u8>>,
+) -> GetResponse {
+	GetResponse {
+		get: GetRequest {
+			source: StateMachine::Substrate(*b"orbi"),
+			dest: COUNTERPARTY,
+			nonce: 0,
+			from: PALLET_ID_BYTES.to_vec(),
+			keys: alloc::vec![crate::receipts::request_receipt_key(
+				sp_core::H256::repeat_byte(7)
+			)],
+			height: 42,
+			context,
+			timeout_timestamp: 0,
+		},
+		values: alloc::vec![StorageValue {
+			key: crate::receipts::request_receipt_key(sp_core::H256::repeat_byte(7)),
+			value,
+		}],
+	}
+}
+
+fn confirmed_events() -> alloc::vec::Vec<(sp_core::H256, alloc::vec::Vec<u8>, u64)> {
+	frame_system::Pallet::<Test>::events()
+		.into_iter()
+		.filter_map(|r| match r.event {
+			crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::DeliveryConfirmed {
+				commitment,
+				relayer,
+				height,
+			}) => Some((commitment, relayer, height)),
+			_ => None,
+		})
+		.collect()
+}
+
+#[test]
+fn a_present_receipt_confirms_the_post_named_by_the_context() {
+	new_test_ext().execute_with(|| {
+		let post = sp_core::H256::repeat_byte(7);
+		let relayer = alloc::vec![0xaa; 32];
+
+		assert!(
+			IsmpModuleCallback::<Test>::default()
+				.on_response(confirmation_response(
+					post.as_bytes().to_vec(),
+					Some(relayer.clone())
+				))
+				.is_ok()
+		);
+
+		// The confirmed commitment is the POST from the context, NOT the GET's own — they
+		// are different messages, and reporting the GET's would make the event useless for
+		// joining a delivery to what was delivered.
+		assert_eq!(confirmed_events(), alloc::vec![(post, relayer, 42)]);
+	});
+}
+
+#[test]
+fn an_absent_receipt_confirms_nothing() {
+	new_test_ext().execute_with(|| {
+		let post = sp_core::H256::repeat_byte(7);
+
+		assert!(
+			IsmpModuleCallback::<Test>::default()
+				.on_response(confirmation_response(post.as_bytes().to_vec(), None))
+				.is_ok()
+		);
+
+		// The guard this whole feature exists for. A proof of absence says the receipt was
+		// not there at THAT height, which is what asking too early also looks like. There
+		// is no negative event, so silence is the only honest output.
+		assert!(confirmed_events().is_empty());
+	});
+}
+
+#[test]
+fn an_ordinary_get_is_never_read_as_a_confirmation() {
+	new_test_ext().execute_with(|| {
+		// Every GET dispatched before confirmation existed carries an empty context. If a
+		// non-commitment context were accepted, those would attribute deliveries to
+		// commitment zero.
+		assert!(
+			IsmpModuleCallback::<Test>::default()
+				.on_response(confirmation_response(
+					alloc::vec![],
+					Some(alloc::vec![0xaa; 32])
+				))
+				.is_ok()
+		);
+		assert!(confirmed_events().is_empty());
+	});
+}
+
+#[test]
+fn confirming_reads_the_receipt_key_from_the_coprocessor() {
+	new_test_ext().execute_with(|| {
+		let post = sp_core::H256::repeat_byte(9);
+		assert_ok!(crate::Pallet::<Test>::confirm_delivery(
+			RuntimeOrigin::root(),
+			post,
+			42,
+			600
+		));
+
+		// Addressed to the coprocessor, not to the POST's destination: it is the only
+		// chain whose state this runtime holds a commitment for, so it is the only
+		// receipt that can be proven here.
+		let dispatched = frame_system::Pallet::<Test>::events()
+			.into_iter()
+			.find_map(|r| match r.event {
+				crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::RequestDispatched {
+					dest,
+					kind,
+					..
+				}) => Some((dest, kind)),
+				_ => None,
+			})
+			.expect("confirm_delivery dispatches a request");
+
+		assert_eq!(dispatched.0, COPROCESSOR);
+		assert_eq!(dispatched.1, crate::RequestKind::Get);
+	});
+}
+
+#[test]
+fn confirm_delivery_rejects_non_root() {
+	new_test_ext().execute_with(|| {
+		assert_noop!(
+			crate::Pallet::<Test>::confirm_delivery(
+				RuntimeOrigin::signed(1),
+				sp_core::H256::repeat_byte(9),
+				42,
+				600
+			),
+			sp_runtime::DispatchError::BadOrigin
+		);
+	});
+}
+
+#[test]
+fn confirm_delivery_rejects_an_unprovable_height() {
+	new_test_ext().execute_with(|| {
+		// Height 0 can never be proven, and `handlers/response.rs:71` compares heights for
+		// equality — so this would not fail slowly, it would hang until it expired.
+		assert_noop!(
+			crate::Pallet::<Test>::confirm_delivery(
+				RuntimeOrigin::root(),
+				sp_core::H256::repeat_byte(9),
+				0,
+				600
+			),
+			Error::<Test>::InvalidGetHeight
+		);
+	});
+}
+
+#[test]
+fn a_get_context_is_bounded_like_a_body() {
+	new_test_ext().execute_with(|| {
+		// `context` is carried on the wire and returned inside the response, but
+		// `dispatch_get`'s weight is measured per KEY — so without this bound an oversized
+		// context is work nothing charges for.
+		// 8192 is the mock's `MaxBodyLen`, matching `dispatch_rejects_an_oversized_body`.
+		assert_noop!(
+			crate::outbound::get::<Test>(
+				COUNTERPARTY,
+				alloc::vec![alloc::vec![1]],
+				42,
+				0,
+				alloc::vec![0u8; 8193]
+			),
+			Error::<Test>::BodyTooLarge
+		);
+
+		// At the limit it still goes through: the bound is a cap, not a smaller cap.
+		assert_ok!(crate::outbound::get::<Test>(
+			COUNTERPARTY,
+			alloc::vec![alloc::vec![1]],
+			42,
+			0,
+			alloc::vec![0u8; 8192]
+		));
+	});
+}
+
+#[test]
+fn the_receipt_is_matched_by_key_not_by_position() {
+	new_test_ext().execute_with(|| {
+		let post = sp_core::H256::repeat_byte(7);
+		let want = crate::receipts::request_receipt_key(post);
+
+		// `verify_state_proof` returns a `BTreeMap`, so values arrive sorted by key bytes —
+		// not in the order the keys were asked for. A key that sorts BEFORE the receipt's
+		// puts a foreign value at index 0, which is what indexing would pick up.
+		let decoy = alloc::vec![0u8; 4];
+		assert!(
+			decoy < want,
+			"the decoy must sort first for this test to mean anything"
+		);
+
+		let response = GetResponse {
+			get: GetRequest {
+				source: StateMachine::Substrate(*b"orbi"),
+				dest: COPROCESSOR,
+				nonce: 0,
+				from: PALLET_ID_BYTES.to_vec(),
+				keys: alloc::vec![want.clone(), decoy.clone()],
+				height: 42,
+				context: post.as_bytes().to_vec(),
+				timeout_timestamp: 0,
+			},
+			values: alloc::vec![
+				StorageValue {
+					key: decoy,
+					value: Some(alloc::vec![0xde, 0xad])
+				},
+				StorageValue {
+					key: want,
+					value: Some(alloc::vec![0xaa; 32])
+				},
+			],
+		};
+
+		assert!(
+			IsmpModuleCallback::<Test>::default()
+				.on_response(response)
+				.is_ok()
+		);
+
+		// The relayer must be the RECEIPT's value, never the decoy sitting at index 0.
+		assert_eq!(
+			confirmed_events(),
+			alloc::vec![(post, alloc::vec![0xaa; 32], 42)]
+		);
+	});
+}
