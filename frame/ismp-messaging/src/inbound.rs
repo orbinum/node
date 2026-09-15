@@ -68,10 +68,19 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 		let nonce = request.nonce;
 		let timeout_timestamp = request.timeout_timestamp;
 
-		// Hashed once, before any early return: every exit from this callback emits an
-		// event and all three need the same value. `Request::Post` is the shape the
-		// sender committed to, so this reproduces its commitment exactly rather than
-		// inventing a local identifier.
+		// Hashed once, before any early return: every exit from this callback emits an event
+		// and all three need the same value. `Request::Post` is the shape the sender
+		// committed to, so this reproduces its commitment exactly rather than inventing a
+		// local identifier.
+		//
+		// Deliberately ABOVE the size check, and it costs nothing to put it there: upstream
+		// has already hashed this very request before we are called. `handlers/request.rs:91`
+		// maps `hash_request` over every request in the batch to build the membership proof,
+		// and only then invokes `on_accept` at `:113`. A revision that moved this below the
+		// bound saved one of three or four identical passes — no asymptotic difference — and
+		// paid for it by leaving the rejection event with no way to name the message it
+		// refused. An oversized body cannot reach here cheaply anyway: it must first clear
+		// `verify_membership`, so the sending chain really did commit to it.
 		let commitment = hash_request::<pallet_ismp::Pallet<T>>(&Request::Post(request.clone()));
 
 		// Size before decode, so decoding cost is bounded by a value we chose.

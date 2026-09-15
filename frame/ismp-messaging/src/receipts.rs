@@ -6,11 +6,18 @@
 //! only inbound callback, and a delivered POST is indistinguishable from one still in
 //! flight by looking at our own state.
 //!
-//! What the destination *does* leave is a receipt. `handlers/request.rs:112` writes
-//! `RequestReceipts[commitment] = relayer` before invoking the receiving module, and
-//! `:122-125` **deletes it again if that module errs**. So the receipt's presence proves
-//! the message was delivered *and executed successfully* — a stronger statement than the
+//! What a chain that handles the message *does* leave is a receipt. `handlers/request.rs:112`
+//! writes `RequestReceipts[commitment] = relayer` before invoking the receiving module, and
+//! `:122-125` **deletes it again if that module errs**. So a receipt's presence proves that
+//! chain accepted and handled the message without error — a stronger statement than the
 //! `PostRequestHandled` event, which an observer on another chain cannot verify anyway.
+//!
+//! **Whose receipt matters.** [`crate::Pallet::confirm_delivery`] reads the COPROCESSOR's,
+//! not the final destination's, because the coprocessor's ISMP child trie is the only remote
+//! state this chain can verify. On Hyperbridge the "receiving module" is its proxy, which
+//! re-dispatches onward — so a receipt there proves the message was accepted and forwarded,
+//! one hop short of execution on the far side. See that call's docs before reading any
+//! stronger claim into a confirmation.
 //!
 //! That receipt is ordinary storage, and storage is what a GET proves. This module builds
 //! the key; [`crate::outbound::get`] carries it.
