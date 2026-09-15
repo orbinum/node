@@ -958,6 +958,38 @@ fn dispatch_get_bounds_the_work_it_asks_of_the_destination() {
 }
 
 #[test]
+fn one_oversized_key_is_refused_even_when_the_count_is_fine() {
+	new_test_ext().execute_with(|| {
+		// The count bound and the length bound are different guards. Four keys is legal,
+		// and one of them being a megabyte is not: `dispatch_get`'s weight is charged per
+		// key on the assumption that a key is a storage key, so this is the case that
+		// would be priced as four short reads.
+		let mut keys = get_keys(3);
+		keys.push(alloc::vec![0u8; 8193]);
+
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_get(
+				RuntimeOrigin::root(),
+				COUNTERPARTY,
+				keys,
+				10_403_542,
+				0,
+			),
+			crate::Error::<Test>::KeyTooLarge
+		);
+
+		// The boundary itself is allowed: exactly `MaxBodyLen` is not oversized.
+		assert_ok!(crate::Pallet::<Test>::dispatch_get(
+			RuntimeOrigin::root(),
+			COUNTERPARTY,
+			alloc::vec![alloc::vec![0u8; 8192]],
+			10_403_542,
+			0,
+		));
+	});
+}
+
+#[test]
 fn dispatch_get_rejects_an_unprovable_height() {
 	new_test_ext().execute_with(|| {
 		// `handlers/response.rs:71` compares the proof height for EQUALITY, so height 0 is

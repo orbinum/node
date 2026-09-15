@@ -292,6 +292,12 @@ pub mod pallet {
 		NoKeysRequested,
 		/// Exceeded [`Config::MaxGetKeys`].
 		TooManyKeys,
+		/// A single GET key exceeded [`Config::MaxBodyLen`].
+		///
+		/// Distinct from [`Error::TooManyKeys`]: the count was fine, one key was not. A
+		/// storage key is short; a long one is a payload wearing a key's name, and the
+		/// weight charged per key does not cover it.
+		KeyTooLarge,
 		/// A GET must name the height to read at, and `0` is never a real one.
 		///
 		/// The response handler requires the proof height to equal the requested height

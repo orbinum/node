@@ -40,6 +40,16 @@ proof of delivery, and the account answers *who*, not *whether*.
 call signature moved. Spec-14 events already indexed keep their 33-byte value; consumers
 reading history should expect both shapes.
 
+**Each GET key is now length-bounded.** `dispatch_get` capped how many keys a request may
+name but not how long each one is, while its weight is charged per key on the stated
+assumption that a key is a storage key rather than a payload. Sixteen megabyte-long keys
+were therefore priced as sixteen short ones. Bounded by `MaxBodyLen`, the same constant
+`context` already uses, and refused with a new `KeyTooLarge` error.
+
+Reachable only by root today, so nothing on chain was exposed — but `dispatch_get` is one
+of the three calls that would open to signed accounts, and this closes the gap before that
+rather than after.
+
 ### spec 14 — tx 3 — 2026-09-13 (`v0.1.0-rc.25`)
 
 **On-chain proof that an outbound message was delivered.**

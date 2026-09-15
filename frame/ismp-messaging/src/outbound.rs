@@ -145,6 +145,16 @@ pub fn get<T: Config>(
 		Error::<T>::TooManyKeys
 	);
 
+	// And each key's LENGTH, which the count alone does not bound. `dispatch_get`'s weight
+	// is charged per key, on the stated assumption that a key is a storage key rather than
+	// a payload (`weights.rs:212-214`); sixteen megabyte-long keys would be priced as
+	// sixteen short ones. Reuses `MaxBodyLen` for the same reason `context` does — opaque
+	// bytes we agree to carry, bounded by the one constant that means that.
+	ensure!(
+		keys.iter().all(|k| k.len() as u32 <= T::MaxBodyLen::get()),
+		Error::<T>::KeyTooLarge
+	);
+
 	// `context` travels on the wire and comes back inside `GetResponse.get`, so it is
 	// attacker-visible bytes whose cost nothing else bounds: `dispatch_get`'s weight is
 	// measured per KEY, not per context byte. Reuses `MaxBodyLen` because it is the same
