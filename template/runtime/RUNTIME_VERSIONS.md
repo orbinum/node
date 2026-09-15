@@ -22,7 +22,96 @@ The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 
 ### spec 15 — tx 3 — [Unreleased]
 
-**`DeliveryConfirmed.relayer` is the account, not its SCALE encoding.**
+Three changes ship together, none of them moving a call's encoding.
+
+#### 1 · Anyone may dispatch a cross-chain message, and pays for it
+
+`DispatchOrigin` opens from `EnsureRoot` to `EnsureSigned`. Root still dispatches, first
+and unconditionally, and still pays nothing: it is this chain's own automation. A signed
+account pays `MessageFee` — **0.01 ORB** to start, adjustable by Root — transferred straight
+to the ISMP treasury (`orb/ismp`). Nothing is escrowed: 1 ORB is `MaxMessageFee`, the ceiling
+on a repricing, not the price.
+
+**Charged to the ISMP treasury, never refunded** — and the distinction is the design.
+
+`FeeMetadata.fee` is what Hyperbridge's permissionless relayers read to decide whether a
+message is worth carrying, so the protocol refunds it when nobody delivers
+(`pallet-ismp/src/host.rs:322-334`). An anti-spam charge placed in that field inherits the
+refund, and a refundable charge is not a charge: a sender can dispatch, wait out
+`MinSignedTimeout`, take the fee back and repeat — free forever, while this chain pays real
+gas to relay every message. So the charge is taken up front into the `orb/ismp` account and
+`FeeMetadata.fee` is left at **zero**.
+
+That is also what upstream tells self-relaying integrators to do — *"apps that prefer to
+self-relay can leave the fee at zero"* (`developers/polkadot/fees.mdx:11,40`) — and what its
+own example pallet does (`modules/pallets/demo/src/lib.rs:170`).
+
+**Priced per message and per byte**, the way Hyperbridge prices its own outbound traffic:
+`pallet-bandwidth` sells a byte allowance rather than a flat per-dispatch fee
+(`developers/evm/bandwidth/overview.mdx:8`), because a flat fee charges the same for one byte
+as for a full body. Defaults are 0.01 ORB + 0.000001 ORB/byte, so a full 8 KiB body roughly
+doubles the base.
+
+**What counts as a byte** follows upstream's own billing basis rather than a rule of our own.
+Hyperbridge charges a POST by `encode_post_request(&request).len()`
+(`parachain/runtimes/gargantua/src/ismp.rs:383`), and that ABI encoding carries every field —
+`source`, `dest`, `nonce`, `from`, `to`, `timeout` and `body`
+(`modules/ismp/core/src/abi.rs:64-76`). So a POST is charged its body **plus its module id**
+(at most 32 bytes), and a GET its keys **plus its context**. Charging a GET's keys alone left
+the larger half of its payload free; charging a POST's body alone did the same for `to`.
+
+**Both are storage, not constants**, and Root moves them with `set_message_fee`
+(`call_index(6)`), capped at `MaxMessageFee` = 1 ORB. The right price tracks what the token is
+worth, which a value compiled into the WASM cannot follow — correcting one would otherwise
+cost a build and a `setCode`. This mirrors `pallet_relayer`, which already carries an
+adjustable anti-spam floor with the same 1 ORB ceiling (`configs/privacy.rs:21-24`); the
+default here is ten times its 0.001 ORB, because a cross-chain dispatch costs this chain real
+gas on the far side where a shielded relay does not.
+
+A signer's timeout is **required and bounded**: `0` (never expires) is refused with
+`TimeoutRequired`; below `MinSignedTimeout` (10 minutes — two finality rounds, since the proxy
+re-checks the deadline at each hop) with `TimeoutTooShort`; above `MaxSignedTimeout` (7 days)
+with `TimeoutTooLong`. An unfunded signer is refused up front with `InsufficientBalance`,
+before a nonce is spent.
+
+**Expiry reclaims state, not money.** Nothing upstream relays a timeout message
+(`tesseract/messaging/substrate/src/provider.rs:1053`, `Message::Timeout(_) => None`; the docs
+make them "user action", `developers/polkadot/dispatching.mdx:53`), so
+`scripts/hyperbridge/relay-timeout.mjs` submits them to clear expired commitments out of the
+child trie. It moves no balance — there is none escrowed to move.
+
+**Root can pause signed dispatch** with `set_outbound_paused` (`call_index(5)`), and is itself
+unaffected: the check sits in the signed branch, which Root never reaches. Without it, closing
+a permissionless call again would mean a full build-and-`setCode` cycle at the worst possible
+moment.
+
+**Hyperbridge-side gate, for the record.** Upstream `main` adds a per-`(source, module)`
+bandwidth allowlist that Hyperbridge's proxy consults before forwarding
+(`parachain/runtimes/gargantua/src/ismp.rs`, `pallet-bandwidth`). The Gargantua runtime
+deployed today (spec 8200) does not carry that pallet — verified by storage query — which is
+why every `orb/msgs` message has gone through. When Polytope upgrades, `orb/msgs` must be on
+the allowlist or nothing from Orbinum will be forwarded. A coordination item, not a code one.
+
+This is anti-spam pricing, not relayer pay: the fee is in ORB, which no external relayer
+can sell, and Orbinum self-relays. That is why `dest` stays unrestricted — a destination
+Hyperbridge cannot reach simply expires and refunds — and why the same rules apply to
+`dispatch_get` and `confirm_delivery`.
+
+Reached from either wallet family: `EeSuffixAddressMapping` and `OrbinumSignature` derive
+the same `AccountId32` from a secp256k1 key, so a MetaMask signer and a Polkadot.js signer
+both land on their own account. No precompile is involved; that is only needed for a
+*contract* to originate.
+
+**No migration needed.** Three storage items are new — `MessageFee`, `MessageByteFee` and
+`OutboundPaused` — but all three are `ValueQuery` with a `type_value` default reading the
+Config constant, so empty storage already answers with the right value and nothing has to be
+written at the upgrade block. `transaction_version` stays at 3: no call signature moved — the
+origin check changed, not the encoding. Weights: `dispatch_post` and the new
+`dispatch_get` benchmark now measure the signed path, which is one balance transfer dearer
+than Root's; the committed numbers predate that and should be regenerated on the reference
+host together with the other pending benchmark jobs.
+
+#### 2 · `DeliveryConfirmed.relayer` is the account, not its SCALE encoding
 
 Spec 14 published the receipt's stored bytes verbatim. `pallet-ismp` writes that receipt
 with `child::put` (`child_trie.rs:154`), which **encodes**, so a 32-byte account is stored
@@ -40,15 +129,27 @@ proof of delivery, and the account answers *who*, not *whether*.
 call signature moved. Spec-14 events already indexed keep their 33-byte value; consumers
 reading history should expect both shapes.
 
-**Each GET key is now length-bounded.** `dispatch_get` capped how many keys a request may
+#### 3 · Each GET key is length-bounded
+
+`dispatch_get` capped how many keys a request may
 name but not how long each one is, while its weight is charged per key on the stated
 assumption that a key is a storage key rather than a payload. Sixteen megabyte-long keys
-were therefore priced as sixteen short ones. Bounded by `MaxBodyLen`, the same constant
-`context` already uses, and refused with a new `KeyTooLarge` error.
+were therefore priced as sixteen short ones.
 
-Reachable only by root today, so nothing on chain was exposed — but `dispatch_get` is one
-of the three calls that would open to signed accounts, and this closes the gap before that
-rather than after.
+Bounded by a new `MaxGetKeyLen` (**128 bytes**) and refused with a new `KeyTooLarge` error.
+The figure comes from the protocol, not from us: `GetRequest.keys` documents EVM keys as
+*"either 20 bytes or 52 bytes"* (`developers/evm/messaging/get-requests.mdx:95`), and
+`pallet-ismp`'s own Substrate child-trie keys run 47-51. Everything the protocol contemplates
+fits in 52; 128 leaves room because **nothing upstream enforces this** — the protocol type is
+a bare `Vec<Vec<u8>>`, and the relayer flattens every grouped request's keys into one proof
+query without chunking.
+
+An earlier draft bounded these by `MaxBodyLen`, the constant `context` uses. That let one GET
+carry `MaxGetKeys × MaxBodyLen` = 128 KiB — sixteen times a full POST, for less declared
+weight than one.
+
+This ships in the same release that opens `DispatchOrigin`, so the bound and the exposure
+arrive together rather than one after the other.
 
 ### spec 14 — tx 3 — 2026-09-13 (`v0.1.0-rc.25`)
 
