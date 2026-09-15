@@ -1245,12 +1245,21 @@ fn a_present_receipt_confirms_the_post_named_by_the_context() {
 	new_test_ext().execute_with(|| {
 		let post = sp_core::H256::repeat_byte(7);
 		let relayer = alloc::vec![0xaa; 32];
+		// As the chain stores it: `child::put` SCALE-encodes, so a 32-byte account travels
+		// as 33 bytes — a compact length prefix and then the account. Testing with the bare
+		// account would pass while the runtime published the prefix to everyone.
+		let stored = relayer.encode();
+		assert_eq!(
+			stored.len(),
+			33,
+			"a stored 32-byte account is 33 bytes on the wire"
+		);
 
 		assert!(
 			IsmpModuleCallback::<Test>::default()
 				.on_response(confirmation_response(
 					post.as_bytes().to_vec(),
-					Some(relayer.clone())
+					Some(stored)
 				))
 				.is_ok()
 		);
@@ -1416,14 +1425,15 @@ fn the_receipt_is_matched_by_key_not_by_position() {
 				context: post.as_bytes().to_vec(),
 				timeout_timestamp: 0,
 			},
+			// Encoded, as `child::put` stores them.
 			values: alloc::vec![
 				StorageValue {
 					key: decoy,
-					value: Some(alloc::vec![0xde, 0xad])
+					value: Some(alloc::vec![0xdeu8, 0xad].encode())
 				},
 				StorageValue {
 					key: want,
-					value: Some(alloc::vec![0xaa; 32])
+					value: Some(alloc::vec![0xaau8; 32].encode())
 				},
 			],
 		};
@@ -1439,5 +1449,26 @@ fn the_receipt_is_matched_by_key_not_by_position() {
 			confirmed_events(),
 			alloc::vec![(post, alloc::vec![0xaa; 32], 42)]
 		);
+	});
+}
+
+#[test]
+fn a_receipt_that_does_not_decode_confirms_nothing() {
+	new_test_ext().execute_with(|| {
+		let post = sp_core::H256::repeat_byte(7);
+
+		// A length prefix that claims more bytes than follow. Emitting this raw would
+		// publish a relayer nothing can match against an account; emitting nothing keeps
+		// the event's contract — a `DeliveryConfirmed` always names a real deliverer.
+		assert!(
+			IsmpModuleCallback::<Test>::default()
+				.on_response(confirmation_response(
+					post.as_bytes().to_vec(),
+					Some(alloc::vec![0xff, 0xff, 0x01])
+				))
+				.is_ok()
+		);
+
+		assert!(confirmed_events().is_empty());
 	});
 }

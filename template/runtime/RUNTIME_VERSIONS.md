@@ -20,7 +20,27 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
-### spec 14 — tx 3 — [Unreleased]
+### spec 15 — tx 3 — [Unreleased]
+
+**`DeliveryConfirmed.relayer` is the account, not its SCALE encoding.**
+
+Spec 14 published the receipt's stored bytes verbatim. `pallet-ismp` writes that receipt
+with `child::put` (`child_trie.rs:154`), which **encodes**, so a 32-byte account is stored
+as **33 bytes**: a compact length prefix (`0x80`) followed by the account. Observed live —
+`0x8022b6e6…9763` where the account is `0x22b6e6…9763`.
+
+The consequence was not cosmetic: the published relayer matched no account anyone could
+look up, and carried a length that belongs to the encoding rather than to the data.
+
+`on_response` now SCALE-decodes the value before emitting it. A value that fails to decode
+emits **nothing** rather than a malformed relayer — the receipt's presence is already the
+proof of delivery, and the account answers *who*, not *whether*.
+
+**No migration, no storage change, no weight change.** `transaction_version` stays at 3: no
+call signature moved. Spec-14 events already indexed keep their 33-byte value; consumers
+reading history should expect both shapes.
+
+### spec 14 — tx 3 — 2026-09-13 (`v0.1.0-rc.25`)
 
 **On-chain proof that an outbound message was delivered.**
 
@@ -65,6 +85,17 @@ can say a message failed to arrive.
 **`transaction_version` stays at 3**, for the same reason as spec 13: adding call index 4
 leaves indices 0-3 and their encodings untouched, so offline-signed extrinsics still
 decode.
+
+**Live since block 829906** (2026-09-13 17:38 UTC), enacted by `system.setCode`. The first
+confirmation on the public testnet carried commitment
+`0x92c95a9bb4e51198b679186b1f8f5224e0bccb1b749744eeea081c8a67fc8de7` at height 10461398,
+and the relayer it reported was byte-identical to the receipt read directly from
+Gargantua's child trie beforehand — the two derivations agreeing is what the `receipts`
+key pinning is for.
+
+**Known defect, fixed in spec 15.** The `relayer` field publishes the receipt's stored
+bytes verbatim, which are SCALE-encoded: 33 bytes with a `0x80` length prefix rather than
+the 32-byte account. Events indexed while spec 14 was live keep that shape.
 
 ### spec 13 — tx 3 — 2026-09-10 (`v0.1.0-rc.24`)
 
