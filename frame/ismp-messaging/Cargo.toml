@@ -22,7 +22,7 @@ sp-runtime = { workspace = true }
 
 [dev-dependencies]
 hex-literal = { workspace = true }
-pallet-balances = { workspace = true, features = ["std"] }
+pallet-balances = { workspace = true, features = ["std", "insecure_zero_ed"] }
 pallet-timestamp = { workspace = true, features = ["std"] }
 sp-io = { workspace = true, features = ["std"] }
 sp-std = { workspace = true, features = ["std"] }
