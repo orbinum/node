@@ -74,6 +74,8 @@ pub trait WeightInfo {
 	fn dispatch_get(k: u32, ) -> Weight;
 	fn accept_source() -> Weight;
 	fn remove_source() -> Weight;
+	fn set_message_fee() -> Weight;
+	fn set_outbound_paused() -> Weight;
 	fn on_accept(b: u32, ) -> Weight;
 	fn on_response(n: u32, ) -> Weight;
 	fn on_timeout() -> Weight;
@@ -261,6 +263,21 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(4_u64))
 			.saturating_add(T::DbWeight::get().writes(3_u64))
 	}
+	/// NOT BENCHMARKED — derived from `remove_source`, which is the same shape: a root
+	/// origin check, a storage write and an event. `set_message_fee` writes one item more,
+	/// so its write count is raised by one; everything else carries over.
+	fn set_message_fee() -> Weight {
+		Weight::from_parts(9_610_000, 1504)
+			.saturating_add(T::DbWeight::get().reads(4_u64))
+			.saturating_add(T::DbWeight::get().writes(4_u64))
+	}
+	/// NOT BENCHMARKED — see [`WeightInfo::set_message_fee`]. Writes one item, exactly as
+	/// `remove_source` does.
+	fn set_outbound_paused() -> Weight {
+		Weight::from_parts(9_610_000, 1504)
+			.saturating_add(T::DbWeight::get().reads(4_u64))
+			.saturating_add(T::DbWeight::get().writes(3_u64))
+	}
 	/// Storage: `IsmpMessaging::AcceptedSources` (r:1 w:0)
 	/// Proof: `IsmpMessaging::AcceptedSources` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `IsmpMessaging::InboundCount` (r:1 w:1)
@@ -293,7 +310,7 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	/// The range of component `n` is `[0, 64]`.
+	/// The range of component `n` is `[0, MaxGetKeys]`.
 	fn on_response(n: u32, ) -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `19`
@@ -505,6 +522,18 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(4_u64))
 			.saturating_add(RocksDbWeight::get().writes(3_u64))
 	}
+	/// NOT BENCHMARKED — see the `SubstrateWeight` impl.
+	fn set_message_fee() -> Weight {
+		Weight::from_parts(9_610_000, 1504)
+			.saturating_add(RocksDbWeight::get().reads(4_u64))
+			.saturating_add(RocksDbWeight::get().writes(4_u64))
+	}
+	/// NOT BENCHMARKED — see the `SubstrateWeight` impl.
+	fn set_outbound_paused() -> Weight {
+		Weight::from_parts(9_610_000, 1504)
+			.saturating_add(RocksDbWeight::get().reads(4_u64))
+			.saturating_add(RocksDbWeight::get().writes(3_u64))
+	}
 	/// Storage: `IsmpMessaging::AcceptedSources` (r:1 w:0)
 	/// Proof: `IsmpMessaging::AcceptedSources` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `IsmpMessaging::InboundCount` (r:1 w:1)
@@ -537,7 +566,7 @@ impl WeightInfo for () {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	/// The range of component `n` is `[0, 64]`.
+	/// The range of component `n` is `[0, MaxGetKeys]`.
 	fn on_response(n: u32, ) -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `19`

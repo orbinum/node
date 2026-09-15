@@ -7,19 +7,34 @@
 
 use crate::{Config, Error, Event, PALLET_ID_BYTES, Pallet, RequestKind};
 use alloc::vec::Vec;
-use frame_support::{ensure, traits::Get, traits::UnixTime};
+use frame_support::{
+	ensure,
+	traits::{Get, UnixTime, fungible::Mutate, tokens::Preservation},
+};
 use ismp::{
 	dispatcher::{DispatchGet, DispatchPost, DispatchRequest, FeeMetadata, IsmpDispatcher},
 	host::StateMachine,
 };
 use pallet_ismp::pallet::ModuleId;
-use sp_runtime::{DispatchResult, traits::AccountIdConversion};
+use sp_runtime::{
+	DispatchError, DispatchResult, SaturatedConversion,
+	traits::{AccountIdConversion, Saturating},
+};
+
+/// Longest a `to` module id can be, in bytes.
+///
+/// Not ours to choose: `ModuleId::from_bytes` takes the length as the type tag — 8 for a
+/// pallet, 20 for an EVM contract, 32 for an account, nothing else parses.
+const MAX_MODULE_ID_LEN: u64 = 32;
 
 /// Validate and dispatch a POST request to `dest`.
 ///
-/// `timeout` is **relative seconds**; `0` means the request never expires
-/// (`ismp::router::get_timeout`), which is not the same as expiring at once.
+/// `payer` is `None` for Root and the signer otherwise — see [`fee_for`] for what each
+/// pays. `timeout` is **relative seconds**; `0` means the request never expires
+/// (`ismp::router::get_timeout`), which is not the same as expiring at once, and is
+/// therefore refused when someone is paying.
 pub fn post<T: Config>(
+	payer: Option<T::AccountId>,
 	dest: StateMachine,
 	to: Vec<u8>,
 	body: Vec<u8>,
@@ -51,6 +66,12 @@ pub fn post<T: Config>(
 		Error::<T>::CoprocessorNotSet
 	);
 
+	// Body AND module id, because both travel: Hyperbridge bills a POST by the whole
+	// ABI-encoded request (`gargantua/src/ismp.rs:383`, `ismp/core/src/abi.rs:64-76`), `to`
+	// included. At most 32 bytes' worth, since `ModuleId::from_bytes` admits no longer id.
+	let size = (body.len() as u64).saturating_add(to.len() as u64);
+	let fee = fee_for::<T>(payer, timeout, size)?;
+
 	// Captured BEFORE the dispatch, and before `body` is moved into `DispatchPost`.
 	//
 	// The nonce must be read pre-dispatch: `next_nonce` returns the value it then
@@ -60,7 +81,7 @@ pub fn post<T: Config>(
 	let nonce = pallet_ismp::Nonce::<T>::get();
 	let body_len = body.len() as u32;
 
-	// Reproduces the dispatcher's own branch (`dispatcher.rs:134`) rather than assuming
+	// Reproduces the dispatcher's own branch (`dispatcher.rs:135`) rather than assuming
 	// `now + timeout`: a timeout of 0 stays 0 and means "never expires". Computing
 	// `now + 0` here would emit a deadline in the past for a message that has none.
 	let timeout_timestamp = if timeout == 0 {
@@ -79,23 +100,11 @@ pub fn post<T: Config>(
 		body,
 	};
 
+	// `fee.fee` is zero on every path (see `fee_for`), so `dispatch_request` skips its own
+	// transfer entirely (`pallet-ismp/src/dispatcher.rs:97-107`): nothing is escrowed here,
+	// and nothing upstream can refund.
 	let commitment = pallet_ismp::Pallet::<T>::default()
-		.dispatch_request(
-			DispatchRequest::Post(post),
-			// Zero fee, deliberately: Orbinum self-relays, and Hyperbridge's docs call
-			// that the intended integration — the relayer is paid offchain in BRIDGE
-			// rather than per-message on-chain. `dispatch_request` skips the transfer
-			// entirely when the fee is zero, so nothing is escrowed and nobody is owed.
-			//
-			// A non-zero fee is what Hyperbridge's permissionless relayer network reads
-			// to decide whether a message is worth delivering. Setting one only makes
-			// sense alongside dropping self-relay, and `Currency` would have to stop
-			// being the native token first — an external relayer cannot sell it.
-			FeeMetadata {
-				payer: payer::<T>(),
-				fee: Default::default(),
-			},
-		)
+		.dispatch_request(DispatchRequest::Post(post), fee)
 		.map_err(|_| Error::<T>::DispatchFailed)?;
 
 	Pallet::<T>::deposit_event(Event::RequestDispatched {
@@ -119,8 +128,9 @@ pub fn post<T: Config>(
 /// The answer lands back here in our own `on_response` — carried by our own relaying
 /// script for now, since Tesseract only delivers GET responses to EVM sources.
 ///
-/// `timeout` is **relative seconds**; `0` means the request never expires.
+/// `payer` and `timeout` follow the same rules as [`post`].
 pub fn get<T: Config>(
+	payer: Option<T::AccountId>,
 	dest: StateMachine,
 	keys: Vec<Vec<u8>>,
 	height: u64,
@@ -147,11 +157,15 @@ pub fn get<T: Config>(
 
 	// And each key's LENGTH, which the count alone does not bound. `dispatch_get`'s weight
 	// is charged per key, on the stated assumption that a key is a storage key rather than
-	// a payload (`weights.rs:212-214`); sixteen megabyte-long keys would be priced as
-	// sixteen short ones. Reuses `MaxBodyLen` for the same reason `context` does — opaque
-	// bytes we agree to carry, bounded by the one constant that means that.
+	// a payload (`weights.rs:212-214`), so an unbounded key makes that assumption false.
+	//
+	// Bounded by `MaxGetKeyLen` rather than `MaxBodyLen`: see that constant for why the
+	// protocol's own key shapes make 52 bytes the real maximum. Borrowing the body's bound
+	// here let one GET carry `MaxGetKeys × MaxBodyLen` bytes — sixteen times a full POST,
+	// for less declared weight than one.
 	ensure!(
-		keys.iter().all(|k| k.len() as u32 <= T::MaxBodyLen::get()),
+		keys.iter()
+			.all(|k| k.len() as u32 <= T::MaxGetKeyLen::get()),
 		Error::<T>::KeyTooLarge
 	);
 
@@ -164,7 +178,7 @@ pub fn get<T: Config>(
 		Error::<T>::BodyTooLarge
 	);
 
-	// Rejected here rather than left to expire. `handlers/response.rs:71` requires the
+	// Rejected here rather than left to expire. `handlers/response.rs:72` requires the
 	// proof height to EQUAL the requested height, so a height no relayer can prove is not
 	// a slow request — it is one that can never be answered, and failing now says so.
 	ensure!(height > 0, Error::<T>::InvalidGetHeight);
@@ -174,6 +188,15 @@ pub fn get<T: Config>(
 		<T as pallet_ismp::Config>::Coprocessor::get().is_some(),
 		Error::<T>::CoprocessorNotSet
 	);
+
+	// Keys AND context: both travel, and the context comes back inside `GetResponse.get`.
+	// Summed in `u64` because `sum::<u32>()` uses plain `+` and this profile has no
+	// `overflow-checks` — a wrap would hand `fee_for` a near-zero size, i.e. a free message.
+	let size = keys
+		.iter()
+		.fold(0u64, |acc, k| acc.saturating_add(k.len() as u64))
+		.saturating_add(context.len() as u64);
+	let fee = fee_for::<T>(payer, timeout, size)?;
 
 	// Captured before the dispatch consumes the nonce, and before `keys` is moved.
 	let nonce = pallet_ismp::Nonce::<T>::get();
@@ -195,14 +218,7 @@ pub fn get<T: Config>(
 	};
 
 	let commitment = pallet_ismp::Pallet::<T>::default()
-		.dispatch_request(
-			DispatchRequest::Get(get),
-			// Zero fee, for the same reason as `post` — see the note there.
-			FeeMetadata {
-				payer: payer::<T>(),
-				fee: Default::default(),
-			},
-		)
+		.dispatch_request(DispatchRequest::Get(get), fee)
 		.map_err(|_| Error::<T>::DispatchFailed)?;
 
 	Pallet::<T>::deposit_event(Event::RequestDispatched {
@@ -222,10 +238,100 @@ pub fn get<T: Config>(
 	Ok(())
 }
 
-/// Account recorded as the fee payer.
+/// The fee a dispatch carries, and the rules that come with paying one.
 ///
-/// Derived from the pallet id because Root has no account; the fee is zero, so nothing
-/// is debited. Becomes the signer when the origin opens to signed accounts.
-pub fn payer<T: Config>() -> T::AccountId {
+/// Root (`None`) pays nothing and skips every check — it is this chain's own automation. A
+/// signer pays [`crate::MessageFee`] plus [`crate::MessageByteFee`] per byte, **to the
+/// treasury, not escrowed**, and that distinction is the whole design.
+///
+/// `FeeMetadata.fee` is relayer pay, so the protocol refunds it when nobody delivers
+/// (`pallet-ismp/src/host.rs:322-334`). An anti-spam charge placed there inherits the refund,
+/// and a refundable charge is not a charge: dispatch, wait out the minimum timeout, take it
+/// back, repeat — free forever, while this chain pays real gas for every message. So the
+/// charge is taken here into [`Config::FeeDestination`] and `FeeMetadata.fee` goes out at
+/// zero, which is also what upstream tells self-relaying integrators to do
+/// (`developers/polkadot/fees.mdx:11`).
+fn fee_for<T: Config>(
+	payer: Option<T::AccountId>,
+	timeout: u64,
+	size: u64,
+) -> Result<FeeMetadata<T::AccountId, <T as pallet_ismp::Config>::Balance>, DispatchError> {
+	let Some(who) = payer else {
+		return Ok(FeeMetadata {
+			payer: pallet_account::<T>(),
+			fee: Default::default(),
+		});
+	};
+
+	ensure!(
+		!crate::OutboundPaused::<T>::get(),
+		Error::<T>::OutboundPaused
+	);
+
+	ensure!(timeout != 0, Error::<T>::TimeoutRequired);
+	ensure!(
+		timeout >= T::MinSignedTimeout::get(),
+		Error::<T>::TimeoutTooShort
+	);
+	ensure!(
+		timeout <= T::MaxSignedTimeout::get(),
+		Error::<T>::TimeoutTooLong
+	);
+
+	// Saturating: `size` is already bounded by [`max_chargeable_size`] — every guard above
+	// ran before this — so this cannot be reached with a real call. A saturating add is the
+	// right shape for a price anyway, and an overflowing one would wrap to a cheaper fee,
+	// which is the wrong direction to fail.
+	let fee = crate::MessageFee::<T>::get()
+		.saturating_add(crate::MessageByteFee::<T>::get().saturating_mul(size.saturated_into()));
+
+	// Transferred, not merely checked: `Expendable` because `ExistentialDeposit` is zero on
+	// this chain, so there is no minimum to preserve and a sender may legitimately spend
+	// their last planck. A shortfall fails here with a named error, before a nonce or a
+	// commitment is spent on it.
+	<T as pallet_ismp::Config>::Currency::transfer(
+		&who,
+		&T::FeeDestination::get(),
+		fee,
+		Preservation::Expendable,
+	)
+	.map_err(|_| Error::<T>::InsufficientBalance)?;
+
+	// Zero on the wire: see above. The payer is still recorded, so the protocol's own
+	// accounting names the account that sent the message even though nothing is escrowed.
+	Ok(FeeMetadata {
+		payer: who,
+		fee: Default::default(),
+	})
+}
+
+/// The largest `size` [`fee_for`] can ever be handed, across every dispatch shape.
+///
+/// A POST is priced on its body plus its module id; a GET on the sum of its key lengths plus
+/// its context. The worst case is whichever of the two totals is larger — today always the
+/// GET, since its context term alone is a whole `MaxBodyLen`, but the `max` stays because
+/// that is a property of the current constants, not a guarantee. [`crate::Pallet::set_message_fee`] checks its
+/// ceiling against this same value, which is the point of it living here: the two were
+/// computed separately once, the ceiling used only `MaxBodyLen`, and a per-byte fee at the
+/// cap therefore priced the largest GET at sixteen times the ceiling it had just passed.
+/// One function, one answer, no way for them to drift apart again.
+pub fn max_chargeable_size<T: Config>() -> u64 {
+	// A POST is charged its body plus its module id, and `ModuleId::from_bytes` caps that id
+	// at 32 bytes (8, 20 or 32 — the length is the type tag).
+	let post = u64::from(T::MaxBodyLen::get()).saturating_add(MAX_MODULE_ID_LEN);
+	// Widened BEFORE multiplying: two `u32`s do not fit in one. Saturating in `u32` would
+	// clamp to `u32::MAX` and so *understate* the worst case, which is what lets
+	// `set_message_fee` admit a fee that prices the largest message above the ceiling.
+	let get = u64::from(T::MaxGetKeys::get()) * u64::from(T::MaxGetKeyLen::get());
+	// Plus the context, which travels on the wire and is charged with the keys.
+	let get = get.saturating_add(u64::from(T::MaxBodyLen::get()));
+	post.max(get)
+}
+
+/// Account recorded as the payer of a Root dispatch.
+///
+/// Root has no account, so the pallet's own stands in. Its fee is always zero, so it is
+/// never actually debited — it is a label in the commitment metadata, nothing more.
+pub fn pallet_account<T: Config>() -> T::AccountId {
 	frame_support::PalletId(*b"orb/msgs").into_account_truncating()
 }

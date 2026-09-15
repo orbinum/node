@@ -177,22 +177,6 @@ fn dispatch_rejects_an_oversized_body() {
 }
 
 #[test]
-fn dispatch_rejects_non_root() {
-	new_test_ext().execute_with(|| {
-		assert!(
-			crate::Pallet::<Test>::dispatch_post(
-				RuntimeOrigin::signed(1),
-				COUNTERPARTY,
-				b"demo/mod".to_vec(),
-				Message::Ping { nonce: 1 }.encode(),
-				0,
-			)
-			.is_err()
-		);
-	});
-}
-
-#[test]
 fn accepts_a_message_from_an_accepted_source() {
 	new_test_ext().execute_with(|| {
 		AcceptedSources::<Test>::insert(COPROCESSOR, ());
@@ -964,27 +948,46 @@ fn one_oversized_key_is_refused_even_when_the_count_is_fine() {
 		// and one of them being a megabyte is not: `dispatch_get`'s weight is charged per
 		// key on the assumption that a key is a storage key, so this is the case that
 		// would be priced as four short reads.
-		let mut keys = get_keys(3);
-		keys.push(alloc::vec![0u8; 8193]);
+		use frame_support::traits::Get;
+		let max = <<Test as crate::Config>::MaxGetKeyLen as Get<u32>>::get() as usize;
 
-		assert_noop!(
-			crate::Pallet::<Test>::dispatch_get(
-				RuntimeOrigin::root(),
+		// Both origins, because the guard must not live in the paying branch alone: with it
+		// inside `fee_for` a signed user would get unbounded keys while Root stayed bounded,
+		// and a Root-only test cannot tell the difference.
+		for origin in [RuntimeOrigin::root(), RuntimeOrigin::signed(1)] {
+			let mut keys = get_keys(3);
+			keys.push(alloc::vec![0u8; max + 1]);
+
+			assert_noop!(
+				crate::Pallet::<Test>::dispatch_get(
+					origin.clone(),
+					COUNTERPARTY,
+					keys,
+					10_403_542,
+					600,
+				),
+				crate::Error::<Test>::KeyTooLarge
+			);
+
+			// The boundary itself is allowed.
+			assert_ok!(crate::Pallet::<Test>::dispatch_get(
+				origin,
 				COUNTERPARTY,
-				keys,
+				alloc::vec![alloc::vec![0u8; max]],
 				10_403_542,
-				0,
-			),
-			crate::Error::<Test>::KeyTooLarge
-		);
+				600,
+			));
+		}
 
-		// The boundary itself is allowed: exactly `MaxBodyLen` is not oversized.
+		// A key of the longest shape the protocol documents — 52 bytes, an EVM address plus
+		// a slot hash — must pass. This is the bound's reason for existing: it exists to
+		// refuse payloads wearing a key's name, not to refuse real keys.
 		assert_ok!(crate::Pallet::<Test>::dispatch_get(
-			RuntimeOrigin::root(),
+			RuntimeOrigin::signed(1),
 			COUNTERPARTY,
-			alloc::vec![alloc::vec![0u8; 8192]],
+			alloc::vec![alloc::vec![0u8; 52]],
 			10_403_542,
-			0,
+			600,
 		));
 	});
 }
@@ -992,7 +995,7 @@ fn one_oversized_key_is_refused_even_when_the_count_is_fine() {
 #[test]
 fn dispatch_get_rejects_an_unprovable_height() {
 	new_test_ext().execute_with(|| {
-		// `handlers/response.rs:71` compares the proof height for EQUALITY, so height 0 is
+		// `handlers/response.rs:72` compares the proof height for EQUALITY, so height 0 is
 		// not a slow request — it is one no relayer can ever answer. Failing now says so,
 		// rather than leaving it to expire silently.
 		assert_noop!(
@@ -1021,22 +1024,6 @@ fn dispatch_get_rejects_reading_our_own_state() {
 				0,
 			),
 			crate::Error::<Test>::DestinationIsSelf
-		);
-	});
-}
-
-#[test]
-fn dispatch_get_rejects_non_root() {
-	new_test_ext().execute_with(|| {
-		assert_noop!(
-			crate::Pallet::<Test>::dispatch_get(
-				RuntimeOrigin::signed(1),
-				COUNTERPARTY,
-				get_keys(1),
-				10_403_542,
-				0,
-			),
-			sp_runtime::DispatchError::BadOrigin
 		);
 	});
 }
@@ -1371,24 +1358,9 @@ fn confirming_reads_the_receipt_key_from_the_coprocessor() {
 }
 
 #[test]
-fn confirm_delivery_rejects_non_root() {
-	new_test_ext().execute_with(|| {
-		assert_noop!(
-			crate::Pallet::<Test>::confirm_delivery(
-				RuntimeOrigin::signed(1),
-				sp_core::H256::repeat_byte(9),
-				42,
-				600
-			),
-			sp_runtime::DispatchError::BadOrigin
-		);
-	});
-}
-
-#[test]
 fn confirm_delivery_rejects_an_unprovable_height() {
 	new_test_ext().execute_with(|| {
-		// Height 0 can never be proven, and `handlers/response.rs:71` compares heights for
+		// Height 0 can never be proven, and `handlers/response.rs:72` compares heights for
 		// equality — so this would not fail slowly, it would hang until it expired.
 		assert_noop!(
 			crate::Pallet::<Test>::confirm_delivery(
@@ -1411,6 +1383,7 @@ fn a_get_context_is_bounded_like_a_body() {
 		// 8192 is the mock's `MaxBodyLen`, matching `dispatch_rejects_an_oversized_body`.
 		assert_noop!(
 			crate::outbound::get::<Test>(
+				None,
 				COUNTERPARTY,
 				alloc::vec![alloc::vec![1]],
 				42,
@@ -1422,6 +1395,7 @@ fn a_get_context_is_bounded_like_a_body() {
 
 		// At the limit it still goes through: the bound is a cap, not a smaller cap.
 		assert_ok!(crate::outbound::get::<Test>(
+			None,
 			COUNTERPARTY,
 			alloc::vec![alloc::vec![1]],
 			42,
@@ -1829,5 +1803,992 @@ fn an_evm_sender_module_id_is_recorded_not_rejected() {
 
 		assert!(IsmpModuleCallback::<Test>::default().on_accept(req).is_ok());
 		assert_eq!(received_events()[0].1, alloc::vec![0xab; 20]);
+	});
+}
+
+// ── Signed dispatch: who pays, and where it goes ─────────────────────────────────────
+//
+// `DispatchOrigin` is `EnsureSigned` here, as in the runtime. Accounts 1 and 2 hold
+// `100 × worst_case_fee()`, enough to pay for the largest legal message; account 3 holds
+// nothing. The charge is taken by this pallet into `TREASURY` and is NOT escrowed in
+// `FeeMetadata`, so it is never refunded — which is the whole point: a refundable anti-spam
+// charge can be recycled for free every timeout.
+
+use crate::mock::{MESSAGE_BYTE_FEE, MESSAGE_FEE, TREASURY, Timestamp, worst_case_fee};
+
+fn balance(who: u64) -> u128 {
+	pallet_balances::Pallet::<Test>::free_balance(who)
+}
+
+/// What accounts 1 and 2 start with.
+///
+/// Read from the constant rather than spelled out at each assertion: these tests are about
+/// what a dispatch *costs*, and hard-coding the opening balance made five of them fail the
+/// moment the mock was funded differently — a change that says nothing about pricing.
+fn funded() -> u128 {
+	100 * worst_case_fee()
+}
+
+/// Where `pallet-ismp` would park an escrowed fee (`RELAYER_FEE_ACCOUNT`, `ISMPFEES`).
+/// Asserted EMPTY throughout: we pass `fee: 0` on the wire.
+fn fees_account() -> u64 {
+	use sp_runtime::traits::AccountIdConversion;
+	pallet_ismp::RELAYER_FEE_ACCOUNT.into_account_truncating()
+}
+
+fn ping() -> alloc::vec::Vec<u8> {
+	Message::Ping { nonce: 1 }.encode()
+}
+
+/// What a signed POST of `body` to the 8-byte `demo/mod` costs.
+///
+/// A POST is charged its body **plus its module id**, the way Hyperbridge bills one
+/// (`encode_post_request` carries every field). Spelled out here rather than at each
+/// assertion so the `to` term cannot be dropped from one site and go unnoticed.
+fn post_cost(body: &[u8]) -> u128 {
+	MESSAGE_FEE + MESSAGE_BYTE_FEE * (body.len() as u128 + b"demo/mod".len() as u128)
+}
+
+#[test]
+fn an_unsigned_origin_cannot_dispatch() {
+	new_test_ext().execute_with(|| {
+		// Not Root and not admitted by `DispatchOrigin`: the one shape every call refuses.
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_post(
+				RuntimeOrigin::none(),
+				COUNTERPARTY,
+				b"demo/mod".to_vec(),
+				ping(),
+				600,
+			),
+			sp_runtime::DispatchError::BadOrigin
+		);
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_get(
+				RuntimeOrigin::none(),
+				COUNTERPARTY,
+				get_keys(1),
+				10_403_542,
+				600,
+			),
+			sp_runtime::DispatchError::BadOrigin
+		);
+		assert_noop!(
+			crate::Pallet::<Test>::confirm_delivery(
+				RuntimeOrigin::none(),
+				sp_core::H256::repeat_byte(9),
+				42,
+				600,
+			),
+			sp_runtime::DispatchError::BadOrigin
+		);
+	});
+}
+
+#[test]
+fn a_signed_dispatch_pays_the_treasury_and_escrows_nothing() {
+	new_test_ext().execute_with(|| {
+		assert_eq!(balance(1), funded());
+		assert_eq!(balance(TREASURY), 0);
+
+		let body = ping();
+		let expected = post_cost(&body);
+
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::signed(1),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(),
+			body,
+			600,
+		));
+
+		// Moved, not burned: what left the signer is exactly what the treasury now holds.
+		assert_eq!(balance(1), funded() - expected);
+		assert_eq!(balance(TREASURY), expected);
+		// And nothing reached upstream's escrow, so nothing can ever be refunded out of it.
+		assert_eq!(balance(fees_account()), 0);
+		let dispatched = frame_system::Pallet::<Test>::events().into_iter().any(|r| {
+			matches!(
+				r.event,
+				crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::RequestDispatched { .. })
+			)
+		});
+		assert!(dispatched, "the dispatch itself still happens");
+	});
+}
+
+#[test]
+fn root_dispatches_for_free_and_may_never_expire() {
+	new_test_ext().execute_with(|| {
+		let pallet = crate::outbound::pallet_account::<Test>();
+
+		// `timeout == 0` is refused from a signer below; Root is the one caller it is for.
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::root(),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(),
+			ping(),
+			0,
+		));
+
+		assert_eq!(
+			balance(pallet),
+			0,
+			"Root's stand-in account is a label, never debited"
+		);
+		assert_eq!(balance(TREASURY), 0, "and Root pays the treasury nothing");
+		assert_eq!(balance(fees_account()), 0, "and nothing was escrowed");
+	});
+}
+
+#[test]
+fn a_signer_must_let_the_message_expire() {
+	new_test_ext().execute_with(|| {
+		let max = <Test as crate::Config>::MaxSignedTimeout::get();
+
+		// "Never expires" would lock the fee for good: the only way it comes back is expiry.
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_post(
+				RuntimeOrigin::signed(1),
+				COUNTERPARTY,
+				b"demo/mod".to_vec(),
+				ping(),
+				0,
+			),
+			crate::Error::<Test>::TimeoutRequired
+		);
+		// Too short to clear two finality rounds: it could only ever expire.
+		let min = <Test as crate::Config>::MinSignedTimeout::get();
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_post(
+				RuntimeOrigin::signed(1),
+				COUNTERPARTY,
+				b"demo/mod".to_vec(),
+				ping(),
+				min - 1,
+			),
+			crate::Error::<Test>::TimeoutTooShort
+		);
+		// So would a timeout past any horizon a refund is worth waiting for.
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_post(
+				RuntimeOrigin::signed(1),
+				COUNTERPARTY,
+				b"demo/mod".to_vec(),
+				ping(),
+				max + 1,
+			),
+			crate::Error::<Test>::TimeoutTooLong
+		);
+		// Both bounds themselves are allowed.
+		for timeout in [min, max] {
+			assert_ok!(crate::Pallet::<Test>::dispatch_post(
+				RuntimeOrigin::signed(1),
+				COUNTERPARTY,
+				b"demo/mod".to_vec(),
+				ping(),
+				timeout,
+			));
+		}
+	});
+}
+
+#[test]
+fn an_unfunded_signer_is_refused_before_anything_is_written() {
+	new_test_ext().execute_with(|| {
+		assert_eq!(balance(3), 0);
+		let nonce_before = pallet_ismp::Nonce::<Test>::get();
+
+		// A named error, and `assert_noop!` proves no nonce, commitment or event was spent
+		// finding out — the dispatcher's own failure would come after all of those.
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_post(
+				RuntimeOrigin::signed(3),
+				COUNTERPARTY,
+				b"demo/mod".to_vec(),
+				ping(),
+				600,
+			),
+			crate::Error::<Test>::InsufficientBalance
+		);
+		assert_eq!(pallet_ismp::Nonce::<Test>::get(), nonce_before);
+	});
+}
+
+#[test]
+fn an_expired_signed_dispatch_reclaims_its_commitment_but_not_the_charge() {
+	new_test_ext().execute_with(|| {
+		use ismp::host::IsmpHost;
+
+		// A real clock, so the deadline the dispatcher stamps is one this test can name.
+		let now_secs: u64 = 1_700_000_000;
+		Timestamp::set_timestamp(now_secs * 1_000);
+
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::signed(1),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(),
+			ping(),
+			600,
+		));
+		let charge = post_cost(&ping());
+		let after_dispatch = balance(1);
+		assert_eq!(after_dispatch, funded() - charge);
+
+		// The request exactly as the dispatcher built it, so its commitment is the one on
+		// file. `from` is the pallet's module id — the payer lives in the metadata, not here.
+		let request = Request::Post(PostRequest {
+			source: StateMachine::Substrate(*b"orbi"),
+			dest: COUNTERPARTY,
+			nonce: pallet_ismp::Nonce::<Test>::get().saturating_sub(1),
+			from: PALLET_ID_BYTES.to_vec(),
+			to: b"demo/mod".to_vec(),
+			timeout_timestamp: now_secs + 600,
+			body: ping(),
+		});
+
+		// The two steps upstream's timeout handler takes (`handlers/timeout.rs:332,347`),
+		// minus the non-membership proof it verifies first. The proof is upstream's to
+		// test; what is ours is that the metadata still names the right payer and the
+		// refund reaches them.
+		let host = pallet_ismp::Pallet::<Test>::default();
+		let meta = host
+			.delete_request_commitment(&request)
+			.expect("the commitment was on file");
+		assert_ok!(IsmpModuleCallback::<Test>::default().on_timeout(request.clone()));
+		host.on_request_timeout(&request, meta)
+			.expect("refund is a plain transfer from ISMPFEES");
+
+		// Expiry reclaims the commitment — and nothing else. The charge was taken by this
+		// pallet, not escrowed upstream, so there is nothing for `on_request_timeout` to
+		// hand back: `fee: 0` on the wire means its refund branch never fires. That is
+		// deliberate. A charge that comes back on expiry is a charge a spammer recycles.
+		assert_eq!(balance(1), after_dispatch, "the charge stays paid");
+		assert_eq!(balance(TREASURY), charge, "and stays with the treasury");
+		assert_eq!(balance(fees_account()), 0, "nothing was ever escrowed");
+	});
+}
+
+#[test]
+fn a_get_and_a_confirmation_cost_the_same_fee() {
+	new_test_ext().execute_with(|| {
+		// A GET is priced on its keys, the equivalent of a POST's body.
+		let keys = get_keys(1);
+		let get_cost =
+			MESSAGE_FEE + MESSAGE_BYTE_FEE * keys.iter().map(|k| k.len() as u128).sum::<u128>();
+		assert_ok!(crate::Pallet::<Test>::dispatch_get(
+			RuntimeOrigin::signed(1),
+			COUNTERPARTY,
+			keys,
+			10_403_542,
+			600,
+		));
+		assert_eq!(balance(1), funded() - get_cost);
+
+		// `confirm_delivery` is a one-key GET — but it also carries a 32-byte context, the
+		// commitment it is confirming, and that context travels on the wire and comes back
+		// inside `GetResponse.get`. So it costs the key AND the context.
+		//
+		// This assertion used to count the key alone, which made the undercharge look like
+		// correct behaviour: the signer paid for 47 bytes and sent 79.
+		let confirm_keys = crate::receipts::confirmation_keys(sp_core::H256::repeat_byte(9));
+		let confirm_context = 32u128;
+		let confirm_cost = MESSAGE_FEE
+			+ MESSAGE_BYTE_FEE
+				* (confirm_keys.iter().map(|k| k.len() as u128).sum::<u128>() + confirm_context);
+		assert_ok!(crate::Pallet::<Test>::confirm_delivery(
+			RuntimeOrigin::signed(1),
+			sp_core::H256::repeat_byte(9),
+			42,
+			600,
+		));
+		assert_eq!(balance(1), funded() - get_cost - confirm_cost);
+		assert_eq!(balance(TREASURY), get_cost + confirm_cost);
+		assert_eq!(balance(fees_account()), 0, "still nothing escrowed");
+	});
+}
+
+#[test]
+fn two_signers_sending_the_same_body_do_not_collide() {
+	new_test_ext().execute_with(|| {
+		// Identical args from two accounts: `impls.rs:93` rejects a duplicate commitment,
+		// and the nonce is what keeps these two apart. Both must land.
+		for who in [1u64, 2] {
+			assert_ok!(crate::Pallet::<Test>::dispatch_post(
+				RuntimeOrigin::signed(who),
+				COUNTERPARTY,
+				b"demo/mod".to_vec(),
+				ping(),
+				600,
+			));
+		}
+		assert_eq!(pallet_ismp::Nonce::<Test>::get(), 2);
+		let each = post_cost(&ping());
+		assert_eq!(balance(TREASURY), 2 * each);
+	});
+}
+
+#[test]
+fn a_bigger_message_costs_more() {
+	new_test_ext().execute_with(|| {
+		// A flat fee prices one byte the same as a full body, while the cost this chain and
+		// its relayer bear scales with size. Hyperbridge prices its own outbound traffic by
+		// the byte for the same reason (`pallet-bandwidth`).
+		let small = Message::Data {
+			nonce: 1,
+			data: alloc::vec![],
+		}
+		.encode();
+		let large = Message::Data {
+			nonce: 1,
+			data: alloc::vec![0u8; 500],
+		}
+		.encode();
+
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::signed(1),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(),
+			small.clone(),
+			600,
+		));
+		let cheap = balance(TREASURY);
+
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::signed(2),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(),
+			large.clone(),
+			600,
+		));
+		let dear = balance(TREASURY) - cheap;
+
+		assert_eq!(cheap, post_cost(&small));
+		assert_eq!(dear, post_cost(&large));
+		assert!(dear > cheap, "{dear} should exceed {cheap}");
+	});
+}
+
+#[test]
+fn root_can_pause_signed_dispatch_without_stopping_its_own() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(crate::Pallet::<Test>::set_outbound_paused(
+			RuntimeOrigin::root(),
+			true
+		));
+		assert!(crate::OutboundPaused::<Test>::get());
+
+		// Every signed path is closed…
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_post(
+				RuntimeOrigin::signed(1),
+				COUNTERPARTY,
+				b"demo/mod".to_vec(),
+				ping(),
+				600,
+			),
+			crate::Error::<Test>::OutboundPaused
+		);
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_get(
+				RuntimeOrigin::signed(1),
+				COUNTERPARTY,
+				get_keys(1),
+				10_403_542,
+				600,
+			),
+			crate::Error::<Test>::OutboundPaused
+		);
+		assert_noop!(
+			crate::Pallet::<Test>::confirm_delivery(
+				RuntimeOrigin::signed(1),
+				sp_core::H256::repeat_byte(9),
+				42,
+				600,
+			),
+			crate::Error::<Test>::OutboundPaused
+		);
+
+		// …while this chain's own automation is untouched, which is why the check lives in
+		// the signed branch rather than at the top of the extrinsic.
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::root(),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(),
+			ping(),
+			0,
+		));
+		assert_ok!(crate::Pallet::<Test>::confirm_delivery(
+			RuntimeOrigin::root(),
+			sp_core::H256::repeat_byte(9),
+			42,
+			600
+		));
+
+		// And it lifts.
+		assert_ok!(crate::Pallet::<Test>::set_outbound_paused(
+			RuntimeOrigin::root(),
+			false
+		));
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::signed(1),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(),
+			ping(),
+			600,
+		));
+	});
+}
+
+#[test]
+fn pausing_is_root_only() {
+	new_test_ext().execute_with(|| {
+		assert_noop!(
+			crate::Pallet::<Test>::set_outbound_paused(RuntimeOrigin::signed(1), true),
+			sp_runtime::DispatchError::BadOrigin
+		);
+	});
+}
+
+#[test]
+fn root_can_reprice_a_message_without_a_runtime_upgrade() {
+	new_test_ext().execute_with(|| {
+		// The whole reason the fee is storage and not a constant: the right price tracks
+		// what the token is worth, and a constant in the WASM cannot follow it. Correcting
+		// one would otherwise mean a build and a `setCode`.
+		assert_eq!(crate::MessageFee::<Test>::get(), MESSAGE_FEE);
+		assert_eq!(crate::MessageByteFee::<Test>::get(), MESSAGE_BYTE_FEE);
+
+		assert_ok!(crate::Pallet::<Test>::set_message_fee(
+			RuntimeOrigin::root(),
+			5 * MESSAGE_FEE,
+			2 * MESSAGE_BYTE_FEE,
+		));
+
+		let body = ping();
+		let expected = 5 * MESSAGE_FEE
+			+ 2 * MESSAGE_BYTE_FEE * (body.len() as u128 + b"demo/mod".len() as u128);
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::signed(1),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(),
+			body,
+			600,
+		));
+		assert_eq!(
+			balance(TREASURY),
+			expected,
+			"the new price took effect at once"
+		);
+	});
+}
+
+#[test]
+fn a_repricing_is_capped_on_what_the_largest_message_would_cost() {
+	new_test_ext().execute_with(|| {
+		// The ceiling is what keeps the dial from becoming a foot-gun: a mistyped value
+		// would otherwise price dispatch out of reach until the next runtime upgrade.
+		use frame_support::traits::Get;
+		let max = <Test as crate::Config>::MaxMessageFee::get();
+		// The ceiling's size term is the largest of EVERY dispatch shape, not a body's: a
+		// GET is priced on the sum of its key lengths, which can exceed `MaxBodyLen`.
+		let worst_size = crate::outbound::max_chargeable_size::<Test>() as u128;
+
+		assert_noop!(
+			crate::Pallet::<Test>::set_message_fee(RuntimeOrigin::root(), max + 1, 0),
+			crate::Error::<Test>::MessageFeeTooHigh
+		);
+
+		// The bound is on the WORST CASE, not on each term: a per-byte value at the flat
+		// ceiling would price a full body at `MaxBodyLen` times the cap, which is the very
+		// outcome the ceiling exists to prevent. Transposing the two arguments — they have
+		// the same type — is the easy way to get there, so it must be refused.
+		assert_noop!(
+			crate::Pallet::<Test>::set_message_fee(RuntimeOrigin::root(), 0, max),
+			crate::Error::<Test>::MessageFeeTooHigh
+		);
+		// One planck per byte over the budget is still over it.
+		assert_noop!(
+			crate::Pallet::<Test>::set_message_fee(RuntimeOrigin::root(), 0, max / worst_size + 1),
+			crate::Error::<Test>::MessageFeeTooHigh
+		);
+
+		// A per-byte value whose worst case fits is allowed…
+		assert_ok!(crate::Pallet::<Test>::set_message_fee(
+			RuntimeOrigin::root(),
+			0,
+			max / worst_size
+		));
+		// …as is the flat ceiling on its own.
+		assert_ok!(crate::Pallet::<Test>::set_message_fee(
+			RuntimeOrigin::root(),
+			max,
+			0
+		));
+
+		// And now the part that matters: what the chain ACTUALLY charges for the largest
+		// message of each shape, measured rather than recomputed.
+		//
+		// The previous version of this test asserted `fee + byte_fee × MaxBodyLen <= max`
+		// — the same expression `set_message_fee` itself evaluates, with the same term. It
+		// was a tautology, and it held while the largest GET cost sixteen times the ceiling,
+		// because a GET is charged on its keys and `MaxBodyLen` never described them.
+		assert_ok!(crate::Pallet::<Test>::set_message_fee(
+			RuntimeOrigin::root(),
+			0,
+			max / worst_size
+		));
+
+		let keys = <<Test as crate::Config>::MaxGetKeys as Get<u32>>::get();
+		let key_len = <<Test as crate::Config>::MaxGetKeyLen as Get<u32>>::get();
+		let before = balance(TREASURY);
+		assert_ok!(crate::Pallet::<Test>::dispatch_get(
+			RuntimeOrigin::signed(1),
+			COUNTERPARTY,
+			alloc::vec![alloc::vec![0u8; key_len as usize]; keys as usize],
+			10_403_542,
+			600,
+		));
+		let charged = balance(TREASURY) - before;
+		assert!(
+			charged <= max,
+			"the largest GET cost {charged}, above the ceiling {max}"
+		);
+
+		let before = balance(TREASURY);
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::signed(1),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(),
+			alloc::vec![0u8; <<Test as crate::Config>::MaxBodyLen as Get<u32>>::get() as usize],
+			600,
+		));
+		let charged = balance(TREASURY) - before;
+		assert!(
+			charged <= max,
+			"the largest POST cost {charged}, above the ceiling {max}"
+		);
+	});
+}
+
+#[test]
+fn the_largest_legal_message_can_actually_be_paid_for() {
+	new_test_ext().execute_with(|| {
+		// Every size-boundary test in this file used to run as Root — the path that never
+		// pays — because the mock funded accounts with `10 × MESSAGE_FEE` while a full body
+		// costs `MESSAGE_FEE + MESSAGE_BYTE_FEE × MaxBodyLen`. The largest signed message
+		// was literally unaffordable, so nothing checked that the bound and the charge agree.
+		use frame_support::traits::Get;
+		let body_max = <<Test as crate::Config>::MaxBodyLen as Get<u32>>::get();
+		let before = balance(TREASURY);
+
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::signed(1),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(),
+			alloc::vec![0u8; body_max as usize],
+			600,
+		));
+
+		assert_eq!(
+			balance(TREASURY) - before,
+			post_cost(&alloc::vec![0u8; body_max as usize]),
+			"a full-length body is charged flat + per byte over the whole body"
+		);
+
+		// One byte more is refused on size, not on funds — the signer can still afford it.
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_post(
+				RuntimeOrigin::signed(1),
+				COUNTERPARTY,
+				b"demo/mod".to_vec(),
+				alloc::vec![0u8; body_max as usize + 1],
+				600,
+			),
+			crate::Error::<Test>::BodyTooLarge
+		);
+	});
+}
+
+#[test]
+fn a_signed_get_is_bounded_by_the_same_guards_as_root() {
+	new_test_ext().execute_with(|| {
+		// Every guard in `outbound::get` was only ever tested from Root. Moving them into
+		// the paying branch of `fee_for` — or wrapping them in `if payer.is_none()` — would
+		// leave signed users unbounded while the suite stayed green, which inverts what the
+		// bounds are for: they cap work imposed on a REMOTE chain and a relayer, and the
+		// signed caller is the one who is not us.
+		use frame_support::traits::Get;
+		let too_many = <<Test as crate::Config>::MaxGetKeys as Get<u32>>::get() as usize + 1;
+		let signed = || RuntimeOrigin::signed(1);
+
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_get(signed(), COUNTERPARTY, alloc::vec![], 42, 600),
+			crate::Error::<Test>::NoKeysRequested
+		);
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_get(
+				signed(),
+				COUNTERPARTY,
+				get_keys(too_many),
+				42,
+				600
+			),
+			crate::Error::<Test>::TooManyKeys
+		);
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_get(signed(), COUNTERPARTY, get_keys(1), 0, 600),
+			crate::Error::<Test>::InvalidGetHeight
+		);
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_get(
+				signed(),
+				StateMachine::Substrate(*b"orbi"),
+				get_keys(1),
+				42,
+				600
+			),
+			crate::Error::<Test>::DestinationIsSelf
+		);
+
+		// And none of those cost the signer anything: each is refused before the charge.
+		assert_eq!(balance(TREASURY), 0, "a refused GET is never charged for");
+	});
+}
+
+#[test]
+fn a_signer_may_spend_their_very_last_planck() {
+	new_test_ext().execute_with(|| {
+		// `ExistentialDeposit` is zero on this chain (`configs/system.rs:65`), which is what
+		// `fee_for` cites to justify `Preservation::Expendable`: there is no minimum to keep
+		// back, so an account may legitimately pay its whole balance and be reaped.
+		//
+		// This is the test that holds that justification to account. The mock used to
+		// inherit the balances prelude's ED of 1, under which no test could drain an account
+		// at all — so `Expendable` could have been `Preserve` with the suite still green,
+		// and a signer whose balance was exactly the fee would have been refused.
+		let body = ping();
+		let exact = post_cost(&body);
+
+		// Account 3 starts empty. Give it exactly one message's worth, not a planck more.
+		assert_ok!(pallet_balances::Pallet::<Test>::force_set_balance(
+			RuntimeOrigin::root(),
+			3,
+			exact
+		));
+		assert_eq!(balance(3), exact);
+
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::signed(3),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(),
+			body,
+			600,
+		));
+
+		assert_eq!(balance(3), 0, "the whole balance was spendable");
+		assert_eq!(balance(TREASURY), exact);
+
+		// And now genuinely broke: the next one cannot be paid for.
+		assert_noop!(
+			crate::Pallet::<Test>::dispatch_post(
+				RuntimeOrigin::signed(3),
+				COUNTERPARTY,
+				b"demo/mod".to_vec(),
+				ping(),
+				600,
+			),
+			crate::Error::<Test>::InsufficientBalance
+		);
+	});
+}
+
+#[test]
+fn context_bytes_are_charged_for_like_keys() {
+	new_test_ext().execute_with(|| {
+		// `context` travels on the wire and comes back inside `GetResponse.get`, which is why
+		// `outbound::get` bounds it at all. For a while it was bounded and NOT charged, so the
+		// larger half of a GET's payload was free: at runtime values a maximal GET carried
+		// 2,048 bytes of keys and up to 8,192 of context, and only the keys were priced.
+		//
+		// Two GETs with identical keys and different context lengths must therefore cost
+		// different amounts. Dispatched through `outbound::get` directly because no extrinsic
+		// exposes `context` today — which is exactly what keeps this from being a live hole,
+		// and exactly why it needs pinning before one does.
+		let keys = get_keys(1);
+		let key_bytes: u128 = keys.iter().map(|k| k.len() as u128).sum();
+
+		let before = balance(TREASURY);
+		assert_ok!(crate::outbound::get::<Test>(
+			Some(1),
+			COUNTERPARTY,
+			keys.clone(),
+			42,
+			600,
+			alloc::vec![],
+		));
+		let bare = balance(TREASURY) - before;
+		assert_eq!(bare, MESSAGE_FEE + MESSAGE_BYTE_FEE * key_bytes);
+
+		let before = balance(TREASURY);
+		assert_ok!(crate::outbound::get::<Test>(
+			Some(1),
+			COUNTERPARTY,
+			keys,
+			42,
+			600,
+			alloc::vec![7u8; 100],
+		));
+		let with_context = balance(TREASURY) - before;
+
+		assert_eq!(
+			with_context - bare,
+			MESSAGE_BYTE_FEE * 100,
+			"a hundred context bytes must cost a hundred bytes' worth"
+		);
+	});
+}
+
+/// The guard the header comment in `weights.rs` asks for, and cannot itself provide.
+///
+/// The benchmark CLI has a bug that emits a `proof_size` around 2.5 EXABYTES for
+/// `dispatch_post` — `2_585_700_789_447_993_344` on one run, `8_126_544_059_662_763_008` on
+/// the next, non-deterministically. `weights.rs` documents it at length and carries a
+/// hand-corrected 3550. But **the generator overwrites that header on every regeneration**,
+/// so the only thing standing between a fresh run and an absurd value is a comment that the
+/// run itself deletes.
+///
+/// This test survives regeneration. The pallet's real `proof_size` values span 1504 to 3606,
+/// and the bad ones are ~10^18 — sixteen orders apart, so a generous ceiling separates them
+/// with no risk of a false alarm. Anyone regenerating gets a failing test rather than a
+/// runtime that believes one extrinsic consumes every block's proof budget.
+#[test]
+fn declared_proof_sizes_stay_within_a_sane_ceiling() {
+	use frame_support::traits::Get;
+
+	// The intercepts sit in 1504-3606, but the per-component terms dominate at the top of a
+	// range: `dispatch_post(8192)` legitimately declares `3550 + 8192 x 21` = 175,582, and
+	// `dispatch_get` at the runtime's 16 keys reaches `3550 + 16 x 5376` = 89,566.
+	//
+	// The ceiling inside `check` is ten million: ~57x above every honest value, eleven orders
+	// below a corrupted one (~10^18). That gap is what makes this test impossible to trip by
+	// accident and impossible for the real bug to slip through.
+
+	let body_max = <<Test as crate::Config>::MaxBodyLen as Get<u32>>::get();
+	let keys_max = <<Test as crate::Config>::MaxGetKeys as Get<u32>>::get();
+
+	// BOTH impls. The generator writes the same numbers into `SubstrateWeight` and into `()`,
+	// and the runtime uses `SubstrateWeight` (`configs/ismp/mod.rs`) while this mock uses
+	// `()`. Checking only the one the mock happens to use would leave the one production
+	// actually runs unguarded — and an earlier draft of this test did exactly that, which a
+	// mutation caught: injecting the exabyte value into `SubstrateWeight` left it green.
+	fn check<W: crate::weights::WeightInfo>(label: &str, body_max: u32, keys_max: u32) {
+		const CEILING: u64 = 10_000_000;
+
+		// Both ends of every component: the corruption lands in the intercept, so it shows at
+		// zero as readily as at the maximum.
+		for b in [0, body_max] {
+			let w = W::dispatch_post(b);
+			assert!(
+				w.proof_size() < CEILING,
+				"{label}: dispatch_post({b}) declares proof_size {} — regenerated with an \
+				 unfixed CLI? See the header of weights.rs; the corrected value is 3550",
+				w.proof_size()
+			);
+			let w = W::on_accept(b);
+			assert!(
+				w.proof_size() < CEILING,
+				"{label}: on_accept({b}): {}",
+				w.proof_size()
+			);
+		}
+
+		for k in [1, keys_max] {
+			let w = W::dispatch_get(k);
+			assert!(
+				w.proof_size() < CEILING,
+				"{label}: dispatch_get({k}) declares proof_size {} — it walks the same \
+				 RequestCommitments path as dispatch_post and is exposed to the same bug",
+				w.proof_size()
+			);
+		}
+
+		for w in [
+			W::accept_source(),
+			W::remove_source(),
+			W::set_message_fee(),
+			W::set_outbound_paused(),
+			W::on_timeout(),
+			W::on_response(0),
+			// The component's own maximum, not a literal: the benchmark range is
+			// `Linear<0, MaxGetKeys>`, and 64 was left over from an older hardcoded bound.
+			W::on_response(keys_max),
+		] {
+			assert!(
+				w.proof_size() < CEILING,
+				"{label}: proof_size {}",
+				w.proof_size()
+			);
+		}
+	}
+
+	check::<()>("()", body_max, keys_max);
+	check::<crate::weights::SubstrateWeight<Test>>("SubstrateWeight", body_max, keys_max);
+}
+
+#[test]
+fn the_module_id_is_charged_for_like_the_body() {
+	new_test_ext().execute_with(|| {
+		// Hyperbridge bills a POST by `encode_post_request(&request).len()`
+		// (`gargantua/src/ismp.rs:383`), and that encoding carries `to` along with everything
+		// else (`modules/ismp/core/src/abi.rs:64-76`). Charging the body alone left the
+		// module id free while a GET's context was charged — an asymmetry against upstream's
+		// own basis for billing.
+		//
+		// `ModuleId::from_bytes` admits exactly three lengths, so two of them priced
+		// differently is the whole proof: same body, longer id, higher charge.
+		let body = ping();
+
+		let before = balance(TREASURY);
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::signed(1),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(), // 8 bytes: a pallet id
+			body.clone(),
+			600,
+		));
+		let short_id = balance(TREASURY) - before;
+
+		let before = balance(TREASURY);
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::signed(1),
+			COUNTERPARTY,
+			alloc::vec![9u8; 32], // 32 bytes: an account id
+			body.clone(),
+			600,
+		));
+		let long_id = balance(TREASURY) - before;
+
+		assert_eq!(
+			long_id - short_id,
+			MESSAGE_BYTE_FEE * 24,
+			"a 32-byte id must cost 24 bytes more than an 8-byte one"
+		);
+		assert_eq!(short_id, post_cost(&body));
+	});
+}
+
+#[test]
+fn a_dispatch_that_fails_refunds_the_charge() {
+	new_test_ext().execute_with(|| {
+		// The charge is taken before the dispatch, so the one place money and failure meet
+		// is a dispatcher error after a successful transfer. Extrinsics are transactional,
+		// which means the transfer unwinds — but nothing pinned that until now.
+		//
+		// Forced by making the dispatcher see a duplicate commitment (`impls.rs:92-94`).
+		// Rather than recompute the hash here — which would re-derive the dispatcher's own
+		// encoding and could drift from it — send one message, take the commitment the
+		// chain actually recorded, and put it back. The nonce is rewound so the next
+		// dispatch rebuilds the identical request.
+		let body = ping();
+		let send = || {
+			crate::Pallet::<Test>::dispatch_post(
+				RuntimeOrigin::signed(1),
+				COUNTERPARTY,
+				b"demo/mod".to_vec(),
+				body.clone(),
+				600,
+			)
+		};
+		assert_ok!(send());
+		let commitment = frame_system::Pallet::<Test>::events()
+			.into_iter()
+			.find_map(|r| match r.event {
+				crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::RequestDispatched {
+					commitment,
+					..
+				}) => Some(commitment),
+				_ => None,
+			})
+			.expect("the first dispatch emitted one");
+		let meta = pallet_ismp::child_trie::RequestCommitments::<Test>::get(commitment)
+			.expect("and recorded it");
+		let nonce_before = pallet_ismp::Nonce::<Test>::get();
+		pallet_ismp::Nonce::<Test>::put(nonce_before - 1);
+		pallet_ismp::child_trie::RequestCommitments::<Test>::insert(commitment, meta);
+
+		let before = balance(1);
+		let treasury_before = balance(TREASURY);
+		assert_noop!(send(), crate::Error::<Test>::DispatchFailed);
+		// `assert_noop!` already proves no storage changed; naming the balances says which
+		// storage the reader should care about — the charge is taken BEFORE the dispatch,
+		// so this is the one place money and failure meet.
+		assert_eq!(balance(1), before, "the charge unwound with the dispatch");
+		assert_eq!(balance(TREASURY), treasury_before);
+	});
+}
+
+#[test]
+fn repricing_and_pausing_announce_themselves() {
+	new_test_ext().execute_with(|| {
+		// Both are root levers whose effect is invisible in a block unless they emit: an
+		// indexer watching for a price change has nothing else to watch.
+		assert_ok!(crate::Pallet::<Test>::set_message_fee(
+			RuntimeOrigin::root(),
+			7,
+			11
+		));
+		assert_ok!(crate::Pallet::<Test>::set_outbound_paused(
+			RuntimeOrigin::root(),
+			true
+		));
+
+		let events = frame_system::Pallet::<Test>::events();
+		assert!(events.iter().any(|r| matches!(
+			r.event,
+			crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::MessageFeeUpdated {
+				fee: 7,
+				byte_fee: 11
+			})
+		)));
+		assert!(events.iter().any(|r| matches!(
+			r.event,
+			crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::OutboundPauseSet {
+				paused: true
+			})
+		)));
+	});
+}
+
+#[test]
+fn repricing_is_root_only() {
+	new_test_ext().execute_with(|| {
+		assert_noop!(
+			crate::Pallet::<Test>::set_message_fee(RuntimeOrigin::signed(1), 0, 0),
+			sp_runtime::DispatchError::BadOrigin
+		);
+	});
+}
+
+#[test]
+fn a_zero_fee_is_allowed_and_charges_nothing() {
+	new_test_ext().execute_with(|| {
+		// Root may price dispatch at zero — the anti-spam charge is a policy dial, not a
+		// protocol requirement, and `dispatch_request` skips the transfer when it is zero.
+		assert_ok!(crate::Pallet::<Test>::set_message_fee(
+			RuntimeOrigin::root(),
+			0,
+			0
+		));
+		let before = balance(1);
+		assert_ok!(crate::Pallet::<Test>::dispatch_post(
+			RuntimeOrigin::signed(1),
+			COUNTERPARTY,
+			b"demo/mod".to_vec(),
+			ping(),
+			600,
+		));
+		assert_eq!(balance(1), before);
+		assert_eq!(balance(TREASURY), 0);
 	});
 }

@@ -31,6 +31,7 @@ pub use weights::WeightInfo;
 
 use frame_support::PalletId;
 use pallet_ismp::pallet::ModuleId;
+use sp_runtime::traits::Saturating;
 
 /// This pallet's ISMP module identifier — how counterparties address messages to us.
 ///
@@ -63,13 +64,63 @@ pub mod pallet {
 		// No `type RuntimeEvent`: inherited from `frame_system::Config` on this SDK
 		// line, and re-declaring it is deprecated.
 
-		/// Origin permitted to dispatch outgoing messages.
+		/// Who, besides Root, may dispatch outgoing messages — and therefore who pays.
 		///
-		/// Root for now. Opening this is an economics decision: delivery is paid by the
-		/// **relayer, on the far side of the bridge**, so a local deposit is the wrong
-		/// currency on the wrong chain. ISMP's answer is a non-zero `FeeMetadata.fee`,
-		/// escrowed on dispatch and paid to whoever delivers.
-		type DispatchOrigin: EnsureOrigin<Self::RuntimeOrigin>;
+		/// Root always may, and pays nothing: it is this chain's own automation, and it
+		/// has no account to debit. Anyone this origin admits pays [`MessageFee`] and must
+		/// set a finite timeout — not to get the money back, which never happens, but so the
+		/// commitment it leaves behind can eventually be reclaimed.
+		type DispatchOrigin: EnsureOrigin<Self::RuntimeOrigin, Success = Self::AccountId>;
+
+		/// Starting value for [`MessageFee`], the flat part of what a signed dispatch
+		/// costs. Root moves it afterwards with [`Pallet::set_message_fee`].
+		///
+		/// **Paid to [`Config::FeeDestination`], never refunded** — `crate::outbound::fee_for`
+		/// explains why an anti-spam charge must not go through `FeeMetadata.fee`.
+		#[pallet::constant]
+		type DefaultMessageFee: Get<<Self as pallet_ismp::Config>::Balance>;
+
+		/// Starting value for [`MessageByteFee`], charged on the body of a POST or the keys
+		/// of a GET — see `crate::outbound::fee_for` for why size is priced at all.
+		#[pallet::constant]
+		type DefaultMessageByteFee: Get<<Self as pallet_ismp::Config>::Balance>;
+
+		/// Ceiling on what a single message may be priced at, enforced by
+		/// [`Pallet::set_message_fee`].
+		///
+		/// The fees are adjustable because the right price tracks what the token is worth,
+		/// which a constant in the WASM cannot. This keeps that dial from becoming a
+		/// foot-gun: a mistyped value cannot price dispatch out of reach until the next
+		/// upgrade.
+		///
+		/// Bounds the **worst-case total** — `fee + byte_fee × `[`outbound::max_chargeable_size`]
+		/// — not each term alone, since the per-byte term multiplies. Transposing the two
+		/// same-typed arguments of `set_message_fee` is the easy way to reach that.
+		#[pallet::constant]
+		type MaxMessageFee: Get<<Self as pallet_ismp::Config>::Balance>;
+
+		/// Where message charges go. A treasury or burn account — never one the dispatching
+		/// user controls.
+		type FeeDestination: Get<Self::AccountId>;
+
+		/// Shortest timeout, in seconds, a signed dispatch may set.
+		///
+		/// A request is checked against its deadline twice — when Hyperbridge accepts it
+		/// and again at the destination (`handlers/request.rs:62-65`, run by the proxy on
+		/// each hop) — so one too short to clear two finality rounds can only expire. The
+		/// charge is spent either way: refusing the send up front says so, instead of taking
+		/// the fee for a message that was never going to arrive.
+		#[pallet::constant]
+		type MinSignedTimeout: Get<u64>;
+
+		/// Longest timeout, in seconds, a signed dispatch may set.
+		///
+		/// A request that never expires leaves a commitment nothing will ever clear, so a
+		/// signer may not set `0` (never expires) or `u64::MAX`. The fee is not the reason —
+		/// it is never refunded — the storage is. Root is exempt: it pays nothing, and its
+		/// automation legitimately sends messages that need not expire.
+		#[pallet::constant]
+		type MaxSignedTimeout: Get<u64>;
 
 		/// Largest message body accepted, in bytes, in either direction.
 		///
@@ -88,6 +139,20 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxGetKeys: Get<u32>;
 
+		/// Longest a single GET storage key may be, in bytes.
+		///
+		/// The protocol's key shapes are the ceiling: EVM keys are 20 or 52 bytes
+		/// (`ismp/src/router.rs:124-126`), Substrate child-trie keys 47-51. A key outside
+		/// those shapes cannot have a proof verified against it, so refusing it here turns a
+		/// request that could only expire into an immediate error.
+		///
+		/// Set above the documented maximum, not at it: nothing upstream enforces this — the
+		/// protocol type is a bare `Vec<Vec<u8>>` — so the bound is ours alone and leaves
+		/// room. Separate from [`Config::MaxBodyLen`], which this used to borrow: sharing one
+		/// constant let a GET carry sixteen times a full POST for less declared weight.
+		#[pallet::constant]
+		type MaxGetKeyLen: Get<u32>;
+
 		type WeightInfo: WeightInfo;
 	}
 
@@ -99,6 +164,45 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type AcceptedSources<T: Config> =
 		StorageMap<_, Blake2_128Concat, StateMachine, (), OptionQuery>;
+
+	#[pallet::type_value]
+	pub fn DefaultMessageFeeValue<T: Config>() -> <T as pallet_ismp::Config>::Balance {
+		T::DefaultMessageFee::get()
+	}
+
+	#[pallet::type_value]
+	pub fn DefaultMessageByteFeeValue<T: Config>() -> <T as pallet_ismp::Config>::Balance {
+		T::DefaultMessageByteFee::get()
+	}
+
+	/// Flat charge per signed dispatch. Starts at [`Config::DefaultMessageFee`]; Root moves
+	/// it with [`Pallet::set_message_fee`].
+	///
+	/// Adjustable rather than constant because the right price tracks what ORB is worth,
+	/// and a constant in the WASM cannot: correcting it would otherwise cost a build and a
+	/// `setCode`. Same reasoning, and the same shape, as `pallet_relayer`'s `MinRelayFee`.
+	#[pallet::storage]
+	pub type MessageFee<T: Config> =
+		StorageValue<_, <T as pallet_ismp::Config>::Balance, ValueQuery, DefaultMessageFeeValue<T>>;
+
+	/// Per-byte charge on top of [`MessageFee`].
+	#[pallet::storage]
+	pub type MessageByteFee<T: Config> = StorageValue<
+		_,
+		<T as pallet_ismp::Config>::Balance,
+		ValueQuery,
+		DefaultMessageByteFeeValue<T>,
+	>;
+
+	/// Emergency brake on signed outbound dispatch, set by Root.
+	///
+	/// Opening `DispatchOrigin` made dispatch reachable by anyone; closing it again would
+	/// otherwise need a runtime upgrade, at the moment that hour is most expensive.
+	///
+	/// Root is unaffected — the check sits in the signed branch of `outbound::fee_for` — so
+	/// this chain's own automation keeps working while paused.
+	#[pallet::storage]
+	pub type OutboundPaused<T: Config> = StorageValue<_, bool, ValueQuery>;
 
 	/// Count of successfully handled inbound messages.
 	///
@@ -124,13 +228,13 @@ pub mod pallet {
 			/// will see and the one `pallet_ismp`'s own `Request` event reports.
 			nonce: u64,
 			/// Absolute expiry in unix seconds, reproducing the dispatcher's own branch
-			/// (`dispatcher.rs:134`): **`0` means never expires**, not "expired in 1970".
+			/// (`dispatcher.rs:135`): **`0` means never expires**, not "expired in 1970".
 			/// Anything downstream that renders this as a date must special-case zero.
 			timeout_timestamp: u64,
 			/// Size of the body, which is deliberately not emitted — it is the only thing
 			/// this event says about the payload.
 			body_len: u32,
-			/// Always `Post` today. Present so a future `dispatch_get` needs no new event.
+			/// Which of the two request shapes this was.
 			kind: RequestKind,
 		},
 		/// A message arrived and was handled.
@@ -232,15 +336,22 @@ pub mod pallet {
 		SourceRemoved {
 			source: StateMachine,
 		},
+		/// Signed outbound dispatch was paused or resumed by Root.
+		OutboundPauseSet {
+			paused: bool,
+		},
+		/// Root changed what a signed dispatch costs.
+		MessageFeeUpdated {
+			fee: <T as pallet_ismp::Config>::Balance,
+			byte_fee: <T as pallet_ismp::Config>::Balance,
+		},
 	}
 
 	/// Which kind of ISMP request an event refers to.
 	///
-	/// One byte, and `Get` is unreachable today — this pallet only dispatches POSTs. It
-	/// exists so a future `dispatch_get` reuses these events rather than reshaping them:
-	/// a POST expiring and a GET expiring are different failures (the POST never reached
-	/// the destination, the GET's answer never came back) and an indexer cannot tell them
-	/// apart from `RequestTimedOut` alone.
+	/// One byte, carried on every dispatch and timeout event because a POST expiring and a
+	/// GET expiring are different failures — the POST never reached the destination, the
+	/// GET's answer never came back — and an indexer cannot tell them apart otherwise.
 	#[derive(
 		Clone,
 		Copy,
@@ -292,16 +403,32 @@ pub mod pallet {
 		NoKeysRequested,
 		/// Exceeded [`Config::MaxGetKeys`].
 		TooManyKeys,
-		/// A single GET key exceeded [`Config::MaxBodyLen`].
+		/// A single GET key exceeded [`Config::MaxGetKeyLen`].
 		///
 		/// Distinct from [`Error::TooManyKeys`]: the count was fine, one key was not. A
 		/// storage key is short; a long one is a payload wearing a key's name, and the
 		/// weight charged per key does not cover it.
 		KeyTooLarge,
+		/// Signed outbound dispatch is paused by Root. Root itself is unaffected.
+		OutboundPaused,
+		/// A fee update exceeded [`Config::MaxMessageFee`].
+		MessageFeeTooHigh,
+		/// A signed dispatch set `timeout == 0`, which means *never expires*, so nothing
+		/// would ever reclaim its commitment. Root may: its messages are this chain's own
+		/// automation, and it pays nothing.
+		TimeoutRequired,
+		/// A signed dispatch set a timeout below [`Config::MinSignedTimeout`] — too short to
+		/// clear Hyperbridge and the destination, so it could only ever expire.
+		TimeoutTooShort,
+		/// A signed dispatch exceeded [`Config::MaxSignedTimeout`].
+		TimeoutTooLong,
+		/// The signer cannot cover the charge. Taken before anything is
+		/// written, so a failed send costs only the transaction fee.
+		InsufficientBalance,
 		/// A GET must name the height to read at, and `0` is never a real one.
 		///
 		/// The response handler requires the proof height to equal the requested height
-		/// exactly (`ismp-2606.1.0/src/handlers/response.rs:71`), so a height nobody can
+		/// exactly (`ismp-2606.1.0/src/handlers/response.rs:72`), so a height nobody can
 		/// prove leaves the request hanging until it expires rather than failing fast.
 		InvalidGetHeight,
 	}
@@ -322,8 +449,8 @@ pub mod pallet {
 			body: Vec<u8>,
 			timeout: u64,
 		) -> DispatchResult {
-			T::DispatchOrigin::ensure_origin(origin)?;
-			outbound::post::<T>(dest, to, body, timeout)
+			let payer = Self::payer_of(origin)?;
+			outbound::post::<T>(payer, dest, to, body, timeout)
 		}
 
 		/// Read state from `dest` over ISMP.
@@ -346,7 +473,7 @@ pub mod pallet {
 		///
 		/// `keys` are proven against what this chain holds of `dest`. For the coprocessor
 		/// that is its ISMP **child trie** root, not its state root
-		/// (`ismp-grandpa/src/consensus.rs:142-150`), so a GET to Hyperbridge can only read
+		/// (`ismp-grandpa/src/consensus.rs:138-147`), so a GET to Hyperbridge can only read
 		/// keys inside `:child_storage:default:ISMPv2`.
 		///
 		/// `timeout` is **relative seconds**; `0` means *never expires*.
@@ -359,10 +486,10 @@ pub mod pallet {
 			height: u64,
 			timeout: u64,
 		) -> DispatchResult {
-			T::DispatchOrigin::ensure_origin(origin)?;
+			let payer = Self::payer_of(origin)?;
 			// No context: a plain read has nothing to correlate. `confirm_delivery` is the
 			// call that fills it.
-			outbound::get::<T>(dest, keys, height, timeout, Default::default())
+			outbound::get::<T>(payer, dest, keys, height, timeout, Default::default())
 		}
 
 		/// Ask the coprocessor to prove that `commitment` was delivered.
@@ -382,7 +509,7 @@ pub mod pallet {
 		///
 		/// **`height` must be one this chain can already prove**, and the handler compares
 		/// it for equality rather than as a lower bound
-		/// (`ismp/src/handlers/response.rs:71`). Since nothing tells us which block the
+		/// (`ismp/src/handlers/response.rs:72`). Since nothing tells us which block the
 		/// receipt was written in, confirming means retrying at heights we hold commitments
 		/// for until one answers. A height we cannot prove does not fail fast — it expires.
 		///
@@ -397,7 +524,7 @@ pub mod pallet {
 			height: u64,
 			timeout: u64,
 		) -> DispatchResult {
-			T::DispatchOrigin::ensure_origin(origin)?;
+			let payer = Self::payer_of(origin)?;
 
 			// The coprocessor, not the message's destination: it is the only chain whose
 			// state this runtime can verify, and the only one whose receipt is reachable.
@@ -405,6 +532,7 @@ pub mod pallet {
 				.ok_or(Error::<T>::CoprocessorNotSet)?;
 
 			outbound::get::<T>(
+				payer,
 				dest,
 				receipts::confirmation_keys(commitment),
 				height,
@@ -429,6 +557,70 @@ pub mod pallet {
 			AcceptedSources::<T>::remove(source);
 			Self::deposit_event(Event::SourceRemoved { source });
 			Ok(())
+		}
+
+		/// Set what a signed dispatch costs: a flat part and a per-byte part.
+		///
+		/// Root only, and bounded by what the **largest possible message** would cost —
+		/// `fee + byte_fee × `[`outbound::max_chargeable_size`] — against
+		/// [`Config::MaxMessageFee`]. Checking each
+		/// term separately would miss the case the ceiling is for, since the per-byte term
+		/// multiplies. Takes effect on the next dispatch; messages already in flight keep
+		/// the price they paid.
+		#[pallet::call_index(6)]
+		#[pallet::weight(T::WeightInfo::set_message_fee())]
+		pub fn set_message_fee(
+			origin: OriginFor<T>,
+			fee: <T as pallet_ismp::Config>::Balance,
+			byte_fee: <T as pallet_ismp::Config>::Balance,
+		) -> DispatchResult {
+			ensure_root(origin)?;
+			// Saturating, so an absurd `byte_fee` is refused rather than wrapping to a
+			// small total and passing the check.
+			//
+			// Priced on `max_chargeable_size`, NOT on `MaxBodyLen`: a GET is charged on the
+			// sum of its key lengths, which can exceed a body. Using the body's bound here
+			// let `set_message_fee(0, ceiling / MaxBodyLen)` pass and then price the largest
+			// GET far above the ceiling it had just cleared.
+			let worst_case = fee.saturating_add(byte_fee.saturating_mul(
+				sp_runtime::SaturatedConversion::saturated_into(
+					outbound::max_chargeable_size::<T>(),
+				),
+			));
+			ensure!(
+				worst_case <= T::MaxMessageFee::get(),
+				Error::<T>::MessageFeeTooHigh
+			);
+			MessageFee::<T>::put(fee);
+			MessageByteFee::<T>::put(byte_fee);
+			Self::deposit_event(Event::MessageFeeUpdated { fee, byte_fee });
+			Ok(())
+		}
+
+		/// Pause or resume signed outbound dispatch. See [`OutboundPaused`].
+		#[pallet::call_index(5)]
+		#[pallet::weight(T::WeightInfo::set_outbound_paused())]
+		pub fn set_outbound_paused(origin: OriginFor<T>, paused: bool) -> DispatchResult {
+			ensure_root(origin)?;
+			OutboundPaused::<T>::put(paused);
+			Self::deposit_event(Event::OutboundPauseSet { paused });
+			Ok(())
+		}
+	}
+
+	impl<T: Config> Pallet<T> {
+		/// Who is dispatching, and so who pays: `None` for Root, which is exempt, and the
+		/// account for anyone [`Config::DispatchOrigin`] admits.
+		///
+		/// Root is checked first and unconditionally, so a runtime that later narrows
+		/// `DispatchOrigin` — even to `EnsureNever` — keeps its own automation working.
+		fn payer_of(origin: OriginFor<T>) -> Result<Option<T::AccountId>, DispatchError> {
+			if ensure_root(origin.clone()).is_ok() {
+				return Ok(None);
+			}
+			T::DispatchOrigin::ensure_origin(origin)
+				.map(Some)
+				.map_err(Into::into)
 		}
 	}
 }

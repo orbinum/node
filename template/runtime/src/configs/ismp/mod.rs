@@ -15,8 +15,9 @@ pub mod slot_duration;
 use crate::*;
 use alloc::{boxed::Box, vec::Vec};
 use frame_support::{parameter_types, PalletId};
-use frame_system::EnsureRoot;
+use frame_system::{EnsureRoot, EnsureSigned};
 use ismp::{host::StateMachine, router::IsmpRouter};
+use sp_runtime::traits::AccountIdConversion;
 
 parameter_types! {
 	/// Verifies consensus and state proofs on Orbinum's behalf; which deployment depends
@@ -26,11 +27,37 @@ parameter_types! {
 	/// See [`network::HOST_STATE_MACHINE_ID`] for why it must never change.
 	pub const HostStateMachine: StateMachine = network::host_state_machine();
 
-	/// Destination for ISMP relayer fees.
-	///
-	/// Unused while fees are disabled (see the `FeeHandler` associated type below),
-	/// but `WeightFeeHandler` requires the type regardless.
+	/// The ISMP treasury: where message charges accumulate, and the account
+	/// `WeightFeeHandler` is given for inbound fees it does not currently collect.
 	pub const IsmpTreasuryPalletId: PalletId = PalletId(*b"orb/ismp");
+	/// The same pallet id as an account, for `Config::FeeDestination`.
+	pub IsmpTreasuryAccount: AccountId = IsmpTreasuryPalletId::get().into_account_truncating();
+
+	/// 0.01 ORB per signed dispatch, plus a per-byte term, paid to the ISMP treasury and
+	/// never refunded. Starting values only — Root moves both with `set_message_fee`.
+	///
+	/// Ten times `pallet_relayer`'s 0.001 ORB anti-spam floor, because a cross-chain
+	/// dispatch costs this chain real gas on the far side where a shielded relay does not,
+	/// and a hundredth of the 1 ORB ceiling that the same pallet already settled on as
+	/// "room to react to price swings" (`configs/privacy.rs:23-24`).
+	///
+	/// Not escrowed in `FeeMetadata`, deliberately — a refundable anti-spam charge is not a
+	/// charge, because it can be recycled every timeout. See the pallet's
+	/// `outbound::fee_for`.
+	pub const IsmpDefaultMessageFee: Balance = 10_000_000_000_000_000;
+	/// 0.000001 ORB per byte: a full 8 KiB body adds ~0.008 ORB, roughly doubling the price
+	/// of the largest message this chain will carry. Hyperbridge prices its own outbound
+	/// traffic per byte for the same reason (`pallet-bandwidth`).
+	pub const IsmpDefaultMessageByteFee: Balance = 1_000_000_000_000;
+	/// 1 ORB, the same ceiling `pallet_relayer` uses for `MaxMinRelayFee`: far enough above
+	/// the default to absorb a token repricing, far below where a typo would price dispatch
+	/// out of reach until the next runtime upgrade.
+	pub const IsmpMaxMessageFee: Balance = 1_000_000_000_000_000_000;
+	/// Ten minutes: two finality rounds — Orbinum→Hyperbridge, Hyperbridge→destination —
+	/// each with its challenge period. Shorter can only expire.
+	pub const IsmpMinSignedTimeout: u64 = 10 * 60;
+	/// A week. The fee comes back only by expiring, so a signer may not set "never".
+	pub const IsmpMaxSignedTimeout: u64 = 7 * 24 * 60 * 60;
 }
 
 /// Fallback for ISMP callbacks addressed to a module we do not host.
@@ -106,10 +133,11 @@ impl pallet_ismp::Config for Runtime {
 	/// `POLICY = false` makes message *delivery* free for the submitter: `on_executed`
 	/// returns `Pays::No` before charging anyone (`fee_handler.rs:172`).
 	///
-	/// This is the inbound side, and it is separate from the relayer fee an outbound
-	/// message carries — that one lives in `FeeMetadata` and is zero because Orbinum
-	/// self-relays. Turning `POLICY` on would bill whoever submits an inbound message
-	/// for its execution weight, which is a mainnet-economics decision.
+	/// This is the inbound side, and it is separate from the fee an outbound message
+	/// carries — that one lives in `FeeMetadata`: zero from Root, `IsmpMessageFee` from a
+	/// signed account, and anti-spam rather than relayer pay in either case since Orbinum
+	/// self-relays. Turning `POLICY` on would bill whoever submits an inbound message for
+	/// its execution weight, which is a mainnet-economics decision.
 	type FeeHandler = pallet_ismp::fee_handler::WeightFeeHandler<
 		AccountId,
 		Balances,
@@ -292,11 +320,25 @@ mod tests {
 }
 
 impl pallet_ismp_messaging::Config for Runtime {
-	/// Root-only. Opening this to signed accounts is an economics decision: the cost of
-	/// delivering a message falls on the relayer on the far side of the bridge, so a
-	/// local deposit is the wrong currency on the wrong chain. ISMP's own answer is a
-	/// non-zero `FeeMetadata.fee`, escrowed on dispatch and paid on delivery.
-	type DispatchOrigin = EnsureRoot<AccountId>;
+	/// Any signed account may dispatch, paying `IsmpDefaultMessageFee`. Root is always allowed
+	/// on top of this and pays nothing — the pallet checks it first — so automation such
+	/// as `confirm_delivery` is unaffected by how wide or narrow this is set.
+	///
+	/// Open since spec 15. The earlier objection — that delivery cost falls on a relayer
+	/// on the far side, so a local fee is the wrong currency — still holds for *paying
+	/// relayers*; this fee does not try to. It is anti-spam pricing on a self-relayed
+	/// channel, charged to the treasury and never refunded — see the pallet's
+	/// `outbound::fee_for`.
+	type DispatchOrigin = EnsureSigned<AccountId>;
+	type DefaultMessageFee = IsmpDefaultMessageFee;
+	type DefaultMessageByteFee = IsmpDefaultMessageByteFee;
+	type MaxMessageFee = IsmpMaxMessageFee;
+	/// The ISMP treasury account, `orb/ismp` — already declared for the inbound fee handler
+	/// and unused while that stays disabled, so message charges accumulate somewhere Root
+	/// can reach rather than in `ISMPFEES`, which mixes with upstream's escrow accounting.
+	type FeeDestination = IsmpTreasuryAccount;
+	type MinSignedTimeout = IsmpMinSignedTimeout;
+	type MaxSignedTimeout = IsmpMaxSignedTimeout;
 
 	/// Bounds the cost of decoding a remote party's bytes, and is the range the weights
 	/// are measured over. Keep this and the benchmark's upper bound equal.
@@ -309,6 +351,11 @@ impl pallet_ismp_messaging::Config for Runtime {
 	/// any realistic read — a handful of storage items, or one map's worth of entries —
 	/// and a caller who needs more can send a second request.
 	type MaxGetKeys = ConstU32<16>;
+
+	/// 128 bytes per storage key: double the longest shape the protocol documents (52, an
+	/// EVM address plus a slot hash), because nothing upstream enforces that spec. See the
+	/// pallet's `Config::MaxGetKeyLen`.
+	type MaxGetKeyLen = ConstU32<128>;
 
 	type WeightInfo = pallet_ismp_messaging::weights::SubstrateWeight<Runtime>;
 }
