@@ -184,6 +184,45 @@ mod tests {
 		});
 	}
 
+	/// The whole inbound path, through the REAL runtime router rather than the pallet's
+	/// mock: a message from an accepted source reaches our module and is handled.
+	///
+	/// Worth its own test because the pallet's tests call `IsmpModuleCallback` directly.
+	/// This is the only place that proves the runtime hands a real `PostRequest` to it —
+	/// the step a message from Hyperbridge actually takes, and one nothing else covers.
+	#[test]
+	fn an_accepted_source_reaches_our_module_through_the_real_router() {
+		sp_io::TestExternalities::default().execute_with(|| {
+			let coprocessor = Coprocessor::get().expect("a coprocessor is configured");
+			pallet_ismp_messaging::AcceptedSources::<Runtime>::insert(coprocessor, ());
+
+			// Addressed the way Hyperbridge addresses us: source is the coprocessor, dest
+			// is this chain, `to` is our 8-byte module id.
+			let request = ismp::router::PostRequest {
+				source: coprocessor,
+				dest: network::host_state_machine(),
+				nonce: 0,
+				from: alloc::vec![9, 9, 9, 9],
+				to: pallet_ismp_messaging::PALLET_ID_BYTES.to_vec(),
+				timeout_timestamp: 0,
+				body: pallet_ismp_messaging::Message::Ping { nonce: 1 }.encode(),
+			};
+
+			let module = Router
+				.module_for_id(request.to.clone())
+				.expect("our id resolves");
+			assert!(
+				module.on_accept(request).is_ok(),
+				"an accepted source must be handled, not refused"
+			);
+			assert_eq!(
+				pallet_ismp_messaging::InboundCount::<Runtime>::get(),
+				1,
+				"the arrival must be counted by the pallet the router chose"
+			);
+		});
+	}
+
 	/// Catches a comparison loosened to `starts_with` or a truncating match.
 	#[test]
 	fn near_miss_ids_do_not_reach_our_module() {

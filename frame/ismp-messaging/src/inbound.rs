@@ -149,13 +149,24 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 		// An absent value emits nothing. It proves the receipt was not there at `height`,
 		// which is indistinguishable from asking too early, and there is no event in this
 		// pallet that can claim a message failed to arrive.
+		//
+		// The value is SCALE-decoded, not taken raw. `pallet-ismp` writes the receipt with
+		// `child::put` (`child_trie.rs:154`), which encodes, so a 32-byte account is stored
+		// as 33 bytes: a compact length prefix (`0x80`) followed by the account. Emitting
+		// that verbatim published a relayer nothing could match against an account, and a
+		// length that belongs to the encoding rather than to the data.
+		//
+		// A value that does not decode is dropped rather than emitted raw: a malformed
+		// relayer is worse than none, and the receipt's mere presence is already the proof
+		// of delivery — the account is who, not whether.
 		if let Some(confirmed) = crate::receipts::confirmed_commitment(&response.get.context) {
 			let want = crate::receipts::request_receipt_key(confirmed);
 			if let Some(relayer) = response
 				.values
 				.iter()
 				.find(|v| v.key == want)
-				.and_then(|v| v.value.clone())
+				.and_then(|v| v.value.as_ref())
+				.and_then(|raw| alloc::vec::Vec::<u8>::decode(&mut &raw[..]).ok())
 			{
 				Pallet::<T>::deposit_event(Event::DeliveryConfirmed {
 					commitment: confirmed,
