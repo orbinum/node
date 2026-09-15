@@ -1472,3 +1472,330 @@ fn a_receipt_that_does_not_decode_confirms_nothing() {
 		assert!(confirmed_events().is_empty());
 	});
 }
+
+// ── Inbound: the path a real message from Gargantua will take ────────────────────────
+//
+// `AcceptedSources` was populated on testnet (`KUSAMA-4009`, `EVM-97`) but no inbound
+// message has ever arrived — `InboundCount` is 0. These pin the behaviour the first real
+// one will hit, so a regression shows up here rather than as a message silently lost on a
+// chain we do not control.
+
+/// The event a successful arrival must emit, flattened for assertions.
+fn received_events() -> alloc::vec::Vec<(StateMachine, alloc::vec::Vec<u8>, u32, sp_core::H256, u64)>
+{
+	frame_system::Pallet::<Test>::events()
+		.into_iter()
+		.filter_map(|r| match r.event {
+			crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::MessageReceived {
+				source,
+				from,
+				body_len,
+				commitment,
+				nonce,
+				..
+			}) => Some((source, from, body_len, commitment, nonce)),
+			_ => None,
+		})
+		.collect()
+}
+
+#[test]
+fn an_arrival_is_attributable_to_the_message_that_caused_it() {
+	new_test_ext().execute_with(|| {
+		AcceptedSources::<Test>::insert(COPROCESSOR, ());
+		let request = post_from(COPROCESSOR, Message::Ping { nonce: 42 }.encode());
+
+		// The commitment the SENDER holds. Derived the protocol's own way, so the two
+		// chains agree on it without either being told — which is what lets an indexer
+		// join this arrival to the dispatch on the far side.
+		let expected = ismp::messaging::hash_request::<pallet_ismp::Pallet<Test>>(
+			&ismp::router::Request::Post(request.clone()),
+		);
+
+		assert!(
+			IsmpModuleCallback::<Test>::default()
+				.on_accept(request)
+				.is_ok()
+		);
+
+		let evs = received_events();
+		assert_eq!(evs.len(), 1);
+		let (source, from, body_len, commitment, nonce) = evs.into_iter().next().unwrap();
+		assert_eq!(commitment, expected, "must be the sender's commitment");
+		assert_eq!(source, COPROCESSOR);
+		assert_eq!(
+			from,
+			b"remote01".to_vec(),
+			"the sending module, recorded not trusted"
+		);
+		assert_eq!(body_len, Message::Ping { nonce: 42 }.encode().len() as u32);
+		assert_eq!(nonce, 0, "the SENDER's nonce, not one of ours");
+	});
+}
+
+#[test]
+fn a_data_message_is_accepted_like_a_ping() {
+	new_test_ext().execute_with(|| {
+		AcceptedSources::<Test>::insert(COPROCESSOR, ());
+		let body = Message::Data {
+			nonce: 3,
+			data: b"hello from gargantua".to_vec(),
+		}
+		.encode();
+
+		assert!(
+			IsmpModuleCallback::<Test>::default()
+				.on_accept(post_from(COPROCESSOR, body.clone()))
+				.is_ok()
+		);
+		assert_eq!(InboundCount::<Test>::get(), 1);
+		// The body itself is deliberately NOT emitted — it is remote-controlled data and
+		// every event is stored in the block. Only its size travels.
+		assert_eq!(received_events()[0].2, body.len() as u32);
+	});
+}
+
+#[test]
+fn an_oversized_body_is_rejected_without_decoding_it() {
+	new_test_ext().execute_with(|| {
+		AcceptedSources::<Test>::insert(COPROCESSOR, ());
+		// 8192 is the mock's `MaxBodyLen`. The size check runs BEFORE the decode so the
+		// cost of decoding attacker-supplied bytes is bounded by a value we chose.
+		let body = alloc::vec![0u8; 8193];
+
+		assert!(
+			IsmpModuleCallback::<Test>::default()
+				.on_accept(post_from(COPROCESSOR, body))
+				.is_ok(),
+			"must not err: erring reverts the whole relayer batch"
+		);
+		assert_eq!(InboundCount::<Test>::get(), 0);
+
+		let too_large = frame_system::Pallet::<Test>::events().into_iter().any(|r| {
+			matches!(
+				r.event,
+				crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::MessageRejected {
+					reason: crate::RejectReason::TooLarge,
+					..
+				})
+			)
+		});
+		assert!(too_large, "the size rejection must be attributable");
+	});
+}
+
+#[test]
+fn a_rejection_still_names_the_message_it_refused() {
+	new_test_ext().execute_with(|| {
+		AcceptedSources::<Test>::insert(COPROCESSOR, ());
+		let request = post_from(COPROCESSOR, alloc::vec![0xff, 0xff]);
+		let expected = ismp::messaging::hash_request::<pallet_ismp::Pallet<Test>>(
+			&ismp::router::Request::Post(request.clone()),
+		);
+
+		IsmpModuleCallback::<Test>::default()
+			.on_accept(request)
+			.unwrap();
+
+		// Without the commitment a rejection is anonymous: the sender sees only a timeout
+		// and can never learn why. This is the one event a remote party controls the
+		// firing of, so it must still be joinable to what it refused.
+		let named = frame_system::Pallet::<Test>::events().into_iter().any(|r| {
+			matches!(
+				r.event,
+				crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::MessageRejected {
+					commitment, ..
+				}) if commitment == expected
+			)
+		});
+		assert!(named);
+	});
+}
+
+#[test]
+fn accepting_a_source_is_what_opens_the_door() {
+	new_test_ext().execute_with(|| {
+		let module = IsmpModuleCallback::<Test>::default();
+		let msg = || post_from(COPROCESSOR, Message::Ping { nonce: 1 }.encode());
+
+		// Closed by default. This is the state testnet was in until `accept_source` ran.
+		assert!(module.on_accept(msg()).is_err());
+
+		assert_ok!(crate::Pallet::<Test>::accept_source(
+			RuntimeOrigin::root(),
+			COPROCESSOR
+		));
+		assert!(module.on_accept(msg()).is_ok());
+
+		// And closing it again takes effect immediately, which is the whole point of the
+		// map being consulted per message rather than cached.
+		assert_ok!(crate::Pallet::<Test>::remove_source(
+			RuntimeOrigin::root(),
+			COPROCESSOR
+		));
+		assert!(module.on_accept(msg()).is_err());
+		assert_eq!(
+			InboundCount::<Test>::get(),
+			1,
+			"only the accepted one counted"
+		);
+	});
+}
+
+#[test]
+fn one_accepted_source_does_not_admit_another() {
+	new_test_ext().execute_with(|| {
+		// The allowlist is per chain, not a global on/off switch. Accepting Hyperbridge
+		// must not silently admit BSC.
+		AcceptedSources::<Test>::insert(COPROCESSOR, ());
+		let module = IsmpModuleCallback::<Test>::default();
+
+		assert!(
+			module
+				.on_accept(post_from(COPROCESSOR, Message::Ping { nonce: 1 }.encode()))
+				.is_ok()
+		);
+		assert!(
+			module
+				.on_accept(post_from(COUNTERPARTY, Message::Ping { nonce: 1 }.encode()))
+				.is_err()
+		);
+		assert_eq!(InboundCount::<Test>::get(), 1);
+	});
+}
+
+#[test]
+fn accept_source_is_root_only_and_observable() {
+	new_test_ext().execute_with(|| {
+		assert_noop!(
+			crate::Pallet::<Test>::accept_source(RuntimeOrigin::signed(1), COPROCESSOR),
+			sp_runtime::DispatchError::BadOrigin
+		);
+		assert_noop!(
+			crate::Pallet::<Test>::remove_source(RuntimeOrigin::signed(1), COPROCESSOR),
+			sp_runtime::DispatchError::BadOrigin
+		);
+
+		assert_ok!(crate::Pallet::<Test>::accept_source(
+			RuntimeOrigin::root(),
+			COPROCESSOR
+		));
+		// These two events are the only on-chain record of why inbound traffic from a
+		// chain starts or stops — an unaccepted source emits nothing at all.
+		let announced = frame_system::Pallet::<Test>::events().into_iter().any(|r| {
+			matches!(
+				r.event,
+				crate::mock::RuntimeEvent::IsmpMessaging(crate::Event::SourceAccepted { source })
+					if source == COPROCESSOR
+			)
+		});
+		assert!(announced);
+	});
+}
+
+#[test]
+fn accepting_the_same_source_twice_is_harmless() {
+	new_test_ext().execute_with(|| {
+		// Re-running the setup script must not break a live chain.
+		assert_ok!(crate::Pallet::<Test>::accept_source(
+			RuntimeOrigin::root(),
+			COPROCESSOR
+		));
+		assert_ok!(crate::Pallet::<Test>::accept_source(
+			RuntimeOrigin::root(),
+			COPROCESSOR
+		));
+		assert!(AcceptedSources::<Test>::contains_key(COPROCESSOR));
+
+		assert_ok!(crate::Pallet::<Test>::remove_source(
+			RuntimeOrigin::root(),
+			COPROCESSOR
+		));
+		// Removing one that is not there is equally harmless.
+		assert_ok!(crate::Pallet::<Test>::remove_source(
+			RuntimeOrigin::root(),
+			COPROCESSOR
+		));
+		assert!(!AcceptedSources::<Test>::contains_key(COPROCESSOR));
+	});
+}
+
+#[test]
+fn several_arrivals_each_get_their_own_row() {
+	new_test_ext().execute_with(|| {
+		AcceptedSources::<Test>::insert(COPROCESSOR, ());
+		let module = IsmpModuleCallback::<Test>::default();
+
+		// Distinct nonces, so distinct commitments: a relayer batch of three messages must
+		// produce three attributable arrivals, not one merged counter.
+		for n in 0..3u64 {
+			let mut req = post_from(COPROCESSOR, Message::Ping { nonce: n }.encode());
+			req.nonce = n;
+			assert!(module.on_accept(req).is_ok());
+		}
+
+		assert_eq!(InboundCount::<Test>::get(), 3);
+		let evs = received_events();
+		assert_eq!(evs.len(), 3);
+		let commitments: alloc::collections::BTreeSet<_> = evs.iter().map(|e| e.3).collect();
+		assert_eq!(commitments.len(), 3, "each arrival is distinguishable");
+	});
+}
+
+#[test]
+fn a_body_an_evm_caller_would_build_decodes_here() {
+	new_test_ext().execute_with(|| {
+		// The wire format an EVM sender has to produce by hand — Solidity has no SCALE
+		// codec, so `OrbinumBridge.sendToOrbinum` takes raw bytes and whoever calls it
+		// builds them. Getting the variant index or the integer endianness wrong yields
+		// `MessageRejected { Undecodable }` on arrival, which is visible but late.
+		//
+		// `Ping { nonce: 1 }` = index 0x00, then a u64 little-endian.
+		let ping = alloc::vec![0x00, 1, 0, 0, 0, 0, 0, 0, 0];
+		assert_eq!(
+			Message::decode(&mut &ping[..]),
+			Ok(Message::Ping { nonce: 1 })
+		);
+		assert_eq!(Message::Ping { nonce: 1 }.encode(), ping);
+
+		// `Data { nonce: 2, data: [0xab, 0xcd] }` = index 0x01, u64 LE, then a SCALE
+		// compact length (0x08 = 2) and the bytes.
+		let data = alloc::vec![0x01, 2, 0, 0, 0, 0, 0, 0, 0, 0x08, 0xab, 0xcd];
+		assert_eq!(
+			Message::decode(&mut &data[..]),
+			Ok(Message::Data {
+				nonce: 2,
+				data: alloc::vec![0xab, 0xcd]
+			})
+		);
+
+		// And the whole point: such a body, arriving from an accepted EVM source, is
+		// handled rather than refused.
+		let evm = StateMachine::Evm(97);
+		AcceptedSources::<Test>::insert(evm, ());
+		assert!(
+			IsmpModuleCallback::<Test>::default()
+				.on_accept(post_from(evm, ping))
+				.is_ok()
+		);
+		assert_eq!(InboundCount::<Test>::get(), 1);
+	});
+}
+
+#[test]
+fn an_evm_sender_module_id_is_recorded_not_rejected() {
+	new_test_ext().execute_with(|| {
+		// `EvmHost.dispatch` sets `from` to `abi.encodePacked(msg.sender)` — 20 raw bytes,
+		// not the 8 a pallet id has. `on_accept` deliberately does not constrain `from`
+		// (the chain is pinned by `AcceptedSources` and the contents by the membership
+		// proof), so a contract sender must pass and simply be recorded.
+		let evm = StateMachine::Evm(97);
+		AcceptedSources::<Test>::insert(evm, ());
+
+		let mut req = post_from(evm, Message::Ping { nonce: 5 }.encode());
+		req.from = alloc::vec![0xab; 20];
+
+		assert!(IsmpModuleCallback::<Test>::default().on_accept(req).is_ok());
+		assert_eq!(received_events()[0].1, alloc::vec![0xab; 20]);
+	});
+}
