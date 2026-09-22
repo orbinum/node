@@ -251,7 +251,7 @@ pub fn run() -> sc_cli::Result<()> {
 		None => {
 			let runner = cli.create_runner(&cli.run)?;
 			runner.run_node_until_exit(|config| async move {
-				service::build_full(config, cli.eth, cli.sealing)
+				service::build_full(config, cli.eth, cli.sealing, !cli.no_hardware_benchmarks)
 					.map_err(Into::into)
 					.await
 			})
