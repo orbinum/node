@@ -23,6 +23,10 @@ pub struct Cli {
 	#[arg(long, value_enum, ignore_case = true)]
 	pub sealing: Option<Sealing>,
 
+	/// Disable automatic hardware benchmarks.
+	#[arg(long)]
+	pub no_hardware_benchmarks: bool,
+
 	#[command(flatten)]
 	pub eth: EthConfiguration,
 }

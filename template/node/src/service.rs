@@ -2,6 +2,7 @@
 
 use std::{cell::RefCell, path::Path, sync::Arc, time::Duration};
 
+use frame_benchmarking_cli::SUBSTRATE_REFERENCE_HARDWARE;
 use futures::{channel::mpsc, prelude::*};
 // Substrate
 use prometheus_endpoint::Registry;
@@ -297,6 +298,7 @@ pub async fn new_full<B, RA, HF, NB>(
 	mut config: Configuration,
 	eth_config: EthConfiguration,
 	sealing: Option<Sealing>,
+	hardware_benchmarks: bool,
 ) -> Result<TaskManager, ServiceError>
 where
 	B: BlockT<Hash = H256>,
@@ -329,6 +331,15 @@ where
 		transaction_pool,
 		other: (mut telemetry, block_import, grandpa_link, frontier_backend, storage_override),
 	} = new_partial(&config, &eth_config, build_import_queue)?;
+
+	let hwbench = hardware_benchmarks
+		.then(|| {
+			config.database.path().map(|database_path| {
+				let _ = std::fs::create_dir_all(database_path);
+				sc_sysinfo::gather_hwbench(Some(database_path), &SUBSTRATE_REFERENCE_HARDWARE)
+			})
+		})
+		.flatten();
 
 	let FrontierPartialComponents {
 		filter_pool,
@@ -597,6 +608,28 @@ where
 
 	crate::evm_relay_key::report_identity(evm_key.as_deref());
 
+	if let Some(hwbench) = hwbench {
+		sc_sysinfo::print_hwbench(&hwbench);
+		match SUBSTRATE_REFERENCE_HARDWARE.check_hardware(&hwbench, false) {
+			Err(err) if role.is_authority() => {
+				log::warn!(
+					"⚠️  The hardware does not meet the minimal requirements {} for role 'Authority'.",
+					err
+				);
+			}
+			_ => {}
+		}
+
+		if let Some(ref mut telemetry) = telemetry {
+			let telemetry_handle = telemetry.handle();
+			task_manager.spawn_handle().spawn(
+				"telemetry_hwbench",
+				None,
+				sc_sysinfo::initialize_hwbench_telemetry(telemetry_handle, hwbench),
+			);
+		}
+	}
+
 	if role.is_authority() {
 		// manual-seal authorship
 		if let Some(sealing) = sealing {
@@ -815,9 +848,13 @@ pub async fn build_full(
 	config: Configuration,
 	eth_config: EthConfiguration,
 	sealing: Option<Sealing>,
+	hardware_benchmarks: bool,
 ) -> Result<TaskManager, ServiceError> {
 	new_full::<Block, RuntimeApi, HostFunctions, sc_network::NetworkWorker<_, _>>(
-		config, eth_config, sealing,
+		config,
+		eth_config,
+		sealing,
+		hardware_benchmarks,
 	)
 	.await
 }
