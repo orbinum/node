@@ -2,32 +2,12 @@ name: Release & Deploy
 
 # Triggers:
 #   - Tag push v*.*.* → full release: build binary + WASM, publish image, GitHub Release
-#   - workflow_dispatch → manual deploy (choose environment)
+# The on-chain runtime upgrade is runtime-upgrade.yml.
 on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
       - "v[0-9]+.[0-9]+.[0-9]+-*"
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: "Target environment"
-        required: true
-        default: "testnet"
-        type: choice
-        options:
-          - testnet
-          - mainnet
-      deploy_runtime:
-        description: "Deploy runtime upgrade on-chain"
-        required: true
-        default: true
-        type: boolean
-      image_tag:
-        description: "Published image tag to deploy the runtime from (e.g. 0.1.0-rc.10). Extracts the WASM from ghcr.io/<owner>/node:<tag> instead of recompiling."
-        required: true
-        default: "testnet-latest"
-        type: string
 
 concurrency:
   group: release-${{ github.ref }}
@@ -65,20 +45,14 @@ jobs:
       - name: Compute metadata
         id: meta
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION="${{ github.event.inputs.image_tag }}"
-            ENV="${{ github.event.inputs.environment }}"
+          VERSION="${GITHUB_REF#refs/tags/}"
+          # rc / alpha / beta tags go to testnet
+          if [[ "$VERSION" =~ -(rc|alpha|beta|pre) ]]; then
             IS_PRE="true"
+            ENV="testnet"
           else
-            VERSION="${GITHUB_REF#refs/tags/}"
-            # rc / alpha / beta tags go to testnet
-            if [[ "$VERSION" =~ -(rc|alpha|beta|pre) ]]; then
-              IS_PRE="true"
-              ENV="testnet"
-            else
-              IS_PRE="false"
-              ENV="testnet"   # mainnet requires manual approval — see deployment protection
-            fi
+            IS_PRE="false"
+            ENV="testnet"   # mainnet requires manual approval — see deployment protection
           fi
           echo "version=$VERSION"        >> "$GITHUB_OUTPUT"
           echo "environment=$ENV"        >> "$GITHUB_OUTPUT"
@@ -172,128 +146,7 @@ jobs:
             ${{ env.WASM }}.sha256
           retention-days: 30
 
-  # ── 3. Deploy runtime on-chain ────────────────────────────────────────────
-  deploy-runtime:
-    name: Runtime Upgrade (on-chain)
-    runs-on: ubuntu-latest
-    needs: [metadata]
-    if: github.event.inputs.deploy_runtime == 'true'
-    environment: ${{ github.event.inputs.environment }}
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0 # the preflight reads the runtime source at the deployed tag
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Preflight — the image, the runtime and the chain must agree
-        id: preflight
-        env:
-          RPC_URL: ${{ secrets.RPC_URL }}
-          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
-        run: |
-          set -euo pipefail
-          IMAGE="ghcr.io/${{ github.repository_owner }}/node:$IMAGE_TAG"
-
-          # 1. The tag resolves. A floating tag pointing at nothing, or a typo, fails here
-          #    rather than three steps later with a confusing docker error.
-          DIGEST="sha256:$(docker buildx imagetools inspect "$IMAGE" --raw | sha256sum | cut -d' ' -f1)"
-          echo "image  $IMAGE"
-          echo "digest $DIGEST"
-
-          # 2. The image was built from the commit the tag names. `image_tag` is a registry
-          #    tag and can be re-pointed by hand; the binary reports its own build commit
-          #    (`0.2.0-<short-sha>`), so comparing the two is what ties the artifact being
-          #    deployed to reviewed source. Skipped for a floating tag like
-          #    `testnet-latest`, which by definition is not a git ref.
-          if git rev-parse -q --verify "refs/tags/v$IMAGE_TAG" >/dev/null; then
-            WANT_SHA=$(git rev-list -n1 "v$IMAGE_TAG" | cut -c1-9)
-            # `--platform`: the image is linux/amd64 only, and being explicit turns a
-            # runner-architecture surprise into a clear error instead of a manifest one.
-            GOT_VER=$(docker run --rm --platform linux/amd64 \
-              --entrypoint /usr/local/bin/orbinum-node "$IMAGE" --version)
-            echo "binary $GOT_VER  (expected to contain $WANT_SHA)"
-            case "$GOT_VER" in
-              *"$WANT_SHA"*) : ;;
-              *) echo "::error::image $IMAGE_TAG was not built from v$IMAGE_TAG ($WANT_SHA)"; exit 1 ;;
-            esac
-            SRC_REF="v$IMAGE_TAG"
-          else
-            echo "note: $IMAGE_TAG is not a git tag — skipping the build-provenance check"
-            SRC_REF="HEAD"
-          fi
-
-          # 3. spec_version must RISE. A setCode to an equal or lower spec is rejected by
-          #    the runtime and applies nothing — `deploy-runtime.sh` used to warn and exit
-          #    0, so a no-op upgrade reported success. The expected value is read from the
-          #    runtime source at the deployed ref, not from the workflow's checkout.
-          EXPECTED=$(git show "$SRC_REF:template/runtime/src/lib.rs" \
-            | grep -oE 'spec_version: *[0-9]+' | head -1 | grep -oE '[0-9]+')
-          ONCHAIN=$(curl -sf --max-time 10 -H 'Content-Type: application/json' \
-            -d '{"jsonrpc":"2.0","id":1,"method":"state_getRuntimeVersion"}' \
-            "${RPC_URL/wss:\/\//https://}" \
-            | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["specVersion"])')
-          echo "spec   on-chain=$ONCHAIN  image=$EXPECTED"
-          if [ "$EXPECTED" -le "$ONCHAIN" ]; then
-            echo "::error::spec_version $EXPECTED is not above the on-chain $ONCHAIN — setCode would apply nothing"
-            exit 1
-          fi
-          echo "expected_spec=$EXPECTED" >> "$GITHUB_OUTPUT"
-
-          # 4. The node we are about to upgrade already runs the matching binary. The
-          #    runbook says "make sure every node picked up the image before the setCode";
-          #    this asserts it for the node the transaction goes through, instead of
-          #    trusting that Watchtower got there first.
-          if [ "$SRC_REF" != "HEAD" ]; then
-            bash scripts/check-deployment.sh --expect-impl "$WANT_SHA" "$RPC_URL"
-          fi
-
-      - name: Extract runtime WASM from published image
-        run: |
-          IMAGE="ghcr.io/${{ github.repository_owner }}/node:${{ github.event.inputs.image_tag }}"
-          echo "Pulling $IMAGE"
-          docker pull "$IMAGE"
-          mkdir -p ./artifacts
-          CID=$(docker create "$IMAGE")
-          docker cp "$CID:/usr/local/share/orbinum/orbinum_runtime.compact.compressed.wasm" \
-            ./artifacts/orbinum_runtime.compact.compressed.wasm
-          docker rm "$CID"
-          ls -l ./artifacts
-
-      - name: Install Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: "24"
-
-      - name: Install deploy dependencies
-        run: npm install --prefix ./scripts @polkadot/api @polkadot/keyring
-
-      - name: Deploy runtime upgrade to ${{ needs.metadata.outputs.environment }}
-        env:
-          RPC_URL: ${{ secrets.RPC_WS }}
-          SUDO_SEED: ${{ secrets.SUDO_SEED }}
-        run: |
-          WASM_FILE=$(find ./artifacts -name "*.wasm" | head -1)
-          echo "Deploying WASM: $WASM_FILE"
-          bash scripts/deploy-runtime.sh "$WASM_FILE" "$RPC_URL" "$SUDO_SEED"
-
-      - name: Verify the runtime upgrade landed
-        env:
-          RPC_URL: ${{ secrets.RPC_URL }}
-        run: |
-          bash scripts/check-deployment.sh \
-            --expect-spec "${{ steps.preflight.outputs.expected_spec }}" "$RPC_URL"
-
-  # ── 4. Publish Docker image to GHCR ──────────────────────────────────────
+  # ── 3. Publish Docker image to GHCR ──────────────────────────────────────
   # Node binaries are updated via Watchtower following `testnet-latest`.
   # No compilation: `build-contexts` replaces the Dockerfile's `artifacts` stage with
   # the files already verified in `build`, so the image carries exactly those bytes.
@@ -363,7 +216,7 @@ jobs:
           echo "Running --version inside $IMAGE"
           docker run --rm --entrypoint /usr/local/bin/orbinum-node "$IMAGE" --version
           # And the runtime WASM it ships must be readable by the unprivileged user, since
-          # `deploy-runtime` docker-cps it out for the on-chain setCode.
+          # runtime-upgrade.yml docker-cps it out for the on-chain setCode.
           docker run --rm --entrypoint sh "$IMAGE" -c \
             'test -s /usr/local/share/orbinum/orbinum_runtime.compact.compressed.wasm'
 
@@ -388,7 +241,7 @@ jobs:
             echo "ok  $TAG -> $GOT"
           done
 
-  # ── 5. Create GitHub Release ──────────────────────────────────────────────
+  # ── 4. Create GitHub Release ──────────────────────────────────────────────
   github-release:
     name: GitHub Release
     runs-on: ubuntu-latest

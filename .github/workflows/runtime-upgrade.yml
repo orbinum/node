@@ -1,0 +1,146 @@
+name: Runtime Upgrade (testnet)
+
+# `sudo.setCode` of the runtime shipped inside a published release image. Testnet only:
+# mainnet runtime upgrades go through governance, never a sudo key held by CI.
+#
+# Run it after release.yml has published the image and Watchtower has moved the nodes
+# onto it — the preflight refuses a node that is not yet running that binary.
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Published image to take the runtime from: a release (0.1.0-rc.28, 0.3.0-testnet) or testnet-latest"
+        required: true
+        default: "testnet-latest"
+        type: string
+
+concurrency:
+  group: runtime-upgrade-testnet # one setCode in flight per chain
+  cancel-in-progress: false
+
+jobs:
+  deploy-runtime:
+    name: Runtime Upgrade (on-chain)
+    runs-on: ubuntu-latest
+    environment: testnet
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE_TAG: ${{ inputs.image_tag }}
+      IMAGE: ghcr.io/${{ github.repository_owner }}/node:${{ inputs.image_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the preflight reads the runtime source at the deployed tag
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Preflight — the image, the runtime and the chain must agree
+        id: preflight
+        env:
+          RPC_URL: ${{ secrets.RPC_URL }}
+        run: |
+          set -euo pipefail
+
+          # A registry tag only: it lands in a docker reference and a git ref below.
+          if [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+            echo "::error::invalid image tag '$IMAGE_TAG'"; exit 1
+          fi
+
+          # 1. The image resolves. A typo or an unpublished release fails here rather than
+          #    three steps later with a confusing docker error.
+          DIGEST="sha256:$(docker buildx imagetools inspect "$IMAGE" --raw | sha256sum | cut -d' ' -f1)"
+          echo "image  $IMAGE"
+          echo "digest $DIGEST"
+
+          # 2. The image was built from the commit its git tag names. A registry tag can be
+          #    re-pointed by hand; the binary reports its own build commit
+          #    (`0.2.0-<short-sha>`), so comparing the two is what ties the artifact being
+          #    deployed to reviewed source. The git tag is the image tag without the
+          #    `-testnet` flavour suffix (`0.1.0-rc.28` → `v0.1.0-rc.28`, `0.3.0-testnet` →
+          #    `v0.3.0`). Skipped for a floating tag like `testnet-latest`, which names no
+          #    git ref.
+          GIT_TAG="v${IMAGE_TAG%-testnet}"
+          if git rev-parse -q --verify "refs/tags/$GIT_TAG" >/dev/null; then
+            WANT_SHA=$(git rev-list -n1 "$GIT_TAG" | cut -c1-9)
+            # `--platform`: the image is linux/amd64 only, and being explicit turns a
+            # runner-architecture surprise into a clear error instead of a manifest one.
+            GOT_VER=$(docker run --rm --platform linux/amd64 \
+              --entrypoint /usr/local/bin/orbinum-node "$IMAGE" --version)
+            echo "binary $GOT_VER  (expected to contain $WANT_SHA)"
+            case "$GOT_VER" in
+              *"$WANT_SHA"*) : ;;
+              *) echo "::error::$IMAGE was not built from $GIT_TAG ($WANT_SHA)"; exit 1 ;;
+            esac
+            SRC_REF="$GIT_TAG"
+          else
+            echo "note: $IMAGE_TAG names no git tag — skipping the build-provenance check"
+            SRC_REF="HEAD"
+          fi
+
+          # 3. spec_version must RISE. A setCode to an equal or lower spec is rejected by
+          #    the runtime and applies nothing — `deploy-runtime.sh` used to warn and exit
+          #    0, so a no-op upgrade reported success. The expected value is read from the
+          #    runtime source at the deployed ref, not from the workflow's checkout.
+          EXPECTED=$(git show "$SRC_REF:template/runtime/src/lib.rs" \
+            | grep -oE 'spec_version: *[0-9]+' | head -1 | grep -oE '[0-9]+')
+          ONCHAIN=$(curl -sf --max-time 10 -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"state_getRuntimeVersion"}' \
+            "${RPC_URL/wss:\/\//https://}" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["specVersion"])')
+          echo "spec   on-chain=$ONCHAIN  image=$EXPECTED"
+          if [ "$EXPECTED" -le "$ONCHAIN" ]; then
+            echo "::error::spec_version $EXPECTED is not above the on-chain $ONCHAIN — setCode would apply nothing"
+            exit 1
+          fi
+          echo "expected_spec=$EXPECTED" >> "$GITHUB_OUTPUT"
+
+          # 4. The node we are about to upgrade already runs the matching binary. The
+          #    runbook says "make sure every node picked up the image before the setCode";
+          #    this asserts it for the node the transaction goes through, instead of
+          #    trusting that Watchtower got there first.
+          if [ "$SRC_REF" != "HEAD" ]; then
+            bash scripts/check-deployment.sh --expect-impl "$WANT_SHA" "$RPC_URL"
+          fi
+
+      - name: Extract runtime WASM from published image
+        run: |
+          echo "Pulling $IMAGE"
+          docker pull "$IMAGE"
+          mkdir -p ./artifacts
+          CID=$(docker create "$IMAGE")
+          docker cp "$CID:/usr/local/share/orbinum/orbinum_runtime.compact.compressed.wasm" \
+            ./artifacts/orbinum_runtime.compact.compressed.wasm
+          docker rm "$CID"
+          ls -l ./artifacts
+
+      - name: Install Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Install deploy dependencies
+        run: npm install --prefix ./scripts @polkadot/api @polkadot/keyring
+
+      - name: Deploy runtime upgrade to testnet
+        env:
+          RPC_URL: ${{ secrets.RPC_WS }}
+          SUDO_SEED: ${{ secrets.SUDO_SEED }}
+        run: |
+          WASM_FILE=./artifacts/orbinum_runtime.compact.compressed.wasm
+          echo "Deploying WASM: $WASM_FILE"
+          bash scripts/deploy-runtime.sh "$WASM_FILE" "$RPC_URL" "$SUDO_SEED"
+
+      - name: Verify the runtime upgrade landed
+        env:
+          RPC_URL: ${{ secrets.RPC_URL }}
+        run: |
+          bash scripts/check-deployment.sh \
+            --expect-spec "${{ steps.preflight.outputs.expected_spec }}" "$RPC_URL"
