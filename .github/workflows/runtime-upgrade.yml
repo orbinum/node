@@ -1,7 +1,7 @@
 name: Runtime Upgrade (testnet)
 
 # `sudo.setCode` of the runtime shipped inside a published release image. Testnet only:
-# mainnet runtime upgrades go through governance, never a sudo key held by CI.
+# mainnet runtime upgrades go through a multisig, never a sudo key held by CI.
 #
 # Run it after release.yml has published the image and Watchtower has moved the nodes
 # onto it — the preflight refuses a node that is not yet running that binary.
@@ -118,8 +118,15 @@ jobs:
           CID=$(docker create "$IMAGE")
           docker cp "$CID:/usr/local/share/orbinum/orbinum_runtime.compact.compressed.wasm" \
             ./artifacts/orbinum_runtime.compact.compressed.wasm
+          docker cp "$CID:/usr/local/bin/orbinum-node" ./artifacts/orbinum-node
           docker rm "$CID"
           ls -l ./artifacts
+
+      # The image tag says nothing reliable about the flavour: a mainnet image (`latest`,
+      # `X.Y.Z`) would setCode the Polkadot coprocessor onto testnet and break every
+      # proxied Hyperbridge request. Ask the binary that ships with this WASM instead.
+      - name: Verify the runtime targets testnet
+        run: bash scripts/verify-coprocessor.sh testnet ./artifacts/orbinum-node
 
       - name: Install Node.js
         uses: actions/setup-node@v5
