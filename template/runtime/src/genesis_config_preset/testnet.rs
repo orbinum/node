@@ -29,7 +29,6 @@ pub fn testnet() -> serde_json::Value {
 			(treasury, TOTAL_SUPPLY - FAUCET_BALANCE),
 			(faucet, FAUCET_BALANCE),
 			(sudo_key, DEV_BALANCE),
-			// Validators need enough balance for the 1 000 ORB registration bond + fees.
 			// These AccountIds are the same bytes as each validator's Aura (sr25519) public key.
 			(
 				AccountId::from(hex!(
