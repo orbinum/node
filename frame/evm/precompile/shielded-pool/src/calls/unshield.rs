@@ -27,136 +27,92 @@
 //! `NoteCommitment(change_value, asset_id, change_owner_pk, change_blinding)`, and
 //! `change_encrypted_memo` then holds `nonce(12) || ciphertext(132) || ephPk(32)`.
 //!
-//! The relay fee recipient is not in the ABI and is not a call argument: it is
-//! the dispatch origin, built from `handle.context().caller`. Calldata therefore
-//! cannot name a different one.
+//! The relay fee recipient is not in the ABI: it is the relayer that recorded a
+//! relay commit for this spend (`commitRelay`), whoever submits it.
 
-use alloc::vec::Vec;
+use fp_evm::PrecompileFailure;
+use pallet_shielded_pool::types::EncryptedMemo;
 
-use fp_evm::{ExitError, PrecompileFailure, PrecompileHandle};
-use frame_support::BoundedVec;
-use sp_core::U256;
-
-use crate::abi;
+use super::{balance, params, proof};
+use crate::{abi, revert};
 
 /// Selector for the signature in this module's header.
 pub const SELECTOR: [u8; 4] = [0x4e, 0x50, 0x53, 0x48];
-
-/// Maximum byte length of a serialised Groth16 proof accepted by the pallet.
-const MAX_PROOF_LEN: u32 = 512;
 
 /// Decodes `input` into a ready-to-dispatch `unshield` call.
 ///
 /// Rejects anything the pallet would have to reject anyway, plus the inputs that
 /// are irrecoverable rather than merely invalid: a zero amount, the zero
 /// recipient, and a malformed change memo.
-pub fn decode<T>(
-	// Unused here: the relaying address comes from the dispatch origin, not from
-	// anything this decoder reads. Kept for signature parity with the other calls.
-	_handle: &impl PrecompileHandle,
-	input: &[u8],
-) -> Result<pallet_shielded_pool::Call<T>, PrecompileFailure>
+pub fn decode<T>(input: &[u8]) -> Result<pallet_shielded_pool::Call<T>, PrecompileFailure>
 where
 	T: pallet_shielded_pool::Config,
 	pallet_shielded_pool::BalanceOf<T>: TryFrom<u128>,
 	<T as frame_system::Config>::AccountId: From<[u8; 32]>,
 {
-	let params = &input[4..];
-
-	// Step 1: require the head through `change_commitment`. The last two slots are
-	// checked later — the memo offset only when a change note exists (step 9), and
-	// `circuit_version` in step 11.
-	if params.len() < 256 {
-		return Err(err("unshield: input too short"));
-	}
+	// Step 1: require the whole 10-slot head.
+	let params = params(input, 320, "unshield: input too short")?;
 
 	// Step 2: proof — dynamic, offset at slot 0.
-	let proof: BoundedVec<u8, frame_support::traits::ConstU32<MAX_PROOF_LEN>> =
-		abi::decode_bytes_at_slot(params, 0)?
-			.try_into()
-			.map_err(|_| err("unshield: proof too long"))?;
-
-	if proof.is_empty() {
-		return Err(err("unshield: proof must be non-empty"));
-	}
+	let proof = proof(
+		params,
+		0,
+		"unshield: proof too long",
+		"unshield: proof must be non-empty",
+	)?;
 
 	// Step 3: merkle_root and the nullifier of the note being spent.
 	let merkle_root: pallet_shielded_pool::Hash = abi::read_bytes32(params, 32)?;
-
 	let nullifier = pallet_shielded_pool::Nullifier::from(abi::read_bytes32(params, 64)?);
 
 	// Step 4: asset_id.
-	let asset_id = abi::decode_u32(&params[96..128])?;
+	let asset_id = abi::read_u32(params, 96)?;
 
 	// Step 5: amount. Zero is rejected here as well as in the pallet — it is a
 	// no-op that still burns the nullifier, destroying the note it spends.
-	let amount_u256 = U256::from_big_endian(&params[128..160]);
+	let amount_u256 = abi::read_u256(params, 128)?;
 	if amount_u256.is_zero() {
-		return Err(err("unshield: amount must be non-zero"));
+		return Err(revert("unshield: amount must be non-zero"));
 	}
-	let amount: pallet_shielded_pool::BalanceOf<T> = {
-		let raw: u128 = amount_u256
-			.try_into()
-			.map_err(|_| err("unshield: amount overflow"))?;
-		raw.try_into()
-			.map_err(|_| err("unshield: amount conversion failed"))?
-	};
+	let amount = balance::<T>(
+		amount_u256,
+		"unshield: amount overflow",
+		"unshield: amount conversion failed",
+	)?;
 
 	// Step 6: recipient. The all-zero AccountId32 has no known private key, so
 	// unshielding to it destroys the funds with no possibility of recovery.
 	let recipient_bytes = abi::read_bytes32(params, 160)?;
 	if recipient_bytes == [0u8; 32] {
-		return Err(err("unshield: recipient must not be the zero address"));
+		return Err(revert("unshield: recipient must not be the zero address"));
 	}
 	let recipient: <T as frame_system::Config>::AccountId = recipient_bytes.into();
 
 	// Step 7: fee paid to the relayer.
-	let fee: pallet_shielded_pool::BalanceOf<T> = {
-		let raw: u128 = U256::from_big_endian(&params[192..224])
-			.try_into()
-			.map_err(|_| err("unshield: fee overflow"))?;
-		raw.try_into()
-			.map_err(|_| err("unshield: fee conversion failed"))?
-	};
+	let fee = balance::<T>(
+		abi::read_u256(params, 192)?,
+		"unshield: fee overflow",
+		"unshield: fee conversion failed",
+	)?;
 
 	// Step 8: change_commitment. All-zero means a total unshield, which leaves no
 	// change note behind.
 	let change_commitment: pallet_shielded_pool::Hash = abi::read_bytes32(params, 224)?;
-	let is_total_unshield = change_commitment == [0u8; 32];
 
-	// Step 9: change_encrypted_memo — dynamic, offset at slot 256. A total
-	// unshield carries no memo, so a missing or malformed offset is expected
-	// there. A partial one must fail loudly: the memo is the only copy of the
-	// change note's secrets, and defaulting to an empty one would leave the
-	// change permanently unspendable.
-	let change_encrypted_memo_bytes = if params.len() >= 288 {
-		match abi::decode_bytes_at_slot(params, 256) {
-			Ok(bytes) => bytes,
-			Err(e) if is_total_unshield => {
-				let _ = e;
-				Vec::new()
-			}
-			Err(_) => return Err(err("unshield: malformed change_encrypted_memo offset")),
-		}
+	// Step 9: change_encrypted_memo — dynamic, offset at slot 256. Always
+	// encoded: a total unshield carries an empty one. The pallet then requires
+	// exactly 180 bytes when there is a change note, and none otherwise.
+	let change_encrypted_memo_bytes = abi::decode_bytes_at_slot(params, 256)
+		.map_err(|_| revert("unshield: malformed change_encrypted_memo"))?;
+	let change_encrypted_memo = if change_encrypted_memo_bytes.is_empty() {
+		EncryptedMemo::default()
 	} else {
-		Vec::new()
+		EncryptedMemo::new(change_encrypted_memo_bytes)
+			.map_err(|_| revert("unshield: invalid change_encrypted_memo"))?
 	};
 
-	let change_encrypted_memo: pallet_shielded_pool::types::EncryptedMemo =
-		if change_encrypted_memo_bytes.is_empty() {
-			pallet_shielded_pool::types::EncryptedMemo::default()
-		} else {
-			pallet_shielded_pool::types::EncryptedMemo::new(change_encrypted_memo_bytes)
-				.map_err(|_| err("unshield: invalid change_encrypted_memo"))?
-		};
-
-	// Step 10: circuit_version. Checked here rather than in the step 1 guard so
-	// that calldata predating this slot reports the missing field instead of a
-	// generic length error.
-	if params.len() < 320 {
-		return Err(err("unshield: input too short (missing circuitVersion)"));
-	}
-	let circuit_version = abi::decode_u32(&params[288..320])?;
+	// Step 10: circuit_version.
+	let circuit_version = abi::read_u32(params, 288)?;
 
 	Ok(pallet_shielded_pool::Call::<T>::unshield {
 		proof,
@@ -170,12 +126,4 @@ where
 		change_encrypted_memo,
 		circuit_version,
 	})
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn err(msg: &'static str) -> PrecompileFailure {
-	PrecompileFailure::Error {
-		exit_status: ExitError::Other(msg.into()),
-	}
 }

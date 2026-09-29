@@ -18,16 +18,7 @@ impl Groth16Verifier {
 		public_inputs: &PublicInputs,
 		proof: &Proof,
 	) -> Result<(), VerifierError> {
-		let pvk = PreparedVerifyingKey::from(vk.to_ark_vk()?);
-		let ark_proof = proof.to_ark_proof()?;
-		let inputs = public_inputs.to_field_elements()?;
-		let valid = Groth16::<Bn254>::verify_proof(&pvk, &ark_proof, &inputs)
-			.map_err(|_| VerifierError::VerificationFailed)?;
-		if valid {
-			Ok(())
-		} else {
-			Err(VerifierError::VerificationFailed)
-		}
+		Self::verify_with_prepared_vk(&vk.prepare()?, public_inputs, proof)
 	}
 
 	/// Verify using a pre-prepared VK — more efficient when verifying multiple
@@ -60,7 +51,7 @@ impl Groth16Verifier {
 	}
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
+// ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -108,7 +99,7 @@ mod tests {
 		}
 	}
 
-	// ─── estimate_verification_cost ─────────────────────────────────────
+	// ─── estimate_verification_cost ───────────────────────────────────────────
 
 	#[test]
 	fn test_estimate_verification_cost_zero_inputs() {
@@ -149,7 +140,7 @@ mod tests {
 		assert_eq!(cost_10 - cost_5, 5 * PER_INPUT_COST);
 	}
 
-	// ─── verify ──────────────────────────────────────────────────────────
+	// ─── verify ───────────────────────────────────────────────────────────────
 
 	#[test]
 	fn test_verify_detects_invalid_proof_structure() {
@@ -185,15 +176,7 @@ mod tests {
 		assert!(matches!(result, Err(VerifierError::VerificationFailed)));
 	}
 
-	#[test]
-	fn test_verify_with_value_proof_vk() {
-		let vk_wrapper = VerifyingKey::from_ark_vk(&create_mock_ark_vk(4)).unwrap();
-		let result =
-			Groth16Verifier::verify(&vk_wrapper, &create_mock_inputs(4), &create_mock_proof());
-		assert!(matches!(result, Err(VerifierError::VerificationFailed)));
-	}
-
-	// ─── verify_with_prepared_vk ─────────────────────────────────────────
+	// ─── verify_with_prepared_vk ──────────────────────────────────────────────
 
 	#[test]
 	fn test_verify_with_prepared_vk_structure() {
@@ -228,7 +211,7 @@ mod tests {
 		.is_err());
 	}
 
-	// ─── num_public_inputs ───────────────────────────────────────────────
+	// ─── num_public_inputs ────────────────────────────────────────────────────
 
 	#[test]
 	fn num_public_inputs_matches_vk_arity() {
@@ -247,7 +230,7 @@ mod tests {
 		));
 	}
 
-	// ─── integration ─────────────────────────────────────────────────────
+	// ─── integration ──────────────────────────────────────────────────────────
 
 	#[test]
 	fn test_all_circuits_can_prepare_vk() {

@@ -251,6 +251,20 @@ mod tests {
 	}
 
 	#[test]
+	fn only_a_full_memo_has_a_valid_size() {
+		for len in [1, 7, 179] {
+			assert!(
+				!EncryptedMemo::new(vec![0x01; len]).unwrap().is_valid_size(),
+				"{len}"
+			);
+		}
+		assert!(
+			EncryptedMemo::new(vec![0x01; 181]).is_err(),
+			"above the bound"
+		);
+	}
+
+	#[test]
 	fn encrypted_memo_full_is_not_empty() {
 		let full = EncryptedMemo::from_bytes(&[0x01u8; MAX_ENCRYPTED_MEMO_SIZE as usize]).unwrap();
 		assert!(!full.is_empty());

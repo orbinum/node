@@ -1,3 +1,5 @@
+//! Shield: deposit public tokens into the pool as a new note.
+
 use frame_support::{
 	pallet_prelude::*,
 	traits::{Currency, ExistenceRequirement},
@@ -81,44 +83,17 @@ mod tests {
 		operations::assets::AssetOperation,
 		pallet::Event as PalletEvent,
 		storage::{CommitmentRepository, PoolBalanceRepository},
-		types::{Commitment, EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE},
+		tests::{commitment, memo, register_asset, setup_asset, short_memo},
+		types::Commitment,
 	};
 	use frame_support::{assert_noop, assert_ok};
 	use sp_runtime::AccountId32;
 
-	// ── helpers ──────────────────────────────────────────────────────────────
-
-	/// Register and verify an asset, returning its ID.
-	fn setup_asset() -> u32 {
-		let name = frame_support::BoundedVec::try_from(b"Orbinum".to_vec()).unwrap();
-		let symbol = frame_support::BoundedVec::try_from(b"ORB".to_vec()).unwrap();
-		let id = AssetOperation::register_asset::<Test>(name, symbol, 18, None, acc(1)).unwrap();
-		AssetOperation::verify::<Test>(id).unwrap();
-		id
-	}
-
 	fn memo_valid() -> EncryptedMemo {
-		EncryptedMemo::new(vec![0x01u8; MAX_ENCRYPTED_MEMO_SIZE as usize]).unwrap()
+		memo(0x01)
 	}
 
-	fn memo_short() -> EncryptedMemo {
-		EncryptedMemo::new(vec![0x01u8; 32]).unwrap()
-	}
-
-	/// A distinct, canonical 32-byte commitment for `seed`.
-	///
-	/// The seed goes in the low byte rather than filling all 32: a repeated high
-	/// byte puts the value above the BN254 modulus (`p` starts at 0x30), which
-	/// the canonicity guard refuses. Real commitments come out of Poseidon and
-	/// are always canonical.
-	fn commitment(seed: u8) -> Commitment {
-		let mut b = [0u8; 32];
-		b[0] = seed;
-		b[1] = 0xA5;
-		Commitment::new(b)
-	}
-
-	// ── execute ───────────────────────────────────────────────────────────────
+	// ── execute ──────────────────────────────────────────────────────────────
 
 	#[test]
 	fn execute_works() {
@@ -155,11 +130,7 @@ mod tests {
 	#[test]
 	fn execute_asset_not_verified_fails() {
 		new_test_ext().execute_with(|| {
-			let name = frame_support::BoundedVec::try_from(b"Orbinum".to_vec()).unwrap();
-			let symbol = frame_support::BoundedVec::try_from(b"ORB".to_vec()).unwrap();
-			let id =
-				AssetOperation::register_asset::<Test>(name, symbol, 18, None, acc(1)).unwrap();
-			// Not verified
+			let id = register_asset();
 
 			assert_noop!(
 				ShieldOperation::execute::<Test>(acc(1), id, 500u128, commitment(1), memo_valid()),
@@ -282,7 +253,7 @@ mod tests {
 					asset_id,
 					500u128,
 					commitment(1),
-					memo_short()
+					short_memo()
 				),
 				crate::pallet::Error::<Test>::InvalidMemoSize
 			);
@@ -378,7 +349,7 @@ mod tests {
 		});
 	}
 
-	// ── query helpers ─────────────────────────────────────────────────────────
+	// ── query helpers ────────────────────────────────────────────────────────
 
 	#[test]
 	fn commitment_exists_false_before_shield() {

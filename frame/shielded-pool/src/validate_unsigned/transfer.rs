@@ -1,132 +1,112 @@
 //! Pool admission for `private_transfer`.
 //!
-//! No ZK verification happens here; that is the extrinsic's job. Verifying a
-//! proof at admission would let anyone burn a node's CPU for free, since
-//! unsigned submissions cost nothing to make.
+//! | # | Check                  | Cost                              |
+//! |---|------------------------|-----------------------------------|
+//! | 1 | circuit version        | in-memory lookup                  |
+//! | 2 | dispatch checks        | `validate`, cheapest first        |
+//! | 3 | proof verifies         | one pairing (pool only)           |
+//! | 4 | build the pool tags    | no reads                          |
 //!
-//! ## Order of checks
-//!
-//! The steps below are numbered, and the order is the anti-spam property, not a
-//! style choice: each step is more expensive than the last, so a junk
-//! transaction is rejected as early — and as cheaply — as possible.
-//!
-//! | # | Check                  | Cost                        |
-//! |---|------------------------|-----------------------------|
-//! | 1 | circuit version        | in-memory lookup            |
-//! | 2 | fee floor              | one storage read + compare  |
-//! | 3 | Merkle root known      | one storage read            |
-//! | 4 | nullifiers not spent   | up to two storage reads     |
-//! | 5 | not all-dummy          | in-memory scan              |
-//! | 6 | build the pool tags    | no reads                    |
-//!
-//! Every check here is ALSO re-done in the dispatchable. That is deliberate: a
-//! check performed only at admission could be skipped by a malicious block
-//! author, so admission may reject more than execution — never less.
+//! Step 2 IS the dispatchable's validation, so admission can never reject less
+//! than execution. Its checks run cheapest first — shape, fee floor, root,
+//! nullifiers, memos, then the rest — and each failure maps to the rejection a
+//! wallet or relayer can act on (see [`admission_error`]).
 
 use super::{
 	TX_LONGEVITY,
 	codes::{self, reject},
 };
 use crate::{
-	pallet::{BalanceOf, Config, NullifierSet},
-	storage::MerkleRepository,
-	types::{Hash, Nullifier},
+	operations::{
+		ensure_valid_proof,
+		private_transfer::{PrivateTransferOperation, TransferRequest},
+	},
+	pallet::{Config, Error},
 };
-use frame_support::pallet_prelude::*;
-use pallet_relayer::RelayerInterface as _;
-use pallet_zk_verifier::ZkVerifierPort as _;
+use pallet_zk_verifier::{CircuitId, ZkVerifierPort as _};
 use sp_runtime::{
 	SaturatedConversion,
-	transaction_validity::{InvalidTransaction, TransactionValidity, ValidTransaction},
+	transaction_validity::{
+		InvalidTransaction, TransactionValidity, TransactionValidityError, ValidTransaction,
+	},
 };
-
-/// On-chain circuit id for the transfer/unshield version guard (mirrors the
-/// zk-verifier's `CircuitId` constants).
-const CIRCUIT_TRANSFER: u32 = 1;
 
 /// Validate an incoming `private_transfer` unsigned transaction.
 ///
-/// The fee recipient is absent by construction — it comes from the dispatch
-/// origin, not the call — and it must not enter the pool tag either way: binding
-/// it once made a copy with a swapped recipient a separate pool entry, so anyone
-/// could duplicate an honest transaction at no cost.
+/// `proof` is `Some` at pool admission and `None` in `pre_dispatch`, where the
+/// dispatchable verifies it and a second pairing would go unweighed.
 pub fn validate_private_transfer<T: Config>(
-	merkle_root: &Hash,
-	nullifiers: &BoundedVec<Nullifier, ConstU32<2>>,
-	fee: &BalanceOf<T>,
-	circuit_version: u32,
+	proof: Option<&[u8]>,
+	req: &TransferRequest<T>,
 ) -> TransactionValidity {
 	// ── 1. Circuit version ───────────────────────────────────────────────────
 	// Cheapest gate first: a transaction proving against a retired circuit can
 	// never execute, so it must not reach the pool at all.
-	if !T::ZkVerifier::is_supported_version(CIRCUIT_TRANSFER, circuit_version) {
+	if !T::ZkVerifier::is_supported_version(CircuitId::TRANSFER.0, req.circuit_version) {
 		return reject(codes::UNSUPPORTED_CIRCUIT_VERSION).into();
 	}
 
-	// ── 2. Fee floor ─────────────────────────────────────────────────────────
-	// The pool's price of entry. Submissions are unsigned and gasless, so this
-	// is what stops an attacker from filling it for nothing.
-	let min_fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
-	if *fee < min_fee {
-		return InvalidTransaction::Payment.into();
-	}
+	// ── 2. Everything the dispatchable checks ────────────────────────────────
+	PrivateTransferOperation::validate::<T>(req).map_err(admission_error::<T>)?;
 
-	// ── 3. Merkle root ───────────────────────────────────────────────────────
-	// An unknown root cannot verify, and the retention window is sized to
-	// outlive `TX_LONGEVITY` so a root accepted here stays valid until the
-	// transaction expires.
-	if !MerkleRepository::is_known_root::<T>(merkle_root) {
-		return reject(codes::UNKNOWN_ROOT).into();
-	}
-
-	// ── 4. Nullifiers not already spent ──────────────────────────────────────
-	// The dummy nullifier (all zeros) pads a single-input spend. It is never
-	// inserted into the set, so it can never be stale — skipping it is required,
-	// not an optimisation: treating it as spent would reject every one-input
-	// transfer after the first.
-	for nullifier in nullifiers.iter() {
-		if nullifier.0 == [0u8; 32] {
-			continue;
-		}
-		if NullifierSet::<T>::contains_key(nullifier) {
-			return InvalidTransaction::Stale.into();
+	// ── 3. Proof ─────────────────────────────────────────────────────────────
+	// Without it, a copy of a pending spend with swapped memos or a higher fee
+	// would share the nullifier tags, outrank the original on priority, replace
+	// it, and then fail in the block — free, repeatable censorship. An invalid
+	// proof from a peer also costs that peer reputation.
+	if let Some(proof) = proof {
+		let valid = ensure_valid_proof::<T>(|| {
+			T::ZkVerifier::verify_transfer_proof(proof, &req.statement(), Some(req.circuit_version))
+		})
+		.is_ok();
+		if !valid {
+			return reject(codes::INVALID_PROOF).into();
 		}
 	}
 
-	// ── 5. At least one real input ───────────────────────────────────────────
-	// All-dummy means no note is being spent, so the transfer would insert two
-	// commitments at zero cost — free Merkle tree growth.
-	if nullifiers.iter().all(|n| n.0 == [0u8; 32]) {
-		return reject(codes::ALL_INPUTS_DUMMY).into();
-	}
-
-	// ── 6. Pool tags — ONE PER NULLIFIER, never one over the whole set ───────
+	// ── 4. Pool tags: one per nullifier, never one over the whole set ────────
 	//
 	// `and_provides(x)` contributes exactly ONE tag: passing a `Vec<Vec<u8>>`
-	// encodes the entire vector into one blob. Doing that made the tag depend on
-	// the ORDER of the inputs and on the OTHER note in the pair, so:
-	//   - reordering the two inputs minted a second admissible entry for the
-	//     same spend, and
-	//   - two transfers sharing only one note (A+B and A+C) did not collide at
-	//     all, letting one note back an unbounded number of pool entries.
-	// Since the fee is only charged on execution, that was free mempool
+	// encodes the entire vector into one blob. Such a tag depends on the ORDER
+	// of the inputs and on the OTHER note in the pair, so:
+	//   - reordering the two inputs would mint a second admissible entry for
+	//     the same spend, and
+	//   - two transfers sharing only one note (A+B and A+C) would not collide,
+	//     letting one note back an unbounded number of pool entries.
+	// Since the fee is only charged on execution, that is free mempool
 	// amplification: every variant propagates and is revalidated network-wide
 	// while at most one can ever execute.
 	//
 	// Calling `and_provides` once PER nullifier makes any two transactions that
-	// share a note mutually exclusive, in any order — which is what makes the
-	// pool mirror the on-chain nullifier set.
+	// share a note mutually exclusive, in any order, so the pool mirrors the
+	// on-chain nullifier set.
 	//
 	// Dummy nullifiers (zero) are excluded: they carry no identity, and tagging
 	// them would collide every padded single-input spend with every other.
 	let mut builder = ValidTransaction::with_tag_prefix(super::SPEND_TAG_PREFIX)
-		.priority((*fee).saturated_into())
+		.priority(req.fee.saturated_into())
 		.longevity(TX_LONGEVITY)
 		.propagate(true);
 
-	for nullifier in nullifiers.iter().filter(|n| n.0 != [0u8; 32]) {
+	for nullifier in req.real_nullifiers() {
 		builder = builder.and_provides(nullifier);
 	}
 
 	builder.build()
+}
+
+/// The pool rejection for a failed transfer check.
+fn admission_error<T: Config>(error: Error<T>) -> TransactionValidityError {
+	match error {
+		// The pool's price of entry: submissions are unsigned and gasless.
+		Error::FeeTooLow => InvalidTransaction::Payment.into(),
+		Error::UnknownMerkleRoot => reject(codes::UNKNOWN_ROOT).into(),
+		Error::NullifierAlreadyUsed => InvalidTransaction::Stale.into(),
+		// The only `InvalidAmount` a transfer raises: it spends no real note.
+		Error::InvalidAmount => reject(codes::ALL_INPUTS_DUMMY).into(),
+		Error::MemoCommitmentMismatch | Error::InvalidMemoSize => {
+			reject(codes::INVALID_MEMO).into()
+		}
+		_ => reject(codes::INVALID_SPEND).into(),
+	}
 }

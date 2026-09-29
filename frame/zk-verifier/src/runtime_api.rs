@@ -3,8 +3,6 @@
 //! Read-only functions called by the runtime API implementation in
 //! `template/runtime`. They never modify state.
 
-extern crate alloc;
-
 use crate::{
 	CircuitVersionInfo, VkVersionHash,
 	pallet::{ActiveCircuitVersion, Config, RetiredVersions, VerificationKeys, VkHashes},

@@ -20,7 +20,7 @@ fn register_relayer_call() -> crate::Call<Test> {
 	}
 }
 
-// ─── Pays::Yes (standard governance call) ────────────────────────────────────
+// ─── Pays::Yes ───────────────────────────────────────────────────────────────
 
 #[test]
 fn register_relayer_pays_fee() {
@@ -33,7 +33,7 @@ fn register_relayer_pays_fee() {
 	);
 }
 
-// ─── DispatchClass::Normal ────────────────────────────────────────────────────
+// ─── DispatchClass::Normal ───────────────────────────────────────────────────
 
 #[test]
 fn register_relayer_is_normal_class() {
@@ -46,7 +46,7 @@ fn register_relayer_is_normal_class() {
 	);
 }
 
-// ─── Weight is non-zero ───────────────────────────────────────────────────────
+// ─── Weight is non-zero ──────────────────────────────────────────────────────
 
 #[test]
 fn register_relayer_has_non_zero_weight() {

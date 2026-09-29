@@ -2,6 +2,50 @@
 
 All notable changes to `pallet-evm-precompile-shielded-pool` will be documented in this file.
 
+## [0.7.0] - 2026-09-29
+
+**Breaking** — `claimShieldedFees` is gone. Requires the matching
+`pallet-shielded-pool`.
+
+### Added
+
+- `commitRelay(bytes32[])` — `0xc9b235ff` — records relay commits for the caller.
+- `claimRelayFees(uint32,uint256)` — `0x2a3274dd` — public fee claim into the
+  caller's mirror account.
+- `decode_relayable_call(input)`: decodes spend calldata exactly as `execute`
+  does, so the runtime derives relay commits from the same decoder.
+- Re-export `MAX_RELAY_COMMITS_PER_CALL`, and `MAX_SPEND_INPUTS` (the transfer
+  circuit's input count) for the node's relay.
+
+### Changed
+
+- `unshield` / `privateTransfer` decoders no longer take the (unused) handle.
+- Tests split into `tests/` by call (abi, shield, privateTransfer, unshield,
+  flows, adversarial, relay).
+- Array decoders take a maximum count (and item length for `bytes[]`) and reject
+  before copying: aliased `bytes[]` pointers used to allocate `count × length`
+  bytes — quadratic in the calldata — before any gas was charged.
+- Static calls and DELEGATECALL are refused: under DELEGATECALL the caller is the
+  delegating contract's caller, so any contract a relayer called could spend its
+  commit quota or claim in its name.
+- A pallet error returns `Revert` with the reason as `Error(string)`, giving the
+  caller its unused gas back, instead of an `Error` exit that burned all of it.
+  So do an unknown selector, input shorter than a selector, and calldata that
+  does not decode — through `precompile_utils::prelude::revert`.
+- `unshield` requires the whole 10-slot head and a well-formed change memo
+  (empty for a total unshield). Calldata without `circuitVersion`, or a total
+  unshield with a malformed memo offset, is refused instead of accepted as the
+  pre-spec-16 layout.
+
+### Removed
+
+- `claimShieldedFees` (`0x88d9deba`), `selectors::CLAIM_SHIELDED_FEES` and
+  `dispatch::from_caller`.
+
+### Internal
+
+- One `revert` constructor for every failure; decoders share `params`, `balance` and `proof` helpers and read slots through `abi::read_u32` / `read_u256`. Revert messages unchanged. Decoder steps numbered in all five calls.
+
 ## [0.6.0] - 2026-08-21
 
 ### Changed

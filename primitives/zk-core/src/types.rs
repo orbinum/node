@@ -87,7 +87,7 @@ impl From<u64> for FieldElement {
 	}
 }
 
-// ─── Newtype macro for value objects ─────────────────────────────────────────
+// ─── Newtype macro for value objects ──────────────────────────────────────────
 
 macro_rules! field_newtype {
 	($Name:ident, $doc:literal) => {

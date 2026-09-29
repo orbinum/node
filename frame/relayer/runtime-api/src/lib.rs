@@ -4,6 +4,7 @@ extern crate alloc;
 
 sp_api::decl_runtime_apis! {
 	/// Runtime API for querying relayer status and pending fees.
+	#[api_version(2)]
 	pub trait RelayerRuntimeApi {
 		/// Returns true if the given account is a registered relayer.
 		fn is_relayer(account: sp_runtime::AccountId32) -> bool;
@@ -17,14 +18,17 @@ sp_api::decl_runtime_apis! {
 		/// Returns all (evm_address, substrate_account) pairs in the relay registry.
 		///
 		/// Used by clients to discover which validator nodes have relay active.
-		/// Capa 2 of the relay architecture.
 		fn get_active_relayers() -> alloc::vec::Vec<([u8; 20], sp_runtime::AccountId32)>;
 
 		/// Returns true if the given EVM address is registered as a relayer on-chain.
 		///
-		/// Used by `orbinum_relayerStatus` to surface registration state to operators.
-		/// Capa 2 of the relay architecture.
+		/// Used by `orbinum_relayerStatus` and before recording a relay commit.
 		fn is_relayer_evm(evm_address: [u8; 20]) -> bool;
+
+		/// Block a relay commit was recorded in, while it is still live. A relayer
+		/// submits the spend only once this is below the current block.
+		#[api_version(2)]
+		fn relay_commit_block(commit: [u8; 32]) -> Option<u32>;
 	}
 }
 

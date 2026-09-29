@@ -11,8 +11,12 @@
 //!   unambiguous even when the EVM and substrate keys differ.
 //!   Self-service: an approved validator registers its own address via
 //!   `register_relayer`, and the binding is cleared when it leaves the set.
+//! - **Relay commits**: a relayer records `relay_commit_hash(op_hash, its H160)`
+//!   at least one block before submitting a spend. The fee of that spend is then
+//!   credited to the committed relayer no matter who submits it, so copying a
+//!   relayer's transaction does not redirect its fee.
 //! - **Fee accounting**: `PendingRelayerFees` tracks accrued relay fees per
-//!   (AccountId, asset_id).  Other pallets (pallet-shielded-pool) call
+//!   (AccountId, asset_id). Other pallets (pallet-shielded-pool) call
 //!   `T::Relayer::accumulate_relay_fee()` and `T::Relayer::consume_relay_fee()`
 //!   via the [`RelayerInterface`] trait instead of touching storage directly.
 //!
@@ -20,10 +24,12 @@
 //!
 //! | File | Responsibility |
 //! |------|----------------|
+//! | `lib.rs`          | FRAME pallet: Config, Storage, Events, Errors, Extrinsics, relay commits |
 //! | `traits.rs`       | `RelayerInterface` — public port consumed by other pallets |
+//! | `evm_proof.rs`    | Proof of EVM key control checked by `register_relayer` |
 //! | `weights.rs`      | `WeightInfo` trait + `SubstrateWeight<T>` + unit (`()`) impl |
 //! | `benchmarking.rs` | FRAME benchmarks (`runtime-benchmarks` feature) |
-//! | `lib.rs`          | FRAME pallet: Config, Storage, Events, Errors, Extrinsics |
+//! | `test_signing.rs` | Real ownership proofs for tests and benchmarks |
 //! | `mock.rs`         | Test runtime (`#[cfg(test)]`) |
 //! | `tests/`          | Integration tests split by concern |
 //!
@@ -43,17 +49,36 @@ pub mod test_signing;
 pub mod traits;
 pub mod weights;
 
-pub use evm_proof::EvmSignature;
-pub use pallet::*;
-pub use traits::RelayerInterface;
-pub use weights::WeightInfo;
-
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
 #[cfg(test)]
 mod mock;
 #[cfg(test)]
 mod tests;
+
+pub use evm_proof::EvmSignature;
+pub use pallet::*;
+pub use traits::RelayerInterface;
+pub use weights::WeightInfo;
+
+/// Domain tag of [`relay_commit_hash`], so a commit can never collide with
+/// another hash the protocol computes over the same bytes.
+pub const RELAY_COMMIT_DOMAIN: &[u8] = b"orbinum/relay-commit";
+
+/// The commit a relayer records before submitting the spend identified by
+/// `op_hash`.
+///
+/// The relayer's address is inside the preimage, so the relayer credited is
+/// derived from the hash itself: whoever writes a copy of this commit to storage
+/// only credits `relayer`. Without knowing `op_hash` — which stays private
+/// until the spend is broadcast — nobody can compute a commit for themselves.
+pub fn relay_commit_hash(op_hash: &[u8; 32], relayer: &sp_core::H160) -> sp_core::H256 {
+	let mut preimage = sp_std::vec::Vec::with_capacity(RELAY_COMMIT_DOMAIN.len() + 32 + 20);
+	preimage.extend_from_slice(RELAY_COMMIT_DOMAIN);
+	preimage.extend_from_slice(op_hash);
+	preimage.extend_from_slice(relayer.as_bytes());
+	sp_core::H256(sp_io::hashing::blake2_256(&preimage))
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FRAME pallet
@@ -64,11 +89,13 @@ pub mod pallet {
 	use super::{
 		RelayerInterface, WeightInfo,
 		evm_proof::{self, EvmSignature},
+		relay_commit_hash,
 	};
 	use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
 	use frame_system::pallet_prelude::*;
 	use pallet_validator_set::ValidatorSetInterface;
-	use sp_core::H160;
+	use sp_core::{H160, H256};
+	use sp_runtime::Saturating;
 	use sp_std::vec::Vec;
 
 	// ── Config ────────────────────────────────────────────────────────────────
@@ -105,6 +132,20 @@ pub mod pallet {
 		/// set may bind an EVM relay address.
 		type ValidatorSet: ValidatorSetInterface<Self::AccountId>;
 
+		/// Blocks a relay commit lives. A commit recorded in block `N` credits
+		/// spends included in blocks `N + 1 ..= N + CommitTtl - 1` and is pruned
+		/// at `N + CommitTtl`. A change applies to commits recorded afterwards.
+		///
+		/// Short on purpose: a relayer that commits and never submits keeps the
+		/// fee of that exact spend reserved to itself until this runs out.
+		#[pallet::constant]
+		type CommitTtl: Get<BlockNumberFor<Self>>;
+
+		/// Commits a single relayer may record per block. Per relayer, not global,
+		/// so one relayer cannot fill the quota and lock the others out.
+		#[pallet::constant]
+		type MaxCommitsPerRelayerPerBlock: Get<u32>;
+
 		type WeightInfo: WeightInfo;
 	}
 
@@ -113,6 +154,28 @@ pub mod pallet {
 	#[pallet::type_value]
 	pub fn DefaultMinRelayFeeValue<T: Config>() -> u128 {
 		T::DefaultMinRelayFee::get()
+	}
+
+	// ── Types ─────────────────────────────────────────────────────────────────
+
+	/// A stored relay commit.
+	#[derive(
+		Clone,
+		Copy,
+		PartialEq,
+		Eq,
+		Debug,
+		Encode,
+		Decode,
+		DecodeWithMemTracking,
+		MaxEncodedLen,
+		TypeInfo
+	)]
+	pub struct RelayCommit<BlockNumber> {
+		/// Block it was recorded in; only a spend in a later block is credited.
+		pub recorded_at: BlockNumber,
+		/// Block it is pruned in.
+		pub expires_at: BlockNumber,
 	}
 
 	// ── Storage ───────────────────────────────────────────────────────────────
@@ -150,6 +213,31 @@ pub mod pallet {
 		ValueQuery,
 	>;
 
+	/// Relay commits: [`relay_commit_hash`] → when it was recorded and expires.
+	///
+	/// Stores no author on purpose. The credited relayer is the one whose
+	/// address is in the preimage, so writing someone else's commit first
+	/// gains nothing. A commit already present keeps its (earlier) block.
+	#[pallet::storage]
+	pub type RelayCommits<T: Config> =
+		StorageMap<_, Blake2_128Concat, H256, RelayCommit<BlockNumberFor<T>>, OptionQuery>;
+
+	/// Expiry index: (expiry block, validator account) → the commits its relayer
+	/// recorded that expire then. Keyed by expiry, not by recording block, so
+	/// pruning stays exact when `CommitTtl` changes; keyed by account, not by
+	/// relay address, so rotating the address does not buy a fresh quota. At
+	/// most one entry per validator per expiry block.
+	#[pallet::storage]
+	pub type CommitsByRelayer<T: Config> = StorageDoubleMap<
+		_,
+		Twox64Concat,
+		BlockNumberFor<T>,
+		Blake2_128Concat,
+		T::AccountId,
+		BoundedVec<H256, T::MaxCommitsPerRelayerPerBlock>,
+		ValueQuery,
+	>;
+
 	// ── Events ────────────────────────────────────────────────────────────────
 
 	#[pallet::event]
@@ -170,18 +258,22 @@ pub mod pallet {
 			evm_address: H160,
 			account: T::AccountId,
 		},
-		/// Relay fee accrued for a block author during extrinsic processing.
+		/// A relay fee accrued to `relayer`: the committed relayer, or the block
+		/// author when none committed.
 		RelayFeeAccumulated {
 			relayer: T::AccountId,
 			asset_id: u32,
 			amount: u128,
 		},
-		/// Relay fees were marked as consumed (by `claim_shielded_fees`).
+		/// Relay fees were marked as consumed (by `claim_relay_fees`).
 		RelayFeesConsumed {
 			relayer: T::AccountId,
 			asset_id: u32,
 			amount: u128,
 		},
+		/// A relayer recorded `count` new relay commits (already-present ones
+		/// are not counted).
+		RelayCommitted { relayer: H160, count: u32 },
 	}
 
 	// ── Errors ────────────────────────────────────────────────────────────────
@@ -207,12 +299,44 @@ pub mod pallet {
 		InvalidEvmAddress,
 		/// The signature does not prove control of the EVM address being claimed.
 		BadEvmSignature,
+		/// The relayer already recorded `MaxCommitsPerRelayerPerBlock` commits in
+		/// this block.
+		TooManyCommits,
 	}
 
 	// ── Pallet core ───────────────────────────────────────────────────────────
 
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
+
+	#[pallet::hooks]
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		fn integrity_test() {
+			// 0 never expires a commit; 1 prunes it before any later block could use it.
+			assert!(
+				T::CommitTtl::get() >= 2u32.into(),
+				"CommitTtl must be at least 2 blocks"
+			);
+		}
+
+		/// Prune the commits that expire in this block. Bounded: the index holds
+		/// at most one entry per validator per block.
+		fn on_initialize(now: BlockNumberFor<T>) -> Weight {
+			let (mut keys, mut pruned) = (0u32, 0u32);
+			for (_, commits) in CommitsByRelayer::<T>::drain_prefix(now) {
+				keys = keys.saturating_add(1);
+				for commit in commits {
+					// A consumed commit is gone, and one consumed and recorded again
+					// has a later expiry of its own; leave both alone.
+					if RelayCommits::<T>::get(commit).is_some_and(|c| c.expires_at == now) {
+						RelayCommits::<T>::remove(commit);
+					}
+					pruned = pruned.saturating_add(1);
+				}
+			}
+			T::WeightInfo::prune_relay_commits(keys, pruned)
+		}
+	}
 
 	// ── Extrinsics ────────────────────────────────────────────────────────────
 
@@ -329,7 +453,7 @@ pub mod pallet {
 		/// the set, and removal from the set must never be blocked by cleanup.
 		///
 		/// `PendingRelayerFees` is deliberately left untouched — those fees were
-		/// already earned and stay claimable via `claim_shielded_fees`.
+		/// already earned and stay claimable via `claim_relay_fees`.
 		pub fn clear_relayer(who: &T::AccountId) -> Option<H160> {
 			let evm_address = RelayerByAccount::<T>::take(who)?;
 			RelayerRegistry::<T>::remove(evm_address);
@@ -412,6 +536,75 @@ pub mod pallet {
 
 		fn registered_evm_address(who: &T::AccountId) -> Option<sp_core::H160> {
 			RelayerByAccount::<T>::get(who)
+		}
+
+		fn record_relay_commits(relayer: &H160, commits: &[H256]) -> DispatchResult {
+			let who = RelayerRegistry::<T>::get(relayer).ok_or(Error::<T>::NotRegistered)?;
+			let recorded_at = frame_system::Pallet::<T>::block_number();
+			let expires_at = recorded_at.saturating_add(T::CommitTtl::get());
+
+			// Only new commits count against the quota, each once.
+			let mut fresh: Vec<H256> = Vec::with_capacity(commits.len());
+			for commit in commits {
+				if !RelayCommits::<T>::contains_key(commit) && !fresh.contains(commit) {
+					fresh.push(*commit);
+				}
+			}
+			// Nothing new: no index entry, no event.
+			if fresh.is_empty() {
+				return Ok(());
+			}
+			// Index first: past the quota nothing at all is written.
+			CommitsByRelayer::<T>::try_mutate(expires_at, &who, |index| -> DispatchResult {
+				for commit in &fresh {
+					index
+						.try_push(*commit)
+						.map_err(|_| Error::<T>::TooManyCommits)?;
+				}
+				Ok(())
+			})?;
+			for commit in &fresh {
+				RelayCommits::<T>::insert(
+					commit,
+					RelayCommit {
+						recorded_at,
+						expires_at,
+					},
+				);
+			}
+
+			Self::deposit_event(Event::RelayCommitted {
+				relayer: *relayer,
+				count: fresh.len() as u32,
+			});
+			Ok(())
+		}
+
+		fn take_committed_relayer(op_hash: &[u8; 32]) -> Option<T::AccountId> {
+			let now = frame_system::Pallet::<T>::block_number();
+			// (commit block, commit hash) of the best candidate so far, and its account.
+			type Rank<N> = (N, H256);
+			let mut winner: Option<(Rank<BlockNumberFor<T>>, T::AccountId)> = None;
+			for (evm_address, account) in RelayerRegistry::<T>::iter() {
+				let hash = relay_commit_hash(op_hash, &evm_address);
+				let Some(commit) = RelayCommits::<T>::take(hash) else {
+					continue;
+				};
+				// A commit from this block may have been written after the spend was
+				// seen, so only earlier blocks count.
+				let at = commit.recorded_at;
+				if at >= now {
+					continue;
+				}
+				// Earliest wins. A same-block tie goes to the lowest commit hash:
+				// it changes with every spend and cannot be ground in advance, unlike
+				// the registry's storage order, which an operator picks by address.
+				let rank = (at, hash);
+				if winner.as_ref().is_none_or(|(best, _)| rank < *best) {
+					winner = Some((rank, account));
+				}
+			}
+			winner.map(|(_, account)| account)
 		}
 	}
 }

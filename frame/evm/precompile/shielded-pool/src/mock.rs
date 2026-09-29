@@ -1,17 +1,16 @@
 //! Test mock for `pallet-evm-precompile-shielded-pool`.
 
+use fp_evm::{ExitError, ExitReason, Transfer};
 use frame_support::{derive_impl, parameter_types, traits::Get, weights::Weight, PalletId};
 use pallet_evm::{
 	AddressMapping, Context, EnsureAddressNever, EnsureAddressRoot, FeeCalculator, PrecompileHandle,
 };
-use pallet_zk_verifier::ZkVerifierPort;
+use pallet_zk_verifier::{TransferStatement, UnshieldStatement, ZkVerifierPort};
 use sp_core::{H160, H256, U256};
 use sp_runtime::{
 	traits::{BlakeTwo256, IdentityLookup},
 	AccountId32, BuildStorage,
 };
-
-use fp_evm::{ExitError, ExitReason, Transfer};
 
 pub(crate) type Balance = u128;
 
@@ -81,6 +80,7 @@ parameter_types! {
 	pub WeightPerGas: Weight = Weight::from_parts(20_000, 0);
 }
 
+/// `H160 ++ [0u8; 12]`, the runtime's EVM address mapping.
 pub struct H160ToAccountId32Mapping;
 impl AddressMapping<AccountId32> for H160ToAccountId32Mapping {
 	fn into_account_id(address: H160) -> AccountId32 {
@@ -131,54 +131,42 @@ pub struct MockZkVerifier;
 impl ZkVerifierPort for MockZkVerifier {
 	fn verify_transfer_proof(
 		proof: &[u8],
-		_merkle_root: &[u8; 32],
-		_nullifiers: &[[u8; 32]],
-		_commitments: &[[u8; 32]],
-		_asset_id: u32,
-		_fee: u128,
+		_statement: &TransferStatement,
 		_version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
-		if proof.is_empty() {
-			return Err(sp_runtime::DispatchError::Other("Empty proof"));
-		}
-		Ok(true)
+		non_empty(proof)
 	}
 
 	fn verify_unshield_proof(
 		proof: &[u8],
-		_merkle_root: &[u8; 32],
-		_nullifier: &[u8; 32],
-		_amount: u128,
-		_recipient: &[u8; 32],
-		_asset_id: u32,
-		_fee: u128,
-		_change_commitment: &[u8; 32],
+		_statement: &UnshieldStatement,
 		_version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
-		if proof.is_empty() {
-			return Err(sp_runtime::DispatchError::Other("Empty proof"));
-		}
-		Ok(true)
-	}
-
-	fn verify_value_proof(
-		proof: &[u8],
-		public_signals: &[u8],
-		_version: Option<u32>,
-	) -> Result<bool, sp_runtime::DispatchError> {
-		if proof.is_empty() {
-			return Err(sp_runtime::DispatchError::Other("Empty proof"));
-		}
-		if public_signals.len() != 76 {
-			return Err(sp_runtime::DispatchError::Other(
-				"Invalid public signals length",
-			));
-		}
-		Ok(true)
+		non_empty(proof)
 	}
 
 	fn is_supported_version(_circuit_id: u32, version: u32) -> bool {
 		version != 0
+	}
+
+	fn verification_weight() -> frame_support::weights::Weight {
+		frame_support::weights::Weight::from_parts(11_700_000_000, 0)
+	}
+}
+
+fn non_empty(proof: &[u8]) -> Result<bool, sp_runtime::DispatchError> {
+	if proof.is_empty() {
+		return Err(sp_runtime::DispatchError::Other("Empty proof"));
+	}
+	Ok(true)
+}
+
+/// The pallet's EVM mirror account: the same mapping as [`H160ToAccountId32Mapping`].
+pub struct MirrorAccount;
+
+impl sp_runtime::traits::Convert<H160, AccountId32> for MirrorAccount {
+	fn convert(address: H160) -> AccountId32 {
+		H160ToAccountId32Mapping::into_account_id(address)
 	}
 }
 
@@ -191,23 +179,41 @@ impl frame_support::traits::Get<Option<AccountId32>> for MockBlockAuthor {
 
 pub struct MockRelayer;
 
-std::thread_local! {
-	/// Controls the value returned by `MockRelayer::pending_relay_fees` during tests.
-	/// Default is 0 (no pending fees).  Set with `set_pending_relay_fees` before the
-	/// test that exercises a happy-path `claim_shielded_fees` dispatch.
-	static PENDING_RELAY_FEES: std::cell::Cell<u128> = const { std::cell::Cell::new(0) };
+/// The one relay address registered in the mock.
+pub fn registered_relayer() -> H160 {
+	H160::repeat_byte(0x77)
 }
 
-/// Override the mock's pending relay-fee balance for the current test.
+/// The validator account [`registered_relayer`] is registered to.
+pub fn registered_relayer_account() -> AccountId32 {
+	AccountId32::from([0x77u8; 32])
+}
+
+std::thread_local! {
+	/// Pending relay fees of `registered_relayer_account()`.
+	static PENDING_RELAY_FEES: std::cell::Cell<u128> = const { std::cell::Cell::new(0) };
+	/// Commits recorded through `record_relay_commits`, for assertions.
+	static RECORDED_COMMITS: std::cell::RefCell<Vec<sp_core::H256>> =
+		const { std::cell::RefCell::new(Vec::new()) };
+}
+
 pub fn set_pending_relay_fees(amount: u128) {
 	PENDING_RELAY_FEES.with(|c| c.set(amount));
+}
+
+pub fn pending_relay_fees() -> u128 {
+	PENDING_RELAY_FEES.with(|c| c.get())
+}
+
+pub fn recorded_commits() -> Vec<sp_core::H256> {
+	RECORDED_COMMITS.with(|c| c.borrow().clone())
 }
 
 impl pallet_relayer::RelayerInterface for MockRelayer {
 	type AccountId = AccountId32;
 
-	fn resolve_relayer(_evm_address: &sp_core::H160) -> Option<AccountId32> {
-		None
+	fn resolve_relayer(evm_address: &sp_core::H160) -> Option<AccountId32> {
+		(*evm_address == registered_relayer()).then(registered_relayer_account)
 	}
 
 	fn min_relay_fee() -> u128 {
@@ -225,18 +231,39 @@ impl pallet_relayer::RelayerInterface for MockRelayer {
 	fn accumulate_relay_fee(_author: &AccountId32, _asset_id: u32, _amount: u128) {}
 
 	fn pending_relay_fees(_who: &AccountId32, _asset_id: u32) -> u128 {
-		PENDING_RELAY_FEES.with(|c| c.get())
+		pending_relay_fees()
 	}
 
 	fn consume_relay_fee(
-		_who: &AccountId32,
+		who: &AccountId32,
 		_asset_id: u32,
-		_amount: u128,
+		amount: u128,
 	) -> frame_support::dispatch::DispatchResult {
+		if *who != registered_relayer_account() || pending_relay_fees() < amount {
+			return Err(sp_runtime::DispatchError::Other(
+				"insufficient pending fees",
+			));
+		}
+		PENDING_RELAY_FEES.with(|c| c.set(c.get() - amount));
 		Ok(())
 	}
 
-	fn registered_evm_address(_who: &AccountId32) -> Option<sp_core::H160> {
+	fn registered_evm_address(who: &AccountId32) -> Option<sp_core::H160> {
+		(*who == registered_relayer_account()).then(registered_relayer)
+	}
+
+	fn record_relay_commits(
+		relayer: &sp_core::H160,
+		commits: &[sp_core::H256],
+	) -> frame_support::dispatch::DispatchResult {
+		if *relayer != registered_relayer() {
+			return Err(sp_runtime::DispatchError::Other("not registered"));
+		}
+		RECORDED_COMMITS.with(|c| c.borrow_mut().extend_from_slice(commits));
+		Ok(())
+	}
+
+	fn take_committed_relayer(_op_hash: &[u8; 32]) -> Option<AccountId32> {
 		None
 	}
 }
@@ -252,8 +279,10 @@ impl pallet_shielded_pool::Config for Test {
 	type MaxLeavesPerTree = MaxLeavesPerTree;
 	type WeightInfo = ();
 	type Relayer = MockRelayer;
+	type EvmAccount = MirrorAccount;
 }
 
+/// The EVM caller of every `MockHandle`.
 pub fn caller() -> H160 {
 	H160::from_low_u64_be(1)
 }
@@ -266,23 +295,25 @@ pub fn caller_account() -> AccountId32 {
 /// `MockHandle` (`context.address = H160::zero()`).
 ///
 /// In real EVM execution the EVM transfers `msg.value` from the caller to the
-/// precompile's account before `execute` is called.  The mock doesn't run the EVM
+/// precompile's account before `execute` is called. The mock doesn't run the EVM
 /// machinery, so `new_test_ext` funds this account directly to replicate that effect.
 pub fn precompile_account() -> AccountId32 {
 	H160ToAccountId32Mapping::into_account_id(H160::zero())
 }
 
 pub fn new_test_ext() -> sp_io::TestExternalities {
+	// Thread-locals outlive externalities; reset so tests do not leak into each other.
+	set_pending_relay_fees(0);
+	RECORDED_COMMITS.with(|c| c.borrow_mut().clear());
 	let mut t = frame_system::GenesisConfig::<Test>::default()
 		.build_storage()
 		.unwrap();
 
 	pallet_balances::GenesisConfig::<Test> {
-		// Fund both the EVM caller and the precompile's own account.
-		// The precompile account must have balance because `dispatch_call_from_self`
+		// Fund both the EVM caller and the precompile's own account. `dispatch::from_self`
 		// dispatches `shield` with the precompile as origin, and the pallet transfers
-		// from that account to the pool.  In real EVM the engine moves `msg.value`
-		// there before calling execute; here we fund it in genesis instead.
+		// from that account to the pool. The real EVM moves `msg.value` there before
+		// `execute`; here genesis funds it instead.
 		balances: vec![
 			(caller_account(), 1_000_000_000_000_000u128),
 			(precompile_account(), 1_000_000_000_000_000u128),
@@ -304,9 +335,13 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 	ext
 }
 
+/// A precompile call from [`caller`] to the precompile at `H160::zero()`.
 pub(crate) struct MockHandle {
 	pub input: Vec<u8>,
 	pub context: Context,
+	/// Differs from `context.address` under DELEGATECALL.
+	pub code_address: H160,
+	pub is_static: bool,
 }
 
 impl MockHandle {
@@ -318,20 +353,17 @@ impl MockHandle {
 				caller: caller(),
 				apparent_value: U256::zero(),
 			},
+			code_address: H160::zero(),
+			is_static: false,
 		}
 	}
 
-	/// Creates a `MockHandle` with a non-zero `apparent_value` (msg.value).
-	/// Used for payable calls such as `shield`.
+	/// A handle carrying `value` as `apparent_value` (`msg.value`), for payable
+	/// calls such as `shield`.
 	pub fn with_value(input: Vec<u8>, value: u128) -> Self {
-		Self {
-			input,
-			context: Context {
-				address: H160::zero(),
-				caller: caller(),
-				apparent_value: U256::from(value),
-			},
-		}
+		let mut handle = Self::new(input);
+		handle.context.apparent_value = U256::from(value);
+		handle
 	}
 }
 
@@ -372,7 +404,7 @@ impl PrecompileHandle for MockHandle {
 	}
 
 	fn code_address(&self) -> H160 {
-		H160::zero()
+		self.code_address
 	}
 
 	fn input(&self) -> &[u8] {
@@ -388,7 +420,7 @@ impl PrecompileHandle for MockHandle {
 	}
 
 	fn is_static(&self) -> bool {
-		false
+		self.is_static
 	}
 
 	fn gas_limit(&self) -> Option<u64> {

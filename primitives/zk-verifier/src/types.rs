@@ -1,4 +1,4 @@
-//! Core ZK types: proofs, keys, inputs, errors, and circuit constants.
+//! Core Groth16 types: proofs, keys, public inputs, errors, and size limits.
 
 use alloc::vec::Vec;
 
@@ -12,25 +12,7 @@ use parity_scale_codec::{Decode, Encode};
 #[cfg(feature = "substrate")]
 use scale_info::TypeInfo;
 
-// ─── Circuit constants ────────────────────────────────────────────────────────
-
-/// Circuit identifier for transfer operations.
-pub const CIRCUIT_ID_TRANSFER: u8 = 1;
-/// Circuit identifier for unshield (withdraw) operations.
-pub const CIRCUIT_ID_UNSHIELD: u8 = 2;
-/// Circuit identifier for value proof operations (proves note commitment encodes declared value).
-pub const CIRCUIT_ID_VALUE_PROOF: u8 = 6;
-
-/// Number of public inputs for the transfer circuit.
-/// Public inputs: [merkle_root, nullifier1, nullifier2, commitment1, commitment2, asset_id, fee]
-pub const TRANSFER_PUBLIC_INPUTS: usize = 7;
-/// Number of public inputs for the unshield circuit.
-/// Public inputs: [merkle_root, nullifier, amount, recipient, asset_id, fee, change_commitment]
-pub const UNSHIELD_PUBLIC_INPUTS: usize = 7;
-/// Number of public signals for the value proof circuit.
-/// Signals: [commitment(32B), value(8B), asset_id(4B), owner_hash(32B)] = 4 field elements.
-pub const VALUE_PROOF_PUBLIC_INPUTS: usize = 4;
-
+// ─── Limits ───────────────────────────────────────────────────────────────────
 /// Base cost for Groth16 verification (pairing operations).
 pub const BASE_VERIFICATION_COST: u64 = 100_000;
 /// Cost per public input (scalar multiplication).
@@ -60,19 +42,7 @@ pub const MAX_VK_BYTES: usize = 8192;
 /// the deserializer a length prefix to act on.
 pub const MAX_PROOF_BYTES: usize = 1024;
 
-/// Expected public-input count for a known circuit id, or `None` if unknown.
-/// A VK for the circuit must have `gamma_abc_g1.len() == expected + 1`.
-pub const fn expected_public_inputs(circuit_id: u8) -> Option<usize> {
-	match circuit_id {
-		CIRCUIT_ID_TRANSFER => Some(TRANSFER_PUBLIC_INPUTS),
-		CIRCUIT_ID_UNSHIELD => Some(UNSHIELD_PUBLIC_INPUTS),
-		CIRCUIT_ID_VALUE_PROOF => Some(VALUE_PROOF_PUBLIC_INPUTS),
-		_ => None,
-	}
-}
-
 // ─── VerifierError ────────────────────────────────────────────────────────────
-
 /// Errors that can occur during proof verification.
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "substrate", derive(Encode, Decode, TypeInfo))]
@@ -122,7 +92,6 @@ impl fmt::Display for VerifierError {
 impl std::error::Error for VerifierError {}
 
 // ─── Proof ────────────────────────────────────────────────────────────────────
-
 /// A Groth16 proof in compressed serialized form.
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "substrate", derive(Encode, Decode, TypeInfo))]
@@ -157,7 +126,6 @@ impl Proof {
 }
 
 // ─── VerifyingKey ─────────────────────────────────────────────────────────────
-
 /// A Groth16 verifying key in compressed serialized form.
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "substrate", derive(Encode, Decode, TypeInfo))]
@@ -174,12 +142,47 @@ impl VerifyingKey {
 		&self.bytes
 	}
 
+	/// Deserialize, refusing any key that is not exactly a well-formed BN254
+	/// Groth16 key.
+	///
+	/// The layout is checked before deserializing: `ark-serialize` reserves a
+	/// `Vec` from its length prefix before reading an element, so a short key
+	/// declaring 2^25 points would ask for gigabytes. Points at infinity are
+	/// refused too — an identity `gamma_abc` entry would leave its public input
+	/// out of the verification equation entirely.
 	pub fn to_ark_vk(&self) -> Result<ArkVK<Bn254>, VerifierError> {
-		if self.bytes.len() > MAX_VK_BYTES {
+		use ark_ec::AffineRepr;
+		// alpha (G1) + beta, gamma, delta (G2), compressed; then the u64 length
+		// of `gamma_abc` and its G1 points.
+		const HEADER: usize = 32 + 3 * 64;
+		const G1: usize = 32;
+		let bytes = &self.bytes[..];
+		if bytes.len() > MAX_VK_BYTES {
 			return Err(VerifierError::InvalidVerifyingKey);
 		}
-		ArkVK::<Bn254>::deserialize_compressed(&self.bytes[..])
-			.map_err(|_| VerifierError::InvalidVerifyingKey)
+		let declared = bytes
+			.get(HEADER..HEADER + 8)
+			.and_then(|len| <[u8; 8]>::try_from(len).ok())
+			.map(u64::from_le_bytes)
+			.ok_or(VerifierError::InvalidVerifyingKey)?;
+		if declared == 0 || declared > (MAX_PUBLIC_INPUTS as u64 + 1) {
+			return Err(VerifierError::InvalidVerifyingKey);
+		}
+		if bytes.len() != HEADER + 8 + declared as usize * G1 {
+			return Err(VerifierError::InvalidVerifyingKey);
+		}
+
+		let vk = ArkVK::<Bn254>::deserialize_compressed(bytes)
+			.map_err(|_| VerifierError::InvalidVerifyingKey)?;
+		let identity = vk.alpha_g1.is_zero()
+			|| vk.beta_g2.is_zero()
+			|| vk.gamma_g2.is_zero()
+			|| vk.delta_g2.is_zero()
+			|| vk.gamma_abc_g1.iter().any(|p| p.is_zero());
+		if identity {
+			return Err(VerifierError::InvalidVerifyingKey);
+		}
+		Ok(vk)
 	}
 
 	pub fn from_ark_vk(vk: &ArkVK<Bn254>) -> Result<Self, VerifierError> {
@@ -204,7 +207,6 @@ impl VerifyingKey {
 }
 
 // ─── PublicInputs ─────────────────────────────────────────────────────────────
-
 /// Public inputs for a Groth16 proof — each input is a field element in LE bytes.
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "substrate", derive(Encode, Decode, TypeInfo))]
@@ -259,17 +261,52 @@ impl PublicInputs {
 	}
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
+/// Reduce 32 little-endian bytes mod BN254 `r`: the canonical field element the
+/// verifier accepts as a public input.
+pub fn to_field_le(bytes: &[u8; 32]) -> [u8; 32] {
+	use ark_ff::{BigInteger, PrimeField};
+	let mut out = [0u8; 32];
+	out.copy_from_slice(
+		&Bn254Fr::from_le_bytes_mod_order(bytes)
+			.into_bigint()
+			.to_bytes_le(),
+	);
+	out
+}
 
+// ─── Tests ────────────────────────────────────────────────────────────────────
 #[cfg(test)]
 mod tests {
 	use super::*;
-	extern crate alloc;
 	use alloc::vec;
 	use ark_ff::PrimeField;
 
-	// ─── VerifierError ───────────────────────────────────────────────────
+	// ─── Helpers ──────────────────────────────────────────────────────────────
+	/// A genuine BN254 verifying key with `arity` public inputs; `tweak` edits it
+	/// before encoding.
+	///
+	/// Real, not random bytes: a size or layout guard must reject input that
+	/// *would* deserialize, so a test built on garbage would pass whether or not
+	/// the guard exists.
+	fn vk_bytes(arity: usize, tweak: impl FnOnce(&mut ArkVK<Bn254>)) -> Vec<u8> {
+		use ark_bn254::{G1Affine, G2Affine};
+		use ark_ec::AffineRepr;
+		let mut vk = ArkVK::<Bn254> {
+			alpha_g1: G1Affine::generator(),
+			beta_g2: G2Affine::generator(),
+			gamma_g2: G2Affine::generator(),
+			delta_g2: G2Affine::generator(),
+			gamma_abc_g1: (0..=arity).map(|_| G1Affine::generator()).collect(),
+		};
+		tweak(&mut vk);
+		VerifyingKey::from_ark_vk(&vk).expect("serializes").bytes
+	}
 
+	fn well_formed_vk(arity: usize) -> Vec<u8> {
+		vk_bytes(arity, |_| {})
+	}
+
+	// ─── VerifierError ────────────────────────────────────────────────────────
 	#[test]
 	fn test_error_equality_and_clone() {
 		let a = VerifierError::InvalidProof;
@@ -323,38 +360,7 @@ mod tests {
 		assert_eq!(msg, "Invalid circuit ID: 9");
 	}
 
-	// ─── Circuit constants ───────────────────────────────────────────────
-
-	#[test]
-	fn test_circuit_ids_are_stable() {
-		assert_eq!(CIRCUIT_ID_TRANSFER, 1);
-		assert_eq!(CIRCUIT_ID_UNSHIELD, 2);
-		assert_eq!(CIRCUIT_ID_VALUE_PROOF, 6);
-	}
-
-	#[test]
-	fn test_public_input_counts_are_expected() {
-		assert_eq!(TRANSFER_PUBLIC_INPUTS, 7);
-		assert_eq!(UNSHIELD_PUBLIC_INPUTS, 7);
-		assert_eq!(VALUE_PROOF_PUBLIC_INPUTS, 4);
-	}
-
-	#[test]
-	fn expected_public_inputs_maps_known_circuits() {
-		assert_eq!(expected_public_inputs(CIRCUIT_ID_TRANSFER), Some(7));
-		assert_eq!(expected_public_inputs(CIRCUIT_ID_UNSHIELD), Some(7));
-		assert_eq!(expected_public_inputs(CIRCUIT_ID_VALUE_PROOF), Some(4));
-		// Unknown / unmapped circuit ids (e.g. shield=3) return None.
-		assert_eq!(expected_public_inputs(3), None);
-		// Circuit 5 (retired private-link) is no longer a known circuit: a VK
-		// registered under that id would skip arity validation entirely.
-		assert_eq!(expected_public_inputs(5), None);
-		assert_eq!(expected_public_inputs(0), None);
-		assert_eq!(expected_public_inputs(99), None);
-	}
-
-	// ─── Proof ──────────────────────────────────────────────────────────
-
+	// ─── Proof ────────────────────────────────────────────────────────────────
 	#[test]
 	fn test_proof_new() {
 		let bytes = vec![1, 2, 3, 4, 5];
@@ -387,8 +393,7 @@ mod tests {
 		assert!(Proof::new(vec![]).as_bytes().is_empty());
 	}
 
-	// ─── VerifyingKey ────────────────────────────────────────────────────
-
+	// ─── VerifyingKey ─────────────────────────────────────────────────────────
 	#[test]
 	fn test_vk_new() {
 		let bytes = vec![1, 2, 3, 4, 5];
@@ -413,6 +418,38 @@ mod tests {
 	}
 
 	#[test]
+	fn to_ark_vk_accepts_a_well_formed_key() {
+		assert!(VerifyingKey::new(vk_bytes(8, |_| {})).to_ark_vk().is_ok());
+	}
+
+	#[test]
+	fn to_ark_vk_refuses_a_huge_declared_length_without_allocating() {
+		let mut bytes = vk_bytes(1, |_| {});
+		bytes[224..232].copy_from_slice(&(1u64 << 25).to_le_bytes());
+		assert_eq!(
+			VerifyingKey::new(bytes).to_ark_vk(),
+			Err(VerifierError::InvalidVerifyingKey)
+		);
+	}
+
+	#[test]
+	fn to_ark_vk_refuses_trailing_bytes() {
+		let mut bytes = vk_bytes(2, |_| {});
+		bytes.push(0);
+		assert!(VerifyingKey::new(bytes).to_ark_vk().is_err());
+	}
+
+	#[test]
+	fn to_ark_vk_refuses_points_at_infinity() {
+		use ark_bn254::{G1Affine, G2Affine};
+		use ark_ec::AffineRepr;
+		let zero_input = vk_bytes(3, |vk| vk.gamma_abc_g1[2] = G1Affine::zero());
+		assert!(VerifyingKey::new(zero_input).to_ark_vk().is_err());
+		let zero_delta = vk_bytes(3, |vk| vk.delta_g2 = G2Affine::zero());
+		assert!(VerifyingKey::new(zero_delta).to_ark_vk().is_err());
+	}
+
+	#[test]
 	fn test_vk_prepare_invalid() {
 		assert!(VerifyingKey::new(vec![0u8; 10]).prepare().is_err());
 	}
@@ -428,8 +465,7 @@ mod tests {
 		assert!(VerifyingKey::new(vec![]).as_bytes().is_empty());
 	}
 
-	// ─── PublicInputs ────────────────────────────────────────────────────
-
+	// ─── PublicInputs ─────────────────────────────────────────────────────────
 	#[test]
 	fn test_public_inputs_new() {
 		let inputs = vec![[1u8; 32], [2u8; 32]];
@@ -565,28 +601,25 @@ mod tests {
 		}
 	}
 
-	// ─── Deserialization bounds ───────────────────────────────────────────────
+	#[test]
+	fn to_field_le_reduces_mod_r() {
+		use ark_ff::{BigInteger, PrimeField};
+		let r: [u8; 32] = Bn254Fr::MODULUS.to_bytes_le().try_into().unwrap();
+		let mut r_plus_one = r;
+		r_plus_one[0] += 1;
+		let mut one = [0u8; 32];
+		one[0] = 1;
 
-	/// Build a genuine BN254 verifying key with `arity` public inputs.
-	///
-	/// Real, not random bytes: the point of the size guard is to reject input
-	/// that *would* deserialize, so a test built on garbage would pass whether
-	/// or not the guard exists.
-	#[cfg(test)]
-	fn well_formed_vk(arity: usize) -> Vec<u8> {
-		use ark_bn254::{G1Affine, G2Affine};
-		use ark_ec::AffineRepr;
-
-		let vk = ArkVK::<Bn254> {
-			alpha_g1: G1Affine::generator(),
-			beta_g2: G2Affine::generator(),
-			gamma_g2: G2Affine::generator(),
-			delta_g2: G2Affine::generator(),
-			gamma_abc_g1: (0..=arity).map(|_| G1Affine::generator()).collect(),
-		};
-		VerifyingKey::from_ark_vk(&vk).expect("serializes").bytes
+		assert_eq!(to_field_le(&r), [0u8; 32]);
+		assert_eq!(to_field_le(&r_plus_one), one);
+		assert_eq!(to_field_le(&one), one, "canonical input is unchanged");
+		let max = to_field_le(&[0xFF; 32]);
+		assert_eq!(to_field_le(&max), max, "output is canonical");
+		assert!(PublicInputs::new(alloc::vec![max])
+			.to_field_elements()
+			.is_ok());
 	}
-
+	// ─── Deserialization bounds ───────────────────────────────────────────────
 	/// `ark-serialize` sizes a `Vec` from an 8-byte length prefix and calls
 	/// `Vec::with_capacity` before reading a single element, so a key declaring
 	/// 2^40 points asks the allocator for tens of gigabytes on attacker-supplied
@@ -686,8 +719,8 @@ mod tests {
 		);
 	}
 
-	/// `MAX_PUBLIC_INPUTS` was declared but never applied: the pallet bounds its
-	/// extrinsic argument, yet the `ZkVerifierPort` path does not go through it.
+	/// `MAX_PUBLIC_INPUTS` is enforced here: the pallet bounds its extrinsic
+	/// argument, but the `ZkVerifierPort` path does not go through it.
 	#[test]
 	fn too_many_public_inputs_are_rejected() {
 		let inputs = alloc::vec![[0u8; 32]; MAX_PUBLIC_INPUTS + 1];
@@ -703,25 +736,4 @@ mod tests {
 		let inputs = alloc::vec![[0u8; 32]; MAX_PUBLIC_INPUTS];
 		assert!(PublicInputs::new(inputs).to_field_elements().is_ok());
 	}
-
-	/// Every circuit in use sits far below the cap, so enforcing it cannot break
-	/// a real verification.
-	///
-	/// A `const` block rather than a `#[test]`: these are all constants, so the
-	/// comparison is decided at compile time either way — this way raising a
-	/// circuit's arity past the cap fails the build instead of a test run.
-	const _: () = {
-		assert!(
-			TRANSFER_PUBLIC_INPUTS * 4 < MAX_PUBLIC_INPUTS,
-			"transfer arity is too close to MAX_PUBLIC_INPUTS"
-		);
-		assert!(
-			UNSHIELD_PUBLIC_INPUTS * 4 < MAX_PUBLIC_INPUTS,
-			"unshield arity is too close to MAX_PUBLIC_INPUTS"
-		);
-		assert!(
-			VALUE_PROOF_PUBLIC_INPUTS * 4 < MAX_PUBLIC_INPUTS,
-			"value-proof arity is too close to MAX_PUBLIC_INPUTS"
-		);
-	};
 }

@@ -21,122 +21,109 @@
 //! The three arrays are parallel: `commitments[i]` and `memos[i]` describe the
 //! output note paid for by `nullifiers[i]`, so all three must have equal length.
 //!
-//! The relay fee recipient is not in the ABI and is not a call argument: it is
-//! the dispatch origin, built from `handle.context().caller`. Calldata therefore
-//! cannot name a different one.
+//! The relay fee recipient is not in the ABI: it is the relayer that recorded a
+//! relay commit for this spend (`commitRelay`), whoever submits it.
 
-use fp_evm::{ExitError, PrecompileFailure, PrecompileHandle};
-use frame_support::BoundedVec;
-use sp_core::U256;
+use alloc::vec::Vec;
 
-use crate::abi;
+use fp_evm::PrecompileFailure;
+use frame_support::{traits::ConstU32, BoundedVec};
+use pallet_shielded_pool::{
+	types::MAX_ENCRYPTED_MEMO_SIZE, Commitment, FrameEncryptedMemo, Nullifier,
+};
+
+use super::{balance, params, proof};
+use crate::{abi, revert};
 
 /// Selector for the signature in this module's header.
 pub const SELECTOR: [u8; 4] = [0x66, 0xed, 0x2c, 0xd4];
 
-/// Maximum byte length of a serialised Groth16 proof accepted by the pallet.
-const MAX_PROOF_LEN: u32 = 512;
 /// Maximum number of input nullifiers / output commitments in a single transfer.
-const MAX_NOTES: u32 = 2;
+pub const MAX_NOTES: u32 = 2;
 
 /// Decodes `input` into a ready-to-dispatch `private_transfer` call.
 ///
 /// Beyond the ABI itself, this enforces the structural invariant the proof does
 /// not cover: at least one input note, and the three arrays equal in length.
-pub fn decode<T>(
-	// Unused here: the relaying address comes from the dispatch origin, not from
-	// anything this decoder reads. Kept for signature parity with the other calls.
-	_handle: &impl PrecompileHandle,
-	input: &[u8],
-) -> Result<pallet_shielded_pool::Call<T>, PrecompileFailure>
+pub fn decode<T>(input: &[u8]) -> Result<pallet_shielded_pool::Call<T>, PrecompileFailure>
 where
 	T: pallet_shielded_pool::Config,
 	pallet_shielded_pool::BalanceOf<T>: TryFrom<u128>,
 {
-	let params = &input[4..];
-
-	// Step 1: require all eight head slots. The array offsets they carry point
-	// into the tail, whose bounds each decoder validates on its own.
-	if params.len() < 256 {
-		return Err(err("privateTransfer: input too short"));
-	}
+	// Step 1: require all eight head slots.
+	let params = params(input, 256, "privateTransfer: input too short")?;
 
 	// Step 2: proof — dynamic, offset at slot 0.
-	let proof: BoundedVec<u8, frame_support::traits::ConstU32<MAX_PROOF_LEN>> =
-		abi::decode_bytes_at_slot(params, 0)?
-			.try_into()
-			.map_err(|_| err("privateTransfer: proof too long"))?;
-
-	if proof.is_empty() {
-		return Err(err("privateTransfer: proof must be non-empty"));
-	}
+	let proof = proof(
+		params,
+		0,
+		"privateTransfer: proof too long",
+		"privateTransfer: proof must be non-empty",
+	)?;
 
 	// Step 3: merkle_root the proof is verified against.
 	let merkle_root: pallet_shielded_pool::Hash = abi::read_bytes32(params, 32)?;
 
 	// Step 4: the three parallel arrays — nullifiers spent, commitments created,
-	// and the memo carrying each new note's secrets.
-	let nullifiers: BoundedVec<
-		pallet_shielded_pool::Nullifier,
-		frame_support::traits::ConstU32<MAX_NOTES>,
-	> = abi::decode_bytes32_array_at_slot(params, 64)?
-		.into_iter()
-		.map(pallet_shielded_pool::Nullifier::from)
-		.collect::<alloc::vec::Vec<_>>()
-		.try_into()
-		.map_err(|_| err("privateTransfer: too many nullifiers"))?;
+	// and the memo carrying each new note's secrets. The decoders bound count and
+	// item size, so the conversions below cannot fail.
+	let nullifiers: BoundedVec<Nullifier, ConstU32<MAX_NOTES>> =
+		abi::decode_bytes32_array_at_slot(params, 64, MAX_NOTES as usize)?
+			.into_iter()
+			.map(Nullifier::from)
+			.collect::<Vec<_>>()
+			.try_into()
+			.map_err(|_| revert("privateTransfer: too many nullifiers"))?;
 
-	let commitments: BoundedVec<
-		pallet_shielded_pool::Commitment,
-		frame_support::traits::ConstU32<MAX_NOTES>,
-	> = abi::decode_bytes32_array_at_slot(params, 96)?
-		.into_iter()
-		.map(pallet_shielded_pool::Commitment::from)
-		.collect::<alloc::vec::Vec<_>>()
-		.try_into()
-		.map_err(|_| err("privateTransfer: too many commitments"))?;
+	let commitments: BoundedVec<Commitment, ConstU32<MAX_NOTES>> =
+		abi::decode_bytes32_array_at_slot(params, 96, MAX_NOTES as usize)?
+			.into_iter()
+			.map(Commitment::from)
+			.collect::<Vec<_>>()
+			.try_into()
+			.map_err(|_| revert("privateTransfer: too many commitments"))?;
 
-	let encrypted_memos: BoundedVec<
-		pallet_shielded_pool::FrameEncryptedMemo,
-		frame_support::traits::ConstU32<MAX_NOTES>,
-	> = abi::decode_bytes_array_at_slot(params, 128)?
+	let encrypted_memos: BoundedVec<FrameEncryptedMemo, ConstU32<MAX_NOTES>> =
+		abi::decode_bytes_array_at_slot(
+			params,
+			128,
+			MAX_NOTES as usize,
+			MAX_ENCRYPTED_MEMO_SIZE as usize,
+		)?
 		.into_iter()
-		.map(|m| {
-			pallet_shielded_pool::FrameEncryptedMemo::new(m)
-				.map_err(|_| err("privateTransfer: memo too long"))
-		})
-		.collect::<Result<alloc::vec::Vec<_>, _>>()?
+		.map(|m| FrameEncryptedMemo::new(m).map_err(|_| revert("privateTransfer: memo too long")))
+		.collect::<Result<Vec<_>, _>>()?
 		.try_into()
-		.map_err(|_| err("privateTransfer: too many memos"))?;
+		.map_err(|_| revert("privateTransfer: too many memos"))?;
 
 	// Step 5: the arrays must line up. A length mismatch is malformed input, not a
 	// balance question, and the proof cannot catch it — it constrains values, not
 	// how many memos were attached, so a short memo array would silently drop the
 	// secrets for an output note that still gets created.
 	if nullifiers.is_empty() {
-		return Err(err("privateTransfer: at least one nullifier required"));
+		return Err(revert("privateTransfer: at least one nullifier required"));
 	}
 	if nullifiers.len() != commitments.len() {
-		return Err(err("privateTransfer: nullifier/commitment count mismatch"));
+		return Err(revert(
+			"privateTransfer: nullifier/commitment count mismatch",
+		));
 	}
 	if commitments.len() != encrypted_memos.len() {
-		return Err(err("privateTransfer: commitment/memo count mismatch"));
+		return Err(revert("privateTransfer: commitment/memo count mismatch"));
 	}
 
 	// Step 6: asset_id.
-	let asset_id = abi::decode_u32(&params[160..192])?;
+	let asset_id = abi::read_u32(params, 160)?;
 
 	// Step 7: fee paid to the relayer.
-	let fee: pallet_shielded_pool::BalanceOf<T> = {
-		let raw: u128 = U256::from_big_endian(&params[192..224])
-			.try_into()
-			.map_err(|_| err("privateTransfer: fee overflow"))?;
-		raw.try_into()
-			.map_err(|_| err("privateTransfer: fee conversion failed"))?
-	};
+	let fee = balance::<T>(
+		abi::read_u256(params, 192)?,
+		"privateTransfer: fee overflow",
+		"privateTransfer: fee conversion failed",
+	)?;
 
 	// Step 8: circuit_version, selecting the VK the proof is checked against.
-	let circuit_version = abi::decode_u32(&params[224..256])?;
+	let circuit_version = abi::read_u32(params, 224)?;
 
 	Ok(pallet_shielded_pool::Call::<T>::private_transfer {
 		proof,
@@ -148,12 +135,4 @@ where
 		fee,
 		circuit_version,
 	})
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn err(msg: &'static str) -> PrecompileFailure {
-	PrecompileFailure::Error {
-		exit_status: ExitError::Other(msg.into()),
-	}
 }

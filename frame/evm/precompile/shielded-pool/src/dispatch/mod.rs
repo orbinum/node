@@ -1,26 +1,25 @@
 //! Dispatch helpers for the shielded-pool precompile.
 //!
-//! Three dispatch modes mirror the pallet's extrinsic origin checks. They differ
+//! Two dispatch modes mirror the pallet's extrinsic origin checks. They differ
 //! only in the origin they build; everything else — converting the pallet call to
 //! a runtime call, charging gas from its weight, mapping the dispatch result to a
 //! precompile outcome — is shared here and reached through [`record_and_dispatch`].
 //!
 //! - [`origin::from_self`] — the precompile's own address as signed origin.
-//! - [`origin::from_caller`] — the EVM caller's mapped address as signed origin.
 //! - [`origin::relayed`] — carries the EVM caller as the relaying address.
 
 mod origin;
 
-pub use origin::{from_caller, from_self, relayed};
+pub use origin::{from_self, relayed};
 
 use alloc::format;
 
-use fp_evm::{
-	ExitError, ExitSucceed, PrecompileFailure, PrecompileHandle, PrecompileOutput, PrecompileResult,
-};
+use fp_evm::{ExitSucceed, PrecompileHandle, PrecompileOutput, PrecompileResult};
 use frame_support::dispatch::{GetDispatchInfo, PostDispatchInfo};
 use pallet_evm::GasWeightMapping;
 use sp_runtime::traits::Dispatchable;
+
+use crate::revert;
 
 /// The runtime origin type for `T`'s runtime call.
 type RuntimeOriginOf<T> = <<T as frame_system::Config>::RuntimeCall as Dispatchable>::RuntimeOrigin;
@@ -61,8 +60,6 @@ where
 			exit_status: ExitSucceed::Stopped,
 			output: Default::default(),
 		}),
-		Err(e) => Err(PrecompileFailure::Error {
-			exit_status: ExitError::Other(format!("{e:?}").into()),
-		}),
+		Err(e) => Err(revert(&format!("{e:?}"))),
 	}
 }

@@ -2,6 +2,144 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [0.20.0] - 2026-09-29
+
+Relay fees follow the relay commit, and are claimed publicly. Closes RL-6: copying
+a relayer's spend no longer redirects its fee. **Breaking** — calls, events and
+errors all change (see below); `transaction_version` must move and index-decoding
+indexers need the new metadata.
+
+### Changed
+
+#### Fee attribution by relay commit
+`unshield` and `private_transfer` credit their fee to
+`T::Relayer::take_committed_relayer(op_hash)`, else the block author — no longer
+to whoever submitted. The origin is still validated but decides nothing.
+
+`op_hash` (`operations::fees::{unshield_op_hash, transfer_op_hash,
+relay_op_hash}`) covers the statement's public values plus `circuit_version` and
+nothing else: not the proof bytes, which anyone can re-randomise without the
+witness, and not the memos, which a v1 proof does not bind. Under a v2 key every
+copy that verifies hashes the same; a v1 copy can still alias the recipient.
+
+#### Spends take a request, the verifier a statement
+`UnshieldOperation::execute(proof, UnshieldRequest)` and
+`PrivateTransferOperation::execute(proof, TransferRequest)` replace the long
+positional argument lists, and are split into validate / verify / settle steps.
+`request.statement()` builds the `pallet_zk_verifier::{UnshieldStatement,
+TransferStatement}` handed to the verifier; `request.op_hash()` is the relay
+identity, shared with `relay_op_hash` so the two cannot drift. Field encoding
+moved to `pallet-zk-verifier`: the pool passes the recipient's raw bytes and
+`operations::statement::memo_digest` (blake2_256 of the SCALE-encoded memos).
+
+#### Origins
+`ensure_spend_origin` gates spends (unsigned, signed, `Relayed`; Root refused).
+`ensure_relay_caller` resolves the caller of `commit_relay` / `claim_relay_fees`
+to `RelayCaller::{Evm, Signed}`; an unsigned `commit_relay` now fails `BadOrigin`
+instead of `RelayerNotRegistered`. `ensure_relayed` is removed.
+
+#### Config
+New `Config::EvmAccount: Convert<H160, AccountId>`, the runtime's EVM address
+mapping. Claims pay EVM relayers through it instead of a local copy of the
+mapping (`fees::evm_mirror`, removed).
+
+### Added
+
+- `commit_relay(commits)` (call 18): records relay commits for the caller's
+  registered address; origin `Signed` or the precompile's `Relayed`.
+- `claim_relay_fees(asset_id, amount)` (call 19): pays pending fees out of the
+  pool, no proof. A signed claimant is paid at its registered EVM mirror (or
+  itself if unregistered); a `Relayed(addr)` claimant spends the fees of the
+  account registered to `addr` into `addr`'s mirror. Bounded by the claimant's own
+  pending balance; the pool ledger drops by `amount`.
+- `commit_relay` refuses an empty batch (`EmptyBatch`), like the precompile.
+- Event `RelayFeesClaimed` (`amount: BalanceOf<T>`, as in `Unshielded`); runtime API `relay_commit_hash(calldata, relayer)`,
+  `#[api_version(3)]`; `MAX_RELAY_COMMITS_PER_CALL` (64).
+
+#### Memos and recipient bound to the proof
+`private_transfer` and `unshield` pass the memo digest and the raw recipient to
+the verifier. Against a memo-bound (v2) key the proof binds
+`memo_hash = memo_digest mod r` and, for unshield, `blake2_256(recipient) mod r`:
+a copy with swapped memos, or with the recipient replaced by an alias `R ± r`
+(same field element, different account), fails `ProofVerificationFailed`. v1 keys
+verify without either binding until retired.
+
+#### Pool admission verifies the proof
+`validate_unsigned` now checks the memo shape and verifies the proof after the
+cheap checks; `pre_dispatch` keeps to the cheap checks, since the dispatchable
+verifies once more under its weight. Without it, a copy of a pending unsigned
+spend with swapped memos (or junk) and a higher fee replaced the original in the
+pool on its shared nullifier tag, then failed in the block — free, repeatable
+censorship — and junk spends filled blocks for nothing. New rejection codes
+`INVALID_MEMO` (11) and `INVALID_PROOF` (12). The pool validators take a
+`TransferRequest` / `UnshieldRequest` built by `operations::SpendRequest::from_call`,
+which `relay_op_hash` shares.
+
+#### Nothing admitted fails after its proof
+Pool admission (and `pre_dispatch`) now also runs the dispatchable's own
+`validate` (code `INVALID_SPEND` = 13), and that `validate` gained the checks
+that used to fail only after verification:
+- transfer outputs must be distinct and not already in the forest (they failed
+  inside `insert_leaf`);
+- an unshield to the zero account is refused (`InvalidRecipient`), like one to
+  the pool account.
+A spend that passed admission but failed in the block kept its nullifier and
+paid nothing, so it could fill blocks for free, repeatedly.
+
+`CommitmentRepository::exists` reads the leaf index (`CommitmentToLeafIndex`),
+not `CommitmentMemos`: a leaf inserted without a memo escaped the duplicate check.
+
+#### Admission is the dispatchable's `validate`
+`validate` returns a typed `Error<T>` and runs its checks cheapest first (shape,
+fee floor, root, nullifiers, dummy inputs or pool solvency, memos, then asset,
+recipient and outputs). Pool admission is the version guard, `validate` mapped to
+the same rejection codes as before, the proof and the tags — it can no longer
+reject less than dispatch, because it runs the same code. A dispatch can now
+report the cheaper error when a request fails several checks.
+
+#### Transfer shape
+`private_transfer` requires exactly two nullifiers and two commitments
+(`TooManyInputsOrOutputs` otherwise); a one-input spend pads with the zero
+nullifier. Any other shape could never verify against the 2-in/2-out circuit and
+was only refused after the proof work. `WeightInfo::private_transfer()` loses
+its component.
+
+#### Spend weights pay for the proof
+`unshield` and `private_transfer` add `ZkVerifierPort::verification_weight()`
+(about one `verify_proof(8)`) to their benchmarked weight, which never included
+the pairing (benchmarks run with `skip-proof-verification`). A junk-proof spend
+over the signed or EVM path paid for a fraction of what it cost.
+
+#### Claims respect the asset freeze
+`claim_relay_fees` requires the asset to be verified, like every other outflow.
+
+#### Memo size enforced
+`EncryptedMemo::is_valid_size` means exactly `MAX_ENCRYPTED_MEMO_SIZE` (180)
+bytes; it used to mean "non-empty", which made the partial-unshield check a
+tautology and let any 0–180-byte change memo through. A partial unshield now
+requires a full change memo, a total one an empty memo — the same rule at
+admission and at dispatch.
+
+### Removed
+
+- `claim_shielded_fees` (call 16) and the `value_proof` it verified.
+- Errors `InvalidProof`, `AssetIdMismatch` and `CommitmentNotFound`, which
+  nothing raised — later error indices shift.
+- `PrivateTransferOperation::{is_nullifier_used, is_merkle_root_known}` and the
+  `UnshieldOperation` query helpers, used only by tests.
+- Events `RelayFeeDiverted`, `SelfRelayedFee`, `ValidatorFeesClaimed` — the event
+  enum shifts.
+- Error `InsufficientPendingFees`; `RelayerNotRegistered` takes its index.
+
+### Notes
+
+- Weights for `commit_relay`, `claim_relay_fees` and the commit lookup added to
+  `unshield` / `private_transfer` are **provisional** until re-benchmarked.
+
+### Internal
+
+- Origin helpers (`ensure_spend_origin`, `RelayCaller`, `ensure_relay_caller`) in `origin.rs`, re-exported at the crate root. Admission tests in `validate_unsigned/tests.rs`; test fixtures shared in `tests/mod.rs`. Doc comments brought in line with the current behavior.
+
 ## [0.19.0] - 2026-08-21
 
 Relay fees are attributed by dispatch origin instead of by a call argument.

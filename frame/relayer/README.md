@@ -12,7 +12,7 @@ Orbinum allows users to execute private operations (`unshield`, `private_transfe
 1. The user builds EVM calldata (ZK proof + embedded fee) and sends it to the node via JSON-RPC (`orbinum_relayShieldedCall`).
 2. The node-relayer (`client/rpc/src/relay.rs`) validates the calldata, signs the EVM transaction with its own key, and submits it to the mempool.
 3. The EVM precompile converts it into an unsigned Substrate extrinsic that reaches `pallet-shielded-pool`.
-4. `pallet-shielded-pool` verifies the ZK proof, executes the operation, and **credits the fee to the current block author** through this pallet.
+4. `pallet-shielded-pool` verifies the ZK proof, executes the operation, and credits the fee through this pallet to the relayer that **committed** to the spend in an earlier block (the block author if none did).
 
 ---
 
@@ -65,9 +65,9 @@ Emits: `MinRelayFeeUpdated { new_fee }`.
 Replaces the ABI selector whitelist. Pass `vec![]` to restore the Runtime API defaults.  
 Bounded by `T::MaxAllowedSelectors`. Emits: `AllowedSelectorsUpdated { count }`.
 
-### `register_relayer(who: AccountId, evm_address: H160)` — origin: `ManageOrigin`
-Registers an EVM address for the given `who` account. Must be called by sudo or governance.  
-Fails if the EVM address is already claimed (`AlreadyRegistered`) or the account already has a binding (`AccountAlreadyRegistered`).  
+### `register_relayer(evm_address: H160, signature)` — origin: `Signed` (active validator)
+Binds the caller's EVM relay address. The caller must be in the active validator set and `signature` must prove it holds the EVM key (see `evm_proof`).  
+Fails with `NotValidator`, `BadEvmSignature`, `AlreadyRegistered` or `AccountAlreadyRegistered`.  
 Emits: `RelayerRegistered { evm_address, account }`.
 
 ### `unregister_relayer()` — origin: `Signed`
@@ -75,60 +75,42 @@ Removes the caller's EVM binding. Clears both forward and reverse maps.
 Fails if the caller has no binding (`NotRegistered`).  
 Emits: `RelayerUnregistered { evm_address, account }`.
 
-> **Claiming fees:** To receive accumulated relay fees, the validator calls one of the two claim paths in `pallet-shielded-pool` (not in this pallet):
-> - `claim_shielded_fees` — receives fees as a private ZK note (requires a value_proof ZK proof)
-> - `claim_relay_fees_to_evm` — transfers public ORB directly to the H160 mirror AccountId (no proof required; ideal for refilling the relayer's EVM gas wallet)
+> **Committing and claiming** happen through `pallet-shielded-pool` (`commit_relay`, `claim_relay_fees`), which call into this pallet via `RelayerInterface`.
 
 ---
 
 ## Relay fee lifecycle
 
-Each node has **two separate identities**:
+Each node has **two identities**, linked by `register_relayer`:
 
 | Identity | Type | Key | Purpose |
 |---|---|---|---|
-| `AccountId` (sr25519/Aura) | Substrate | Aura key | Receives and accumulates fees in `PendingRelayerFees` |
-| `H160` (ECDSA) | EVM | `--evm-relayer-key` | Signs EVM transactions, pays gas |
+| `AccountId` (sr25519/Aura) | Substrate | Aura key | Accumulates fees in `PendingRelayerFees` |
+| `H160` (ECDSA) | EVM | `--evm-relayer-key` | Signs relay transactions and commits, pays gas, receives claimed fees |
 
-Both are linked by sudo/governance via `register_relayer(who, evm_address)`, which writes both indexes (`RelayerRegistry` and `RelayerByAccount`). The node derives and logs the EVM address automatically at block #1 (see [Validator registration flow](#validator-registration-flow) below).
+A spend's fee goes to the relayer that **committed** to it in an earlier block, never to whoever submits it. Copying a relayer's spend — or an author including its own copy — therefore credits the original relayer.
 
 ```
-1. shield(1000)
-   └─ PoolBalance[asset=0] += 1000
-      (tokens physically enter pool_account_id)
+1. commit_relay([relay_commit_hash(op_hash, H160)])      block N   [shielded-pool, call 18]
+   └─ RelayCommits[commit] = { recorded_at: N, expires_at: N + CommitTtl }
+      (no author stored; the relayer is in the preimage)
 
-2. unshield(amount=900, fee=100, relayer=H160)
+2. unshield(amount=900, fee=100)  submitted by anyone     block > N
    ├─ ZK proof verified
-   ├─ T::Currency::transfer(pool → recipient, 900)
-   ├─ PoolBalance[asset=0] -= 900  (amount only; fee remains in the pool)
-   └─ T::Relayer::accumulate_relay_fee(resolve_relayer(H160), asset=0, 100)
+   ├─ pool → recipient 900; PoolBalance -= 900 (fee stays in the pool)
+   └─ take_committed_relayer(op_hash) → AccountId of H160   (else the block author)
          └─ PendingRelayerFees[AccountId][0] += 100
 
-3a. claim_shielded_fees(commitment, amount=100, ...)   [pallet-shielded-pool, call_index 16]
-    ├─ Verifies ZK value proof
-    ├─ consume_relay_fee(validator, 0, 100)
-    │     └─ PendingRelayerFees[validator][0] -= 100
-    └─ MerkleTree ← commitment(100)
-          (validator receives a private ZK note — full privacy)
-
-3b. claim_relay_fees_to_evm(asset_id=0, amount=100)   [pallet-shielded-pool, call_index 17]
-    ├─ registered_evm_address(validator) → H160
-    ├─ mirror = H160[0..20] ++ [0x00; 12]  (EeSuffixAddressMapping)
-    ├─ consume_relay_fee(validator, 0, 100)
-    │     └─ PendingRelayerFees[validator][0] -= 100
-    ├─ T::Currency::transfer(pool → mirror, 100)
-    └─ PoolBalance[asset=0] -= 100
-          (H160 EVM balance updated immediately → can pay gas)
+3. claim_relay_fees(asset_id=0, amount=100)                [shielded-pool, call 19]
+   ├─ consume_relay_fee(claimant, 0, 100)   (own balance only)
+   ├─ pool → mirror(H160) 100                (H160 ++ [0x00; 12])
+   └─ PoolBalance -= 100
 ```
 
-**Key difference between 3a and 3b:**
-
-| | `claim_shielded_fees` | `claim_relay_fees_to_evm` |
-|---|---|---|
-| Result | Private note in Merkle tree | Public ORB on H160 EVM |
-| Privacy | Full (ZK UTXO) | Public (visible transfer) |
-| ZK proof required | Yes (value_proof circuit) | No |
-| Typical use | Accumulate private funds | Refill relayer gas wallet |
+- `op_hash` covers the spend's public inputs and circuit version — not the proof bytes, which can be re-randomised without the witness.
+- Commits from the spending block are ignored; the earliest earlier commit wins.
+- Commits expire after `CommitTtl` blocks; the quota is `MaxCommitsPerRelayerPerBlock` per relayer.
+- The node's relay RPC (`orbinum_relayShieldedCall`) does steps 1–2 automatically.
 
 ---
 
@@ -148,10 +130,12 @@ pub trait RelayerInterface {
     fn pending_relay_fees(who: &Self::AccountId, asset_id: u32) -> u128;
     fn consume_relay_fee(who: &Self::AccountId, asset_id: u32, amount: u128) -> DispatchResult;
     fn registered_evm_address(who: &Self::AccountId) -> Option<H160>;
+    fn record_relay_commits(relayer: &H160, commits: &[H256]) -> DispatchResult;
+    fn take_committed_relayer(op_hash: &[u8; 32]) -> Option<Self::AccountId>;
 }
 ```
 
-`registered_evm_address` is the reverse lookup of `resolve_relayer`: given an `AccountId` it returns the registered `H160`. Used by `pallet-shielded-pool::claim_relay_fees_to_evm` to derive the mirror AccountId of the H160 that receives the funds.
+`registered_evm_address` is the reverse lookup of `resolve_relayer`: given an `AccountId` it returns the registered `H160`. Used by `pallet-shielded-pool::claim_relay_fees` to derive the mirror account that receives the funds.
 
 In production: `type Relayer = pallet_relayer::Pallet<Runtime>`.  
 In `pallet-shielded-pool` unit tests: a lightweight mock struct in `mock.rs` backed by `sp_io::storage`.
@@ -198,9 +182,8 @@ owner. The flow is:
    rival's address, divert its fees, and lock the owner out permanently, since
    `AlreadyRegistered` has no override.
 
-Until step 4 completes, relay fees earned by the node are credited to the block
-author instead. Nothing fails — the attribution is simply wrong, which is a soft
-incentive to register rather than a penalty.
+Until step 4 completes the node cannot record relay commits, so its relay RPC
+refuses to relay: a spend without a commit would pay the block author.
 
 Leaving the validator set (`removeValidator` or `deregisterValidator`) clears the
 binding, since the membership that authorised it is gone. Accrued

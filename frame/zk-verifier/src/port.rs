@@ -1,127 +1,130 @@
 //! [`ZkVerifierPort`] — public interface for cross-pallet ZK proof verification.
 //!
 //! Other pallets (e.g. `pallet-shielded-pool`) depend only on this trait, never
-//! on the concrete pallet internals.
-//!
-//! Each method delegates public-input encoding to [`crate::encoding`] and the
-//! cryptographic work to [`crate::verifier::verify`].
+//! on the concrete pallet internals. They describe a spend as a statement of
+//! domain values; turning it into field elements is [`crate::encoding`]'s job,
+//! and the cryptographic work is [`crate::verifier`]'s.
 
 use crate::{
 	Pallet, encoding,
-	pallet::{Config, Error},
+	pallet::{Config, Error, RetiredVersions, VerificationKeys},
 	types::CircuitId,
 	verifier,
 };
+use alloc::vec::Vec;
+
+// ─── Statements ───────────────────────────────────────────────────────────────
+
+/// What a private-transfer proof attests to, as the pallet submits it.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct TransferStatement {
+	pub merkle_root: [u8; 32],
+	/// One per input note.
+	pub nullifiers: Vec<[u8; 32]>,
+	/// One per output note, in the order their memos are submitted.
+	pub commitments: Vec<[u8; 32]>,
+	pub asset_id: u32,
+	pub fee: u128,
+	/// `blake2_256` of the SCALE-encoded output memos. Bound by memo-bound versions.
+	pub memo_digest: [u8; 32],
+}
+
+/// What an unshield proof attests to, as the pallet submits it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct UnshieldStatement {
+	pub merkle_root: [u8; 32],
+	pub nullifier: [u8; 32],
+	pub amount: u128,
+	/// The recipient account's raw 32 bytes. See [`encoding::encode_unshield`].
+	pub recipient: [u8; 32],
+	pub asset_id: u32,
+	pub fee: u128,
+	/// Zero for a total unshield.
+	pub change_commitment: [u8; 32],
+	/// `blake2_256` of the SCALE-encoded `[change_memo]`. Bound by memo-bound versions.
+	pub memo_digest: [u8; 32],
+}
 
 // ─── Trait ────────────────────────────────────────────────────────────────────
 
 /// Cross-pallet interface for zero-knowledge proof verification.
+///
+/// `version` selects the verifying key; `None` means the circuit's active one.
+/// `Ok(false)` is an invalid proof, `Err` a request that cannot be checked.
 pub trait ZkVerifierPort {
-	/// Verify a private transfer proof (2-in / 2-out UTXO).
+	/// Verify a private transfer proof (2-in / 2-out).
 	fn verify_transfer_proof(
 		proof: &[u8],
-		merkle_root: &[u8; 32],
-		nullifiers: &[[u8; 32]],
-		commitments: &[[u8; 32]],
-		asset_id: u32,
-		fee: u128,
+		statement: &TransferStatement,
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError>;
 
 	/// Verify an unshield (pool withdrawal) proof.
-	#[allow(clippy::too_many_arguments)]
 	fn verify_unshield_proof(
 		proof: &[u8],
-		merkle_root: &[u8; 32],
-		nullifier: &[u8; 32],
-		amount: u128,
-		recipient: &[u8; 32],
-		asset_id: u32,
-		fee: u128,
-		change_commitment: &[u8; 32],
+		statement: &UnshieldStatement,
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError>;
 
-	/// Verify a value proof (76-byte layout: commitment | value | asset_id | owner_hash).
-	/// Used for gasless fee claiming.
-	fn verify_value_proof(
-		proof: &[u8],
-		public_signals: &[u8],
-		version: Option<u32>,
-	) -> Result<bool, sp_runtime::DispatchError>;
-
-	/// Whether a verification key is registered for `(circuit_id, version)`.
+	/// Whether `version` is registered for `circuit_id` and not retired.
 	fn is_supported_version(circuit_id: u32, version: u32) -> bool;
+
+	/// Weight of one `verify_*_proof` call: key read, preparation and the
+	/// pairing. A caller that verifies a proof must add it to its own weight.
+	fn verification_weight() -> frame_support::weights::Weight;
 }
 
-// ─── impl ─────────────────────────────────────────────────────────────────────
+// ─── Implementation ───────────────────────────────────────────────────────────
+
+/// Public inputs of the largest spend layout: a memo-bound transfer or unshield.
+const MAX_SPEND_PUBLIC_INPUTS: u32 = {
+	use orbinum_zk_verifier::{MEMO_HASH_INPUTS, TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS};
+	let base = if TRANSFER_PUBLIC_INPUTS > UNSHIELD_PUBLIC_INPUTS {
+		TRANSFER_PUBLIC_INPUTS
+	} else {
+		UNSHIELD_PUBLIC_INPUTS
+	};
+	(base + MEMO_HASH_INPUTS) as u32
+};
 
 impl<T: Config> ZkVerifierPort for Pallet<T> {
 	fn verify_transfer_proof(
 		proof: &[u8],
-		merkle_root: &[u8; 32],
-		nullifiers: &[[u8; 32]],
-		commitments: &[[u8; 32]],
-		asset_id: u32,
-		fee: u128,
+		statement: &TransferStatement,
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
-		// The 2-in/2-out circuit encodes one nullifier per input note and one
-		// commitment per output note. A mismatch produces garbage public inputs
-		// that pass in benchmark/test mode (do_verify returns true unconditionally)
-		// but would represent a structurally invalid proof in production.
+		// One nullifier per input and one commitment per output, and the circuit
+		// has as many outputs as inputs.
 		frame_support::ensure!(
-			nullifiers.len() == commitments.len(),
+			statement.nullifiers.len() == statement.commitments.len(),
 			Error::<T>::InvalidPublicInputs
 		);
-		let raw = encoding::encode_transfer(merkle_root, nullifiers, commitments, asset_id, fee);
-		verifier::verify::<T>(CircuitId::TRANSFER, version, proof, raw).map(|(ok, _)| ok)
+		verifier::verify_statement::<T>(CircuitId::TRANSFER, version, proof, |layout| {
+			encoding::encode_transfer(statement, layout)
+		})
+		.map(|(ok, _)| ok)
 	}
 
 	fn verify_unshield_proof(
 		proof: &[u8],
-		merkle_root: &[u8; 32],
-		nullifier: &[u8; 32],
-		amount: u128,
-		recipient: &[u8; 32],
-		asset_id: u32,
-		fee: u128,
-		change_commitment: &[u8; 32],
+		statement: &UnshieldStatement,
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
-		let raw = encoding::encode_unshield(
-			merkle_root,
-			nullifier,
-			amount,
-			recipient,
-			asset_id,
-			fee,
-			change_commitment,
-		);
-		verifier::verify::<T>(CircuitId::UNSHIELD, version, proof, raw).map(|(ok, _)| ok)
-	}
-
-	fn verify_value_proof(
-		proof: &[u8],
-		public_signals: &[u8],
-		version: Option<u32>,
-	) -> Result<bool, sp_runtime::DispatchError> {
-		if public_signals.len() != 76 {
-			return Err(sp_runtime::DispatchError::Other(
-				"Invalid value proof signals length (expected 76 bytes)",
-			));
-		}
-		let signals: &[u8; 76] = public_signals
-			.try_into()
-			.map_err(|_| sp_runtime::DispatchError::Other("value proof signals slice error"))?;
-		let raw = encoding::encode_value_proof(signals);
-		verifier::verify::<T>(CircuitId::VALUE_PROOF, version, proof, raw).map(|(ok, _)| ok)
+		verifier::verify_statement::<T>(CircuitId::UNSHIELD, version, proof, |layout| {
+			encoding::encode_unshield(statement, layout)
+		})
+		.map(|(ok, _)| ok)
 	}
 
 	fn is_supported_version(circuit_id: u32, version: u32) -> bool {
 		let cid = CircuitId(circuit_id);
-		crate::pallet::VerificationKeys::<T>::contains_key(cid, version)
-			&& !crate::pallet::RetiredVersions::<T>::contains_key(cid, version)
+		VerificationKeys::<T>::contains_key(cid, version)
+			&& !RetiredVersions::<T>::contains_key(cid, version)
+	}
+
+	fn verification_weight() -> frame_support::weights::Weight {
+		use crate::weights::WeightInfo;
+		T::WeightInfo::verify_proof(MAX_SPEND_PUBLIC_INPUTS)
 	}
 }
 
@@ -130,413 +133,229 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{
-		Error,
-		mock::Test,
-		pallet::{ActiveCircuitVersion, RetiredVersions, VerificationKeys},
-		types::{ProofSystem, VerificationKeyInfo},
-	};
-	use frame_support::{BoundedVec, assert_err};
-	use sp_io::TestExternalities;
-	use sp_runtime::BuildStorage;
+	use crate::mock::{Test, activate, insert_vk, new_test_ext};
+	use frame_support::assert_err;
+	use orbinum_zk_verifier::{MEMO_HASH_INPUTS, TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS};
 
-	// ── Shared helpers ────────────────────────────────────────────────────────
+	// ── Helpers ───────────────────────────────────────────────────────────────
 
-	fn new_test_ext() -> TestExternalities {
-		let storage = frame_system::GenesisConfig::<Test>::default()
-			.build_storage()
-			.expect("mock storage ok");
-		TestExternalities::new(storage)
-	}
-
-	fn vk_bytes() -> BoundedVec<u8, frame_support::traits::ConstU32<8192>> {
-		vec![0xABu8; 300].try_into().unwrap()
-	}
+	const NULLIFIERS: [[u8; 32]; 2] = [[0xAA; 32], [0xBB; 32]];
+	const COMMITMENTS: [[u8; 32]; 2] = [[0xCC; 32], [0xDD; 32]];
 
 	fn proof() -> alloc::vec::Vec<u8> {
 		vec![0x01u8; 128]
 	}
 
-	fn merkle_root() -> [u8; 32] {
-		[0x03u8; 32]
+	fn transfer() -> TransferStatement {
+		TransferStatement {
+			merkle_root: [0x03; 32],
+			nullifiers: NULLIFIERS.to_vec(),
+			commitments: COMMITMENTS.to_vec(),
+			asset_id: 1,
+			fee: 500,
+			memo_digest: [0x04; 32],
+		}
 	}
 
-	fn commitment() -> [u8; 32] {
-		[0x01u8; 32]
+	fn unshield() -> UnshieldStatement {
+		UnshieldStatement {
+			merkle_root: [0x03; 32],
+			nullifier: [0x02; 32],
+			amount: 1000,
+			recipient: [0xFF; 32],
+			asset_id: 0,
+			fee: 50,
+			change_commitment: [0; 32],
+			memo_digest: [0x04; 32],
+		}
 	}
 
-	fn nullifier() -> [u8; 32] {
-		[0x02u8; 32]
+	fn verify_transfer(
+		s: &TransferStatement,
+		version: Option<u32>,
+	) -> Result<bool, sp_runtime::DispatchError> {
+		<Pallet<Test> as ZkVerifierPort>::verify_transfer_proof(&proof(), s, version)
 	}
 
-	fn insert_vk(circuit_id: CircuitId, version: u32) {
-		VerificationKeys::<Test>::insert(
-			circuit_id,
-			version,
-			VerificationKeyInfo {
-				key_data: vk_bytes(),
-				system: ProofSystem::Groth16,
-				registered_at: 0u64,
-			},
-		);
+	fn verify_unshield(
+		s: &UnshieldStatement,
+		version: Option<u32>,
+	) -> Result<bool, sp_runtime::DispatchError> {
+		<Pallet<Test> as ZkVerifierPort>::verify_unshield_proof(&proof(), s, version)
 	}
 
-	fn activate(circuit_id: CircuitId, version: u32) {
-		ActiveCircuitVersion::<Test>::insert(circuit_id, version);
-	}
-
-	// ── verify_transfer_proof ──────────────────────────────────────────────────
+	// ── verify_transfer_proof ─────────────────────────────────────────────────
 
 	#[test]
 	fn transfer_empty_proof_is_rejected() {
-		// EmptyProof guard fires inside verifier::verify before version resolution.
 		new_test_ext().execute_with(|| {
 			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::verify_transfer_proof(
-					&[],
-					&merkle_root(),
-					&[],
-					&[],
-					0,
-					0,
-					Some(1),
-				),
+				<Pallet<Test> as ZkVerifierPort>::verify_transfer_proof(&[], &transfer(), Some(1)),
 				Error::<Test>::EmptyProof
 			);
 		});
 	}
 
 	#[test]
-	fn transfer_no_active_version_returns_circuit_not_found() {
+	fn transfer_without_an_active_version_is_circuit_not_found() {
 		new_test_ext().execute_with(|| {
 			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::verify_transfer_proof(
-					&proof(),
-					&merkle_root(),
-					&[],
-					&[],
-					0,
-					0,
-					None,
-				),
+				verify_transfer(&transfer(), None),
 				Error::<Test>::CircuitNotFound
 			);
 		});
 	}
 
 	#[test]
-	fn transfer_explicit_unsupported_version_rejected() {
+	fn transfer_unknown_explicit_version_is_unsupported() {
 		new_test_ext().execute_with(|| {
 			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::verify_transfer_proof(
-					&proof(),
-					&merkle_root(),
-					&[],
-					&[],
-					0,
-					0,
-					Some(99),
-				),
+				verify_transfer(&transfer(), Some(99)),
 				Error::<Test>::UnsupportedCircuitVersion
 			);
 		});
 	}
 
 	#[test]
-	fn transfer_happy_path_returns_true() {
+	fn transfer_verifies_under_the_base_and_the_memo_bound_key() {
 		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::TRANSFER, 1);
+			insert_vk(CircuitId::TRANSFER, 1, TRANSFER_PUBLIC_INPUTS);
+			insert_vk(
+				CircuitId::TRANSFER,
+				2,
+				TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
+			);
 			activate(CircuitId::TRANSFER, 1);
-			let ok = <Pallet<Test> as ZkVerifierPort>::verify_transfer_proof(
-				&proof(),
-				&merkle_root(),
-				&[nullifier()],
-				&[commitment()],
-				42,
-				1000,
-				None,
-			)
-			.unwrap();
-			assert!(ok);
+			assert_eq!(verify_transfer(&transfer(), None), Ok(true));
+			assert_eq!(verify_transfer(&transfer(), Some(2)), Ok(true));
 		});
 	}
 
 	#[test]
-	fn transfer_explicit_version_overrides_active() {
+	fn transfer_with_one_input_does_not_fit_the_two_input_key() {
 		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::TRANSFER, 1);
-			insert_vk(CircuitId::TRANSFER, 2);
+			insert_vk(CircuitId::TRANSFER, 1, TRANSFER_PUBLIC_INPUTS);
 			activate(CircuitId::TRANSFER, 1);
-			let ok = <Pallet<Test> as ZkVerifierPort>::verify_transfer_proof(
-				&proof(),
-				&merkle_root(),
-				&[],
-				&[],
-				0,
-				0,
-				Some(2),
-			)
-			.unwrap();
-			assert!(ok);
-		});
-	}
-
-	#[test]
-	fn transfer_multiple_nullifiers_and_commitments_are_accepted() {
-		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::TRANSFER, 1);
-			activate(CircuitId::TRANSFER, 1);
-			let ok = <Pallet<Test> as ZkVerifierPort>::verify_transfer_proof(
-				&proof(),
-				&merkle_root(),
-				&[[0xAAu8; 32], [0xBBu8; 32]],
-				&[[0xCCu8; 32], [0xDDu8; 32]],
-				1,
-				500,
-				None,
-			)
-			.unwrap();
-			assert!(ok);
+			let s = TransferStatement {
+				nullifiers: NULLIFIERS[..1].to_vec(),
+				commitments: COMMITMENTS[..1].to_vec(),
+				..transfer()
+			};
+			assert_eq!(verify_transfer(&s, None), Ok(false));
 		});
 	}
 
 	#[test]
 	fn transfer_nullifier_commitment_count_mismatch_is_rejected() {
-		// The 2-in/2-out circuit requires an equal number of nullifiers and
-		// commitments. A mismatch produces structurally invalid public inputs that
-		// in benchmark/test mode would still "verify" because do_verify returns true
-		// unconditionally. The guard in verify_transfer_proof catches this before
-		// reaching the verifier.
 		new_test_ext().execute_with(|| {
+			let s = TransferStatement {
+				nullifiers: NULLIFIERS[..1].to_vec(),
+				..transfer()
+			};
 			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::verify_transfer_proof(
-					&proof(),
-					&merkle_root(),
-					&[[0xAAu8; 32]],               // 1 nullifier
-					&[[0xBBu8; 32], [0xCCu8; 32]], // 2 commitments
-					0,
-					0,
-					Some(1),
-				),
+				verify_transfer(&s, Some(1)),
 				Error::<Test>::InvalidPublicInputs
 			);
 		});
 	}
 
 	#[test]
-	fn transfer_empty_nullifiers_with_empty_commitments_is_accepted_by_guard() {
-		// 0 nullifiers == 0 commitments satisfies the count guard. EmptyPublicInputs
-		// fires next inside verifier::verify (merkle_root is the only remaining
-		// element but that still gives 1 input after encode_transfer, so actually
-		// EmptyProof doesn't fire — but CircuitNotFound does if no VK). Let's just
-		// confirm the count guard itself doesn't reject the 0==0 case.
+	fn a_retired_version_is_unsupported_and_does_not_fall_back() {
 		new_test_ext().execute_with(|| {
-			// No VK registered → CircuitNotFound, not InvalidPublicInputs.
+			insert_vk(CircuitId::TRANSFER, 1, TRANSFER_PUBLIC_INPUTS);
+			insert_vk(CircuitId::TRANSFER, 2, TRANSFER_PUBLIC_INPUTS);
+			activate(CircuitId::TRANSFER, 1);
+			RetiredVersions::<Test>::insert(CircuitId::TRANSFER, 2, ());
+
+			assert!(!<Pallet<Test> as ZkVerifierPort>::is_supported_version(
+				CircuitId::TRANSFER.0,
+				2
+			));
 			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::verify_transfer_proof(
-					&proof(),
-					&merkle_root(),
-					&[],
-					&[],
-					0,
-					0,
-					None,
-				),
-				Error::<Test>::CircuitNotFound
+				verify_transfer(&transfer(), Some(2)),
+				Error::<Test>::UnsupportedCircuitVersion
 			);
 		});
 	}
 
-	// ── verify_unshield_proof ──────────────────────────────────────────────────
+	// ── verify_unshield_proof ─────────────────────────────────────────────────
 
 	#[test]
 	fn unshield_empty_proof_is_rejected() {
 		new_test_ext().execute_with(|| {
 			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::verify_unshield_proof(
-					&[],
-					&merkle_root(),
-					&nullifier(),
-					0,
-					&[0u8; 32],
-					0,
-					0,
-					&[0u8; 32],
-					Some(1),
-				),
+				<Pallet<Test> as ZkVerifierPort>::verify_unshield_proof(&[], &unshield(), Some(1)),
 				Error::<Test>::EmptyProof
 			);
 		});
 	}
 
 	#[test]
-	fn unshield_no_active_version_returns_circuit_not_found() {
+	fn unshield_without_an_active_version_is_circuit_not_found() {
 		new_test_ext().execute_with(|| {
 			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::verify_unshield_proof(
-					&proof(),
-					&merkle_root(),
-					&nullifier(),
-					100,
-					&[0u8; 32],
-					0,
-					0,
-					&[0u8; 32],
-					None,
-				),
+				verify_unshield(&unshield(), None),
 				Error::<Test>::CircuitNotFound
 			);
 		});
 	}
 
 	#[test]
-	fn unshield_explicit_unsupported_version_rejected() {
+	fn unshield_unknown_explicit_version_is_unsupported() {
 		new_test_ext().execute_with(|| {
 			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::verify_unshield_proof(
-					&proof(),
-					&merkle_root(),
-					&nullifier(),
-					100,
-					&[0u8; 32],
-					0,
-					0,
-					&[0u8; 32],
-					Some(99),
-				),
+				verify_unshield(&unshield(), Some(99)),
 				Error::<Test>::UnsupportedCircuitVersion
 			);
 		});
 	}
 
 	#[test]
-	fn unshield_happy_path_returns_true() {
+	fn unshield_verifies_under_the_base_and_the_memo_bound_key() {
 		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::UNSHIELD, 1);
-			activate(CircuitId::UNSHIELD, 1);
-			let ok = <Pallet<Test> as ZkVerifierPort>::verify_unshield_proof(
-				&proof(),
-				&merkle_root(),
-				&nullifier(),
-				1000,
-				&[0xFFu8; 32],
-				0,
-				50,
-				&[0u8; 32],
-				None,
-			)
-			.unwrap();
-			assert!(ok);
-		});
-	}
-
-	#[test]
-	fn unshield_explicit_version_overrides_active() {
-		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::UNSHIELD, 1);
-			insert_vk(CircuitId::UNSHIELD, 2);
-			activate(CircuitId::UNSHIELD, 1);
-			let ok = <Pallet<Test> as ZkVerifierPort>::verify_unshield_proof(
-				&proof(),
-				&merkle_root(),
-				&nullifier(),
-				500,
-				&[0u8; 32],
+			insert_vk(CircuitId::UNSHIELD, 1, UNSHIELD_PUBLIC_INPUTS);
+			insert_vk(
+				CircuitId::UNSHIELD,
 				2,
-				10,
-				&[0u8; 32],
-				Some(2),
-			)
-			.unwrap();
-			assert!(ok);
-		});
-	}
-
-	#[test]
-	fn unshield_non_trivial_recipient_is_accepted() {
-		// Verifies recipient BE→LE reversal does not panic for asymmetric data.
-		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::UNSHIELD, 1);
-			activate(CircuitId::UNSHIELD, 1);
-			let mut recipient = [0u8; 32];
-			recipient[0] = 0x01; // MSB in AccountId32 big-endian
-			recipient[31] = 0xFF;
-			let ok = <Pallet<Test> as ZkVerifierPort>::verify_unshield_proof(
-				&proof(),
-				&merkle_root(),
-				&nullifier(),
-				500,
-				&recipient,
-				2,
-				10,
-				&[0u8; 32],
-				None,
-			)
-			.unwrap();
-			assert!(ok);
-		});
-	}
-
-	// ── is_supported_version ───────────────────────────────────────────────────
-
-	#[test]
-	fn is_supported_version_reflects_registered_vks() {
-		new_test_ext().execute_with(|| {
-			// No VK yet → unsupported.
-			assert!(!<Pallet<Test> as ZkVerifierPort>::is_supported_version(
-				CircuitId::TRANSFER.0,
-				1
-			));
-			insert_vk(CircuitId::TRANSFER, 1);
-			// Registered → supported; other versions/circuits stay unsupported.
-			assert!(<Pallet<Test> as ZkVerifierPort>::is_supported_version(
-				CircuitId::TRANSFER.0,
-				1
-			));
-			assert!(!<Pallet<Test> as ZkVerifierPort>::is_supported_version(
-				CircuitId::TRANSFER.0,
-				2
-			));
-			assert!(!<Pallet<Test> as ZkVerifierPort>::is_supported_version(
-				CircuitId::UNSHIELD.0,
-				1
-			));
-		});
-	}
-
-	#[test]
-	fn retired_version_is_not_supported_and_verify_rejects_it() {
-		new_test_ext().execute_with(|| {
-			// v1 active, v2 registered and retired.
-			insert_vk(CircuitId::TRANSFER, 1);
-			insert_vk(CircuitId::TRANSFER, 2);
-			activate(CircuitId::TRANSFER, 1);
-			RetiredVersions::<Test>::insert(CircuitId::TRANSFER, 2, ());
-
-			// A retired version drops out of is_supported_version even though its VK exists.
-			assert!(VerificationKeys::<Test>::contains_key(
-				CircuitId::TRANSFER,
-				2
-			));
-			assert!(!<Pallet<Test> as ZkVerifierPort>::is_supported_version(
-				CircuitId::TRANSFER.0,
-				2
-			));
-
-			// verify against the retired version fails closed (UnsupportedCircuitVersion),
-			// not by falling through to the active version.
-			assert_err!(
-				<Pallet<Test> as ZkVerifierPort>::verify_transfer_proof(
-					&proof(),
-					&merkle_root(),
-					&[[0u8; 32]],
-					&[[0u8; 32]],
-					0,
-					0,
-					Some(2),
-				),
-				Error::<Test>::UnsupportedCircuitVersion
+				UNSHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
 			);
+			activate(CircuitId::UNSHIELD, 1);
+			assert_eq!(verify_unshield(&unshield(), None), Ok(true));
+			assert_eq!(verify_unshield(&unshield(), Some(2)), Ok(true));
 		});
+	}
+
+	#[test]
+	fn unshield_under_a_key_of_foreign_arity_fails() {
+		new_test_ext().execute_with(|| {
+			insert_vk(CircuitId::UNSHIELD, 1, UNSHIELD_PUBLIC_INPUTS + 2);
+			activate(CircuitId::UNSHIELD, 1);
+			assert_eq!(verify_unshield(&unshield(), None), Ok(false));
+		});
+	}
+
+	// ── is_supported_version ──────────────────────────────────────────────────
+
+	#[test]
+	fn is_supported_version_reflects_registered_keys() {
+		new_test_ext().execute_with(|| {
+			let supported =
+				|id: CircuitId, v| <Pallet<Test> as ZkVerifierPort>::is_supported_version(id.0, v);
+			assert!(!supported(CircuitId::TRANSFER, 1));
+			insert_vk(CircuitId::TRANSFER, 1, TRANSFER_PUBLIC_INPUTS);
+			assert!(supported(CircuitId::TRANSFER, 1));
+			assert!(!supported(CircuitId::TRANSFER, 2));
+			assert!(!supported(CircuitId::UNSHIELD, 1));
+		});
+	}
+
+	#[test]
+	fn verification_weight_covers_the_largest_spend_layout() {
+		use crate::weights::WeightInfo;
+		assert_eq!(MAX_SPEND_PUBLIC_INPUTS, 8);
+		assert_eq!(
+			<Pallet<Test> as ZkVerifierPort>::verification_weight(),
+			<Test as crate::Config>::WeightInfo::verify_proof(MAX_SPEND_PUBLIC_INPUTS)
+		);
 	}
 }

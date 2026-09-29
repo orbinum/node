@@ -1,92 +1,68 @@
-//! Public input encoding for each supported circuit.
+//! Public-input encoding: a circuit's statement to the field elements its
+//! verifying key expects.
 //!
-//! Converts typed domain parameters into the raw `Vec<[u8; 32]>` format
-//! expected by [`crate::verifier::verify`]. Each function handles the
-//! field-element packing rules for one circuit type.
+//! The one place that knows each circuit's input order and how a domain value
+//! becomes a BN254 field element (32 bytes, little-endian, canonical). The
+//! [`InputLayout`] comes from the key being verified against, so a v1 and a
+//! memo-bound key each get the inputs they were built for.
 
-extern crate alloc;
-
+use crate::port::{TransferStatement, UnshieldStatement};
 use alloc::vec::Vec;
+use orbinum_zk_verifier::{InputLayout, to_field_le};
 
-/// Encode transfer (2-in / 2-out) public inputs.
-///
-/// Order: `merkle_root | nullifiers[..] | commitments[..] | asset_id | fee`
-pub fn encode_transfer(
-	merkle_root: &[u8; 32],
-	nullifiers: &[[u8; 32]],
-	commitments: &[[u8; 32]],
-	asset_id: u32,
-	fee: u128,
-) -> Vec<[u8; 32]> {
-	let mut raw = Vec::with_capacity(1 + nullifiers.len() + commitments.len() + 2);
-	raw.push(*merkle_root);
-	raw.extend_from_slice(nullifiers);
-	raw.extend_from_slice(commitments);
-
-	let mut asset_bytes = [0u8; 32];
-	asset_bytes[..4].copy_from_slice(&asset_id.to_le_bytes());
-	raw.push(asset_bytes);
-
-	let mut fee_bytes = [0u8; 32];
-	fee_bytes[..16].copy_from_slice(&fee.to_le_bytes());
-	raw.push(fee_bytes);
-
+/// Transfer inputs, in circuit order:
+/// `merkle_root | nullifiers.. | commitments.. | asset_id | fee [| memo_hash]`.
+pub fn encode_transfer(s: &TransferStatement, layout: InputLayout) -> Vec<[u8; 32]> {
+	let mut raw = Vec::with_capacity(4 + s.nullifiers.len() + s.commitments.len());
+	raw.push(s.merkle_root);
+	raw.extend_from_slice(&s.nullifiers);
+	raw.extend_from_slice(&s.commitments);
+	raw.push(u32_field(s.asset_id));
+	raw.push(u128_field(s.fee));
+	if layout == InputLayout::MemoBound {
+		raw.push(to_field_le(&s.memo_digest));
+	}
 	raw
 }
 
-/// Encode unshield (pool withdrawal) public inputs.
+/// Unshield inputs, in circuit order:
+/// `merkle_root | nullifier | amount | recipient | asset_id | fee | change_commitment [| memo_hash]`.
 ///
-/// Order: `merkle_root | nullifier | amount | recipient | asset_id | fee | change_commitment`
-///
-/// `recipient` is passed as-is (LE field element, same convention used by the
-/// TypeScript SDK: `bytesToBigintLE(accountId32Bytes)`).
-pub fn encode_unshield(
-	merkle_root: &[u8; 32],
-	nullifier: &[u8; 32],
-	amount: u128,
-	recipient: &[u8; 32],
-	asset_id: u32,
-	fee: u128,
-	change_commitment: &[u8; 32],
-) -> Vec<[u8; 32]> {
-	let mut amount_bytes = [0u8; 32];
-	amount_bytes[..16].copy_from_slice(&amount.to_le_bytes());
-
-	let mut asset_bytes = [0u8; 32];
-	asset_bytes[..4].copy_from_slice(&asset_id.to_le_bytes());
-
-	let mut fee_bytes = [0u8; 32];
-	fee_bytes[..16].copy_from_slice(&fee.to_le_bytes());
-
-	alloc::vec![
-		*merkle_root,
-		*nullifier,
-		amount_bytes,
-		*recipient,
-		asset_bytes,
-		fee_bytes,
-		*change_commitment,
-	]
+/// `recipient` is an AccountId32, wider than the field. The base layout takes
+/// it mod r, which maps `R` and `R ± r` to the same input — a copier could
+/// redirect the withdrawal to an alias nobody controls. The memo-bound layout
+/// hashes it first, so an alias would need a blake2 collision.
+pub fn encode_unshield(s: &UnshieldStatement, layout: InputLayout) -> Vec<[u8; 32]> {
+	let (recipient, memo_hash) = match layout {
+		InputLayout::Base => (to_field_le(&s.recipient), None),
+		InputLayout::MemoBound => (
+			to_field_le(&sp_io::hashing::blake2_256(&s.recipient)),
+			Some(to_field_le(&s.memo_digest)),
+		),
+	};
+	let mut raw = alloc::vec![
+		s.merkle_root,
+		s.nullifier,
+		u128_field(s.amount),
+		recipient,
+		u32_field(s.asset_id),
+		u128_field(s.fee),
+		s.change_commitment,
+	];
+	raw.extend(memo_hash);
+	raw
 }
 
-/// Encode value proof public inputs (CircuitId 6).
-///
-/// Expands the compact 76-byte on-chain layout into 4 BN254 field elements:
-/// `commitment(32) | value_u64_le(8→32) | asset_id_u32_le(4→32) | owner_hash(32)`
-pub fn encode_value_proof(public_signals: &[u8; 76]) -> Vec<[u8; 32]> {
-	let mut commitment = [0u8; 32];
-	commitment.copy_from_slice(&public_signals[0..32]);
+fn u32_field(v: u32) -> [u8; 32] {
+	let mut out = [0u8; 32];
+	out[..4].copy_from_slice(&v.to_le_bytes());
+	out
+}
 
-	let mut value = [0u8; 32];
-	value[..8].copy_from_slice(&public_signals[32..40]);
-
-	let mut asset_id = [0u8; 32];
-	asset_id[..4].copy_from_slice(&public_signals[40..44]);
-
-	let mut owner_hash = [0u8; 32];
-	owner_hash.copy_from_slice(&public_signals[44..76]);
-
-	alloc::vec![commitment, value, asset_id, owner_hash]
+fn u128_field(v: u128) -> [u8; 32] {
+	let mut out = [0u8; 32];
+	out[..16].copy_from_slice(&v.to_le_bytes());
+	out
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -94,86 +70,180 @@ pub fn encode_value_proof(public_signals: &[u8; 76]) -> Vec<[u8; 32]> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use orbinum_zk_verifier::{MEMO_HASH_INPUTS, TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS};
 
-	#[test]
-	fn encode_transfer_correct_length() {
-		let root = [0x01u8; 32];
-		let nullifiers = [[0x02u8; 32], [0x03u8; 32]];
-		let commitments = [[0x04u8; 32], [0x05u8; 32]];
-		let raw = encode_transfer(&root, &nullifiers, &commitments, 1, 500);
-		// 1 (root) + 2 (nullifiers) + 2 (commitments) + 1 (asset_id) + 1 (fee) = 7
-		assert_eq!(raw.len(), 7);
-		assert_eq!(raw[0], root);
-		assert_eq!(&raw[1..3], &nullifiers);
-		assert_eq!(&raw[3..5], &commitments);
+	const NULLIFIERS: [[u8; 32]; 2] = [[0x02; 32], [0x03; 32]];
+	const COMMITMENTS: [[u8; 32]; 2] = [[0x04; 32], [0x05; 32]];
+
+	fn transfer() -> TransferStatement {
+		TransferStatement {
+			merkle_root: [0x01; 32],
+			nullifiers: NULLIFIERS.to_vec(),
+			commitments: COMMITMENTS.to_vec(),
+			asset_id: 7,
+			fee: 500,
+			memo_digest: [0xEE; 32],
+		}
+	}
+
+	fn unshield() -> UnshieldStatement {
+		UnshieldStatement {
+			merkle_root: [0x01; 32],
+			nullifier: [0x02; 32],
+			amount: 100,
+			recipient: [0xFF; 32],
+			asset_id: 7,
+			fee: 5,
+			change_commitment: [0x06; 32],
+			memo_digest: [0xEE; 32],
+		}
+	}
+
+	/// `R + r`: a different AccountId32 that is the same field element as `R`.
+	fn alias(recipient: [u8; 32]) -> [u8; 32] {
+		// BN254 r, little-endian.
+		const R: [u8; 32] = [
+			0x01, 0x00, 0x00, 0xf0, 0x93, 0xf5, 0xe1, 0x43, 0x91, 0x70, 0xb9, 0x79, 0x48, 0xe8,
+			0x33, 0x28, 0x5d, 0x58, 0x81, 0x81, 0xb6, 0x45, 0x50, 0xb8, 0x29, 0xa0, 0x31, 0xe1,
+			0x72, 0x4e, 0x64, 0x30,
+		];
+		let mut out = [0u8; 32];
+		let mut carry = 0u16;
+		for i in 0..32 {
+			let sum = recipient[i] as u16 + R[i] as u16 + carry;
+			out[i] = sum as u8;
+			carry = sum >> 8;
+		}
+		assert_eq!(carry, 0, "recipient + r must fit in 32 bytes");
+		out
 	}
 
 	#[test]
-	fn encode_unshield_correct_length() {
-		let raw = encode_unshield(&[1u8; 32], &[2u8; 32], 100, &[3u8; 32], 1, 5, &[6u8; 32]);
-		assert_eq!(raw.len(), 7);
+	fn transfer_follows_circuit_order() {
+		let raw = encode_transfer(&transfer(), InputLayout::Base);
+		assert_eq!(raw.len(), TRANSFER_PUBLIC_INPUTS);
+		assert_eq!(raw[0], [0x01; 32]);
+		assert_eq!(&raw[1..3], &NULLIFIERS);
+		assert_eq!(&raw[3..5], &COMMITMENTS);
+		assert_eq!(raw[5], u32_field(7));
+		assert_eq!(raw[6], u128_field(500));
 	}
 
 	#[test]
-	fn encode_unshield_change_commitment_appended() {
-		let change = [0xABu8; 32];
-		let raw = encode_unshield(&[0u8; 32], &[0u8; 32], 0, &[0u8; 32], 0, 0, &change);
-		assert_eq!(raw[6], change);
+	fn memo_bound_transfer_appends_the_reduced_memo_digest() {
+		let base = encode_transfer(&transfer(), InputLayout::Base);
+		let bound = encode_transfer(&transfer(), InputLayout::MemoBound);
+		assert_eq!(bound.len(), TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS);
+		assert_eq!(&bound[..TRANSFER_PUBLIC_INPUTS], &base[..]);
+		assert_eq!(bound[TRANSFER_PUBLIC_INPUTS], to_field_le(&[0xEE; 32]));
 	}
 
 	#[test]
-	fn encode_unshield_zero_change_commitment() {
-		let raw = encode_unshield(&[0u8; 32], &[0u8; 32], 0, &[0u8; 32], 0, 0, &[0u8; 32]);
-		assert_eq!(raw[6], [0u8; 32]);
+	fn memo_digest_only_matters_when_bound() {
+		let other = TransferStatement {
+			memo_digest: [0x11; 32],
+			..transfer()
+		};
+		assert_eq!(
+			encode_transfer(&transfer(), InputLayout::Base),
+			encode_transfer(&other, InputLayout::Base)
+		);
+		assert_ne!(
+			encode_transfer(&transfer(), InputLayout::MemoBound),
+			encode_transfer(&other, InputLayout::MemoBound)
+		);
 	}
 
 	#[test]
-	fn encode_unshield_recipient_reversed() {
-		let mut recipient = [0u8; 32];
-		recipient[31] = 0xFF;
-		let raw = encode_unshield(&[0u8; 32], &[0u8; 32], 0, &recipient, 0, 0, &[0u8; 32]);
-		// recipient is passed as-is (LE format), so last byte should be 0xFF
-		assert_eq!(raw[3][31], 0xFF);
+	fn unshield_follows_circuit_order() {
+		let raw = encode_unshield(&unshield(), InputLayout::Base);
+		assert_eq!(raw.len(), UNSHIELD_PUBLIC_INPUTS);
+		assert_eq!(raw[0], [0x01; 32]);
+		assert_eq!(raw[1], [0x02; 32]);
+		assert_eq!(raw[2], u128_field(100));
+		assert_eq!(raw[3], to_field_le(&[0xFF; 32]));
+		assert_eq!(raw[4], u32_field(7));
+		assert_eq!(raw[5], u128_field(5));
+		assert_eq!(raw[6], [0x06; 32]);
 	}
 
 	#[test]
-	fn encode_value_proof_correct_length() {
-		let signals = [0u8; 76];
-		let raw = encode_value_proof(&signals);
-		assert_eq!(raw.len(), 4);
+	fn memo_bound_unshield_hashes_the_recipient_and_appends_the_memo_digest() {
+		let raw = encode_unshield(&unshield(), InputLayout::MemoBound);
+		assert_eq!(raw.len(), UNSHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS);
+		assert_eq!(
+			raw[3],
+			to_field_le(&sp_io::hashing::blake2_256(&[0xFF; 32]))
+		);
+		assert_eq!(raw[UNSHIELD_PUBLIC_INPUTS], to_field_le(&[0xEE; 32]));
 	}
 
 	#[test]
-	fn encode_value_proof_commitment_field() {
-		let mut signals = [0u8; 76];
-		signals[0..32].copy_from_slice(&[0xAAu8; 32]);
-		let raw = encode_value_proof(&signals);
-		assert_eq!(raw[0], [0xAAu8; 32]);
+	fn a_recipient_alias_encodes_the_same_only_in_the_base_layout() {
+		let recipient = [0x01; 32];
+		let aliased = UnshieldStatement {
+			recipient: alias(recipient),
+			..unshield()
+		};
+		let original = UnshieldStatement {
+			recipient,
+			..unshield()
+		};
+		assert_ne!(original.recipient, aliased.recipient);
+		assert_eq!(
+			encode_unshield(&original, InputLayout::Base),
+			encode_unshield(&aliased, InputLayout::Base),
+			"v1 cannot tell R from R + r"
+		);
+		assert_ne!(
+			encode_unshield(&original, InputLayout::MemoBound),
+			encode_unshield(&aliased, InputLayout::MemoBound)
+		);
+	}
+
+	/// Shared with `@orbinum/protocol` (`addressToFieldElement(_, 2)`) and
+	/// `@orbinum/wallet-sdk`: a client that disagrees proves another recipient.
+	#[test]
+	fn memo_bound_recipient_matches_the_cross_repo_vectors() {
+		fn hex(bytes: [u8; 32]) -> String {
+			bytes.iter().map(|b| format!("{b:02x}")).collect()
+		}
+		let recipient = |r| {
+			encode_unshield(
+				&UnshieldStatement {
+					recipient: r,
+					..unshield()
+				},
+				InputLayout::MemoBound,
+			)[3]
+		};
+		assert_eq!(
+			hex(recipient([0x01; 32])),
+			"f30cea08db61944ea2c1fe5eb553bb5c3f55301bb3506c6f0051c5676608061c"
+		);
+		assert_eq!(
+			hex(recipient([0xFF; 32])),
+			"de0211a000397909c6c8b94fd72f023a5b2d8ca896c7ac8c3624784f491ecd12"
+		);
 	}
 
 	#[test]
-	fn encode_value_proof_value_field_zero_padded() {
-		let mut signals = [0u8; 76];
-		signals[32..40].copy_from_slice(&100u64.to_le_bytes());
-		let raw = encode_value_proof(&signals);
-		assert_eq!(&raw[1][..8], &100u64.to_le_bytes());
-		assert_eq!(&raw[1][8..], &[0u8; 24]);
-	}
-
-	#[test]
-	fn encode_value_proof_asset_id_field_zero_padded() {
-		let mut signals = [0u8; 76];
-		signals[40..44].copy_from_slice(&42u32.to_le_bytes());
-		let raw = encode_value_proof(&signals);
-		assert_eq!(&raw[2][..4], &42u32.to_le_bytes());
-		assert_eq!(&raw[2][4..], &[0u8; 28]);
-	}
-
-	#[test]
-	fn encode_value_proof_owner_hash_field() {
-		let mut signals = [0u8; 76];
-		signals[44..76].copy_from_slice(&[0xBBu8; 32]);
-		let raw = encode_value_proof(&signals);
-		assert_eq!(raw[3], [0xBBu8; 32]);
+	fn every_input_is_canonical() {
+		let max = UnshieldStatement {
+			recipient: [0xFF; 32],
+			memo_digest: [0xFF; 32],
+			amount: u128::MAX,
+			fee: u128::MAX,
+			..unshield()
+		};
+		for layout in [InputLayout::Base, InputLayout::MemoBound] {
+			let raw = encode_unshield(&max, layout);
+			assert!(
+				orbinum_zk_verifier::PublicInputs::new(raw)
+					.to_field_elements()
+					.is_ok(),
+				"{layout:?}"
+			);
+		}
 	}
 }

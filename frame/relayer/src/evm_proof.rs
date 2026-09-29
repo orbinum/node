@@ -160,10 +160,10 @@ pub fn recover_evm_address(signature: &EvmSignature, digest: &[u8; 32]) -> Optio
 /// serialisation prepends — which is exactly what `secp256k1_ecdsa_recover`
 /// returns. Callers holding a tagged 65-byte key pass `&tagged[1..]`.
 ///
-/// Every derivation of an EVM address from a key goes through here. Three copies
-/// of this five-line expression previously lived in the pallet, the node RPC and
-/// the test helper; a divergence between them would only surface as a signature
-/// that mysteriously fails to verify.
+/// Every derivation of an EVM address from a key goes through here — the
+/// pallet, the node RPC and the test helper alike. Separate copies could
+/// diverge, and that would only surface as a signature that mysteriously fails
+/// to verify.
 pub fn evm_address_from_uncompressed(pubkey: &[u8; 64]) -> H160 {
 	H160::from_slice(&keccak_256(pubkey)[12..])
 }

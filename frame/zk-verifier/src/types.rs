@@ -4,7 +4,8 @@ use frame_support::pallet_prelude::*;
 use parity_scale_codec::DecodeWithMemTracking;
 use serde::{Deserialize, Serialize};
 
-extern crate alloc;
+/// A serialized verifying key as stored: at most [`orbinum_zk_verifier::MAX_VK_BYTES`].
+pub type VkBytes = BoundedVec<u8, ConstU32<{ orbinum_zk_verifier::MAX_VK_BYTES as u32 }>>;
 
 /// Circuit identifier type (pallet-specific wrapper)
 #[derive(
@@ -29,8 +30,6 @@ impl CircuitId {
 	pub const TRANSFER: Self = Self(1);
 	/// Unshield circuit ID
 	pub const UNSHIELD: Self = Self(2);
-	/// Value proof circuit ID — proves commitment encodes (value, asset_id) before fee insertion
-	pub const VALUE_PROOF: Self = Self(6);
 }
 
 /// Supported proof systems
@@ -61,8 +60,8 @@ pub enum ProofSystem {
 /// Information about a stored verification key
 #[derive(Clone, PartialEq, Eq, Encode, Decode, MaxEncodedLen, TypeInfo, Debug)]
 pub struct VerificationKeyInfo<BlockNumber> {
-	/// The serialized verification key data (max 8KB)
-	pub key_data: BoundedVec<u8, ConstU32<8192>>,
+	/// The serialized verification key data.
+	pub key_data: VkBytes,
 	/// The proof system this key is for
 	pub system: ProofSystem,
 	/// Block number when the key was registered
@@ -120,8 +119,8 @@ pub struct VkEntry {
 	pub circuit_id: CircuitId,
 	/// Version number for this key.
 	pub version: u32,
-	/// Serialized verification key data (max 8 KB).
-	pub verification_key: BoundedVec<u8, ConstU32<8192>>,
+	/// Serialized verification key data.
+	pub verification_key: VkBytes,
 	/// Set this version as active after registration.
 	/// If no active version exists for the circuit, it is activated regardless.
 	pub set_active: bool,

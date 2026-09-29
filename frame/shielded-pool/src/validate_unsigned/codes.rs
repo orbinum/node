@@ -19,19 +19,30 @@ pub const UNKNOWN_ROOT: u8 = 1;
 /// nothing. Rejected as anti-spam: it would insert commitments for free.
 pub const ALL_INPUTS_DUMMY: u8 = 2;
 
-/// `amount + fee` overflows the balance type.
-///
-/// Deliberately distinct from [`ALL_INPUTS_DUMMY`]: both meanings once shared
-/// code 2 across the two validators, which made a rejection ambiguous to anyone
-/// reading a node log.
-pub const AMOUNT_OVERFLOW: u8 = 4;
-
 /// The pool does not hold enough of the asset to cover `amount + fee`.
 pub const INSUFFICIENT_POOL_BALANCE: u8 = 3;
+
+/// `amount + fee` overflows the balance type.
+pub const AMOUNT_OVERFLOW: u8 = 4;
 
 /// The circuit version is not registered in the verifier, so the proof could
 /// never verify. Checked first — it is the cheapest gate of all.
 pub const UNSUPPORTED_CIRCUIT_VERSION: u8 = 10;
+
+/// The memos do not have the shape the spend requires: one full memo per output
+/// of a transfer; none for a total unshield and a full one for a partial one.
+pub const INVALID_MEMO: u8 = 11;
+
+/// The proof does not verify against its public values. Checked last — it is
+/// the most expensive gate — and the one that keeps a copy of a pending spend
+/// with swapped memos or a higher fee from displacing the original.
+pub const INVALID_PROOF: u8 = 12;
+
+/// The spend fails a check the dispatchable runs (duplicate or existing output,
+/// zero amount, invalid recipient, unverified asset, …). Admission runs the same
+/// checks so that nothing admitted can fail after its proof is verified: such a
+/// spend would fill blocks for free without ever spending its nullifier.
+pub const INVALID_SPEND: u8 = 13;
 
 /// Build an `InvalidTransaction` from one of the codes above.
 pub fn reject(code: u8) -> InvalidTransaction {

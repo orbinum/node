@@ -4,6 +4,35 @@ All notable changes to this crate are documented here.
 
 ---
 
+## [2.0.0] - 2026-09-29
+
+### Added
+
+- `InputLayout` and `input_layout(circuit_id, arity)`: a known circuit's key is
+  `Base` at its base arity, `MemoBound` at base + `MEMO_HASH_INPUTS`, else
+  unusable.
+- `to_field_le(bytes)`: reduce 32 LE bytes to the canonical field element.
+- Re-export `PreparedVerifyingKey` and `MAX_VK_BYTES`.
+
+### Security
+
+- `VerifyingKey::to_ark_vk` checks the layout before deserializing: at most
+  `MAX_PUBLIC_INPUTS + 1` `gamma_abc` points and the exact byte length (no
+  trailing bytes). A short key declaring 2^25 points passed the size cap and made
+  `ark-serialize` reserve gigabytes. Keys with a point at infinity are refused: an
+  identity `gamma_abc` entry leaves its public input out of the verification.
+
+### Removed
+
+- `CIRCUIT_ID_VALUE_PROOF` and `VALUE_PROOF_PUBLIC_INPUTS`;
+  `expected_public_inputs(6)` is now `None`. **Breaking.**
+
+### Internal
+
+- Circuit ids, arities and `InputLayout` in `circuits.rs`; paths unchanged through the crate root. `Groth16Verifier::verify` goes through `verify_with_prepared_vk`.
+
+---
+
 ## [1.4.0] - 2026-08-07
 
 ### Security

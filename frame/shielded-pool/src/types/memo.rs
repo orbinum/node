@@ -40,8 +40,11 @@ impl EncryptedMemo {
 	pub fn as_bytes(&self) -> &[u8] {
 		&self.0
 	}
+	/// Whether this is a full memo: exactly `MAX_ENCRYPTED_MEMO_SIZE` bytes, the
+	/// only size a note's secrets are sealed into. Anything shorter cannot be
+	/// opened, so the note it describes would be unrecoverable from the chain.
 	pub fn is_valid_size(&self) -> bool {
-		!self.0.is_empty()
+		self.0.len() == MAX_ENCRYPTED_MEMO_SIZE as usize
 	}
 	pub fn len(&self) -> usize {
 		self.0.len()

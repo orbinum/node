@@ -20,6 +20,81 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
+### spec 16 — tx 4 — [Unreleased]
+
+Relay fees follow the relay commit and are claimed publicly. `transaction_version`
+moves: `claim_shielded_fees` (call 16) is removed and `commit_relay` (18) /
+`claim_relay_fees` (19) are added.
+
+#### 1 · Relay commits close fee theft (RL-6)
+
+A spend's fee used to go to whoever submitted it, so copying a relayer's spend —
+or an author including its own copy — took the fee. A relayer now records
+`relay_commit_hash(op_hash, its H160)` at least one block before submitting, and
+the fee goes to the relayer with the earliest earlier-block commit, whoever
+submits. `op_hash` covers the proof's public inputs, never the (malleable) proof
+bytes. New `pallet_relayer` constants: `CommitTtl` = 20 blocks,
+`MaxCommitsPerRelayerPerBlock` = 64.
+
+#### 2 · Public fee claim, value_proof removed
+
+`claim_relay_fees` pays pending fees out of the pool to the relayer's EVM mirror,
+with no proof: it creates no note, so there is no amount to prove. The
+value_proof circuit (id 6) goes with the private claim; after this upgrade,
+`purge_circuit(6)` clears its keys.
+
+#### 3 · Memos and recipient bound to the proof
+
+Spends hand the verifier a statement with the memo digest (blake2_256 of the
+SCALE-encoded memos) and the recipient's raw bytes. For a memo-bound key (8
+inputs) the verifier appends `memo_hash = digest mod r` and binds the unshield
+recipient as `blake2_256(recipient) mod r`: a copy with swapped memos, or with
+the recipient replaced by an alias `R ± r` (a different account, the same field
+element under v1), fails verification. v1 keys (7 inputs) keep the old encoding;
+registration refuses a 7-input key for any version other than 1.
+
+Unsigned spends are admitted to the pool only with a valid proof, well-formed
+memos and every check the dispatchable runs (codes 11 / 12 / 13), so nothing
+admitted fails after its proof. Transfer outputs must be distinct and new,
+unshields cannot pay the zero account, and commitment existence reads the leaf
+index. Spend weights now include one proof verification. A partial unshield
+requires a full 180-byte change memo. Claims respect an asset freeze. The
+precompile refuses static and delegated calls, bounds its array decoders and
+reverts (returning gas) on pallet errors. zk-verifier refuses malformed or
+identity-point keys and activating a retired version.
+
+New `pallet_shielded_pool::Config::EvmAccount` (the runtime's EVM address
+mapping). `pallet_relayer::RelayCommits` stores `{ recorded_at, expires_at }` and
+its expiry index is keyed by expiry block.
+
+#### 4 · v1 → v2 rotation by Root, after the upgrade
+
+No keys are embedded and no migration runs: zk-verifier stays at storage
+version 1 and v1 stays active when `setCode` lands. With every service stopped,
+Root registers the v2 transfer / unshield keys of `@orbinum/circuits` 0.15.0
+(`vk_hash` transfer `0x8eb9dbb2…4525`, unshield `0x729c4cce…9bab`) as version 2
+with `set_active`, then `retire_version(1)` for both circuits. Services resume
+only after that: while v1 is live, a pending v1 spend can be resubmitted with
+swapped memos or an aliased recipient. Unspent v1 notes are not affected: the
+note format is unchanged and wallets spend them with v2 proofs.
+
+Fees pending from spec 15 stay in `PendingRelayerFees` and are claimed with
+`claim_relay_fees`. The storage of the other pallets is compatible; no data
+migration.
+
+Upgrade the node binary before `setCode`, and have every relay operator call
+`register_relayer` first: the new relay RPC refuses to relay from an
+unregistered address.
+
+#### 5 · Runtime APIs
+
+`ShieldedPoolRuntimeApi` v3 adds `relay_commit_hash(calldata, relayer)`;
+`RelayerRuntimeApi` v2 adds `relay_commit_block(commit)`. The node's relay RPC
+uses the commit flow only when v3 is present, so the binary can ship first.
+
+Weights for the new calls and the commit lookup are provisional until
+re-benchmarked on the reference machine.
+
 ### spec 15 — tx 3 — [Unreleased]
 
 Three changes ship together, none of them moving a call's encoding.

@@ -1,8 +1,8 @@
 //! Core Groth16 proof verification.
 //!
-//! Single entry point for all verification logic used by [`crate::ZkVerifierPort`].
-//! Resolves the circuit version, loads the VK from storage, calls
-//! `orbinum-zk-verifier`, and updates statistics — all in one place.
+//! Resolves the circuit version, loads and prepares its key once, picks the
+//! [`InputLayout`] the key implies, and records statistics. Encoding the inputs
+//! is the caller's (see [`crate::encoding`]).
 
 use crate::{
 	Error,
@@ -10,45 +10,79 @@ use crate::{
 	types::CircuitId,
 };
 use alloc::vec::Vec;
+use orbinum_zk_verifier::{Bn254, InputLayout, PreparedVerifyingKey, VerifyingKey, input_layout};
 
-/// Verify a Groth16 proof against a circuit's stored verification key.
+/// Verify a proof of a circuit statement, encoded for the layout of the key it
+/// is checked against.
 ///
-/// Returns `(valid, resolved_version)` so callers can emit events with the
-/// exact version that was used.
-///
-/// * `circuit_id`  — target circuit
-/// * `version`     — explicit version, or `None` to use the active version
-/// * `proof_bytes` — compressed Groth16 proof bytes
-/// * `raw_inputs`  — public inputs, each exactly 32 bytes (LE BN254 field element)
-pub fn verify<T: Config>(
+/// Returns `(valid, resolved_version)`. A key whose arity fits neither of the
+/// circuit's layouts, or inputs that do not fill it, are `valid = false`.
+pub fn verify_statement<T: Config>(
 	circuit_id: CircuitId,
 	version: Option<u32>,
-	proof_bytes: &[u8],
+	proof: &[u8],
+	encode: impl FnOnce(InputLayout) -> Vec<[u8; 32]>,
+) -> Result<(bool, u32), sp_runtime::DispatchError> {
+	check::<T>(circuit_id, version, proof, |arity| {
+		let layout = input_layout(u8::try_from(circuit_id.0).ok()?, arity)?;
+		Some(encode(layout)).filter(|raw| raw.len() == arity)
+	})
+}
+
+/// Verify a proof against caller-supplied inputs, taken as-is. Serves the
+/// `verify_proof` extrinsic, whose caller encodes every input itself.
+pub fn verify_raw<T: Config>(
+	circuit_id: CircuitId,
+	version: Option<u32>,
+	proof: &[u8],
 	raw_inputs: Vec<[u8; 32]>,
 ) -> Result<(bool, u32), sp_runtime::DispatchError> {
-	frame_support::ensure!(!proof_bytes.is_empty(), Error::<T>::EmptyProof);
 	frame_support::ensure!(!raw_inputs.is_empty(), Error::<T>::EmptyPublicInputs);
+	check::<T>(circuit_id, version, proof, |_| Some(raw_inputs))
+}
 
-	let explicit = version.is_some();
+/// Shared path: resolve and prepare the key, build the inputs for its arity,
+/// verify, record. `inputs` returns `None` to fail the proof without verifying.
+fn check<T: Config>(
+	circuit_id: CircuitId,
+	version: Option<u32>,
+	proof: &[u8],
+	inputs: impl FnOnce(usize) -> Option<Vec<[u8; 32]>>,
+) -> Result<(bool, u32), sp_runtime::DispatchError> {
+	frame_support::ensure!(!proof.is_empty(), Error::<T>::EmptyProof);
+	let (key_data, resolved) = resolve_key::<T>(circuit_id, version)?;
+
+	// Registration checked the key deserializes; if one ever did not, the proof
+	// fails rather than verifying under guessed inputs.
+	let result = match VerifyingKey::new(key_data).prepare() {
+		Ok(pvk) => {
+			let arity = pvk.vk.gamma_abc_g1.len().saturating_sub(1);
+			inputs(arity).is_some_and(|raw| do_verify(&pvk, proof, raw))
+		}
+		Err(_) => false,
+	};
+	record_stats::<T>(circuit_id, resolved, result);
+	Ok((result, resolved))
+}
+
+/// The key bytes and version to verify against: `version`, or the active one.
+fn resolve_key<T: Config>(
+	circuit_id: CircuitId,
+	version: Option<u32>,
+) -> Result<(Vec<u8>, u32), Error<T>> {
 	let resolved = version
 		.or_else(|| ActiveCircuitVersion::<T>::get(circuit_id))
 		.ok_or(Error::<T>::CircuitNotFound)?;
-
 	frame_support::ensure!(
 		!RetiredVersions::<T>::contains_key(circuit_id, resolved),
 		Error::<T>::UnsupportedCircuitVersion
 	);
-
-	let vk_info = VerificationKeys::<T>::get(circuit_id, resolved).ok_or(if explicit {
+	let info = VerificationKeys::<T>::get(circuit_id, resolved).ok_or(if version.is_some() {
 		Error::<T>::UnsupportedCircuitVersion
 	} else {
 		Error::<T>::VerificationKeyNotFound
 	})?;
-
-	let result = do_verify(vk_info.key_data.as_slice(), proof_bytes, raw_inputs);
-	record_stats::<T>(circuit_id, resolved, result);
-
-	Ok((result, resolved))
+	Ok((info.key_data.into_inner(), resolved))
 }
 
 /// Record a verification outcome into `VerificationStats`.
@@ -69,29 +103,26 @@ fn record_stats<T: Config>(circuit_id: CircuitId, version: u32, result: bool) {
 	});
 }
 
-/// Actual cryptographic verification.
+/// The pairing check.
 ///
-/// Returns `true` unconditionally in **test** builds (no real VK/proof available in unit tests).
-/// In **benchmarking** builds the full Groth16 pairing computation runs so that
-/// `verify_proof` weights reflect real on-chain cost.
-fn do_verify(vk_bytes: &[u8], proof_bytes: &[u8], raw_inputs: Vec<[u8; 32]>) -> bool {
+/// Always `true` in **test** builds: unit tests use keys that deserialize but
+/// no real proofs. Benchmarks run the full pairing so weights reflect its cost.
+fn do_verify(pvk: &PreparedVerifyingKey<Bn254>, proof: &[u8], raw_inputs: Vec<[u8; 32]>) -> bool {
 	#[cfg(test)]
 	{
-		let _ = (vk_bytes, proof_bytes, raw_inputs);
+		let _ = (pvk, proof, raw_inputs);
 		true
 	}
 
 	#[cfg(not(test))]
 	{
-		use orbinum_zk_verifier::{Groth16Verifier, Proof, PublicInputs, VerifyingKey};
-
-		let vk = VerifyingKey::new(vk_bytes.to_vec());
-		let proof = Proof::new(proof_bytes.to_vec());
-		let inputs = PublicInputs::new(raw_inputs);
-
-		Groth16Verifier::verify(&vk, &inputs, &proof)
-			.map(|_| true)
-			.unwrap_or(false)
+		use orbinum_zk_verifier::{Groth16Verifier, Proof, PublicInputs};
+		Groth16Verifier::verify_with_prepared_vk(
+			pvk,
+			&PublicInputs::new(raw_inputs),
+			&Proof::new(proof.to_vec()),
+		)
+		.is_ok()
 	}
 }
 
@@ -101,129 +132,228 @@ fn do_verify(vk_bytes: &[u8], proof_bytes: &[u8], raw_inputs: Vec<[u8; 32]>) -> 
 mod tests {
 	use super::*;
 	use crate::{
-		mock::Test,
-		pallet::{ActiveCircuitVersion, VerificationKeys, VerificationStats},
-		types::{ProofSystem, VerificationKeyInfo},
+		mock::{Test, activate, insert_key, insert_vk, new_test_ext},
+		pallet::VerificationStats,
 	};
-	use frame_support::{BoundedVec, assert_err};
-	use sp_io::TestExternalities;
-	use sp_runtime::BuildStorage;
+	use frame_support::assert_err;
+	use orbinum_zk_verifier::{MEMO_HASH_INPUTS, TRANSFER_PUBLIC_INPUTS};
 
-	fn vk_bytes() -> BoundedVec<u8, frame_support::traits::ConstU32<8192>> {
-		vec![0xAB; 300].try_into().unwrap()
-	}
+	const BASE: usize = TRANSFER_PUBLIC_INPUTS;
 
-	fn proof_bytes() -> Vec<u8> {
+	fn proof() -> Vec<u8> {
 		vec![0x01; 128]
 	}
 
-	fn inputs() -> Vec<[u8; 32]> {
-		vec![[0x02u8; 32]]
+	/// Encoder that records the layout it was asked for and fills `len` inputs.
+	fn encoder(
+		seen: &mut Option<InputLayout>,
+		len: usize,
+	) -> impl FnOnce(InputLayout) -> Vec<[u8; 32]> + '_ {
+		move |layout| {
+			*seen = Some(layout);
+			vec![[0x02; 32]; len]
+		}
 	}
 
-	fn new_test_ext() -> TestExternalities {
-		let storage = frame_system::GenesisConfig::<Test>::default()
-			.build_storage()
-			.expect("mock storage ok");
-		TestExternalities::new(storage)
+	fn stats(circuit_id: CircuitId, version: u32) -> (u64, u64, u64) {
+		let s = VerificationStats::<Test>::get(circuit_id, version);
+		(
+			s.total_verifications,
+			s.successful_verifications,
+			s.failed_verifications,
+		)
 	}
 
-	fn insert_vk(circuit_id: CircuitId, version: u32) {
-		VerificationKeys::<Test>::insert(
-			circuit_id,
-			version,
-			VerificationKeyInfo {
-				key_data: vk_bytes(),
-				system: ProofSystem::Groth16,
-				registered_at: 0u64,
-			},
-		);
+	// ── verify_statement ──────────────────────────────────────────────────────
+
+	#[test]
+	fn a_base_key_gets_the_base_layout() {
+		new_test_ext().execute_with(|| {
+			insert_vk(CircuitId::TRANSFER, 1, BASE);
+			let mut seen = None;
+			let res = verify_statement::<Test>(
+				CircuitId::TRANSFER,
+				Some(1),
+				&proof(),
+				encoder(&mut seen, BASE),
+			);
+			assert_eq!(res, Ok((true, 1)));
+			assert_eq!(seen, Some(InputLayout::Base));
+		});
 	}
 
-	// ── Error paths ───────────────────────────────────────────────────────────
+	#[test]
+	fn a_memo_bound_key_gets_the_memo_bound_layout() {
+		new_test_ext().execute_with(|| {
+			insert_vk(CircuitId::TRANSFER, 2, BASE + MEMO_HASH_INPUTS);
+			let mut seen = None;
+			let res = verify_statement::<Test>(
+				CircuitId::TRANSFER,
+				Some(2),
+				&proof(),
+				encoder(&mut seen, BASE + MEMO_HASH_INPUTS),
+			);
+			assert_eq!(res, Ok((true, 2)));
+			assert_eq!(seen, Some(InputLayout::MemoBound));
+		});
+	}
+
+	#[test]
+	fn a_key_of_foreign_arity_fails_without_encoding() {
+		new_test_ext().execute_with(|| {
+			insert_vk(CircuitId::TRANSFER, 1, BASE + 2);
+			let mut seen = None;
+			let res = verify_statement::<Test>(
+				CircuitId::TRANSFER,
+				Some(1),
+				&proof(),
+				encoder(&mut seen, BASE + 2),
+			);
+			assert_eq!(res, Ok((false, 1)));
+			assert_eq!(seen, None);
+			assert_eq!(stats(CircuitId::TRANSFER, 1), (1, 0, 1));
+		});
+	}
+
+	#[test]
+	fn inputs_that_do_not_fill_the_key_fail() {
+		new_test_ext().execute_with(|| {
+			insert_vk(CircuitId::TRANSFER, 1, BASE);
+			let mut seen = None;
+			let res = verify_statement::<Test>(
+				CircuitId::TRANSFER,
+				Some(1),
+				&proof(),
+				encoder(&mut seen, BASE - 2),
+			);
+			assert_eq!(res, Ok((false, 1)));
+		});
+	}
+
+	#[test]
+	fn a_key_that_does_not_deserialize_fails_closed() {
+		new_test_ext().execute_with(|| {
+			insert_key(CircuitId::TRANSFER, 1, vec![0xAB; 300].try_into().unwrap());
+			let mut seen = None;
+			let res = verify_statement::<Test>(
+				CircuitId::TRANSFER,
+				Some(1),
+				&proof(),
+				encoder(&mut seen, BASE),
+			);
+			assert_eq!(res, Ok((false, 1)));
+			assert_eq!(seen, None, "no inputs are built for an unreadable key");
+		});
+	}
+
+	#[test]
+	fn an_unknown_circuit_takes_the_base_layout_at_any_arity() {
+		new_test_ext().execute_with(|| {
+			insert_vk(CircuitId(200), 1, 3);
+			let mut seen = None;
+			let res =
+				verify_statement::<Test>(CircuitId(200), Some(1), &proof(), encoder(&mut seen, 3));
+			assert_eq!(res, Ok((true, 1)));
+			assert_eq!(seen, Some(InputLayout::Base));
+		});
+	}
+
+	// ── verify_raw ────────────────────────────────────────────────────────────
 
 	#[test]
 	fn empty_proof_is_rejected() {
 		new_test_ext().execute_with(|| {
 			assert_err!(
-				verify::<Test>(CircuitId::TRANSFER, Some(1), &[], inputs()),
-				crate::Error::<Test>::EmptyProof
+				verify_raw::<Test>(CircuitId::TRANSFER, Some(1), &[], vec![[0x02; 32]]),
+				Error::<Test>::EmptyProof
 			);
 		});
 	}
 
 	#[test]
-	fn empty_public_inputs_is_rejected() {
+	fn empty_public_inputs_are_rejected() {
 		new_test_ext().execute_with(|| {
 			assert_err!(
-				verify::<Test>(CircuitId::TRANSFER, Some(1), &proof_bytes(), vec![]),
-				crate::Error::<Test>::EmptyPublicInputs
+				verify_raw::<Test>(CircuitId::TRANSFER, Some(1), &proof(), vec![]),
+				Error::<Test>::EmptyPublicInputs
 			);
 		});
 	}
 
+	/// Raw inputs are not encoded or counted here; the count check against the
+	/// key is ark-groth16's, which the test build stubs out.
 	#[test]
-	fn no_active_version_returns_circuit_not_found() {
+	fn verify_raw_does_not_encode_inputs() {
+		new_test_ext().execute_with(|| {
+			insert_vk(CircuitId::TRANSFER, 1, BASE);
+			activate(CircuitId::TRANSFER, 1);
+			assert_eq!(
+				verify_raw::<Test>(CircuitId::TRANSFER, None, &proof(), vec![[0x02; 32]]),
+				Ok((true, 1))
+			);
+		});
+	}
+
+	// ── version resolution ────────────────────────────────────────────────────
+
+	#[test]
+	fn no_active_version_is_circuit_not_found() {
 		new_test_ext().execute_with(|| {
 			assert_err!(
-				verify::<Test>(CircuitId::TRANSFER, None, &proof_bytes(), inputs()),
-				crate::Error::<Test>::CircuitNotFound
+				verify_raw::<Test>(CircuitId::TRANSFER, None, &proof(), vec![[0x02; 32]]),
+				Error::<Test>::CircuitNotFound
 			);
 		});
 	}
 
 	#[test]
-	fn explicit_version_without_vk_is_unsupported() {
+	fn an_explicit_version_without_a_key_is_unsupported() {
 		new_test_ext().execute_with(|| {
 			assert_err!(
-				verify::<Test>(CircuitId::TRANSFER, Some(99), &proof_bytes(), inputs()),
-				crate::Error::<Test>::UnsupportedCircuitVersion
+				verify_raw::<Test>(CircuitId::TRANSFER, Some(99), &proof(), vec![[0x02; 32]]),
+				Error::<Test>::UnsupportedCircuitVersion
 			);
 		});
 	}
 
-	// ── Happy paths ───────────────────────────────────────────────────────────
-
 	#[test]
-	fn verify_resolves_active_version() {
+	fn an_active_version_without_a_key_is_key_not_found() {
 		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::TRANSFER, 1);
-			ActiveCircuitVersion::<Test>::insert(CircuitId::TRANSFER, 1u32);
-
-			let (ok, version) =
-				verify::<Test>(CircuitId::TRANSFER, None, &proof_bytes(), inputs()).unwrap();
-			assert!(ok);
-			assert_eq!(version, 1);
+			activate(CircuitId::TRANSFER, 3);
+			assert_err!(
+				verify_raw::<Test>(CircuitId::TRANSFER, None, &proof(), vec![[0x02; 32]]),
+				Error::<Test>::VerificationKeyNotFound
+			);
 		});
 	}
 
 	#[test]
-	fn verify_uses_explicit_version_over_active() {
+	fn an_explicit_version_overrides_the_active_one() {
 		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::TRANSFER, 1);
-			insert_vk(CircuitId::TRANSFER, 2);
-			ActiveCircuitVersion::<Test>::insert(CircuitId::TRANSFER, 1u32);
-
-			let (ok, version) =
-				verify::<Test>(CircuitId::TRANSFER, Some(2), &proof_bytes(), inputs()).unwrap();
-			assert!(ok);
-			assert_eq!(version, 2, "debe usar la versión explícita, no la activa");
+			insert_vk(CircuitId::TRANSFER, 1, BASE);
+			insert_vk(CircuitId::TRANSFER, 2, BASE);
+			activate(CircuitId::TRANSFER, 1);
+			let (_, version) =
+				verify_raw::<Test>(CircuitId::TRANSFER, Some(2), &proof(), vec![[0x02; 32]])
+					.unwrap();
+			assert_eq!(version, 2);
 		});
 	}
 
+	// ── statistics ────────────────────────────────────────────────────────────
+
 	#[test]
-	fn verify_updates_stats_on_success() {
+	fn stats_count_per_circuit_and_version() {
 		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::UNSHIELD, 1);
-			ActiveCircuitVersion::<Test>::insert(CircuitId::UNSHIELD, 1u32);
-
-			verify::<Test>(CircuitId::UNSHIELD, None, &proof_bytes(), inputs()).unwrap();
-			verify::<Test>(CircuitId::UNSHIELD, None, &proof_bytes(), inputs()).unwrap();
-
-			let stats = VerificationStats::<Test>::get(CircuitId::UNSHIELD, 1u32);
-			assert_eq!(stats.total_verifications, 2);
-			assert_eq!(stats.successful_verifications, 2);
-			assert_eq!(stats.failed_verifications, 0);
+			for cid in [CircuitId::TRANSFER, CircuitId::UNSHIELD] {
+				insert_vk(cid, 1, BASE);
+			}
+			let raw = || vec![[0x02; 32]];
+			verify_raw::<Test>(CircuitId::TRANSFER, Some(1), &proof(), raw()).unwrap();
+			verify_raw::<Test>(CircuitId::UNSHIELD, Some(1), &proof(), raw()).unwrap();
+			verify_raw::<Test>(CircuitId::UNSHIELD, Some(1), &proof(), raw()).unwrap();
+			assert_eq!(stats(CircuitId::TRANSFER, 1), (1, 1, 0));
+			assert_eq!(stats(CircuitId::UNSHIELD, 1), (2, 2, 0));
 		});
 	}
 
@@ -233,49 +363,7 @@ mod tests {
 			record_stats::<Test>(CircuitId::TRANSFER, 1, false);
 			record_stats::<Test>(CircuitId::TRANSFER, 1, false);
 			record_stats::<Test>(CircuitId::TRANSFER, 1, true);
-
-			let stats = VerificationStats::<Test>::get(CircuitId::TRANSFER, 1u32);
-			assert_eq!(stats.total_verifications, 3);
-			assert_eq!(stats.successful_verifications, 1);
-			assert_eq!(stats.failed_verifications, 2);
-		});
-	}
-
-	#[test]
-	fn verify_works_for_each_circuit_independently() {
-		new_test_ext().execute_with(|| {
-			for cid in [
-				CircuitId::TRANSFER,
-				CircuitId::UNSHIELD,
-				CircuitId::VALUE_PROOF,
-			] {
-				insert_vk(cid, 1);
-				ActiveCircuitVersion::<Test>::insert(cid, 1u32);
-
-				let (ok, v) = verify::<Test>(cid, None, &proof_bytes(), inputs()).unwrap();
-				assert!(ok, "circuit {cid:?} debería verificar");
-				assert_eq!(v, 1);
-			}
-		});
-	}
-
-	#[test]
-	fn stats_accumulate_across_multiple_circuits() {
-		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::TRANSFER, 1);
-			insert_vk(CircuitId::UNSHIELD, 1);
-			ActiveCircuitVersion::<Test>::insert(CircuitId::TRANSFER, 1u32);
-			ActiveCircuitVersion::<Test>::insert(CircuitId::UNSHIELD, 1u32);
-
-			verify::<Test>(CircuitId::TRANSFER, None, &proof_bytes(), inputs()).unwrap();
-			verify::<Test>(CircuitId::UNSHIELD, None, &proof_bytes(), inputs()).unwrap();
-			verify::<Test>(CircuitId::UNSHIELD, None, &proof_bytes(), inputs()).unwrap();
-
-			let t = VerificationStats::<Test>::get(CircuitId::TRANSFER, 1u32);
-			assert_eq!(t.total_verifications, 1);
-
-			let u = VerificationStats::<Test>::get(CircuitId::UNSHIELD, 1u32);
-			assert_eq!(u.total_verifications, 2);
+			assert_eq!(stats(CircuitId::TRANSFER, 1), (3, 1, 2));
 		});
 	}
 }

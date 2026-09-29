@@ -9,9 +9,44 @@ use sp_core::{ecdsa, sr25519, Pair, H160};
 use sp_io::TestExternalities;
 use sp_runtime::traits::{IdentifyAccount, Verify};
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 fn with_ext<R>(run: impl FnOnce() -> R) -> R {
 	TestExternalities::default().execute_with(run)
 }
+
+fn api_validate_signature(signature: OrbinumSignature, message: &[u8], signer: &AccountId) -> bool {
+	signature.verify(message, signer)
+}
+
+fn sr25519_account(derivation: &str) -> (sr25519::Pair, AccountId) {
+	let pair = sr25519::Pair::from_string(derivation, None).unwrap();
+	let account: AccountId = OrbinumSigner::from(pair.public()).into_account();
+	(pair, account)
+}
+
+fn ecdsa_account(derivation: &str) -> (ecdsa::Pair, AccountId) {
+	let pair = ecdsa::Pair::from_string(derivation, None).unwrap();
+	let account: AccountId = OrbinumSigner::Ecdsa(pair.public()).into_account();
+	(pair, account)
+}
+
+/// Every signed extension at its default, with `CheckMetadataHash` disabled.
+fn signed_extra() -> crate::SignedExtra {
+	(
+		frame_system::CheckNonZeroSender::new(),
+		frame_system::CheckSpecVersion::new(),
+		frame_system::CheckTxVersion::new(),
+		frame_system::CheckGenesis::new(),
+		frame_system::CheckEra::from(sp_runtime::generic::Era::Immortal),
+		frame_system::CheckNonce::from(0u32),
+		frame_system::CheckWeight::new(),
+		pallet_transaction_payment::ChargeTransactionPayment::from(0u128),
+		frame_metadata_hash_extension::CheckMetadataHash::new(false),
+	)
+}
+
+// ── Weights ───────────────────────────────────────────────────────────────────
 
 #[test]
 fn configured_base_extrinsic_weight_is_evm_compatible() {
@@ -22,13 +57,18 @@ fn configured_base_extrinsic_weight_is_evm_compatible() {
 	assert!(base_extrinsic.ref_time() <= min_ethereum_transaction_weight.ref_time());
 }
 
+// ── Address mapping, signatures and nonces ────────────────────────────────────
+
 #[test]
 fn ee_suffix_mapping_is_deterministic() {
 	with_ext(|| {
 		let eth_addr = H160::from([0x42u8; 20]);
 		let acc1 = EeSuffixAddressMapping::<Runtime>::into_account_id(eth_addr);
 		let acc2 = EeSuffixAddressMapping::<Runtime>::into_account_id(eth_addr);
-		assert_eq!(acc1, acc2, "mismo H160 debe producir el mismo AccountId32");
+		assert_eq!(
+			acc1, acc2,
+			"the same H160 must produce the same AccountId32"
+		);
 	});
 }
 
@@ -259,7 +299,7 @@ fn ecdsa_evm_and_substrate_paths_are_unified() {
 		assert_eq!(
 			substrate_account, evm_account,
 			"OrbinumSigner::Ecdsa and EeSuffixAddressMapping must produce identical AccountId32 \
-			 for the same secp256k1 keypair — Phase 3 unification confirmed"
+			 for the same secp256k1 keypair"
 		);
 	});
 }
@@ -375,22 +415,6 @@ fn ecdsa_known_vector_alith_derives_correct_account() {
 	});
 }
 
-fn api_validate_signature(signature: OrbinumSignature, message: &[u8], signer: &AccountId) -> bool {
-	signature.verify(message, signer)
-}
-
-fn sr25519_account(derivation: &str) -> (sr25519::Pair, AccountId) {
-	let pair = sr25519::Pair::from_string(derivation, None).unwrap();
-	let account: AccountId = OrbinumSigner::from(pair.public()).into_account();
-	(pair, account)
-}
-
-fn ecdsa_account(derivation: &str) -> (ecdsa::Pair, AccountId) {
-	let pair = ecdsa::Pair::from_string(derivation, None).unwrap();
-	let account: AccountId = OrbinumSigner::Ecdsa(pair.public()).into_account();
-	(pair, account)
-}
-
 #[test]
 fn check_nonce_signed_extension_is_constructable() {
 	let _: frame_system::CheckNonce<Runtime>;
@@ -469,7 +493,7 @@ fn evm_and_substrate_addresses_share_unified_balance() {
 	});
 }
 
-// ── CheckMetadataHash tests ────────────────────────────────────────────────
+// ── CheckMetadataHash ─────────────────────────────────────────────────────────
 
 /// Disabled mode (`enable = false`) must encode as the single byte 0x00.
 #[test]
@@ -526,20 +550,9 @@ fn check_metadata_hash_implicit_is_none_when_disabled() {
 fn signed_extra_with_check_metadata_hash_round_trips() {
 	use crate::SignedExtra;
 	use scale_codec::{Decode, Encode};
-	use sp_runtime::generic::Era;
 
 	with_ext(|| {
-		let extra: SignedExtra = (
-			frame_system::CheckNonZeroSender::new(),
-			frame_system::CheckSpecVersion::new(),
-			frame_system::CheckTxVersion::new(),
-			frame_system::CheckGenesis::new(),
-			frame_system::CheckEra::from(Era::Immortal),
-			frame_system::CheckNonce::from(0u32),
-			frame_system::CheckWeight::new(),
-			pallet_transaction_payment::ChargeTransactionPayment::from(0u128),
-			frame_metadata_hash_extension::CheckMetadataHash::new(false),
-		);
+		let extra = signed_extra();
 
 		let encoded = extra.encode();
 		let decoded =
@@ -558,25 +571,14 @@ fn signed_extra_with_check_metadata_hash_round_trips() {
 /// seed it before calling `SignedPayload::new`.
 #[test]
 fn signed_extra_implicit_succeeds_with_check_metadata_hash() {
-	use crate::{RuntimeCall, SignedExtra};
-	use sp_runtime::generic::Era;
+	use crate::RuntimeCall;
 
 	with_ext(|| {
 		// CheckEra::implicit() for Era::Immortal reads BlockHash[0] from storage.
 		// Seed it so the call does not fail with AncientBirthBlock.
 		frame_system::BlockHash::<Runtime>::insert(0u32, sp_core::H256::default());
 
-		let extra: SignedExtra = (
-			frame_system::CheckNonZeroSender::new(),
-			frame_system::CheckSpecVersion::new(),
-			frame_system::CheckTxVersion::new(),
-			frame_system::CheckGenesis::new(),
-			frame_system::CheckEra::from(Era::Immortal),
-			frame_system::CheckNonce::from(0u32),
-			frame_system::CheckWeight::new(),
-			pallet_transaction_payment::ChargeTransactionPayment::from(0u128),
-			frame_metadata_hash_extension::CheckMetadataHash::new(false),
-		);
+		let extra = signed_extra();
 
 		let call = RuntimeCall::System(frame_system::Call::remark { remark: vec![] });
 		crate::SignedPayload::new(call, extra)

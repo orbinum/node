@@ -41,12 +41,13 @@ use core::marker::PhantomData;
 pub trait WeightInfo {
 	fn shield() -> Weight;
 	fn shield_batch(n: u32, ) -> Weight;
-	fn private_transfer(n: u32, ) -> Weight;
+	fn private_transfer() -> Weight;
 	fn unshield() -> Weight;
 	fn register_asset() -> Weight;
 	fn verify_asset() -> Weight;
 	fn unverify_asset() -> Weight;
-	fn claim_shielded_fees() -> Weight;
+	fn commit_relay(n: u32, ) -> Weight;
+	fn claim_relay_fees() -> Weight;
 	fn prune_sealed_nodes(n: u32, ) -> Weight;
 }
 
@@ -202,19 +203,16 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Storage: `ShieldedPool::CommitmentToLeafIndex` (r:0 w:2)
 	/// Proof: `ShieldedPool::CommitmentToLeafIndex` (`max_values`: None, `max_size`: Some(52), added: 2527, mode: `MaxEncodedLen`)
 	/// The range of component `n` is `[1, 2]`.
-	fn private_transfer(n: u32, ) -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `1260`
-		//  Estimated: `3631 + n * (2705 ±0)`
-		// Minimum execution time: 983_546_000 picoseconds.
-		Weight::from_parts(90_754_716, 3631)
-			// Standard Error: 2_663_348
-			.saturating_add(Weight::from_parts(918_631_791, 0).saturating_mul(n.into()))
-			.saturating_add(T::DbWeight::get().reads(17_u64))
-			.saturating_add(T::DbWeight::get().reads((3_u64).saturating_mul(n.into())))
-			.saturating_add(T::DbWeight::get().writes(29_u64))
-			.saturating_add(T::DbWeight::get().writes((6_u64).saturating_mul(n.into())))
-			.saturating_add(Weight::from_parts(0, 2705).saturating_mul(n.into()))
+	fn private_transfer() -> Weight {
+		// PROVISIONAL: the n = 2 point of the last `private_transfer(n)` run; the
+		// transfer is fixed at two inputs and two outputs.
+		Weight::from_parts(1_928_018_298, 9041)
+			.saturating_add(T::DbWeight::get().reads(23_u64))
+			.saturating_add(T::DbWeight::get().writes(41_u64))
+			// PROVISIONAL: relay commit lookup (registry scan + commits, 32 relayers).
+			.saturating_add(T::DbWeight::get().reads(64_u64))
+			.saturating_add(T::DbWeight::get().writes(32_u64))
+			.saturating_add(Weight::from_parts(2_000_000, 163_264))
 	}
 	/// Storage: `ShieldedPool::Assets` (r:1 w:0)
 	/// Proof: `ShieldedPool::Assets` (`max_values`: None, `max_size`: Some(166), added: 2641, mode: `MaxEncodedLen`)
@@ -254,6 +252,10 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		Weight::from_parts(119_921_000, 6196)
 			.saturating_add(T::DbWeight::get().reads(16_u64))
 			.saturating_add(T::DbWeight::get().writes(8_u64))
+			// PROVISIONAL: relay commit lookup (registry scan + commits, 32 relayers).
+			.saturating_add(T::DbWeight::get().reads(64_u64))
+			.saturating_add(T::DbWeight::get().writes(32_u64))
+			.saturating_add(Weight::from_parts(2_000_000, 163_264))
 	}
 	/// Storage: `ShieldedPool::NextAssetId` (r:1 w:1)
 	/// Proof: `ShieldedPool::NextAssetId` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
@@ -314,50 +316,29 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(5_u64))
 			.saturating_add(T::DbWeight::get().writes(3_u64))
 	}
+	/// Storage: `Relayer::RelayerRegistry` (r:1 w:0)
+	/// Storage: `Relayer::CommitsByRelayer` (r:1 w:1)
+	/// Storage: `Relayer::RelayCommits` (r:n w:n)
+	/// PROVISIONAL — not benchmarked yet. Regenerate on the reference machine.
+	/// The range of component `n` is `[1, 64]`.
+	fn commit_relay(n: u32, ) -> Weight {
+		Weight::from_parts(20_000_000, 3533)
+			.saturating_add(Weight::from_parts(5_000_000, 2543).saturating_mul(n.into()))
+			.saturating_add(T::DbWeight::get().reads(6_u64))
+			.saturating_add(T::DbWeight::get().writes(3_u64))
+			.saturating_add(T::DbWeight::get().reads((1_u64).saturating_mul(n.into())))
+			.saturating_add(T::DbWeight::get().writes((1_u64).saturating_mul(n.into())))
+	}
 	/// Storage: `ShieldedPool::Assets` (r:1 w:0)
-	/// Proof: `ShieldedPool::Assets` (`max_values`: None, `max_size`: Some(166), added: 2641, mode: `MaxEncodedLen`)
+	/// Storage: `ShieldedPool::PoolBalancePerAsset` (r:1 w:1)
+	/// Storage: `Relayer::RelayerByAccount` (r:1 w:0)
 	/// Storage: `Relayer::PendingRelayerFees` (r:1 w:1)
-	/// Proof: `Relayer::PendingRelayerFees` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `MaxEncodedLen`)
-	/// Storage: `System::Number` (r:1 w:0)
-	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::ExecutionPhase` (r:1 w:0)
-	/// Proof: `System::ExecutionPhase` (`max_values`: Some(1), `max_size`: Some(5), added: 500, mode: `MaxEncodedLen`)
-	/// Storage: `System::EventCount` (r:1 w:1)
-	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::Events` (r:1 w:1)
-	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	/// Storage: `ShieldedPool::MerkleTreeSize` (r:1 w:1)
-	/// Proof: `ShieldedPool::MerkleTreeSize` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::CommitmentMemos` (r:1 w:1)
-	/// Proof: `ShieldedPool::CommitmentMemos` (`max_values`: None, `max_size`: Some(230), added: 2705, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::MerkleTreeFrontier` (r:1 w:1)
-	/// Proof: `ShieldedPool::MerkleTreeFrontier` (`max_values`: Some(1), `max_size`: Some(640), added: 1135, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::PoseidonRoot` (r:1 w:1)
-	/// Proof: `ShieldedPool::PoseidonRoot` (`max_values`: Some(1), `max_size`: Some(32), added: 527, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::TotalCommitmentsInserted` (r:1 w:1)
-	/// Proof: `ShieldedPool::TotalCommitmentsInserted` (`max_values`: Some(1), `max_size`: Some(8), added: 503, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::HistoricRootsHead` (r:1 w:1)
-	/// Proof: `ShieldedPool::HistoricRootsHead` (`max_values`: Some(1), `max_size`: Some(8), added: 503, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::HistoricRootsTail` (r:1 w:1)
-	/// Proof: `ShieldedPool::HistoricRootsTail` (`max_values`: Some(1), `max_size`: Some(8), added: 503, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::HistoricRootsQueue` (r:1 w:1)
-	/// Proof: `ShieldedPool::HistoricRootsQueue` (`max_values`: None, `max_size`: Some(52), added: 2527, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::HistoricPoseidonRoots` (r:1 w:1)
-	/// Proof: `ShieldedPool::HistoricPoseidonRoots` (`max_values`: None, `max_size`: Some(52), added: 2527, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::MerkleNodes` (r:0 w:19)
-	/// Proof: `ShieldedPool::MerkleNodes` (`max_values`: None, `max_size`: Some(65), added: 2540, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::MerkleLeaves` (r:0 w:1)
-	/// Proof: `ShieldedPool::MerkleLeaves` (`max_values`: None, `max_size`: Some(52), added: 2527, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::CommitmentToLeafIndex` (r:0 w:1)
-	/// Proof: `ShieldedPool::CommitmentToLeafIndex` (`max_values`: None, `max_size`: Some(52), added: 2527, mode: `MaxEncodedLen`)
-	fn claim_shielded_fees() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `1200`
-		//  Estimated: `3695`
-		// Minimum execution time: 969_545_000 picoseconds.
-		Weight::from_parts(987_242_000, 3695)
-			.saturating_add(T::DbWeight::get().reads(15_u64))
-			.saturating_add(T::DbWeight::get().writes(33_u64))
+	/// Storage: `System::Account` (r:2 w:2)
+	/// PROVISIONAL — not benchmarked yet. Regenerate on the reference machine.
+	fn claim_relay_fees() -> Weight {
+		Weight::from_parts(60_000_000, 6196)
+			.saturating_add(T::DbWeight::get().reads(10_u64))
+			.saturating_add(T::DbWeight::get().writes(6_u64))
 	}
 	/// Storage: `ShieldedPool::MerkleTreeSize` (r:1 w:0)
 	/// Proof: `ShieldedPool::MerkleTreeSize` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
@@ -535,19 +516,16 @@ impl WeightInfo for () {
 	/// Storage: `ShieldedPool::CommitmentToLeafIndex` (r:0 w:2)
 	/// Proof: `ShieldedPool::CommitmentToLeafIndex` (`max_values`: None, `max_size`: Some(52), added: 2527, mode: `MaxEncodedLen`)
 	/// The range of component `n` is `[1, 2]`.
-	fn private_transfer(n: u32, ) -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `1260`
-		//  Estimated: `3631 + n * (2705 ±0)`
-		// Minimum execution time: 983_546_000 picoseconds.
-		Weight::from_parts(90_754_716, 3631)
-			// Standard Error: 2_663_348
-			.saturating_add(Weight::from_parts(918_631_791, 0).saturating_mul(n.into()))
-			.saturating_add(RocksDbWeight::get().reads(17_u64))
-			.saturating_add(RocksDbWeight::get().reads((3_u64).saturating_mul(n.into())))
-			.saturating_add(RocksDbWeight::get().writes(29_u64))
-			.saturating_add(RocksDbWeight::get().writes((6_u64).saturating_mul(n.into())))
-			.saturating_add(Weight::from_parts(0, 2705).saturating_mul(n.into()))
+	fn private_transfer() -> Weight {
+		// PROVISIONAL: the n = 2 point of the last `private_transfer(n)` run; the
+		// transfer is fixed at two inputs and two outputs.
+		Weight::from_parts(1_928_018_298, 9041)
+			.saturating_add(RocksDbWeight::get().reads(23_u64))
+			.saturating_add(RocksDbWeight::get().writes(41_u64))
+			// PROVISIONAL: relay commit lookup (registry scan + commits, 32 relayers).
+			.saturating_add(RocksDbWeight::get().reads(64_u64))
+			.saturating_add(RocksDbWeight::get().writes(32_u64))
+			.saturating_add(Weight::from_parts(2_000_000, 163_264))
 	}
 	/// Storage: `ShieldedPool::Assets` (r:1 w:0)
 	/// Proof: `ShieldedPool::Assets` (`max_values`: None, `max_size`: Some(166), added: 2641, mode: `MaxEncodedLen`)
@@ -587,6 +565,10 @@ impl WeightInfo for () {
 		Weight::from_parts(119_921_000, 6196)
 			.saturating_add(RocksDbWeight::get().reads(16_u64))
 			.saturating_add(RocksDbWeight::get().writes(8_u64))
+			// PROVISIONAL: relay commit lookup (registry scan + commits, 32 relayers).
+			.saturating_add(RocksDbWeight::get().reads(64_u64))
+			.saturating_add(RocksDbWeight::get().writes(32_u64))
+			.saturating_add(Weight::from_parts(2_000_000, 163_264))
 	}
 	/// Storage: `ShieldedPool::NextAssetId` (r:1 w:1)
 	/// Proof: `ShieldedPool::NextAssetId` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
@@ -647,50 +629,29 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(5_u64))
 			.saturating_add(RocksDbWeight::get().writes(3_u64))
 	}
+	/// Storage: `Relayer::RelayerRegistry` (r:1 w:0)
+	/// Storage: `Relayer::CommitsByRelayer` (r:1 w:1)
+	/// Storage: `Relayer::RelayCommits` (r:n w:n)
+	/// PROVISIONAL — not benchmarked yet. Regenerate on the reference machine.
+	/// The range of component `n` is `[1, 64]`.
+	fn commit_relay(n: u32, ) -> Weight {
+		Weight::from_parts(20_000_000, 3533)
+			.saturating_add(Weight::from_parts(5_000_000, 2543).saturating_mul(n.into()))
+			.saturating_add(RocksDbWeight::get().reads(6_u64))
+			.saturating_add(RocksDbWeight::get().writes(3_u64))
+			.saturating_add(RocksDbWeight::get().reads((1_u64).saturating_mul(n.into())))
+			.saturating_add(RocksDbWeight::get().writes((1_u64).saturating_mul(n.into())))
+	}
 	/// Storage: `ShieldedPool::Assets` (r:1 w:0)
-	/// Proof: `ShieldedPool::Assets` (`max_values`: None, `max_size`: Some(166), added: 2641, mode: `MaxEncodedLen`)
+	/// Storage: `ShieldedPool::PoolBalancePerAsset` (r:1 w:1)
+	/// Storage: `Relayer::RelayerByAccount` (r:1 w:0)
 	/// Storage: `Relayer::PendingRelayerFees` (r:1 w:1)
-	/// Proof: `Relayer::PendingRelayerFees` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `MaxEncodedLen`)
-	/// Storage: `System::Number` (r:1 w:0)
-	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::ExecutionPhase` (r:1 w:0)
-	/// Proof: `System::ExecutionPhase` (`max_values`: Some(1), `max_size`: Some(5), added: 500, mode: `MaxEncodedLen`)
-	/// Storage: `System::EventCount` (r:1 w:1)
-	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `System::Events` (r:1 w:1)
-	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	/// Storage: `ShieldedPool::MerkleTreeSize` (r:1 w:1)
-	/// Proof: `ShieldedPool::MerkleTreeSize` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::CommitmentMemos` (r:1 w:1)
-	/// Proof: `ShieldedPool::CommitmentMemos` (`max_values`: None, `max_size`: Some(230), added: 2705, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::MerkleTreeFrontier` (r:1 w:1)
-	/// Proof: `ShieldedPool::MerkleTreeFrontier` (`max_values`: Some(1), `max_size`: Some(640), added: 1135, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::PoseidonRoot` (r:1 w:1)
-	/// Proof: `ShieldedPool::PoseidonRoot` (`max_values`: Some(1), `max_size`: Some(32), added: 527, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::TotalCommitmentsInserted` (r:1 w:1)
-	/// Proof: `ShieldedPool::TotalCommitmentsInserted` (`max_values`: Some(1), `max_size`: Some(8), added: 503, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::HistoricRootsHead` (r:1 w:1)
-	/// Proof: `ShieldedPool::HistoricRootsHead` (`max_values`: Some(1), `max_size`: Some(8), added: 503, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::HistoricRootsTail` (r:1 w:1)
-	/// Proof: `ShieldedPool::HistoricRootsTail` (`max_values`: Some(1), `max_size`: Some(8), added: 503, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::HistoricRootsQueue` (r:1 w:1)
-	/// Proof: `ShieldedPool::HistoricRootsQueue` (`max_values`: None, `max_size`: Some(52), added: 2527, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::HistoricPoseidonRoots` (r:1 w:1)
-	/// Proof: `ShieldedPool::HistoricPoseidonRoots` (`max_values`: None, `max_size`: Some(52), added: 2527, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::MerkleNodes` (r:0 w:19)
-	/// Proof: `ShieldedPool::MerkleNodes` (`max_values`: None, `max_size`: Some(65), added: 2540, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::MerkleLeaves` (r:0 w:1)
-	/// Proof: `ShieldedPool::MerkleLeaves` (`max_values`: None, `max_size`: Some(52), added: 2527, mode: `MaxEncodedLen`)
-	/// Storage: `ShieldedPool::CommitmentToLeafIndex` (r:0 w:1)
-	/// Proof: `ShieldedPool::CommitmentToLeafIndex` (`max_values`: None, `max_size`: Some(52), added: 2527, mode: `MaxEncodedLen`)
-	fn claim_shielded_fees() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `1200`
-		//  Estimated: `3695`
-		// Minimum execution time: 969_545_000 picoseconds.
-		Weight::from_parts(987_242_000, 3695)
-			.saturating_add(RocksDbWeight::get().reads(15_u64))
-			.saturating_add(RocksDbWeight::get().writes(33_u64))
+	/// Storage: `System::Account` (r:2 w:2)
+	/// PROVISIONAL — not benchmarked yet. Regenerate on the reference machine.
+	fn claim_relay_fees() -> Weight {
+		Weight::from_parts(60_000_000, 6196)
+			.saturating_add(RocksDbWeight::get().reads(10_u64))
+			.saturating_add(RocksDbWeight::get().writes(6_u64))
 	}
 	/// Storage: `ShieldedPool::MerkleTreeSize` (r:1 w:0)
 	/// Proof: `ShieldedPool::MerkleTreeSize` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)

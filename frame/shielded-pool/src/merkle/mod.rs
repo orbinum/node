@@ -1225,7 +1225,9 @@ mod prune_tests {
 	/// Fill exactly one tree so it seals, then start the next.
 	fn seal_one_tree() -> u32 {
 		let cap: u32 = <Test as Config>::MaxLeavesPerTree::get();
-		for i in 0..cap {
+		// Offset by the leaves already present: each commitment is unique.
+		let start = crate::storage::MerkleRepository::get_tree_size::<Test>();
+		for i in start..start + cap {
 			let mut c = [0u8; 32];
 			c[..4].copy_from_slice(&i.to_le_bytes());
 			c[31] = 0x5A;

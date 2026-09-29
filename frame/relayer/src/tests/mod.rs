@@ -6,17 +6,13 @@
 //! - `registry_tests`        — EVM address ↔ AccountId binding lifecycle
 //! - `ownership_proof_tests` — proof of key control, and which addresses count
 //! - `cleanup_tests`         — `clear_relayer`, the validator-exit hook
+//! - `commit_tests`          — relay commits: recording, attribution, expiry
 //! - `fees_tests`            — relay fee accrual and consumption via RelayerInterface
 
-#[cfg(test)]
-pub mod cleanup_tests;
-#[cfg(test)]
-pub mod config_tests;
-#[cfg(test)]
-pub mod dispatch_info_tests;
-#[cfg(test)]
-pub mod fees_tests;
-#[cfg(test)]
-pub mod ownership_proof_tests;
-#[cfg(test)]
-pub mod registry_tests;
+mod cleanup_tests;
+mod commit_tests;
+mod config_tests;
+mod dispatch_info_tests;
+mod fees_tests;
+mod ownership_proof_tests;
+mod registry_tests;

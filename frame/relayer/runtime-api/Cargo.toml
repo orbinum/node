@@ -1,6 +1,6 @@
 [package]
 name = "pallet-relayer-runtime-api"
-version = "0.1.0"
+version = "0.2.0"
 description = "Runtime API for pallet-relayer: query relayer status and pending fees."
 authors = { workspace = true }
 license = "GPL-3.0-or-later"
