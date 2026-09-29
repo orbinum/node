@@ -10,9 +10,9 @@ This folder centralizes all Verification Key (VK) operations for development and
     - `set-active`
     - `remove`
 - `workflows/setup-dev.sh`
-  - DEV bootstrap for fixed circuits `1,2,6`.
+  - DEV bootstrap for fixed circuits `1,2`.
 - `workflows/rotate-dev.sh`
-  - Version rotation `old -> new` with RPC validation and optional `--remove-old`.
+  - Version rotation `old -> new` with RPC validation. The old version is **retired** as soon as the new one is active (the submitter picks the version a spend is verified under, so a live older key lets a copier resubmit under it); `--keep-old` skips that, `--remove-old` also removes it.
 - `policy/verify-window-dev.sh`
   - Version-window policy validation (`active` + `supported_versions`).
 
@@ -46,9 +46,11 @@ retiring one as a whole needs `purge`.
 `purge_circuit` clears all five maps (`VerificationKeys`, `VkHashes`,
 `VerificationStats`, `RetiredVersions`, `ActiveCircuitVersion`) and accepts a
 circuit **only** when the runtime no longer implements it, i.e. when
-`expected_public_inputs` returns `None`. Transfer (1), unshield (2) and
-value_proof (6) are rejected with `CircuitStillInUse` for as long as they remain
-compiled in — storage contents cannot override that.
+`expected_public_inputs` returns `None`. Transfer (1) and unshield (2) are
+rejected with `CircuitStillInUse` for as long as they remain compiled in —
+storage contents cannot override that. value_proof (6) was dropped together
+with the private fee claim: once that runtime is live, run
+`registry.sh purge 6 <rpc> <seed>` to clear its keys.
 
 Order matters: deploy the runtime that drops the circuit **first**, then purge.
 Purging against a runtime that still knows the id just fails.

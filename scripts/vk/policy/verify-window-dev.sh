@@ -5,7 +5,7 @@ set -euo pipefail
 # scripts/vk/policy/verify-window-dev.sh
 # Verifies VK version-window policy for fixed DEV circuits.
 #
-# Verified circuits: 1 (transfer), 2 (unshield), 6 (value_proof)
+# Verified circuits: 1 (transfer), 2 (unshield)
 #
 # USAGE:
 #   bash scripts/vk/policy/verify-window-dev.sh <expected_active> [rpc_http] [required_versions_csv] [strict]
@@ -41,7 +41,7 @@ log() {
 [[ "$EXPECTED_ACTIVE" =~ ^[0-9]+$ ]] || err "expected_active must be an integer >= 0"
 [[ "$STRICT" == "true" || "$STRICT" == "false" ]] || err "strict must be true|false"
 
-CIRCUITS=(1 2 6)
+CIRCUITS=(1 2)
 
 log "Verifying VK window"
 log "RPC: $RPC_HTTP"
@@ -84,12 +84,12 @@ if active != expected_active:
 
 missing = [v for v in required if v not in supported]
 if missing:
-  print(f"[ERROR] circuit {cid}: missing required versions {missing}; supported={supported}")
+    print(f"[ERROR] circuit {cid}: missing required versions {missing}; supported={supported}")
     sys.exit(1)
 
 if strict:
     if sorted(supported) != sorted(required):
-    print(f"[ERROR] circuit {cid}: strict=true and supported={supported} != required={required}")
+        print(f"[ERROR] circuit {cid}: strict=true and supported={supported} != required={required}")
         sys.exit(1)
 
 print(f"[OK] circuit {cid}: active={active} supported={supported}")
@@ -97,4 +97,4 @@ PY
 
 done
 
-log "✅ VK window is valid for all 3 circuits"
+log "✅ VK window is valid for both circuits"
