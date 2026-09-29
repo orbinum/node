@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
-//! Capa 3 — Generic `RelayableOperation` trait and built-in implementations.
+//! Generic `RelayableOperation` trait and built-in implementations.
 //!
 //! Each operation describes how to validate calldata for a specific on-chain call:
 //! its ABI selector, the minimum calldata length required, and where to find the
@@ -16,13 +16,27 @@ use ethereum_types::U256;
 /// decoder fails silently — a wrong selector is merely "unsupported", so the
 /// rejection tests stay green while the accept path stops working.
 pub(crate) use pallet_evm_precompile_shielded_pool::selectors::{
-	PRIVATE_TRANSFER as SELECTOR_PRIVATE_TRANSFER, UNSHIELD as SELECTOR_UNSHIELD,
+	COMMIT_RELAY as SELECTOR_COMMIT_RELAY, PRIVATE_TRANSFER as SELECTOR_PRIVATE_TRANSFER,
+	UNSHIELD as SELECTOR_UNSHIELD,
 };
+
+/// Calldata for `commitRelay(bytes32[] commits)`: selector, the offset of the
+/// array (one head slot), then its length and items.
+pub(crate) fn commit_relay_calldata(commits: &[ethereum_types::H256]) -> Vec<u8> {
+	let mut data = Vec::with_capacity(4 + 64 + commits.len() * 32);
+	data.extend_from_slice(&SELECTOR_COMMIT_RELAY);
+	data.extend_from_slice(&U256::from(32).to_big_endian());
+	data.extend_from_slice(&U256::from(commits.len()).to_big_endian());
+	for commit in commits {
+		data.extend_from_slice(commit.as_bytes());
+	}
+	data
+}
 
 /// Describes how to validate calldata for a specific relayable on-chain operation.
 ///
 /// Implementing this trait for a new operation allows the relay to accept it
-/// without modifying [`validate_relay_calldata`] — Capa 3 of the relay architecture.
+/// without modifying [`validate_relay_calldata`].
 ///
 /// [`validate_relay_calldata`]: super::validation::validate_relay_calldata
 pub(crate) trait RelayableOperation: Send + Sync {

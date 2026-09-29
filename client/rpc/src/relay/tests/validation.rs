@@ -9,7 +9,9 @@ use fp_evm::ExitReason;
 
 use crate::relay::{
 	config::*,
-	operations::{SELECTOR_PRIVATE_TRANSFER, SELECTOR_UNSHIELD},
+	operations::{
+		commit_relay_calldata, SELECTOR_COMMIT_RELAY, SELECTOR_PRIVATE_TRANSFER, SELECTOR_UNSHIELD,
+	},
 	validation::*,
 };
 
@@ -58,8 +60,8 @@ fn rejects_calldata_227_bytes() {
 }
 
 #[test]
-fn rejects_calldata_196_bytes_old_wrong_limit() {
-	// Ensure the old (incorrect) limit of 196 is no longer accepted
+fn rejects_calldata_that_ends_before_the_fee_slot() {
+	// 196 bytes stops short of the fee slot (slot 6 ends at 4 + 7 × 32 = 228).
 	let data = vec![0u8; 196];
 	assert_eq!(
 		validate_relay_calldata(&data, MIN_RELAY_FEE_FALLBACK, &SELECTORS_FALLBACK),
@@ -412,4 +414,19 @@ fn dry_run_exit_error_message_includes_reason() {
 	// The message should contain both the prefix and the specific variant.
 	assert!(err.starts_with("calldata would fail on-chain:"), "{err}");
 	assert!(err.contains("OutOfFund"), "{err}");
+}
+
+// ─── commitRelay calldata ─────────────────────────────────────────────────────
+
+#[test]
+fn commit_relay_calldata_is_abi_encoded() {
+	use ethereum_types::H256;
+	let commits = [H256::repeat_byte(0x11), H256::repeat_byte(0x22)];
+	let data = commit_relay_calldata(&commits);
+	assert_eq!(data[..4], SELECTOR_COMMIT_RELAY);
+	assert_eq!(U256::from_big_endian(&data[4..36]), U256::from(32));
+	assert_eq!(U256::from_big_endian(&data[36..68]), U256::from(2));
+	assert_eq!(&data[68..100], commits[0].as_bytes());
+	assert_eq!(&data[100..132], commits[1].as_bytes());
+	assert_eq!(data.len(), 132);
 }

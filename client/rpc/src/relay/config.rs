@@ -30,8 +30,8 @@ pub(crate) const SHIELDED_POOL_PRECOMPILE: [u8; 20] = [
 
 /// Maximum calldata size accepted by the relay (32 KB).
 ///
-/// A realistic shielded-pool calldata is ~2–5 KB: a 256 B Groth16 proof plus the
-/// ABI head and Merkle path. The cap prevents an attacker from passing the
+/// A realistic shielded-pool calldata is under 1 KB: a 256 B Groth16 proof, the
+/// ABI head and two 180 B memos. The cap prevents an attacker from passing the
 /// selector and fee checks with megabytes of data the relayer would then pay
 /// calldata gas for.
 pub(crate) const MAX_CALLDATA_BYTES: usize = 32_768;
@@ -46,6 +46,29 @@ pub(crate) const MAX_FEE_PER_GAS_WEI: u64 = 10_000_000_000;
 /// Gas limit used for relay transactions, and the basis of the 2× gas floor in
 /// [`super::validation::compute_effective_min_fee`].
 pub(crate) const RELAY_GAS_LIMIT: u64 = 2_000_000;
+
+// ---------------------------------------------------------------------------
+// Relay commits
+// ---------------------------------------------------------------------------
+
+/// How long a relay call waits for others before sending the queued commits,
+/// so calls arriving together share one `commitRelay` transaction.
+pub(crate) const COMMIT_BATCH_WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// How often the best block is checked for the commit.
+pub(crate) const COMMIT_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Give up on a commit after this long. Well under `CommitTtl` (20 blocks,
+/// ~2 min), so a late commit never leaves the spend with an expired one.
+pub(crate) const COMMIT_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// How long a submitted spend's nullifiers stay claimed: past it, a spend that
+/// never landed may be relayed again.
+pub(crate) const IN_FLIGHT_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Blocks the confirmed nonce may stay behind the relay's own before the relay
+/// treats the gap as a dropped transaction and signs from the confirmed nonce.
+pub(crate) const NONCE_STALL_BLOCKS: u64 = 10;
 
 // ---------------------------------------------------------------------------
 // Runtime API fallbacks

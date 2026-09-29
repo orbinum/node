@@ -12,7 +12,8 @@ pub trait OrbinumRelayApi {
 	/// Relay a shielded-pool call (unshield or privateTransfer) on behalf of a user.
 	///
 	/// `calldata` must be ABI-encoded EVM calldata for the ShieldedPool precompile,
-	/// including the 4-byte selector. The fee in ABI slot index 6 must be ≥ MIN_RELAY_FEE_WEI.
+	/// including the 4-byte selector. Its fee must reach the effective minimum:
+	/// the governance fee or twice the relay's gas cost, whichever is higher.
 	///
 	/// Returns the Ethereum transaction hash.
 	#[method(name = "orbinum_relayShieldedCall")]
@@ -32,10 +33,11 @@ pub struct RelayerStatus {
 	pub min_fee: String,
 	/// Current EVM balance of the relay wallet (wei). Lets callers verify the relay is funded.
 	pub balance_wei: String,
-	/// True only when balance ≥ effective min fee (enough to cover at least one relay tx).
+	/// True when the relay can relay: registered (on a runtime with relay
+	/// commits) and funded for the worst case of a commit plus a spend.
 	pub enabled: bool,
 	/// True when this relay's EVM address is registered on-chain via `register_relayer`.
-	/// Unregistered relays still forward transactions but fees are attributed to the block author
-	/// instead of the intended validator. Capa 2 of the relay architecture.
+	/// Relaying needs it: only a registered address can record the relay commit
+	/// that earns a spend's fee.
 	pub is_registered: bool,
 }

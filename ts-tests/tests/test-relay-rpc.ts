@@ -105,19 +105,20 @@ describeWithFrontier("Frontier RPC (Relay)", (context) => {
 
 	// ── orbinum_relayerStatus ──────────────────────────────────────────
 
-	it("orbinum_relayerStatus: enabled, correct address, positive minFee", async () => {
+	it("orbinum_relayerStatus: correct address, endowed, not enabled until registered", async () => {
 		const result = await customRequest(context.web3, "orbinum_relayerStatus", []);
 		assert.notExists(result.error, `unexpected RPC error: ${JSON.stringify(result.error)}`);
 
 		const status = result.result;
 		assert.equal(status.address.toLowerCase(), RELAYER_ADDRESS, "relayer address should be the dev relay identity");
-		// enabled tracks whether the relay can cover a transaction, so it doubles
-		// as the check that the dev genesis actually endowed the relay account.
 		assert.isTrue(
 			BigInt(status.balanceWei) > BigInt(0),
 			"relay account must be endowed in the development genesis"
 		);
-		assert.isTrue(status.enabled, "relayer should report enabled=true");
+		// Relaying needs a relay commit, which only a registered address can record:
+		// on a fresh dev chain nothing has called `register_relayer` yet.
+		assert.isFalse(status.isRegistered, "a fresh dev chain has no registered relayer");
+		assert.isFalse(status.enabled, "an unregistered relay is not enabled");
 		assert.isTrue(BigInt(status.minFee) > BigInt(0), "minFee must be positive");
 	});
 
