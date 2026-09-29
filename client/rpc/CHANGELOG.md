@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* `eth_getFilterChanges`: the first poll of a log filter scans its range, and every later poll skips journal logs the scan covered, so a block journaled late is not returned twice; a reorg entry is skipped on the first poll (the scan read the new chain) and passes through after it. A result over `max_past_logs`, from the scan or the journal, drops the filter instead of failing the same way on every poll.
 * Fix `estimate_gas`: ensure that provided gas limit it never larger than current block's gas limit
 * `EthPubSubApi::new` takes an additional `overrides` parameter.
 * Fix `estimate_gas` inaccurate issue.
