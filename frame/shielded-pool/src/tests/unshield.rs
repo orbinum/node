@@ -1146,6 +1146,8 @@ fn the_unshield_weight_includes_one_proof_verification() {
 }
 
 /// A proof that does not verify pays nobody and spends nothing.
+// Under `skip-proof-verification` every proof is accepted.
+#[cfg(not(feature = "skip-proof-verification"))]
 #[test]
 fn an_invalid_proof_fails_at_dispatch_and_changes_nothing() {
 	new_test_ext().execute_with(|| {

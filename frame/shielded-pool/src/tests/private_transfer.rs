@@ -1292,6 +1292,8 @@ fn a_one_in_one_out_transfer_is_refused() {
 
 /// A proof that does not verify leaves nothing behind: no spent nullifier, no
 /// leaf, no fee.
+// Under `skip-proof-verification` every proof is accepted.
+#[cfg(not(feature = "skip-proof-verification"))]
 #[test]
 fn an_invalid_proof_fails_at_dispatch_and_changes_nothing() {
 	new_test_ext().execute_with(|| {
