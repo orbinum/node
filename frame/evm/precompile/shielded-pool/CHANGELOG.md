@@ -25,6 +25,10 @@ All notable changes to `pallet-evm-precompile-shielded-pool` will be documented 
 - Array decoders take a maximum count (and item length for `bytes[]`) and reject
   before copying: aliased `bytes[]` pointers used to allocate `count × length`
   bytes — quadratic in the calldata — before any gas was charged.
+- Only `shield` is payable: `unshield`, `privateTransfer`, `commitRelay` and
+  `claimRelayFees` refuse a call carrying `msg.value`. The executor moves that
+  value to the precompile address before the call runs and nothing sends it on,
+  so it used to stay there — lost to the caller, outside the pool and its ledger.
 - Static calls and DELEGATECALL are refused: under DELEGATECALL the caller is the
   delegating contract's caller, so any contract a relayer called could spend its
   commit quota or claim in its name.

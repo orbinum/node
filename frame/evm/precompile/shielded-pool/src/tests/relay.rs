@@ -278,6 +278,59 @@ fn a_delegated_shield_is_refused() {
 	});
 }
 
+/// Only `shield` is payable. The executor moves `msg.value` to the precompile
+/// before this code runs, and nothing would send it back out, so every other
+/// call refuses it rather than stranding the caller's funds at the address.
+#[test]
+fn the_non_payable_calls_refuse_msg_value() {
+	new_test_ext().execute_with(|| {
+		do_shield(canon(0x51), 1_000);
+		set_pending_relay_fees(300);
+		let root = current_root();
+		let calls: Vec<(&str, Vec<u8>)> = vec![
+			("commitRelay", encode_commit_relay(&[[0x11; 32]])),
+			("claimRelayFees", encode_claim_relay_fees(0, 100)),
+			(
+				"unshield",
+				encode_unshield(
+					&[0x01u8; 72],
+					root,
+					canon(1),
+					0,
+					500,
+					recipient_bytes(),
+					0,
+					[0u8; 32],
+					&[],
+					1,
+				),
+			),
+			(
+				"privateTransfer",
+				encode_private_transfer(
+					&[0x01, 0x02, 0x03],
+					root,
+					&[[0x11; 32], [0x22; 32]],
+					&[canon(0x33), canon(0x44)],
+					&[vec![0xAA; 180], vec![0xBB; 180]],
+					0,
+					0,
+					1,
+				),
+			),
+		];
+		for (name, input) in calls {
+			let mut h = MockHandle::with_value(input, 1_000);
+			h.context.caller = registered_relayer();
+			expect_error_msg(
+				ShieldedPoolPrecompile::<Test>::execute(&mut h),
+				"not payable",
+			);
+			assert_eq!(pending_relay_fees(), 300, "{name} moved a pending fee");
+		}
+	});
+}
+
 #[test]
 fn truncated_spend_calldata_is_not_relayable() {
 	let unshield = encode_unshield(
