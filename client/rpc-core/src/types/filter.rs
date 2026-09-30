@@ -319,6 +319,7 @@ pub struct FilterPoolItem {
 	pub at_block: u64,
 	pub pending_transaction_hashes: HashSet<H256>,
 	pub last_log_journal_seq: Option<u64>,
+	pub log_scanned_through: Option<u64>,
 }
 
 /// On-memory stored filters created through the `eth_newFilter` RPC.

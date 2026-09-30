@@ -4,7 +4,7 @@ FRAME pallet for privacy-preserving transactions in Orbinum using ZK-SNARKs.
 
 ## Status
 
-MVP in active development. Core shield / transfer / unshield flows are functional, including partial unshield with automatic change note handling. Relay fee claiming uses the `value_proof` circuit.
+MVP in active development. Core shield / transfer / unshield flows are functional, including partial unshield with automatic change note handling. Relay fees are attributed by relay commit and claimed publicly (no proof).
 
 ## What this pallet does
 
@@ -33,10 +33,10 @@ This ensures change note commitments are **not linkable** to other notes belongi
 |-----------|--------|-------------|
 | `shield` | Signed | Deposit tokens; insert one commitment into the Merkle tree |
 | `shield_batch` | Signed | Deposit and insert multiple commitments in one call |
-| `private_transfer` | Unsigned | ZK-proven private transfer between notes |
-| `unshield` | Unsigned | ZK-proven withdrawal to a public account. Accepts a `change_commitment` and `change_encrypted_memo` for partial unshield with stealth change notes |
-| `claim_shielded_fees` | Unsigned | Claim accrued relay fees as a private ZK note (value_proof circuit) |
-| `claim_relay_fees_to_evm` | Signed | Transfer accrued relay fees to the relayer's H160 EVM address |
+| `private_transfer` | Unsigned / Signed / Relayed | ZK-proven private transfer between notes. Fee goes to the committed relayer, else the block author |
+| `unshield` | Unsigned / Signed / Relayed | ZK-proven withdrawal to a public account. Accepts a `change_commitment` and a 180-byte `change_encrypted_memo` for partial unshield with stealth change notes (empty for a total unshield) |
+| `commit_relay` | Signed / Relayed (registered relayer) | Record relay commits for spends about to be submitted |
+| `claim_relay_fees` | Signed / Relayed | Pay the caller's pending relay fees out of the pool to its EVM mirror (no proof) |
 | `register_asset` | Signed | Register a new asset for multi-asset support |
 | `verify_asset` | Root | Mark a registered asset as verified (enables shielding) |
 | `unverify_asset` | Root | Remove verified status from an asset |
@@ -60,33 +60,34 @@ This ensures change note commitments are **not linkable** to other notes belongi
 
 ```
 src/
-  lib.rs               — Config, Storage, Events, Errors, extrinsics
-  types.rs             — Commitment, Nullifier, Hash, EncryptedMemo and aliases
-  merkle.rs            — Poseidon Merkle tree insertion and root update
+  lib.rs               — Config, Storage, Events, Errors, extrinsics, origin helpers
+  types/               — Commitment, Nullifier, Hash, EncryptedMemo and aliases
+  merkle/              — Poseidon Merkle forest (pure tree logic + MerkleTreeService)
   operations/
-    mod.rs             — module declarations
-    shield.rs          — shield / shield_batch logic
-    private_transfer.rs — private transfer proof dispatch
-    unshield.rs        — unshield logic (partial + full)
-    fees.rs            — relay fee claiming (claim_shielded_fees, claim_relay_fees_to_evm)
-    assets.rs          — register / verify / unverify asset logic
-  storage.rs           — Storage helper functions (nullifier checks, root lookups)
-  helpers.rs           — Miscellaneous internal helpers
+    mod.rs             — module declarations, `ensure_valid_proof`
+    shield.rs          — shield / shield_batch
+    private_transfer.rs — TransferRequest + PrivateTransferOperation
+    unshield.rs        — UnshieldRequest + UnshieldOperation (partial and total)
+    statement.rs       — pool values → verifier statement (memo digest, recipient bytes)
+    fees.rs            — relay op hashes, fee attribution by commit, public claim
+    assets.rs          — register / verify / unverify asset
+  storage/             — one Repository per storage domain
+  validate_unsigned/   — mempool anti-spam checks
+  helpers.rs           — thin `Pallet<T>` delegations
   genesis.rs           — GenesisConfig and BuildGenesisConfig impl
-  validate_unsigned.rs — ValidateUnsigned impl for unsigned extrinsics
   runtime_api_impl.rs  — Runtime API implementations (Merkle proofs, tree info)
+  tests/               — extrinsic and operation tests, one file per concern
   benchmarking.rs      — FRAME benchmarks
   weights.rs           — WeightInfo trait and generated weights
 ```
-
-The previous Clean Architecture layers (`domain/`, `application/`, `infrastructure/`, `presentation/`, `tests/`) have been removed. All logic lives in `lib.rs` and the focused modules above.
 
 ## Security properties
 
 - **Double-spend prevention**: nullifiers are recorded on first use and rejected thereafter.
 - **Merkle root validation**: only the current root and historic roots within `MaxHistoricRoots` are accepted.
 - **ZK proof verification**: all state-changing extrinsics require a Groth16 proof validated by `pallet-zk-verifier`.
-- **Recipient encoding**: the `recipient` field is passed as-is (LE field element) to the verifier — consistent with `Bn254Fr::from_le_bytes_mod_order` and the TypeScript SDK convention (`bytesToBigintLE`).
+- **Recipient binding**: the recipient's raw 32 bytes go to the verifier, which binds them as `blake2_256(recipient) mod r` under a memo-bound (v2) key, so no other account shares the input. A v1 key binds `recipient mod r`, which `R ± r` aliases.
+- **Memo binding**: under a v2 key the proof binds `blake2_256(SCALE(memos)) mod r`, so a copy with other memos fails verification.
 - **Change commitment uniqueness**: the pallet rejects a `change_commitment` that already exists in the Merkle tree before inserting it.
 - **Change note unlinkability**: each partial unshield creates a stealth-addressed change note with:
   - Unique ephemeral keypair (random per unshield)

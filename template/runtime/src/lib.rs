@@ -160,10 +160,10 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: Cow::Borrowed("orbinum"),
 	impl_name: Cow::Borrowed("orbinum"),
 	authoring_version: 1,
-	spec_version: 15,
+	spec_version: 16,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
-	transaction_version: 3,
+	transaction_version: 4,
 	system_version: 1,
 };
 
@@ -448,6 +448,25 @@ pub mod runtime_api {
 			/// it from the runtime instead of restating it.
 			fn hyperbridge_slot_duration() -> u64;
 		}
+	}
+}
+
+/// A circuit's version info from `pallet-zk-verifier`, as its runtime API returns it.
+fn zk_circuit_version_info(
+	info: pallet_zk_verifier::CircuitVersionInfo,
+) -> pallet_zk_verifier_runtime_api::CircuitVersionInfo {
+	pallet_zk_verifier_runtime_api::CircuitVersionInfo {
+		circuit_id: info.circuit_id,
+		active_version: info.active_version,
+		supported_versions: info.supported_versions,
+		vk_hashes: info
+			.vk_hashes
+			.into_iter()
+			.map(|item| pallet_zk_verifier_runtime_api::VkVersionHash {
+				version: item.version,
+				vk_hash: item.vk_hash,
+			})
+			.collect(),
 	}
 }
 
@@ -953,6 +972,14 @@ impl_runtime_apis! {
 			};
 			pallet_shielded_pool_runtime_api::RelayConfig { min_fee_planck, allowed_selectors }
 		}
+
+		fn relay_commit_hash(calldata: Vec<u8>, relayer: [u8; 20]) -> Option<[u8; 32]> {
+			// Same decoder the precompile runs and same hash the extrinsic computes,
+			// so the commit a node records is the one the spend will look up.
+			let call = pallet_evm_precompile_shielded_pool::decode_relayable_call::<Runtime>(&calldata)?;
+			let op_hash = pallet_shielded_pool::operations::fees::relay_op_hash::<Runtime>(&call)?;
+			Some(pallet_relayer::relay_commit_hash(&op_hash, &sp_core::H160(relayer)).0)
+		}
 	}
 
 	impl pallet_zk_verifier_runtime_api::ZkVerifierRuntimeApi<Block> for Runtime {
@@ -960,37 +987,13 @@ impl_runtime_apis! {
 			circuit_id: u32,
 		) -> Option<pallet_zk_verifier_runtime_api::CircuitVersionInfo> {
 			pallet_zk_verifier::Pallet::<Runtime>::runtime_api_get_circuit_version_info(circuit_id)
-				.map(|info| pallet_zk_verifier_runtime_api::CircuitVersionInfo {
-					circuit_id: info.circuit_id,
-					active_version: info.active_version,
-					supported_versions: info.supported_versions,
-					vk_hashes: info
-						.vk_hashes
-						.into_iter()
-						.map(|item| pallet_zk_verifier_runtime_api::VkVersionHash {
-							version: item.version,
-							vk_hash: item.vk_hash,
-						})
-						.collect(),
-				})
+				.map(zk_circuit_version_info)
 		}
 
 		fn get_all_circuit_versions() -> alloc::vec::Vec<pallet_zk_verifier_runtime_api::CircuitVersionInfo> {
 			pallet_zk_verifier::Pallet::<Runtime>::runtime_api_get_all_circuit_versions()
 				.into_iter()
-				.map(|info| pallet_zk_verifier_runtime_api::CircuitVersionInfo {
-					circuit_id: info.circuit_id,
-					active_version: info.active_version,
-					supported_versions: info.supported_versions,
-					vk_hashes: info
-						.vk_hashes
-						.into_iter()
-						.map(|item| pallet_zk_verifier_runtime_api::VkVersionHash {
-							version: item.version,
-							vk_hash: item.vk_hash,
-						})
-						.collect(),
-				})
+				.map(zk_circuit_version_info)
 				.collect()
 		}
 	}
@@ -1088,6 +1091,11 @@ impl_runtime_apis! {
 			pallet_relayer::RelayerRegistry::<Runtime>::contains_key(
 				sp_core::H160::from(evm_address),
 			)
+		}
+
+		fn relay_commit_block(commit: [u8; 32]) -> Option<u32> {
+			pallet_relayer::RelayCommits::<Runtime>::get(sp_core::H256(commit))
+				.map(|c| c.recorded_at)
 		}
 	}
 

@@ -1,7 +1,7 @@
 //! Public traits exposed by pallet-relayer.
 //!
 //! Other pallets (e.g. `pallet-shielded-pool`) depend only on these traits,
-//! never on the concrete `Pallet<T>` type.  Tests supply lightweight mock
+//! never on the concrete `Pallet<T>` type. Tests supply lightweight mock
 //! implementations directly in their own `mock.rs`.
 
 /// All relay-related behaviour that external pallets need.
@@ -14,10 +14,10 @@ pub trait RelayerInterface {
 	/// Resolve an EVM address to a registered substrate AccountId.
 	///
 	/// Returns `Some(account)` when the EVM address was registered via
-	/// `register_relayer`.  Returns `None` when not registered.
+	/// `register_relayer`. Returns `None` when not registered.
 	///
-	/// Used by `pallet-shielded-pool` to attribute relay fees to the node
-	/// that signed the EVM transaction instead of the block author.
+	/// Used by `pallet-shielded-pool` to find whose fees an EVM caller of
+	/// `claim_relay_fees` is claiming.
 	fn resolve_relayer(evm_address: &sp_core::H160) -> Option<Self::AccountId>;
 
 	/// Minimum fee (planck / wei) that must be embedded in relay calldata.
@@ -29,7 +29,7 @@ pub trait RelayerInterface {
 	/// API impl so the relay always has a non-empty list).
 	fn allowed_selectors() -> sp_std::vec::Vec<[u8; 4]>;
 
-	/// Current block author (relay fee recipient).
+	/// Current block author: the fee recipient of a spend no relayer committed to.
 	///
 	/// Returns `None` when unavailable (e.g. first block or no author pallet
 	/// configured).
@@ -55,9 +55,8 @@ pub trait RelayerInterface {
 
 	/// Deduct `amount` from the pending relay fees for (`who`, `asset_id`).
 	///
-	/// Returns `Err` when the pending balance is insufficient.  Called by
-	/// pallet-shielded-pool's `claim_shielded_fees` before inserting the fee
-	/// commitment into the Merkle tree.
+	/// Returns `Err` when the pending balance is insufficient. Called by
+	/// pallet-shielded-pool's `claim_relay_fees` before paying the fees out.
 	fn consume_relay_fee(
 		who: &Self::AccountId,
 		asset_id: u32,
@@ -66,8 +65,32 @@ pub trait RelayerInterface {
 
 	/// Return the EVM address registered for a substrate account, if any.
 	///
-	/// Reverse lookup of `resolve_relayer`.  Used by `pallet-shielded-pool`
+	/// Reverse lookup of `resolve_relayer`. Used by `pallet-shielded-pool`
 	/// to derive the H160 mirror AccountId when paying relay fees directly
 	/// to the EVM account.
 	fn registered_evm_address(who: &Self::AccountId) -> Option<sp_core::H160>;
+
+	/// Record relay commits (see [`crate::relay_commit_hash`]) on behalf of the
+	/// registered `relayer`.
+	///
+	/// A commit already present is left as is, so it keeps its earlier block;
+	/// only new ones count against the per-block quota, which belongs to the
+	/// validator behind `relayer`. A batch with nothing new writes nothing. All
+	/// or nothing: fails with `NotRegistered` for an unknown address and
+	/// `TooManyCommits` past the quota, writing none of the batch.
+	fn record_relay_commits(
+		relayer: &sp_core::H160,
+		commits: &[sp_core::H256],
+	) -> frame_support::dispatch::DispatchResult;
+
+	/// The relayer to credit for the spend identified by `op_hash`: the
+	/// registered relayer with the earliest commit for it from a previous block.
+	///
+	/// Removes every commit found for `op_hash`, since the spend can only execute
+	/// once. `None` when no relayer committed in time. Commits from the same
+	/// block tie; the lowest commit hash wins. Scans the registry, so the cost
+	/// grows with the number of registered relayers (one per validator). A commit
+	/// made under an address its validator has since replaced does not match, so
+	/// it earns nothing.
+	fn take_committed_relayer(op_hash: &[u8; 32]) -> Option<Self::AccountId>;
 }

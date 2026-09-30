@@ -5,8 +5,8 @@ use pallet_shielded_pool::{DefaultMerklePath, Hash};
 /// Configuration exposed by the runtime for the node-native EVM relay.
 ///
 /// Returned by `ShieldedPoolRuntimeApi::relay_config()`. The relay reads this on every
-/// call instead of using hardcoded constants — when the runtime performs a forkless
-/// upgrade that changes `MinGaslessFee` or `RELAY_GAS_LIMIT`, the running node picks
+/// call instead of using hardcoded constants — when governance or a forkless upgrade
+/// changes the minimum relay fee or the accepted selectors, the running node picks
 /// up the new values automatically without recompilation.
 #[derive(
 	parity_scale_codec::Encode,
@@ -18,7 +18,7 @@ use pallet_shielded_pool::{DefaultMerklePath, Hash};
 )]
 pub struct RelayConfig {
 	/// Minimum fee (in native token planck / wei) that must be embedded in the calldata.
-	/// Corresponds to `T::MinGaslessFee::get()` in the runtime.
+	/// Corresponds to `pallet_relayer`'s `min_relay_fee()` in the runtime.
 	pub min_fee_planck: u128,
 	/// ABI selectors of operations the runtime currently accepts via unsigned dispatch.
 	/// The relay uses this to validate the calldata selector whitelist.
@@ -26,7 +26,7 @@ pub struct RelayConfig {
 }
 
 sp_api::decl_runtime_apis! {
-	#[api_version(2)]
+	#[api_version(3)]
 	pub trait ShieldedPoolRuntimeApi {
 		/// Get the Merkle tree information (root, size, depth)
 		fn get_merkle_tree_info() -> (Hash, u32, u32);
@@ -50,9 +50,15 @@ sp_api::decl_runtime_apis! {
 		/// Return relay configuration sourced from the runtime.
 		///
 		/// Called by the node-native EVM relay on every `relay_shielded_call` to obtain
-		/// the current `MinGaslessFee` and the set of accepted selectors. This ensures
+		/// the current minimum relay fee and the set of accepted selectors. This ensures
 		/// that forkless runtime upgrades are reflected immediately without restarting
 		/// or recompiling the node.
 		fn relay_config() -> RelayConfig;
+
+		/// The relay commit `relayer` must record (`commit_relay`) before relaying
+		/// `calldata`, decoded exactly as the precompile will decode it. `None` for
+		/// calldata that is not a relayable spend.
+		#[api_version(3)]
+		fn relay_commit_hash(calldata: sp_std::vec::Vec<u8>, relayer: [u8; 20]) -> Option<[u8; 32]>;
 	}
 }

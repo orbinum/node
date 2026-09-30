@@ -136,7 +136,10 @@ mod tests {
 		new_test_ext().execute_with(|| {
 			let c = test_commitment(0x02);
 			assert!(!CommitmentRepository::exists::<Test>(&c));
+			// A memo alone does not make a leaf.
 			CommitmentRepository::store_memo::<Test>(c, test_memo());
+			assert!(!CommitmentRepository::exists::<Test>(&c));
+			MerkleRepository::set_commitment_leaf_index::<Test>(c, 0);
 			assert!(CommitmentRepository::exists::<Test>(&c));
 		});
 	}

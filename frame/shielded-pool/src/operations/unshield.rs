@@ -1,1342 +1,188 @@
+//! Unshield: spend a note to a public account, optionally keeping change private.
+
 use crate::{
 	merkle::MerkleTreeService,
-	pallet::{CommitmentMemos, Config, Error, Event, Pallet},
+	operations::{ensure_valid_proof, fees, statement},
+	pallet::{BalanceOf, Config, Error, Event, Pallet},
 	storage::{
 		AssetRepository, CommitmentRepository, MerkleRepository, NullifierRepository,
 		PoolBalanceRepository,
 	},
-	types::{Commitment, EncryptedMemo as FrameEncryptedMemo, Nullifier},
+	types::{Commitment, EncryptedMemo, Nullifier},
 };
 use frame_support::{
+	CloneNoBound, DebugNoBound, EqNoBound, PartialEqNoBound,
 	pallet_prelude::*,
 	traits::{Currency, ExistenceRequirement},
 };
 use pallet_relayer::RelayerInterface as _;
-#[cfg(not(feature = "skip-proof-verification"))]
-use pallet_zk_verifier::ZkVerifierPort;
-#[cfg(not(feature = "skip-proof-verification"))]
-use parity_scale_codec::Encode;
+use pallet_zk_verifier::{UnshieldStatement, ZkVerifierPort as _};
 use sp_runtime::{SaturatedConversion, traits::Zero};
+
+/// An unshield as submitted: the proof's public values plus what the chain
+/// stores for the change note.
+#[derive(CloneNoBound, PartialEqNoBound, EqNoBound, DebugNoBound)]
+pub struct UnshieldRequest<T: Config> {
+	pub merkle_root: [u8; 32],
+	pub nullifier: Nullifier,
+	pub asset_id: u32,
+	/// Net amount the recipient receives.
+	pub amount: BalanceOf<T>,
+	pub recipient: T::AccountId,
+	/// Relay fee, paid on top of `amount` from the spent note.
+	pub fee: BalanceOf<T>,
+	/// Zero for a total unshield.
+	pub change_commitment: [u8; 32],
+	/// Empty for a total unshield; a full memo for a partial one.
+	pub change_memo: EncryptedMemo,
+	/// Version whose key the proof is checked against.
+	pub circuit_version: u32,
+}
+
+impl<T: Config> UnshieldRequest<T> {
+	pub fn has_change(&self) -> bool {
+		self.change_commitment != [0u8; 32]
+	}
+
+	/// What the proof attests to.
+	pub fn statement(&self) -> Result<UnshieldStatement, Error<T>> {
+		Ok(UnshieldStatement {
+			merkle_root: self.merkle_root,
+			nullifier: self.nullifier.0,
+			amount: self.amount.saturated_into(),
+			recipient: statement::recipient_bytes::<T>(&self.recipient)?,
+			asset_id: self.asset_id,
+			fee: self.fee.saturated_into(),
+			change_commitment: self.change_commitment,
+			memo_digest: statement::memo_digest(core::slice::from_ref(&self.change_memo)),
+		})
+	}
+
+	/// The identity a relayer commits to (see [`fees::unshield_op_hash`]).
+	pub fn op_hash(&self) -> Result<[u8; 32], Error<T>> {
+		Ok(fees::unshield_op_hash(
+			&self.statement()?,
+			self.circuit_version,
+		))
+	}
+}
 
 pub struct UnshieldOperation;
 
-/// Encode a recipient account into the exact 32-byte field element bound into the
-/// unshield proof. Orbinum's `AccountId` is always `AccountId32` (every signature
-/// scheme — sr25519/ed25519/ECDSA/EVM, and future ones like Solana — unifies to a
-/// 32-byte account). A non-32-byte encoding is rejected with `InvalidRecipient`
-/// rather than silently binding a zeroed recipient.
-///
-/// The raw bytes are reduced mod BN254 r: provers bind `recipient` as a field
-/// element (LE bytes mod r), and most AccountId32 values exceed r — the verifier
-/// rejects non-canonical public inputs, so passing raw bytes would fail
-/// verification for any such recipient.
-#[cfg(not(feature = "skip-proof-verification"))]
-fn recipient_to_field<T: Config>(
-	recipient: &<T as frame_system::Config>::AccountId,
-) -> Result<[u8; 32], Error<T>> {
-	use ark_ff::{BigInteger, PrimeField};
-	let raw: [u8; 32] = <[u8; 32]>::try_from(recipient.encode().as_slice())
-		.map_err(|_| Error::<T>::InvalidRecipient)?;
-	let le = ark_bn254::Fr::from_le_bytes_mod_order(&raw)
-		.into_bigint()
-		.to_bytes_le();
-	let mut out = [0u8; 32];
-	out[..le.len().min(32)].copy_from_slice(&le[..le.len().min(32)]);
-	Ok(out)
-}
-
 impl UnshieldOperation {
-	#[allow(clippy::too_many_arguments)]
-	pub fn execute<T: Config>(
-		#[cfg_attr(feature = "skip-proof-verification", allow(unused_variables))] proof: &[u8],
-		merkle_root: [u8; 32],
-		nullifier: Nullifier,
-		asset_id: u32,
-		amount: <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance,
-		recipient: <T as frame_system::Config>::AccountId,
-		fee: <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance,
-		change_commitment: [u8; 32],
-		change_encrypted_memo: FrameEncryptedMemo,
-		relayer_evm: Option<sp_core::H160>,
-		circuit_version: u32,
-	) -> DispatchResult {
-		let asset = AssetRepository::get_asset::<T>(asset_id).ok_or(Error::<T>::InvalidAssetId)?;
-		ensure!(asset.is_verified, Error::<T>::AssetNotVerified);
-		ensure!(!amount.is_zero(), Error::<T>::InvalidAmount);
+	pub fn execute<T: Config>(proof: &[u8], req: UnshieldRequest<T>) -> DispatchResult {
+		Self::validate(&req)?;
+		let statement = req.statement()?;
+		ensure_valid_proof::<T>(|| {
+			T::ZkVerifier::verify_unshield_proof(proof, &statement, Some(req.circuit_version))
+		})?;
+
+		let change_leaf_index = Self::settle(&req)?;
+		if !req.fee.is_zero() {
+			let op_hash = fees::unshield_op_hash(&statement, req.circuit_version);
+			fees::credit_relay_fee::<T>(&op_hash, req.asset_id, req.fee.saturated_into())?;
+		}
+
+		let has_change = req.has_change();
+		Pallet::<T>::deposit_event(Event::Unshielded {
+			nullifier: req.nullifier,
+			amount: req.amount,
+			recipient: req.recipient,
+			change_commitment: has_change.then_some(req.change_commitment),
+			change_encrypted_memo: has_change.then_some(req.change_memo),
+			change_leaf_index,
+		});
+		Ok(())
+	}
+
+	/// Every check that does not need the proof, cheapest first. Pool admission
+	/// runs it too, so nothing that passes here fails after the proof is
+	/// verified; it maps each error to a rejection code.
+	pub(crate) fn validate<T: Config>(req: &UnshieldRequest<T>) -> Result<(), Error<T>> {
 		ensure!(
-			recipient != Pallet::<T>::pool_account_id(),
-			Error::<T>::InvalidRecipient
+			req.fee >= T::Relayer::min_relay_fee().saturated_into(),
+			Error::<T>::FeeTooLow
 		);
 		ensure!(
-			MerkleRepository::is_known_root::<T>(&merkle_root),
+			MerkleRepository::is_known_root::<T>(&req.merkle_root),
 			Error::<T>::UnknownMerkleRoot
 		);
-		ensure!(nullifier.is_canonical(), Error::<T>::InvalidPublicSignals);
 		ensure!(
-			!NullifierRepository::is_used::<T>(&nullifier),
+			req.nullifier.is_canonical(),
+			Error::<T>::InvalidPublicSignals
+		);
+		ensure!(
+			!NullifierRepository::is_used::<T>(&req.nullifier),
 			Error::<T>::NullifierAlreadyUsed
 		);
 
-		// If a change note is present, ensure its commitment is not already in the tree.
-		let has_change = change_commitment != [0u8; 32];
-		if has_change {
-			let change_comm = Commitment::new(change_commitment);
-			ensure!(change_comm.is_canonical(), Error::<T>::InvalidPublicSignals);
-			ensure!(
-				!CommitmentRepository::exists::<T>(&change_comm),
-				Error::<T>::CommitmentAlreadyExists
-			);
-			// For partial unshield, memo must be valid size (180 bytes).
-			if !change_encrypted_memo.is_empty() {
-				ensure!(
-					change_encrypted_memo.is_valid_size(),
-					Error::<T>::InvalidMemoSize
-				);
-			}
-		} else {
-			// For total unshield, memo must be empty.
-			ensure!(
-				change_encrypted_memo.is_empty(),
-				Error::<T>::InvalidMemoSize
-			);
-		}
-
-		let total = amount.checked_add(&fee).ok_or(Error::<T>::InvalidAmount)?;
+		// Both `amount` and `fee` leave the pool. A zero amount is refused first,
+		// so any later `InvalidAmount` is the sum overflowing.
+		ensure!(!req.amount.is_zero(), Error::<T>::InvalidAmount);
+		let total = req
+			.amount
+			.checked_add(&req.fee)
+			.ok_or(Error::<T>::InvalidAmount)?;
 		ensure!(
-			PoolBalanceRepository::get_asset_balance::<T>(asset_id) >= total,
+			PoolBalanceRepository::get_asset_balance::<T>(req.asset_id) >= total,
 			Error::<T>::InsufficientPoolBalance
 		);
 
-		let min_fee: <T::Currency as Currency<T::AccountId>>::Balance =
-			T::Relayer::min_relay_fee().saturated_into();
-		ensure!(fee >= min_fee, Error::<T>::FeeTooLow);
-		let fee_u128: u128 = fee.saturated_into();
-		let amount_u128: u128 = amount.saturated_into();
+		// The change note is recoverable from the chain only through its memo.
+		let memo_ok = if req.has_change() {
+			req.change_memo.is_valid_size()
+		} else {
+			req.change_memo.is_empty()
+		};
+		ensure!(memo_ok, Error::<T>::InvalidMemoSize);
 
-		#[cfg(not(feature = "skip-proof-verification"))]
-		{
-			let recipient_bytes = recipient_to_field::<T>(&recipient)?;
-			let valid = T::ZkVerifier::verify_unshield_proof(
-				proof,
-				&merkle_root,
-				&nullifier.0,
-				amount_u128,
-				&recipient_bytes,
-				asset_id,
-				fee_u128,
-				&change_commitment,
-				Some(circuit_version),
-			)?;
-
-			ensure!(valid, Error::<T>::ProofVerificationFailed);
+		let asset =
+			AssetRepository::get_asset::<T>(req.asset_id).ok_or(Error::<T>::InvalidAssetId)?;
+		ensure!(asset.is_verified, Error::<T>::AssetNotVerified);
+		// The zero account has no known key: paying it burns the withdrawal.
+		ensure!(
+			req.recipient != Pallet::<T>::pool_account_id()
+				&& statement::recipient_bytes::<T>(&req.recipient)? != [0u8; 32],
+			Error::<T>::InvalidRecipient
+		);
+		if req.has_change() {
+			let change = Commitment::new(req.change_commitment);
+			ensure!(change.is_canonical(), Error::<T>::InvalidPublicSignals);
+			ensure!(
+				!CommitmentRepository::exists::<T>(&change),
+				Error::<T>::CommitmentAlreadyExists
+			);
 		}
-		#[cfg(feature = "skip-proof-verification")]
-		let _ = circuit_version;
+		Ok(())
+	}
 
-		#[cfg(feature = "skip-proof-verification")]
-		{
-			let _ = amount_u128;
-			let _ = fee_u128;
-		}
-
+	/// Pay the recipient, insert the change note, spend the nullifier. Returns
+	/// the change note's leaf index.
+	fn settle<T: Config>(req: &UnshieldRequest<T>) -> Result<Option<u32>, DispatchError> {
 		T::Currency::transfer(
 			&Pallet::<T>::pool_account_id(),
-			&recipient,
-			amount,
+			&req.recipient,
+			req.amount,
 			ExistenceRequirement::AllowDeath,
 		)?;
+		// Only `amount` leaves the pool: the fee stays as backing for the
+		// relayer's pending fee until it is claimed. Sound only because
+		// `validate` required a balance of `amount + fee`.
+		PoolBalanceRepository::decrease_balance::<T>(req.asset_id, req.amount);
 
-		if fee > <T::Currency as Currency<T::AccountId>>::Balance::zero() {
-			crate::operations::fees::credit_relay_fee::<T>(relayer_evm, asset_id, fee_u128)?;
-		}
-
-		// Decrement only `amount`: the `fee` tokens stay physically in the pool as
-		// backing for the pending relayer fee, so the tracked balance must retain
-		// them too. This is correct ONLY because the guard above requires
-		// `>= amount + fee`; do not weaken it to `>= amount` or fees go unbacked.
-		PoolBalanceRepository::decrease_balance::<T>(asset_id, amount);
-
-		// Insert the change note commitment into the Merkle tree (partial unshield).
-		let change_leaf_index = if has_change {
-			let change_comm = Commitment::new(change_commitment);
-			let idx = MerkleTreeService::insert_leaf::<T>(change_comm)?;
-
-			// Store the encrypted memo for note recovery and audit.
-			if !change_encrypted_memo.is_empty() {
-				CommitmentMemos::<T>::insert(change_comm, change_encrypted_memo.clone());
-			}
-
-			Some(idx)
+		let change_leaf_index = if req.has_change() {
+			let change = Commitment::new(req.change_commitment);
+			let index = MerkleTreeService::insert_leaf::<T>(change)?;
+			CommitmentRepository::store_memo::<T>(change, req.change_memo.clone());
+			Some(index)
 		} else {
 			None
 		};
 
-		let current_block = frame_system::Pallet::<T>::block_number();
-		NullifierRepository::mark_as_used::<T>(nullifier, current_block);
-
-		Pallet::<T>::deposit_event(Event::Unshielded {
-			nullifier,
-			amount,
-			recipient,
-			change_commitment: if has_change {
-				Some(change_commitment)
-			} else {
-				None
-			},
-			change_encrypted_memo: if has_change && !change_encrypted_memo.is_empty() {
-				Some(change_encrypted_memo)
-			} else {
-				None
-			},
-			change_leaf_index,
-		});
-
-		Ok(())
-	}
-
-	pub fn is_nullifier_used<T: Config>(nullifier: &Nullifier) -> bool {
-		NullifierRepository::is_used::<T>(nullifier)
-	}
-
-	pub fn is_merkle_root_known<T: Config>(root: &[u8; 32]) -> bool {
-		MerkleRepository::is_known_root::<T>(root)
-	}
-
-	pub fn asset_exists<T: Config>(asset_id: u32) -> bool {
-		AssetRepository::exists::<T>(asset_id)
-	}
-
-	pub fn is_asset_verified<T: Config>(asset_id: u32) -> bool {
-		AssetRepository::get_asset::<T>(asset_id)
-			.map(|asset| asset.is_verified)
-			.unwrap_or(false)
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use crate::{
-		mock::{RuntimeEvent, System, Test, acc, new_test_ext},
-		operations::assets::AssetOperation,
-		pallet::Event as PalletEvent,
-		storage::{
-			CommitmentRepository, MerkleRepository, NullifierRepository, PoolBalanceRepository,
-		},
-		types::{Commitment, Nullifier},
-	};
-	use frame_support::{assert_err, assert_noop, assert_ok, traits::Currency};
-	use sp_runtime::AccountId32;
-
-	// ── recipient_to_field: canonicity (regression for testnet halt) ───────────
-	// Gated like the function itself: with `skip-proof-verification` there is no
-	// proof to bind a recipient into, so `recipient_to_field` isn't compiled.
-	// A recipient whose raw 32 LE bytes exceed the BN254 scalar field modulus r
-	// must be reduced mod r before it reaches the verifier. Passing raw bytes made
-	// `PublicInputs::to_field_elements` reject them as non-canonical, which
-	// diverged execution between block author and importer and halted the chain.
-	#[test]
-	#[cfg(not(feature = "skip-proof-verification"))]
-	fn recipient_to_field_reduces_non_canonical_account() {
-		use ark_ff::{BigInteger, PrimeField};
-		// AccountId32 = [0xff; 32] — guaranteed to exceed r.
-		let recipient = AccountId32::new([0xffu8; 32]);
-		let out = recipient_to_field::<Test>(&recipient).expect("must not error");
-
-		// Output must equal the canonical LE encoding of (raw mod r) …
-		let expected = ark_bn254::Fr::from_le_bytes_mod_order(&[0xffu8; 32])
-			.into_bigint()
-			.to_bytes_le();
-		let mut expected32 = [0u8; 32];
-		expected32[..expected.len().min(32)].copy_from_slice(&expected[..expected.len().min(32)]);
-		assert_eq!(out, expected32);
-
-		// … and must itself round-trip as canonical (what the verifier requires).
-		let fe = ark_bn254::Fr::from_le_bytes_mod_order(&out);
-		assert_eq!(fe.into_bigint().to_bytes_le().as_slice(), &out[..]);
-	}
-
-	// A recipient already below r is passed through unchanged.
-	#[test]
-	#[cfg(not(feature = "skip-proof-verification"))]
-	fn recipient_to_field_passes_canonical_account() {
-		let mut raw = [0u8; 32];
-		raw[0] = 0x2a; // tiny value, well below r
-		let recipient = AccountId32::new(raw);
-		let out = recipient_to_field::<Test>(&recipient).expect("must not error");
-		assert_eq!(out, raw);
-	}
-
-	// ── helpers ──────────────────────────────────────────────────────────────
-
-	const KNOWN_ROOT: [u8; 32] = [0xAAu8; 32];
-
-	/// A distinct, canonical 32-byte field value for `seed`.
-	///
-	/// The seed goes in the low byte rather than filling all 32: a repeated high
-	/// byte puts the value above the BN254 modulus (`p` starts at 0x30), which
-	/// the canonicity guard refuses. Real nullifiers and commitments come out of
-	/// Poseidon and are always canonical.
-	fn canonical_bytes(seed: u8) -> [u8; 32] {
-		let mut b = [0u8; 32];
-		b[0] = seed;
-		b[1] = 0xA5;
-		b
-	}
-
-	fn setup_asset() -> u32 {
-		let name = frame_support::BoundedVec::try_from(b"Orbinum".to_vec()).unwrap();
-		let symbol = frame_support::BoundedVec::try_from(b"ORB".to_vec()).unwrap();
-		let id = AssetOperation::register_asset::<Test>(name, symbol, 18, None, acc(1)).unwrap();
-		AssetOperation::verify::<Test>(id).unwrap();
-		id
-	}
-
-	/// Fund pool account (currency + pool balance tracker).
-	fn fund_pool(asset_id: u32, total: u128) {
-		let pool = crate::Pallet::<Test>::pool_account_id();
-		let _ = <pallet_balances::Pallet<Test> as Currency<AccountId32>>::deposit_creating(
-			&pool, total,
+		NullifierRepository::mark_as_used::<T>(
+			req.nullifier,
+			frame_system::Pallet::<T>::block_number(),
 		);
-		PoolBalanceRepository::set_asset_balance::<Test>(asset_id, total);
-	}
-
-	fn nullifier(seed: u8) -> Nullifier {
-		Nullifier::new(canonical_bytes(seed))
-	}
-
-	fn proof() -> &'static [u8] {
-		&[0x01u8; 72]
-	}
-
-	// ── execute ───────────────────────────────────────────────────────────────
-
-	#[test]
-	fn execute_works() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let amount = 500u128;
-			let fee = 0u128;
-			fund_pool(asset_id, amount + fee);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x01),
-				asset_id,
-				amount,
-				acc(2), // recipient
-				0u128,
-				[0u8; 32],
-				FrameEncryptedMemo::default(),
-				None,
-				1,
-			));
-		});
-	}
-
-	#[test]
-	fn execute_invalid_asset_fails() {
-		new_test_ext().execute_with(|| {
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-			assert_noop!(
-				UnshieldOperation::execute::<Test>(
-					proof(),
-					KNOWN_ROOT,
-					nullifier(1),
-					99u32,
-					100u128,
-					acc(2),
-					0u128,
-					[0u8; 32],
-					FrameEncryptedMemo::default(),
-					None,
-					1,
-				),
-				crate::pallet::Error::<Test>::InvalidAssetId
-			);
-		});
-	}
-
-	#[test]
-	fn execute_asset_not_verified_fails() {
-		new_test_ext().execute_with(|| {
-			let name = frame_support::BoundedVec::try_from(b"T".to_vec()).unwrap();
-			let sym = frame_support::BoundedVec::try_from(b"T".to_vec()).unwrap();
-			let id = AssetOperation::register_asset::<Test>(name, sym, 18, None, acc(1)).unwrap();
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-			fund_pool(id, 1_000u128);
-
-			assert_noop!(
-				UnshieldOperation::execute::<Test>(
-					proof(),
-					KNOWN_ROOT,
-					nullifier(1),
-					id,
-					100u128,
-					acc(2),
-					0u128,
-					[0u8; 32],
-					FrameEncryptedMemo::default(),
-					None,
-					1,
-				),
-				crate::pallet::Error::<Test>::AssetNotVerified
-			);
-		});
-	}
-
-	#[test]
-	fn execute_zero_amount_fails() {
-		// amount == 0 must be rejected before any ZK check so that benchmark mode
-		// (which skips the verifier) cannot mark a nullifier as spent without moving
-		// any funds.
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			fund_pool(asset_id, 1_000u128);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			assert_noop!(
-				UnshieldOperation::execute::<Test>(
-					proof(),
-					KNOWN_ROOT,
-					nullifier(0x77),
-					asset_id,
-					0u128,
-					acc(2),
-					0u128,
-					[0u8; 32],
-					FrameEncryptedMemo::default(),
-					None,
-					1,
-				),
-				crate::pallet::Error::<Test>::InvalidAmount
-			);
-		});
-	}
-
-	#[test]
-	fn execute_invalid_recipient_pool_account_fails() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			fund_pool(asset_id, 1_000u128);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			let pool = crate::Pallet::<Test>::pool_account_id();
-			assert_noop!(
-				UnshieldOperation::execute::<Test>(
-					proof(),
-					KNOWN_ROOT,
-					nullifier(1),
-					asset_id,
-					100u128,
-					pool, // recipient == pool → rejected
-					0u128,
-					[0u8; 32],
-					FrameEncryptedMemo::default(),
-					None,
-					1,
-				),
-				crate::pallet::Error::<Test>::InvalidRecipient
-			);
-		});
-	}
-
-	#[test]
-	fn execute_unknown_root_fails() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			fund_pool(asset_id, 1_000u128);
-			// Root never added
-
-			assert_noop!(
-				UnshieldOperation::execute::<Test>(
-					proof(),
-					[0xBBu8; 32],
-					nullifier(1),
-					asset_id,
-					100u128,
-					acc(2),
-					0u128,
-					[0u8; 32],
-					FrameEncryptedMemo::default(),
-					None,
-					1,
-				),
-				crate::pallet::Error::<Test>::UnknownMerkleRoot
-			);
-		});
-	}
-
-	#[test]
-	fn execute_nullifier_already_used_fails() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			fund_pool(asset_id, 2_000u128);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			let n = nullifier(0x02);
-			NullifierRepository::mark_as_used::<Test>(n, 1u64);
-
-			assert_noop!(
-				UnshieldOperation::execute::<Test>(
-					proof(),
-					KNOWN_ROOT,
-					n,
-					asset_id,
-					500u128,
-					acc(2),
-					0u128,
-					[0u8; 32],
-					FrameEncryptedMemo::default(),
-					None,
-					1,
-				),
-				crate::pallet::Error::<Test>::NullifierAlreadyUsed
-			);
-		});
-	}
-
-	#[test]
-	fn execute_insufficient_pool_balance_fails() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			// Pool has 50 but we want 100 + 0 = 100
-			fund_pool(asset_id, 50u128);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			assert_noop!(
-				UnshieldOperation::execute::<Test>(
-					proof(),
-					KNOWN_ROOT,
-					nullifier(1),
-					asset_id,
-					100u128,
-					acc(2),
-					0u128,
-					[0u8; 32],
-					FrameEncryptedMemo::default(),
-					None,
-					1,
-				),
-				crate::pallet::Error::<Test>::InsufficientPoolBalance
-			);
-		});
-	}
-
-	#[test]
-	fn execute_marks_nullifier_used() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let n = nullifier(0x05);
-			fund_pool(asset_id, 1_000u128);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			assert!(!UnshieldOperation::is_nullifier_used::<Test>(&n));
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				n,
-				asset_id,
-				300u128,
-				acc(2),
-				0u128,
-				[0u8; 32],
-				FrameEncryptedMemo::default(),
-				None,
-				1,
-			));
-			assert!(UnshieldOperation::is_nullifier_used::<Test>(&n));
-		});
-	}
-
-	#[test]
-	fn execute_decreases_pool_balance() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let amount = 400u128;
-			fund_pool(asset_id, 1_000u128);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x06),
-				asset_id,
-				amount,
-				acc(2),
-				0u128,
-				[0u8; 32],
-				FrameEncryptedMemo::default(),
-				None,
-				1,
-			));
-
-			let remaining = PoolBalanceRepository::get_asset_balance::<Test>(asset_id);
-			assert_eq!(remaining, 1_000u128 - amount);
-		});
-	}
-
-	#[test]
-	fn execute_transfers_currency_to_recipient() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let recipient = acc(2);
-			let amount = 300u128;
-			fund_pool(asset_id, 1_000u128);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			let before =
-				<pallet_balances::Pallet<Test> as Currency<AccountId32>>::free_balance(&recipient);
-
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x07),
-				asset_id,
-				amount,
-				recipient.clone(),
-				0u128,
-				[0u8; 32],
-				FrameEncryptedMemo::default(),
-				None,
-				1,
-			));
-
-			let after =
-				<pallet_balances::Pallet<Test> as Currency<AccountId32>>::free_balance(&recipient);
-			assert_eq!(after - before, amount);
-		});
-	}
-
-	#[test]
-	fn execute_emits_unshielded_event() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let n = nullifier(0x08);
-			fund_pool(asset_id, 1_000u128);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				n,
-				asset_id,
-				200u128,
-				acc(2),
-				0u128,
-				[0u8; 32],
-				FrameEncryptedMemo::default(),
-				None,
-				1,
-			));
-
-			let events = frame_system::Pallet::<Test>::events();
-			let found = events.iter().any(|r| {
-				matches!(
-					r.event,
-					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::Unshielded {
-						nullifier: en,
-						amount: 200,
-						recipient: ref er,
-						change_commitment: None,
-						change_encrypted_memo: None,
-						change_leaf_index: None,
-					}) if en == n && *er == acc(2)
-				)
-			});
-			assert!(found, "Unshielded event not emitted");
-		});
-	}
-
-	#[test]
-	fn execute_accumulates_relay_fee_to_block_author() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let amount = 500u128;
-			let fee = 50u128;
-			fund_pool(asset_id, amount + fee);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x09),
-				asset_id,
-				amount,
-				acc(2),
-				fee,
-				[0u8; 32],
-				FrameEncryptedMemo::default(),
-				None,
-				1,
-			));
-
-			// MockRelayer block_author returns Some(1); fee should be accumulated there
-			let pending = crate::mock::mock_pending_fees_get(acc(1), asset_id);
-			assert_eq!(pending, fee);
-		});
-	}
-
-	// ── partial unshield ─────────────────────────────────────────────────────
-
-	#[test]
-	fn execute_partial_unshield_creates_change_note() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			// Fund pool with the full note value (amount + change_value).
-			fund_pool(asset_id, 1_000u128);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			let change_comm_bytes = canonical_bytes(0xCC);
-			let amount = 600u128;
-
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x10),
-				asset_id,
-				amount,
-				acc(2),
-				0u128,
-				change_comm_bytes,
-				FrameEncryptedMemo::default(),
-				None,
-				1,
-			));
-
-			// The change commitment must now exist as a leaf in the Merkle tree.
-			assert_eq!(
-				MerkleRepository::get_tree_size::<Test>(),
-				1,
-				"change commitment should have been inserted as a Merkle leaf"
-			);
-			assert!(
-				MerkleRepository::find_leaf_index::<Test>(&Commitment::new(change_comm_bytes))
-					.is_some(),
-				"change commitment not found in Merkle tree leaves"
-			);
-
-			// Pool balance must have decreased only by `amount`, not by the full note value.
-			let pool_bal = PoolBalanceRepository::get_asset_balance::<Test>(asset_id);
-			assert_eq!(
-				pool_bal,
-				1_000u128 - amount,
-				"pool balance should only decrease by amount"
-			);
-
-			// Event must carry the change_commitment.
-			let events = frame_system::Pallet::<Test>::events();
-			let found = events.iter().any(|r| {
-				matches!(
-					&r.event,
-					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::Unshielded {
-						change_commitment: Some(cc),
-						..
-					}) if cc == &change_comm_bytes
-				)
-			});
-			assert!(found, "Unshielded event did not carry change_commitment");
-		});
-	}
-
-	#[test]
-	fn execute_total_unshield_with_zero_change_works() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let amount = 800u128;
-			fund_pool(asset_id, amount);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x11),
-				asset_id,
-				amount,
-				acc(2),
-				0u128,
-				[0u8; 32], // zero change_commitment = total unshield
-				FrameEncryptedMemo::default(),
-				None,
-				1,
-			));
-
-			// Pool balance must be zero.
-			let pool_bal = PoolBalanceRepository::get_asset_balance::<Test>(asset_id);
-			assert_eq!(pool_bal, 0u128, "pool balance should be fully drained");
-
-			// No change commitment in tree (tree size remains 0 since no insert happened).
-			assert_eq!(
-				MerkleRepository::get_tree_size::<Test>(),
-				0,
-				"tree should have no leaves for total unshield"
-			);
-
-			// Event carries change_commitment: None.
-			let events = frame_system::Pallet::<Test>::events();
-			let found = events.iter().any(|r| {
-				matches!(
-					r.event,
-					crate::mock::RuntimeEvent::ShieldedPool(PalletEvent::Unshielded {
-						change_commitment: None,
-						..
-					})
-				)
-			});
-			assert!(
-				found,
-				"Unshielded event should have change_commitment: None"
-			);
-		});
-	}
-
-	#[test]
-	fn execute_change_commitment_duplicate_fails() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			fund_pool(asset_id, 2_000u128);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			let change_comm_bytes = canonical_bytes(0xDD);
-			let change_comm = Commitment::new(change_comm_bytes);
-
-			// Mark commitment as already existing in the pool.
-			CommitmentRepository::store_memo::<Test>(change_comm, Default::default());
-
-			// Attempting to reuse the same commitment as a change note must fail.
-			assert_noop!(
-				UnshieldOperation::execute::<Test>(
-					proof(),
-					KNOWN_ROOT,
-					nullifier(0x12),
-					asset_id,
-					500u128,
-					acc(2),
-					0u128,
-					change_comm_bytes,
-					FrameEncryptedMemo::default(),
-					None,
-					1,
-				),
-				Error::<Test>::CommitmentAlreadyExists
-			);
-		});
-	}
-
-	// ── query helpers ─────────────────────────────────────────────────────────
-
-	#[test]
-	fn is_nullifier_used_false_by_default() {
-		new_test_ext().execute_with(|| {
-			assert!(!UnshieldOperation::is_nullifier_used::<Test>(&nullifier(
-				0xCC
-			)));
-		});
-	}
-
-	#[test]
-	fn is_merkle_root_known_returns_correct_values() {
-		new_test_ext().execute_with(|| {
-			assert!(!UnshieldOperation::is_merkle_root_known::<Test>(
-				&KNOWN_ROOT
-			));
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-			assert!(UnshieldOperation::is_merkle_root_known::<Test>(&KNOWN_ROOT));
-		});
-	}
-
-	// ── ledger-solvency invariant ────────────────────────────────────────────
-	// Invariant (A): PoolBalancePerAsset[a] == Currency::free_balance(pool) for the
-	// native asset. Fees stay physically in the pool until their note is unshielded,
-	// so tracked and physical always move together.
-
-	fn pool_physical() -> u128 {
-		<pallet_balances::Pallet<Test> as Currency<AccountId32>>::free_balance(
-			&crate::Pallet::<Test>::pool_account_id(),
-		)
-	}
-
-	fn tracked(asset_id: u32) -> u128 {
-		PoolBalanceRepository::get_asset_balance::<Test>(asset_id)
-	}
-
-	/// T2 — unshield with a fee decrements the ledger by `amount` only (the fee
-	/// stays physical as backing), and ledger == physical afterwards.
-	#[test]
-	fn unshield_with_fee_decrements_amount_only() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let (amount, fee) = (500u128, 50u128);
-			fund_pool(asset_id, amount + fee);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x21),
-				asset_id,
-				amount,
-				acc(2),
-				fee,
-				[0u8; 32],
-				FrameEncryptedMemo::default(),
-				None,
-				1,
-			));
-
-			// Only `amount` left the pool; `fee` stays as backing for pending fees.
-			assert_eq!(tracked(asset_id), fee);
-			assert_eq!(pool_physical(), fee);
-			assert_eq!(tracked(asset_id), pool_physical());
-			assert_eq!(crate::mock::mock_pending_fees_get(acc(1), asset_id), fee);
-		});
-	}
-
-	/// T6 — the guard requires `>= amount + fee`: a pool covering only `amount`
-	/// (fee unbacked) must be rejected; covering `amount + fee` must succeed.
-	#[test]
-	fn unshield_guard_requires_amount_plus_fee() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let (amount, fee) = (500u128, 50u128);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			// Pool covers only `amount` → rejected.
-			fund_pool(asset_id, amount);
-			assert_noop!(
-				UnshieldOperation::execute::<Test>(
-					proof(),
-					KNOWN_ROOT,
-					nullifier(0x22),
-					asset_id,
-					amount,
-					acc(2),
-					fee,
-					[0u8; 32],
-					FrameEncryptedMemo::default(),
-					None,
-					1,
-				),
-				crate::pallet::Error::<Test>::InsufficientPoolBalance
-			);
-
-			// Pool covers `amount + fee` → accepted.
-			fund_pool(asset_id, amount + fee);
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x23),
-				asset_id,
-				amount,
-				acc(2),
-				fee,
-				[0u8; 32],
-				FrameEncryptedMemo::default(),
-				None,
-				1,
-			));
-		});
-	}
-
-	/// T1 + T4 — full fee lifecycle keeps ledger == physical at every step:
-	/// shield → unshield(with fee) → claim(mint fee note) → unshield(fee note).
-	#[test]
-	fn fee_lifecycle_preserves_ledger_invariant() {
-		use crate::operations::{fees::FeeOperation, shield::ShieldOperation};
-
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let memo = FrameEncryptedMemo::default();
-			let depositor = acc(7);
-			// Fund above the shield amount so KeepAlive leaves the ED intact.
-			let _ = <pallet_balances::Pallet<Test> as Currency<AccountId32>>::deposit_creating(
-				&depositor, 2000,
-			);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			// Step 1: shield 1000. Ledger and physical both +1000.
-			assert_ok!(ShieldOperation::execute::<Test>(
-				depositor,
-				asset_id,
-				1000u128,
-				Commitment::new(canonical_bytes(0x31)),
-				FrameEncryptedMemo::from_bytes(&[0u8; 180]).unwrap(),
-			));
-			assert_eq!(tracked(asset_id), pool_physical());
-			assert_eq!(tracked(asset_id), 1000);
-
-			// Step 2: unshield amount=700 fee=50. Only `amount` leaves; fee stays.
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x32),
-				asset_id,
-				700u128,
-				acc(2),
-				50u128,
-				[0u8; 32],
-				memo.clone(),
-				None,
-				1,
-			));
-			assert_eq!(tracked(asset_id), 300);
-			assert_eq!(tracked(asset_id), pool_physical());
-			assert_eq!(crate::mock::mock_pending_fees_get(acc(1), asset_id), 50);
-
-			// Step 3: claim the 50 fee as a note. Ledger unchanged (same backing).
-			let fee_note = Commitment::new([0x33u8; 32]);
-			let mut signals = vec![0u8; 76];
-			signals[..32].copy_from_slice(&fee_note.0);
-			signals[32..40].copy_from_slice(&(50u64).to_le_bytes());
-			signals[40..44].copy_from_slice(&asset_id.to_le_bytes());
-			assert_ok!(FeeOperation::claim_shielded::<Test>(
-				acc(1),
-				fee_note,
-				50u128,
-				asset_id,
-				crate::types::EncryptedMemo::from_bytes(&[0u8; 180]).unwrap(),
-				vec![0x01u8; 128],
-				signals,
-				1,
-			));
-			assert_eq!(tracked(asset_id), 300);
-			assert_eq!(tracked(asset_id), pool_physical());
-			assert_eq!(crate::mock::mock_pending_fees_get(acc(1), asset_id), 0);
-
-			// Step 4: unshield the 50 fee note (fee=0). Ledger and physical both −50.
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x34),
-				asset_id,
-				50u128,
-				acc(2),
-				0u128,
-				[0u8; 32],
-				memo,
-				None,
-				1,
-			));
-			assert_eq!(tracked(asset_id), 250);
-			assert_eq!(tracked(asset_id), pool_physical());
-		});
-	}
-
-	// ── relay-fee attribution ────────────────────────────────────────────────
-	// The `relayer` field steers the fee. resolve_relayer only maps
-	// governance-registered addresses; an unregistered address falls back to the
-	// block author, so an unregistered attacker can never credit themselves.
-
-	fn block_author() -> sp_runtime::AccountId32 {
-		acc(1)
-	}
-
-	fn evm(byte: u8) -> sp_core::H160 {
-		sp_core::H160::from([byte; 20])
-	}
-
-	/// A registered relayer receives the fee it relayed.
-	#[test]
-	fn unshield_fee_lands_at_registered_relayer() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let (amount, fee) = (500u128, 50u128);
-			fund_pool(asset_id, amount + fee);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			let relayer_acct = acc(7);
-			crate::mock::mock_register_relayer(relayer_acct.clone(), evm(0xAA));
-
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x51),
-				asset_id,
-				amount,
-				acc(2),
-				fee,
-				[0u8; 32],
-				FrameEncryptedMemo::default(),
-				Some(evm(0xAA)),
-				1,
-			));
-
-			assert_eq!(
-				crate::mock::mock_pending_fees_get(relayer_acct, asset_id),
-				fee
-			);
-			assert_eq!(
-				crate::mock::mock_pending_fees_get(block_author(), asset_id),
-				0
-			);
-		});
-	}
-
-	/// An unregistered `relayer` address cannot credit itself — the fee falls back
-	/// to the block author (griefing at worst, never theft).
-	#[test]
-	fn unshield_unregistered_relayer_falls_back_to_block_author() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let (amount, fee) = (500u128, 50u128);
-			fund_pool(asset_id, amount + fee);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			// 0xBB is never registered → resolve_relayer returns None.
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x52),
-				asset_id,
-				amount,
-				acc(2),
-				fee,
-				[0u8; 32],
-				FrameEncryptedMemo::default(),
-				Some(evm(0xBB)),
-				1,
-			));
-
-			assert_eq!(
-				crate::mock::mock_pending_fees_get(block_author(), asset_id),
-				fee
-			);
-		});
-	}
-
-	/// `relayer = None` routes the fee to the block author.
-	#[test]
-	fn unshield_none_relayer_goes_to_block_author() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let (amount, fee) = (500u128, 50u128);
-			fund_pool(asset_id, amount + fee);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x53),
-				asset_id,
-				amount,
-				acc(2),
-				fee,
-				[0u8; 32],
-				FrameEncryptedMemo::default(),
-				None,
-				1,
-			));
-
-			assert_eq!(
-				crate::mock::mock_pending_fees_get(block_author(), asset_id),
-				fee
-			);
-		});
-	}
-
-	/// The diversion is recorded on-chain, so a relayer that forgot to register
-	/// can see where its fee went instead of it vanishing silently.
-	#[test]
-	fn unshield_unregistered_relayer_emits_a_diversion_event() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let (amount, fee) = (500u128, 50u128);
-			fund_pool(asset_id, amount + fee);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x53),
-				asset_id,
-				amount,
-				acc(2),
-				fee,
-				[0u8; 32],
-				FrameEncryptedMemo::default(),
-				Some(evm(0xBB)),
-				1,
-			));
-
-			let diverted = System::events().into_iter().any(|r| {
-				matches!(
-					r.event,
-					RuntimeEvent::ShieldedPool(PalletEvent::RelayFeeDiverted {
-						requested,
-						asset_id: aid,
-						amount: amt,
-						..
-					}) if requested == evm(0xBB) && aid == asset_id && amt == fee
-				)
-			});
-			assert!(
-				diverted,
-				"an unresolved relayer must leave an on-chain trace"
-			);
-		});
-	}
-
-	/// A call that named nobody was not asking to credit anyone else, so there is
-	/// no diversion to report.
-	#[test]
-	fn unshield_without_a_relayer_emits_no_diversion_event() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let (amount, fee) = (500u128, 50u128);
-			fund_pool(asset_id, amount + fee);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x54),
-				asset_id,
-				amount,
-				acc(2),
-				fee,
-				[0u8; 32],
-				FrameEncryptedMemo::default(),
-				None,
-				1,
-			));
-
-			let diverted = System::events().into_iter().any(|r| {
-				matches!(
-					r.event,
-					RuntimeEvent::ShieldedPool(PalletEvent::RelayFeeDiverted { .. })
-				)
-			});
-			assert!(!diverted, "no address named means no diversion");
-		});
-	}
-
-	/// A registered relayer is credited directly, with no diversion recorded.
-	#[test]
-	fn unshield_registered_relayer_emits_no_diversion_event() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let (amount, fee) = (500u128, 50u128);
-			fund_pool(asset_id, amount + fee);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-			crate::mock::mock_register_relayer(acc(7), evm(0xCC));
-
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x55),
-				asset_id,
-				amount,
-				acc(2),
-				fee,
-				[0u8; 32],
-				FrameEncryptedMemo::default(),
-				Some(evm(0xCC)),
-				1,
-			));
-
-			assert_eq!(
-				pallet_relayer::PendingRelayerFees::<Test>::get(acc(7), asset_id),
-				fee,
-			);
-			let diverted = System::events().into_iter().any(|r| {
-				matches!(
-					r.event,
-					RuntimeEvent::ShieldedPool(PalletEvent::RelayFeeDiverted { .. })
-				)
-			});
-			assert!(!diverted, "a resolved relayer is not a diversion");
-		});
-	}
-
-	/// A non-zero fee with no resolvable recipient (no relayer, no block author)
-	/// errors instead of stranding the fee tokens in the pool.
-	#[test]
-	fn unshield_nonzero_fee_without_recipient_errors() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let (amount, fee) = (500u128, 50u128);
-			fund_pool(asset_id, amount + fee);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-			crate::mock::mock_clear_block_author();
-
-			// assert_err (not assert_noop): the fee attribution runs after currency
-			// effects; in a real extrinsic the dispatch rolls those back on Err. Here
-			// we assert the error itself — the transactional rollback is Substrate's.
-			assert_err!(
-				UnshieldOperation::execute::<Test>(
-					proof(),
-					KNOWN_ROOT,
-					nullifier(0x60),
-					asset_id,
-					amount,
-					acc(2),
-					fee,
-					[0u8; 32],
-					FrameEncryptedMemo::default(),
-					None,
-					1,
-				),
-				crate::pallet::Error::<Test>::FeeRecipientUnavailable
-			);
-		});
-	}
-
-	/// A zero fee with no recipient is fine — nothing to attribute.
-	#[test]
-	fn unshield_zero_fee_without_recipient_ok() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset();
-			let amount = 500u128;
-			fund_pool(asset_id, amount);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-			crate::mock::mock_clear_block_author();
-
-			assert_ok!(UnshieldOperation::execute::<Test>(
-				proof(),
-				KNOWN_ROOT,
-				nullifier(0x61),
-				asset_id,
-				amount,
-				acc(2),
-				0u128,
-				[0u8; 32],
-				FrameEncryptedMemo::default(),
-				None,
-				1,
-			));
-		});
-	}
-
-	/// Unverifying an asset freezes existing notes too: an unshield of a
-	/// previously-verified asset fails once it is unverified (emergency kill-switch).
-	#[test]
-	fn unverifying_asset_freezes_existing_note_unshield() {
-		new_test_ext().execute_with(|| {
-			let asset_id = setup_asset(); // registered + verified
-			fund_pool(asset_id, 1_000u128);
-			MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-
-			// Freeze the asset via governance.
-			AssetOperation::unverify::<Test>(asset_id).unwrap();
-
-			assert_noop!(
-				UnshieldOperation::execute::<Test>(
-					proof(),
-					KNOWN_ROOT,
-					nullifier(0x70),
-					asset_id,
-					100u128,
-					acc(2),
-					0u128,
-					[0u8; 32],
-					FrameEncryptedMemo::default(),
-					None,
-					1,
-				),
-				crate::pallet::Error::<Test>::AssetNotVerified
-			);
-		});
+		Ok(change_leaf_index)
 	}
 }

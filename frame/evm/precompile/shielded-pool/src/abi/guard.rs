@@ -5,15 +5,10 @@
 //! passes the very bounds check meant to reject it. This module is the only place
 //! that arithmetic lives, and the only place that reads a 256-bit word as a `usize`.
 
-use fp_evm::{ExitError, PrecompileFailure};
+use fp_evm::PrecompileFailure;
 use sp_core::U256;
 
-/// Constructs a `PrecompileFailure::Error` with the given message.
-pub(super) fn abi_error(msg: &'static str) -> PrecompileFailure {
-	PrecompileFailure::Error {
-		exit_status: ExitError::Other(msg.into()),
-	}
-}
+use crate::revert;
 
 /// Checked `a + b`, mapping overflow to an ABI error labelled `what`.
 pub(super) fn checked_add(
@@ -21,7 +16,7 @@ pub(super) fn checked_add(
 	b: usize,
 	what: &'static str,
 ) -> Result<usize, PrecompileFailure> {
-	a.checked_add(b).ok_or_else(|| abi_error(what))
+	a.checked_add(b).ok_or_else(|| revert(what))
 }
 
 /// Checked `a * b`, mapping overflow to an ABI error labelled `what`.
@@ -30,7 +25,7 @@ pub(super) fn checked_mul(
 	b: usize,
 	what: &'static str,
 ) -> Result<usize, PrecompileFailure> {
-	a.checked_mul(b).ok_or_else(|| abi_error(what))
+	a.checked_mul(b).ok_or_else(|| revert(what))
 }
 
 /// The range `start..start + span`, verified to fit inside a buffer of `params_len`
@@ -42,9 +37,9 @@ pub(super) fn checked_range(
 	params_len: usize,
 	what: &'static str,
 ) -> Result<core::ops::Range<usize>, PrecompileFailure> {
-	let end = start.checked_add(span).ok_or_else(|| abi_error(what))?;
+	let end = start.checked_add(span).ok_or_else(|| revert(what))?;
 	if end > params_len {
-		return Err(abi_error(what));
+		return Err(revert(what));
 	}
 	Ok(start..end)
 }
@@ -60,7 +55,7 @@ pub(super) fn checked_range(
 /// the two from disagreeing about which calldata is acceptable.
 pub(super) fn word_to_usize(word: U256, what: &'static str) -> Result<usize, PrecompileFailure> {
 	if word > U256::from(usize::MAX) {
-		return Err(abi_error(what));
+		return Err(revert(what));
 	}
-	usize::try_from(word).map_err(|_| abi_error(what))
+	usize::try_from(word).map_err(|_| revert(what))
 }

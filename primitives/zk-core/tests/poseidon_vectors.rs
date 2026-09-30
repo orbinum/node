@@ -25,7 +25,7 @@ fn fe(n: u64) -> FieldElement {
 
 // ─── Known-answer vectors (canonical circomlib BN254 Poseidon) ─────────────────
 
-/// Poseidon([1]) — single input (used for owner_hash in the value_proof circuit).
+/// Poseidon([1]) — single input (owner_hash in selective disclosure).
 const P1_1: &str = "0x29176100eaa962bdc1fe6c654d6a3c130e96a4d1168b33848b897dc502820133";
 /// Poseidon([1, 2]) — arity 2 (Merkle node / nullifier).
 const P2_1_2: &str = "0x115cc0f5e7d690413df64c6b9662e9cf2a3617f2743245519e19607a4417189a";

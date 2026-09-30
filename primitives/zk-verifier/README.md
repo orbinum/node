@@ -67,11 +67,14 @@ let inputs = parse_public_inputs_from_snarkjs(&["12345", "67890"])?;
 
 ## Supported circuits
 
-| Circuit ID | Name | Public inputs |
+| Circuit ID | Name | Public inputs (`Base` / `MemoBound`) |
 |---|---|---|
-| 1 | `transfer` | 7 |
-| 2 | `unshield` | 6 |
-| 6 | `value_proof` | 4 |
+| 1 | `transfer` | 7 / 8 |
+| 2 | `unshield` | 7 / 8 |
+
+`input_layout(circuit_id, arity)` maps a key's arity to its layout; the memo-bound
+one appends `memo_hash` and hashes the unshield recipient (see `pallet-zk-verifier`).
+`to_field_le` reduces 32 bytes to the canonical field element the verifier accepts.
 
 ## Weight estimation
 

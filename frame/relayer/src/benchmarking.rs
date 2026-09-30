@@ -16,7 +16,7 @@
 use super::*;
 use frame_benchmarking::v2::*;
 use frame_support::traits::Get;
-use frame_system::RawOrigin;
+use frame_system::{RawOrigin, pallet_prelude::BlockNumberFor};
 use pallet_validator_set::ValidatorSetInterface;
 use sp_core::H160;
 
@@ -86,6 +86,45 @@ mod benchmarks {
 
 		assert!(!RelayerRegistry::<T>::contains_key(evm));
 		assert!(!RelayerByAccount::<T>::contains_key(&caller));
+	}
+
+	// ── on_initialize: prune_relay_commits ───────────────────────────────────
+
+	/// `r` validators with an index entry expiring now, `n` commits spread
+	/// over them. Ranges are the runtime's `MaxValidators` (32) and 32 ×
+	/// `MaxCommitsPerRelayerPerBlock` (64); a benchmark range must be a literal.
+	#[benchmark]
+	fn prune_relay_commits(r: Linear<0, 32>, n: Linear<0, 2048>) {
+		let recorded_at: BlockNumberFor<T> = 1u32.into();
+		let expires_at = recorded_at + T::CommitTtl::get();
+		let validators: sp_std::vec::Vec<T::AccountId> =
+			(0..r.max(1)).map(|i| account("validator", i, 0)).collect();
+		for who in validators.iter().take(r as usize) {
+			CommitsByRelayer::<T>::insert(expires_at, who, frame_support::BoundedVec::default());
+		}
+		for i in 0..n {
+			let commit = sp_core::H256::from_low_u64_be(i as u64 + 1);
+			RelayCommits::<T>::insert(
+				commit,
+				RelayCommit {
+					recorded_at,
+					expires_at,
+				},
+			);
+			let who = &validators[(i % r.max(1)) as usize];
+			CommitsByRelayer::<T>::mutate(expires_at, who, |index| {
+				let _ = index.try_push(commit);
+			});
+		}
+
+		#[block]
+		{
+			<Pallet<T> as frame_support::traits::Hooks<BlockNumberFor<T>>>::on_initialize(
+				expires_at,
+			);
+		}
+
+		assert_eq!(CommitsByRelayer::<T>::iter_prefix(expires_at).count(), 0);
 	}
 
 	// ── Benchmark test suite ─────────────────────────────────────────────────

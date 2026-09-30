@@ -41,7 +41,7 @@ fn register_emits_event() {
 fn register_relayer_fails_when_not_a_validator() {
 	new_test_ext().execute_with(|| {
 		// Account 1 is not in the validator set — this is what stops an arbitrary
-		// account from claiming an EVM address now that the call is self-service.
+		// account from claiming an EVM address, since the call is self-service.
 		let (evm, result) = register_with_proof(1, seeds::ALICE);
 		assert_noop!(result, Error::<Test>::NotValidator);
 		assert!(!RelayerRegistry::<Test>::contains_key(evm));

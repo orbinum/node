@@ -7,4 +7,5 @@
 //! unauthenticated RPC and asserts the relay rejects rather than panics.
 
 mod adversarial;
+mod guard;
 mod validation;

@@ -2,6 +2,51 @@
 
 All notable changes to `pallet-relayer` will be documented in this file.
 
+## [0.6.0] - 2026-09-29
+
+Relay commits: a spend's fee is credited to the relayer that committed to it in an
+earlier block, whoever submits the spend. **Breaking** — `Config` gains
+`CommitTtl` and `MaxCommitsPerRelayerPerBlock`, `RelayerInterface` gains two
+methods, and the runtime API moves to version 2.
+
+### Added
+
+#### Relay commits
+A relayer records `relay_commit_hash(op_hash, its H160)` — domain-separated
+blake2 over the spend's identity and its address — before submitting.
+`take_committed_relayer(op_hash)` returns the registered relayer with the
+earliest commit from a **previous** block and consumes every commit for that
+spend; `record_relay_commits` writes them for a registered address, keeping the
+earlier block of a commit already present.
+
+The commit stores only its block, never who wrote it: the credited relayer is
+the one inside the preimage, so writing someone else's commit first only
+credits them. Commits from the spending block are ignored, so an author cannot
+commit after seeing a spend and include both.
+
+- Storage `RelayCommits` (commit → `RelayCommit { recorded_at, expires_at }`)
+  and `CommitsByRelayer` ((expiry block, validator account) → commits), pruned in
+  `on_initialize` at the expiry block. Keyed by expiry, so a `CommitTtl` change
+  applies to new commits and leaves no orphans.
+- The quota is per validator per block, so one relayer cannot lock the others
+  out, and rotating the relay address does not buy a fresh one. A batch is all
+  or nothing, only new commits (deduplicated) count, and a batch with nothing
+  new writes no index entry and emits no event.
+- Event `RelayCommitted` (counts new commits only), error `TooManyCommits` (both
+  appended).
+- A same-block tie goes to the lowest commit hash, which changes per spend,
+  instead of the registry's storage order, which an operator can grind by
+  choosing its address.
+- `integrity_test` requires `CommitTtl ≥ 2` (0 never prunes, 1 prunes before use).
+- Runtime API `relay_commit_block(commit) -> Option<u32>`, `#[api_version(2)]`.
+- `WeightInfo::prune_relay_commits(r, n)` — `r` index entries drained, `n`
+  commits pruned, so an idle block is not charged for a full registry.
+  **Provisional**, to be regenerated on the reference machine.
+
+### Internal
+
+- Module layout and test sections reorganised; mock helpers deduplicated. Comments in present tense.
+
 ## [0.5.0] - 2026-08-21
 
 Two guards on relay configuration. **Breaking** — `Config::MaxMinRelayFee` is a

@@ -140,9 +140,9 @@ fn consume_relay_fee_fails_for_unknown_account() {
 	});
 }
 
-// ─── Cross-account isolation ──────────────────────────────────────────────────
+// ─── Cross-account isolation ─────────────────────────────────────────────────
 
-/// `consume_relay_fee` (called internally by claim_shielded_fees) also isolates
+/// `consume_relay_fee` (called internally by claim_relay_fees) also isolates
 /// by AccountId — passing account 1's fees to account 2 is impossible.
 #[test]
 fn consume_relay_fee_cannot_drain_another_accounts_fees() {

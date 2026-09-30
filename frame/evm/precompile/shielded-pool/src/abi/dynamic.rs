@@ -8,7 +8,8 @@ use alloc::vec::Vec;
 use fp_evm::PrecompileFailure;
 use sp_core::U256;
 
-use super::guard::{abi_error, checked_add, checked_mul, checked_range, word_to_usize};
+use super::guard::{checked_add, checked_mul, checked_range, word_to_usize};
+use crate::revert;
 
 /// Decodes a dynamic `bytes` value.
 ///
@@ -26,13 +27,18 @@ pub fn decode_bytes_at_slot(
 	Ok(params[range].to_vec())
 }
 
-/// Decodes a `bytes32[]` whose offset pointer lives at `slot_start` in `params`.
+/// Decodes a `bytes32[]` of at most `max_count` items whose offset pointer lives
+/// at `slot_start` in `params`.
 pub fn decode_bytes32_array_at_slot(
 	params: &[u8],
 	slot_start: usize,
+	max_count: usize,
 ) -> Result<Vec<[u8; 32]>, PrecompileFailure> {
 	let offset = read_offset(params, slot_start)?;
 	let count = read_length(params, offset)?;
+	if count > max_count {
+		return Err(revert("bytes32[] has too many items"));
+	}
 	let data_start = checked_add(offset, 32, "bytes32[] offset overflows")?;
 	// `count * 32` is the whole span. Bounds-checking it here rejects an oversized
 	// array before `with_capacity` reserves for a count that comes from calldata.
@@ -44,19 +50,29 @@ pub fn decode_bytes32_array_at_slot(
 		let s = data_start + i * 32; // bounded by the checked span above
 		let elem: [u8; 32] = params[s..s + 32]
 			.try_into()
-			.map_err(|_| abi_error("bytes32[] element copy failed"))?;
+			.map_err(|_| revert("bytes32[] element copy failed"))?;
 		items.push(elem);
 	}
 	Ok(items)
 }
 
-/// Decodes a `bytes[]` whose offset pointer lives at `slot_start` in `params`.
+/// Decodes a `bytes[]` of at most `max_count` items of at most `max_len` bytes
+/// each, whose offset pointer lives at `slot_start` in `params`.
+///
+/// Both bounds are checked before anything is copied. Element pointers may all
+/// point at the same data, so without them `count × length` bytes — quadratic in
+/// the calldata — would be allocated before any gas is charged.
 pub fn decode_bytes_array_at_slot(
 	params: &[u8],
 	slot_start: usize,
+	max_count: usize,
+	max_len: usize,
 ) -> Result<Vec<Vec<u8>>, PrecompileFailure> {
 	let array_offset = read_offset(params, slot_start)?;
 	let count = read_length(params, array_offset)?;
+	if count > max_count {
+		return Err(revert("bytes[] has too many items"));
+	}
 	// Each element has a relative offset pointer from the start of the array-data
 	// region (= array_offset + 32, right after the length word).
 	let data_base = checked_add(array_offset, 32, "bytes[] offset overflows")?;
@@ -76,6 +92,9 @@ pub fn decode_bytes_array_at_slot(
 		)?;
 		let abs_offset = checked_add(data_base, rel_offset, "bytes[] element offset overflows")?;
 		let elem_len = read_length(params, abs_offset)?;
+		if elem_len > max_len {
+			return Err(revert("bytes[] item is too long"));
+		}
 		let elem_start = checked_add(abs_offset, 32, "bytes[] element start overflows")?;
 		let range = checked_range(elem_start, elem_len, params.len(), "bytes[] element data")?;
 		result.push(params[range].to_vec());
@@ -167,7 +186,7 @@ mod tests {
 		params.extend_from_slice(&word(U256::from(1u64 << 59)));
 		params.resize(256, 0);
 
-		assert!(decode_bytes32_array_at_slot(&params, 0).is_err());
+		assert!(decode_bytes32_array_at_slot(&params, 0, usize::MAX).is_err());
 	}
 
 	/// An element count far past what the buffer can hold must be refused
@@ -178,8 +197,8 @@ mod tests {
 		params.extend_from_slice(&word(U256::from(1u64 << 30))); // ~1e9 elements
 		params.resize(256, 0);
 
-		assert!(decode_bytes_array_at_slot(&params, 0).is_err());
-		assert!(decode_bytes32_array_at_slot(&params, 0).is_err());
+		assert!(decode_bytes_array_at_slot(&params, 0, usize::MAX, usize::MAX).is_err());
+		assert!(decode_bytes32_array_at_slot(&params, 0, usize::MAX).is_err());
 	}
 
 	// ─── Well-formed input still decodes ─────────────────────────────────────
@@ -204,7 +223,7 @@ mod tests {
 		params.extend_from_slice(&[0x11u8; 32]);
 		params.extend_from_slice(&[0x22u8; 32]);
 
-		let out = decode_bytes32_array_at_slot(&params, 0).unwrap();
+		let out = decode_bytes32_array_at_slot(&params, 0, usize::MAX).unwrap();
 		assert_eq!(out, alloc::vec![[0x11u8; 32], [0x22u8; 32]]);
 	}
 
@@ -214,7 +233,13 @@ mod tests {
 		let mut params = word(U256::from(32u64)).to_vec();
 		params.extend_from_slice(&word(U256::zero()));
 
-		assert!(decode_bytes32_array_at_slot(&params, 0).unwrap().is_empty());
-		assert!(decode_bytes_array_at_slot(&params, 0).unwrap().is_empty());
+		assert!(decode_bytes32_array_at_slot(&params, 0, usize::MAX)
+			.unwrap()
+			.is_empty());
+		assert!(
+			decode_bytes_array_at_slot(&params, 0, usize::MAX, usize::MAX)
+				.unwrap()
+				.is_empty()
+		);
 	}
 }

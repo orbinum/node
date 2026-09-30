@@ -3,13 +3,13 @@
 //! - [`PoseidonHasher`]: abstraction for circuit-compatible hashing (testable via mocks).
 //! - [`LightPoseidonHasher`]: WASM-compatible implementation using `light-poseidon-nostd`.
 //! - [`NativePoseidonHasher`]: native host-function implementation (~3× faster, runtime only).
-//! - [`poseidon_hash_1`]: single-input Poseidon used for viewing-key derivation.
+//! - [`poseidon_hash_1`]: single-input Poseidon (owner hashing in selective disclosure).
 
 use crate::types::FieldElement;
 use ark_bn254::Fr;
 use light_poseidon_nostd::{Poseidon, PoseidonHasher as LightHasher};
 
-// ─── Circom Poseidon core ───────────────────────────────────────────────────────
+// ─── Circom Poseidon core ─────────────────────────────────────────────────────
 
 /// Compute the circomlib Poseidon hash for a fixed arity.
 ///
@@ -122,7 +122,7 @@ impl PoseidonHasher for LightPoseidonHasher {
 	}
 }
 
-// ─── NativePoseidonHasher ────────────────────────────────────────────────────
+// ─── NativePoseidonHasher ─────────────────────────────────────────────────────
 
 /// Native Poseidon hasher that delegates to `sp-runtime-interface` host functions.
 ///
@@ -179,13 +179,11 @@ fn bytes_to_field(bytes: &[u8]) -> FieldElement {
 
 // ─── poseidon_hash_1 ──────────────────────────────────────────────────────────
 
-/// Poseidon hash of a single field element.
+/// Poseidon hash of a single field element, e.g. `owner_hash = Poseidon(owner_pubkey)`
+/// in selective disclosure.
 ///
-/// Used in the `value_proof` circuit to derive the owner key hash:
-/// `owner_hash = Poseidon(owner_pubkey)`.
-///
-/// Single-input Poseidon is intentionally not part of [`PoseidonHasher`] because
-/// it is only needed for the value_proof circuit.
+/// Kept out of [`PoseidonHasher`], which only carries the arities the spend
+/// circuits need.
 pub fn poseidon_hash_1(input: FieldElement) -> FieldElement {
 	let result = poseidon_circom(1, &[input.inner()]);
 	FieldElement::new(result)
@@ -270,7 +268,7 @@ mod tests {
 		assert_ne!(h1, h2);
 	}
 
-	// ─── No panic on boundary inputs, deterministic behavior ───────────────────
+	// ─── No panic on boundary inputs, deterministic behavior ──────────────────
 
 	/// `Fr = p - 1`, the largest canonical field element. Must not panic or diverge.
 	fn field_max() -> FieldElement {
@@ -284,7 +282,7 @@ mod tests {
 		let h = LightPoseidonHasher;
 		let zero = FieldElement::zero();
 		let max = field_max();
-		// None of these calls must panic (they previously used `.expect()`).
+		// None of these calls may panic.
 		let _ = h.hash_2([zero, max]);
 		let _ = h.hash_2([max, max]);
 		let _ = h.hash_4([zero, max, zero, max]);
@@ -314,7 +312,7 @@ mod tests {
 		assert_eq!(via_trait, via_core);
 	}
 
-	// ─── Defensive 32-byte conversion (no panic on short/long) ─────────────────
+	// ─── Defensive 32-byte conversion (no panic on short/long) ────────────────
 
 	#[cfg(feature = "poseidon-native")]
 	#[test]
@@ -332,7 +330,7 @@ mod tests {
 	#[cfg(feature = "poseidon-native")]
 	#[test]
 	fn bytes_to_field_no_panic_on_short_or_long() {
-		// Shorter and longer inputs must not panic (previously copy_from_slice would).
+		// Shorter and longer inputs must not panic (a bare `copy_from_slice` would).
 		let _ = bytes_to_field(&[1u8, 2, 3]);
 		let _ = bytes_to_field(&[]);
 		let _ = bytes_to_field(&[0xABu8; 40]);

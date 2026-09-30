@@ -1,6 +1,6 @@
 # Orbinum Network
 
-Orbinum is a privacy-focused blockchain network built on Substrate that enables confidential transactions with cryptographic value proofs.
+Orbinum is a privacy-focused blockchain network built on Substrate that enables confidential transactions with zero-knowledge proofs.
 
 ## Overview
 
@@ -12,11 +12,6 @@ Orbinum combines the transparency benefits of blockchain technology with advance
 - **Shielded Pool**: Confidential transaction layer using zero-knowledge proofs (Groth16 on BN254 curve)
 - **Private Transfers**: Send and receive assets without revealing amounts, sender, or recipient
 - **Shield/Unshield**: Move assets between transparent and private domains seamlessly
-
-### Value Proofs
-- **Value Proof Circuit**: Cryptographic proof that a note commitment encodes the declared value and asset, used for relay fee claiming (`claim_shielded_fees`)
-- **Proof of Note Ownership**: Any note owner can generate a value proof to demonstrate knowledge of a commitment's preimage without revealing the blinding factor
-- **Audit Trail**: Maintain verifiable records for compliance while preserving user privacy
 
 ### EVM Compatibility
 - **Frontier Integration**: Full Ethereum Virtual Machine compatibility layer
@@ -34,9 +29,9 @@ Orbinum combines the transparency benefits of blockchain technology with advance
 Orbinum is built using Substrate's FRAME framework and implements Clean Architecture principles across all components:
 
 - **Pallets**: Modular runtime components (`pallet-shielded-pool`, `pallet-zk-verifier`, `pallet-relayer`)
-- **Primitives**: Core cryptographic libraries (`zk-core`, `zk-verifier`, `zk-circuits`)
+- **Primitives**: Core cryptographic libraries (`zk-core`, `zk-verifier`)
 - **Client**: RPC layer and blockchain infrastructure
-- **Circuits**: Circom zero-knowledge circuits (`value_proof`, `transfer`, `unshield`)
+- **Circuits**: Circom zero-knowledge circuits (`transfer`, `unshield`)
 
 ## Building
 

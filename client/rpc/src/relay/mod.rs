@@ -23,12 +23,14 @@
 //! | [`types`]      | `OrbinumRelayApi` RPC trait + `RelayerStatus` response     |
 //! | [`operations`] | Per-operation selector, length, and fee extraction         |
 //! | [`validation`] | Pure calldata checks — bytes in, verdict out; no chain state |
-//! | [`rpc`]        | `OrbinumRelay`: dry run, nonce, signing, pool submission   |
+//! | [`guard`]      | One relay per spend, the commit ranking, nonce tracking   |
+//! | [`rpc`]        | `OrbinumRelay`: dry run, relay commit, signing, submission |
 //!
 //! Keeping [`validation`] free of chain state is what lets `tests/adversarial.rs`
 //! throw hostile calldata at it without a node.
 
 pub mod config;
+pub(crate) mod guard;
 pub mod operations;
 pub mod rpc;
 pub mod types;

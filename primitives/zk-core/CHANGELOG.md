@@ -4,6 +4,19 @@ All notable changes to this crate are documented here.
 
 ---
 
+## [1.1.1] — 2026-09-29
+
+### Changed
+
+- `poseidon_hash_1` docs: the value_proof circuit that used it is retired; it
+  remains for owner hashing in selective disclosure.
+
+### Internal
+
+- Comments no longer describe removed code paths.
+
+---
+
 ## [1.1.0] — 2026-07-02
 
 ### Security

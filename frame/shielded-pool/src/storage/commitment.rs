@@ -1,11 +1,8 @@
-//! Commitment memo storage.
-//!
-//! Maps a note commitment to its encrypted memo. Membership here doubles as the
-//! duplicate-commitment check, so `exists` is what keeps the same commitment
-//! from being inserted into the tree twice.
+//! Commitment storage: each note's encrypted memo, and whether a commitment is
+//! already in the forest.
 
 use crate::{
-	pallet::{CommitmentMemos, Config},
+	pallet::{CommitmentMemos, CommitmentToLeafIndex, Config},
 	types::{Commitment, EncryptedMemo},
 };
 
@@ -20,7 +17,10 @@ impl CommitmentRepository {
 	pub fn store_memo<T: Config>(commitment: Commitment, memo: EncryptedMemo) {
 		CommitmentMemos::<T>::insert(commitment, memo);
 	}
+	/// Whether `commitment` is a leaf of the forest. Read from the leaf index,
+	/// which every insertion writes and nothing removes — not from the memos,
+	/// which a leaf inserted without one would escape.
 	pub fn exists<T: Config>(commitment: &Commitment) -> bool {
-		CommitmentMemos::<T>::contains_key(commitment)
+		CommitmentToLeafIndex::<T>::contains_key(commitment)
 	}
 }

@@ -10,8 +10,8 @@ use super::{
 	tree::IncrementalMerkleTree,
 };
 use crate::{
-	pallet::{CommitmentMemos, Config, Error, Event, Pallet},
-	storage::{MerkleRepository, PoolStatsRepository},
+	pallet::{Config, Error, Event, Pallet},
+	storage::{CommitmentRepository, MerkleRepository, PoolStatsRepository},
 	types::{Commitment, DefaultMerklePath, Hash},
 };
 use frame_support::{ensure, pallet_prelude::*, traits::Get};
@@ -32,7 +32,7 @@ impl MerkleTreeService {
 		// over to a fresh tree below instead of erroring.
 		ensure!(index < u32::MAX, Error::<T>::MerkleTreeFull);
 		ensure!(
-			!CommitmentMemos::<T>::contains_key(commitment),
+			!CommitmentRepository::exists::<T>(&commitment),
 			Error::<T>::CommitmentAlreadyExists
 		);
 

@@ -193,7 +193,7 @@ fn attack_calldata_fuzz_never_panics() {
 }
 
 /// Fuzz the fee slot specifically with full-width random words — this is the
-/// field that historically panicked via `U256::as_u128()`.
+/// field that would panic through `U256::as_u128()`.
 #[test]
 fn attack_fee_slot_fuzz_never_panics() {
 	let mut seed: u64 = 0x1234_5678_9ABC_DEF0;

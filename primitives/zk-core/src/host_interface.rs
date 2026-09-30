@@ -188,7 +188,7 @@ mod tests {
 		assert_eq!(from_trait, from_host_fe);
 	}
 
-	// ─── No panic on non-32-byte inputs (host functions must never panic) ──────
+	// ─── No panic on non-32-byte inputs (host functions must never panic) ─────
 
 	#[test]
 	fn read_32_le_pads_and_truncates() {
@@ -208,7 +208,7 @@ mod tests {
 
 	#[test]
 	fn hash_2_no_panic_on_short_input() {
-		// Previously asserted len == 32 and would panic (aborting a native node).
+		// A panic here would abort a native node, so short input is padded instead.
 		let short = alloc::vec![7u8; 10];
 		let long = alloc::vec![9u8; 40];
 		let _ = poseidon_host_interface::poseidon_hash_2(&short, &u64_to_bytes(1));
@@ -229,7 +229,7 @@ mod tests {
 
 	#[test]
 	fn hash_2_still_correct_for_32_bytes() {
-		// The 32-byte path must be unchanged (no regression).
+		// Canonical 32-byte input hashes deterministically to a non-zero element.
 		let a = poseidon_host_interface::poseidon_hash_2(&u64_to_bytes(42), &u64_to_bytes(100));
 		let b = poseidon_host_interface::poseidon_hash_2(&u64_to_bytes(42), &u64_to_bytes(100));
 		assert_eq!(a, b);

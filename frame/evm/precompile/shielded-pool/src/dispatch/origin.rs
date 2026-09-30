@@ -1,9 +1,10 @@
-//! The three dispatch modes, one per pallet origin check. Each builds its origin
+//! The two dispatch modes, one per pallet origin check. Each builds its origin
 //! and defers the shared work to [`super::record_and_dispatch`].
 
 use fp_evm::{PrecompileHandle, PrecompileResult};
 use frame_support::dispatch::{GetDispatchInfo, PostDispatchInfo};
 use pallet_evm::AddressMapping;
+use sp_core::U256;
 use sp_runtime::traits::Dispatchable;
 
 use super::{record_and_dispatch, RuntimeOriginOf};
@@ -34,41 +35,18 @@ where
 	})
 }
 
-/// Dispatches `call` with the **EVM caller** as signed origin.
-///
-/// Used for `claim_shielded_fees`: the validator calls the precompile from their
-/// EVM address; their `H160` is mapped to an `AccountId` and used as the signed
-/// origin so `ensure_signed` succeeds in the pallet.
-pub fn from_caller<T>(
-	handle: &mut impl PrecompileHandle,
-	call: pallet_shielded_pool::Call<T>,
-) -> PrecompileResult
-where
-	T: pallet_evm::Config + pallet_shielded_pool::Config,
-	<T as frame_system::Config>::RuntimeCall: Dispatchable<PostInfo = PostDispatchInfo>
-		+ GetDispatchInfo
-		+ From<pallet_shielded_pool::Call<T>>,
-	RuntimeOriginOf<T>: From<Option<<T as frame_system::Config>::AccountId>>,
-	<<T as frame_system::Config>::RuntimeCall as Dispatchable>::PostInfo: core::fmt::Debug,
-	pallet_evm::AccountIdOf<T>: Into<<T as frame_system::Config>::AccountId>,
-{
-	let caller = handle.context().caller;
-	record_and_dispatch(handle, call, || {
-		let account: <T as frame_system::Config>::AccountId =
-			T::AddressMapping::into_account_id(caller).into();
-		RuntimeOriginOf::<T>::from(Some(account))
-	})
-}
-
 /// Dispatches `call` carrying the **EVM caller** as the relaying address.
 ///
-/// Used for `private_transfer` and `unshield`. A ZK proof authenticates the spend
-/// but says nothing about who relayed it, so the relay fee has to be attributed
-/// some other way. It comes from here: the EVM executor sets `caller` from the
+/// Used for every call but `shield`. The EVM executor sets `caller` from the
 /// transaction signature and debited its gas, so it cannot be forged by calldata.
+/// It names the relayer for `commit_relay` and the claimant for
+/// `claim_relay_fees`; for spends it only gates the origin, since the fee follows
+/// the relay commit rather than whoever submits.
 ///
-/// This is why neither call carries a `relayer` argument — an argument would be an
-/// unauthenticated claim that any resubmitter could rewrite to point at itself.
+/// None of these calls is payable, and the value the executor already moved to
+/// the precompile address would stay there: no code sends it on, and a revert
+/// does not undo a transfer the executor made before this ran. Refusing it here
+/// is what makes the revert give the caller its funds back.
 pub fn relayed<T>(
 	handle: &mut impl PrecompileHandle,
 	call: pallet_shielded_pool::Call<T>,
@@ -81,6 +59,9 @@ where
 	RuntimeOriginOf<T>: From<pallet_shielded_pool::Origin>,
 	<<T as frame_system::Config>::RuntimeCall as Dispatchable>::PostInfo: core::fmt::Debug,
 {
+	if handle.context().apparent_value > U256::zero() {
+		return Err(crate::revert("call is not payable"));
+	}
 	let caller = handle.context().caller;
 	record_and_dispatch(handle, call, || {
 		RuntimeOriginOf::<T>::from(pallet_shielded_pool::Origin::Relayed(caller))

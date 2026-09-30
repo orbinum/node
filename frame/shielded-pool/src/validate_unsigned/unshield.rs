@@ -1,122 +1,98 @@
 //! Pool admission for `unshield`.
 //!
-//! Mirrors [`super::transfer`] step for step, with one extra check: unshield is
-//! the only call that moves value OUT of the pool, so it also verifies the pool
-//! can cover it.
+//! | # | Check                  | Cost                              |
+//! |---|------------------------|-----------------------------------|
+//! | 1 | circuit version        | in-memory lookup                  |
+//! | 2 | dispatch checks        | `validate`, cheapest first        |
+//! | 3 | proof verifies         | one pairing (pool only)           |
+//! | 4 | build the pool tag     | no reads                          |
 //!
-//! ## Order of checks
-//!
-//! The steps below are numbered, and the order is the anti-spam property, not a
-//! style choice: each step is more expensive than the last, so a junk
-//! transaction is rejected as early — and as cheaply — as possible. Steps 1–4
-//! are identical to `transfer`; step 5 is unshield's own.
-//!
-//! | # | Check                | Cost                       |
-//! |---|----------------------|----------------------------|
-//! | 1 | circuit version      | in-memory lookup           |
-//! | 2 | fee floor            | one storage read + compare |
-//! | 3 | Merkle root known    | one storage read           |
-//! | 4 | nullifier not spent  | one storage read           |
-//! | 5 | pool can cover it    | one storage read + add     |
-//! | 6 | build the pool tag   | no reads                   |
-//!
-//! Step 5 is ADVISORY: the balance can move between admission and execution, so
-//! the extrinsic re-verifies it. Rejecting here only avoids gossiping a spend
-//! the pool visibly cannot cover.
-//!
-//! Every check here is ALSO re-done in the dispatchable. That is deliberate: a
-//! check performed only at admission could be skipped by a malicious block
-//! author, so admission may reject more than execution — never less.
+//! Step 2 IS the dispatchable's validation, so admission can never reject less
+//! than execution. Its pool-solvency check is advisory here: the balance can
+//! move before execution, which checks it again. Rejecting early only avoids
+//! gossiping a spend the pool visibly cannot cover.
 
 use super::{
 	TX_LONGEVITY,
 	codes::{self, reject},
 };
 use crate::{
-	pallet::{BalanceOf, Config, NullifierSet, PoolBalancePerAsset},
-	storage::MerkleRepository,
-	types::{Hash, Nullifier},
+	operations::{
+		ensure_valid_proof,
+		unshield::{UnshieldOperation, UnshieldRequest},
+	},
+	pallet::{Config, Error},
 };
-use frame_support::pallet_prelude::*;
-use pallet_relayer::RelayerInterface as _;
-use pallet_zk_verifier::ZkVerifierPort as _;
+use pallet_zk_verifier::{CircuitId, ZkVerifierPort as _};
 use sp_runtime::{
 	SaturatedConversion,
-	transaction_validity::{InvalidTransaction, TransactionValidity, ValidTransaction},
+	traits::Zero,
+	transaction_validity::{
+		InvalidTransaction, TransactionValidity, TransactionValidityError, ValidTransaction,
+	},
 };
-
-/// On-chain circuit id for the transfer/unshield version guard (mirrors the
-/// zk-verifier's `CircuitId` constants).
-const CIRCUIT_UNSHIELD: u32 = 2;
 
 /// Validate an incoming `unshield` unsigned transaction.
 ///
-/// The fee recipient is deliberately absent: it is not a call argument at all,
-/// and it must not enter the pool tag — see the note at the tag construction
-/// below.
+/// `proof` is `Some` at pool admission and `None` in `pre_dispatch`, where the
+/// dispatchable verifies it and a second pairing would go unweighed.
 pub fn validate_unshield<T: Config>(
-	merkle_root: &Hash,
-	nullifier: &Nullifier,
-	asset_id: &u32,
-	amount: &BalanceOf<T>,
-	fee: &BalanceOf<T>,
-	circuit_version: u32,
+	proof: Option<&[u8]>,
+	req: &UnshieldRequest<T>,
 ) -> TransactionValidity {
 	// ── 1. Circuit version ───────────────────────────────────────────────────
-	// Cheapest gate first: a transaction proving against a retired circuit can
-	// never execute, so it must not reach the pool at all.
-	if !T::ZkVerifier::is_supported_version(CIRCUIT_UNSHIELD, circuit_version) {
+	if !T::ZkVerifier::is_supported_version(CircuitId::UNSHIELD.0, req.circuit_version) {
 		return reject(codes::UNSUPPORTED_CIRCUIT_VERSION).into();
 	}
 
-	// ── 2. Fee floor ─────────────────────────────────────────────────────────
-	// The pool's price of entry. Submissions are unsigned and gasless, so this
-	// is what stops an attacker from filling it for nothing.
-	let min_fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
-	if *fee < min_fee {
-		return InvalidTransaction::Payment.into();
+	// ── 2. Everything the dispatchable checks ────────────────────────────────
+	UnshieldOperation::validate::<T>(req).map_err(|e| admission_error(e, req))?;
+
+	// ── 3. Proof ─────────────────────────────────────────────────────────────
+	// Without it, a copy of a pending spend with swapped memos or a higher fee
+	// would share the nullifier tag, outrank the original on priority, replace
+	// it, and then fail in the block — free, repeatable censorship. An invalid
+	// proof from a peer also costs that peer reputation.
+	if let Some(proof) = proof {
+		let valid = req.statement().is_ok_and(|statement| {
+			ensure_valid_proof::<T>(|| {
+				T::ZkVerifier::verify_unshield_proof(proof, &statement, Some(req.circuit_version))
+			})
+			.is_ok()
+		});
+		if !valid {
+			return reject(codes::INVALID_PROOF).into();
+		}
 	}
 
-	// ── 3. Merkle root ───────────────────────────────────────────────────────
-	// An unknown root cannot verify, and the retention window is sized to
-	// outlive `TX_LONGEVITY` so a root accepted here stays valid until the
-	// transaction expires.
-	if !MerkleRepository::is_known_root::<T>(merkle_root) {
-		return reject(codes::UNKNOWN_ROOT).into();
-	}
-
-	// ── 4. Nullifier not already spent ───────────────────────────────────────
-	// Unlike `transfer`, unshield has exactly one input and no dummy padding —
-	// so there is no zero sentinel to skip here.
-	if NullifierSet::<T>::contains_key(nullifier) {
-		return InvalidTransaction::Stale.into();
-	}
-
-	// ── 5. Pool solvency (unshield only) ─────────────────────────────────────
-	// `amount + fee` both leave the pool, so both count against its balance.
-	// The addition is CHECKED: a wrapping sum would produce a small total that
-	// passes the comparison below, admitting a spend the pool cannot cover.
-	// Advisory — the balance can move before execution, so the extrinsic checks
-	// it again (see the module header).
-	let total = amount
-		.checked_add(fee)
-		.ok_or(reject(codes::AMOUNT_OVERFLOW))?;
-	if PoolBalancePerAsset::<T>::get(asset_id) < total {
-		return reject(codes::INSUFFICIENT_POOL_BALANCE).into();
-	}
-
-	// ── 6. Pool tag — the NULLIFIER ALONE: one note, one pool entry ──────────
+	// ── 4. Pool tag: the nullifier alone (one note, one pool entry) ──────────
 	//
-	// `relayer` used to be concatenated in, which made a copy differing only in
-	// the fee recipient a SEPARATE entry: anyone could rebroadcast someone
-	// else's unshield pointed at their own account and have both sit in the pool,
-	// racing for a fee the copy never paid for. Keyed on the nullifier the two
-	// are mutually exclusive, so taking the fee requires out-bidding — which
-	// means actually paying it. Mirrors `transfer.rs`.
+	// Every copy of a spend is mutually exclusive in the pool, whatever else it
+	// changes; with the proof checked, only a valid one gets in. Mirrors
+	// `transfer.rs`.
 	ValidTransaction::with_tag_prefix(super::SPEND_TAG_PREFIX)
-		.priority((*fee).saturated_into())
+		.priority(req.fee.saturated_into())
 		.longevity(TX_LONGEVITY)
-		.and_provides(nullifier)
+		.and_provides(req.nullifier)
 		.propagate(true)
 		.build()
+}
+
+/// The pool rejection for a failed unshield check.
+fn admission_error<T: Config>(
+	error: Error<T>,
+	req: &UnshieldRequest<T>,
+) -> TransactionValidityError {
+	match error {
+		// The pool's price of entry: submissions are unsigned and gasless.
+		Error::FeeTooLow => InvalidTransaction::Payment.into(),
+		Error::UnknownMerkleRoot => reject(codes::UNKNOWN_ROOT).into(),
+		Error::NullifierAlreadyUsed => InvalidTransaction::Stale.into(),
+		// `validate` refuses a zero amount before summing, so with a non-zero
+		// amount this is `amount + fee` overflowing.
+		Error::InvalidAmount if !req.amount.is_zero() => reject(codes::AMOUNT_OVERFLOW).into(),
+		Error::InsufficientPoolBalance => reject(codes::INSUFFICIENT_POOL_BALANCE).into(),
+		Error::InvalidMemoSize => reject(codes::INVALID_MEMO).into(),
+		_ => reject(codes::INVALID_SPEND).into(),
+	}
 }

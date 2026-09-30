@@ -5,10 +5,9 @@ set -euo pipefail
 # scripts/vk/workflows/setup-dev.sh
 # DEV setup for on-chain VKs (main entrypoint for developers)
 #
-# Registers + activates ONLY these 3 circuits:
+# Registers + activates ONLY these 2 circuits:
 #   1 transfer
 #   2 unshield
-#   6 value_proof
 #
 # VK artifacts are resolved from the @orbinum/circuits npm package via unpkg:
 #   1. Fetches manifest.json to determine the latest package_version
@@ -28,7 +27,7 @@ set -euo pipefail
 
 RPC_WS="${1:-ws://127.0.0.1:9944}"
 SUDO_SEED="${2:-//Alice}"
-VERSION="${3:-1}"
+VERSION="${3:-}"
 NPM_PACKAGE="${4:-@orbinum/circuits}"
 
 UNPKG_BASE="https://unpkg.com"
@@ -38,7 +37,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NODE_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 VK_REGISTRY_SCRIPT="$SCRIPT_DIR/../lib/registry.sh"
 ARTIFACTS_DIR="$NODE_DIR/artifacts"
-CONVERT_VK_BIN="$NODE_DIR/../groth16-proofs/target/release/convert-vk"
+PACK_VERIFYING_KEY_BIN="$NODE_DIR/../groth16-proofs/target/release/pack-verifying-key"
 
 err() {
   echo "[ERROR] $*" >&2
@@ -53,13 +52,13 @@ command -v curl >/dev/null 2>&1 || err "curl is required"
 command -v jq   >/dev/null 2>&1 || err "jq is required"
 
 [[ -f "$VK_REGISTRY_SCRIPT" ]] || err "Not found: $VK_REGISTRY_SCRIPT"
-[[ "$VERSION" =~ ^[0-9]+$ ]]   || err "version must be an integer >= 0"
+[[ -z "$VERSION" || "$VERSION" =~ ^[0-9]+$ ]] || err "version must be an integer >= 0"
 
-# Ensure the convert-vk binary is available
-if [[ ! -x "$CONVERT_VK_BIN" ]]; then
-  log "Building convert-vk tool..."
-  (cd "$NODE_DIR/../groth16-proofs" && cargo build --bin convert-vk --release --quiet) \
-    || err "Failed to build convert-vk. Run: cd groth16-proofs && cargo build --bin convert-vk --release"
+# Ensure the pack-verifying-key binary is available
+if [[ ! -x "$PACK_VERIFYING_KEY_BIN" ]]; then
+  log "Building pack-verifying-key tool..."
+  (cd "$NODE_DIR/../groth16-proofs" && cargo build --bin pack-verifying-key --release --quiet) \
+    || err "Failed to build pack-verifying-key. Run: cd groth16-proofs && cargo build --bin pack-verifying-key --release"
 fi
 
 # ─── Fetch manifest ───────────────────────────────────────────────────────────
@@ -71,16 +70,23 @@ PKG_VERSION=$(echo "$MANIFEST_JSON" | jq -r '.package_version')
 CDN_BASE="$UNPKG_BASE/@orbinum/circuits@$PKG_VERSION"
 
 log "Resolved @orbinum/circuits version: $PKG_VERSION"
+
+# Register the keys under the version the manifest serves as active, unless told
+# otherwise: registering them under another number makes every client's VK-hash
+# check fail.
+if [[ -z "$VERSION" ]]; then
+  VERSION=$(echo "$MANIFEST_JSON" | jq -r '.circuits["transfer"].active_version')
+  [[ "$VERSION" =~ ^[0-9]+$ ]] || err "manifest has no active_version for transfer"
+fi
 log "Artifact base URL: $CDN_BASE"
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
-# Returns the active vk_json filename for a circuit from the manifest
+# The vk_json filename of $VERSION for a circuit, from the manifest: the key
+# registered must be the one the manifest publishes under that version.
 get_vk_filename() {
   local circuit="$1"
-  local active_version
-  active_version=$(echo "$MANIFEST_JSON" | jq -r ".circuits[\"$circuit\"].active_version")
-  echo "$MANIFEST_JSON" | jq -r ".circuits[\"$circuit\"].versions[\"$active_version\"].artifacts.vk_json.file"
+  echo "$MANIFEST_JSON" | jq -r ".circuits[\"$circuit\"].versions[\"$VERSION\"].artifacts.vk_json.file"
 }
 
 TEMP_DIR=""
@@ -109,7 +115,7 @@ resolve_vk() {
 
   # Convert JSON → arkworks compressed binary
   local bin_path="${json_path%.json}.bin"
-  "$CONVERT_VK_BIN" "$json_path" "$bin_path" \
+  "$PACK_VERIFYING_KEY_BIN" "$json_path" "$bin_path" \
     || err "Failed to convert $filename to binary"
   echo "$bin_path"
 }
@@ -121,16 +127,15 @@ log "RPC: $RPC_WS | Circuit version: $VERSION"
 
 VK_TRANSFER=$(resolve_vk "transfer")
 VK_UNSHIELD=$(resolve_vk "unshield")
-VK_VALUE_PROOF=$(resolve_vk "value_proof")
 
-log "Circuits: transfer(1), unshield(2), value_proof(6)"
+log "Circuits: transfer(1), unshield(2)"
 
 # ─── Register + activate ─────────────────────────────────────────────────────
 
-log "Batch registering + activating all 3 circuits (v$VERSION) in a single tx..."
+log "Batch registering + activating both circuits (v$VERSION) in a single tx..."
 bash "$VK_REGISTRY_SCRIPT" batch-register \
   "$VERSION" 1 \
-  "$VK_TRANSFER" "$VK_UNSHIELD" "$VK_VALUE_PROOF" \
+  "$VK_TRANSFER" "$VK_UNSHIELD" \
   "$RPC_WS" "$SUDO_SEED"
 
 # ─── Cleanup ─────────────────────────────────────────────────────────────────
@@ -142,7 +147,7 @@ fi
 
 # Remove any .bin files produced from local artifacts (they are generated
 # artefacts and are excluded from version control via .gitignore)
-for circuit in transfer unshield value_proof; do
+for circuit in transfer unshield; do
   rm -f "$ARTIFACTS_DIR/verification_key_${circuit}.bin"
 done
 

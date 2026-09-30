@@ -58,7 +58,7 @@ pub(crate) fn validate_relay_calldata(
 	min_fee_wei: u128,
 	allowed_selectors: &[[u8; 4]],
 ) -> Result<(), &'static str> {
-	// Global minimum: selector (4 B) + 6 ABI head slots (6 × 32 B) = 228 B.
+	// Global minimum: selector (4 B) + head slots 0–6 (7 × 32 B) = 228 B.
 	if data.len() < 228 {
 		return Err("calldata too short");
 	}
@@ -71,7 +71,7 @@ pub(crate) fn validate_relay_calldata(
 		return Err("unsupported selector");
 	}
 
-	// Capa 3: dispatch to the registered RelayableOperation for per-op fee extraction.
+	// Dispatch to the registered RelayableOperation for per-op fee extraction.
 	// If the governance whitelist contains a selector the node does not implement,
 	// the relay rejects it — requiring a node update to support new operations.
 	let op = default_operations()

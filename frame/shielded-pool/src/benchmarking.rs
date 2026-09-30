@@ -20,7 +20,7 @@ use alloc::vec;
 #[benchmarks(
 	where
 		T: pallet_zk_verifier::Config + pallet_relayer::Config,
-		// Relay fees are attributed by origin, so the benchmarks build one.
+		// The precompile's relayed origin is exercised directly.
 		<T as frame_system::Config>::RuntimeOrigin: From<crate::RawOrigin>,
 )]
 mod benchmarks {
@@ -31,11 +31,44 @@ mod benchmarks {
 	use sp_core::H160;
 	use sp_std::vec::Vec;
 
+	/// Relayers the registry can hold at most: one per validator, the runtime's
+	/// `MaxValidators`.
+	const MAX_RELAYERS: u32 = 32;
+
 	fn setup_relayer<T: Config + pallet_relayer::Config>() -> H160 {
-		let addr = H160::from([0xAA; 20]);
-		let relayer: T::AccountId = account("relayer", 0, 0);
-		pallet_relayer::RelayerRegistry::<T>::insert(addr, relayer);
+		register_relayer::<T>(0)
+	}
+
+	fn relayer_address(i: u32) -> H160 {
+		H160::from_low_u64_be(0xAA00 + i as u64)
+	}
+
+	fn register_relayer<T: Config + pallet_relayer::Config>(i: u32) -> H160 {
+		let addr = relayer_address(i);
+		let relayer: T::AccountId = account("relayer", i, 0);
+		pallet_relayer::RelayerRegistry::<T>::insert(addr, relayer.clone());
+		pallet_relayer::RelayerByAccount::<T>::insert(relayer, addr);
 		addr
+	}
+
+	/// Worst case for fee attribution: a full registry, every relayer holding a
+	/// commit from an earlier block for the spend, so the lookup reads and
+	/// removes all of them. Returns the first relayer, which submits the spend.
+	fn commit_all_relayers<T: Config + pallet_relayer::Config>(op_hash: &[u8; 32]) -> H160 {
+		let recorded_at: frame_system::pallet_prelude::BlockNumberFor<T> = 1u32.into();
+		let commit = pallet_relayer::RelayCommit {
+			recorded_at,
+			expires_at: recorded_at + <T as pallet_relayer::Config>::CommitTtl::get(),
+		};
+		for i in 0..MAX_RELAYERS {
+			let addr = register_relayer::<T>(i);
+			pallet_relayer::RelayCommits::<T>::insert(
+				pallet_relayer::relay_commit_hash(op_hash, &addr),
+				commit,
+			);
+		}
+		frame_system::Pallet::<T>::set_block_number(2u32.into());
+		relayer_address(0)
 	}
 
 	fn setup_benchmark_env<T: Config>() -> (T::AccountId, u32) {
@@ -133,7 +166,7 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn private_transfer(n: Linear<1, 2>) {
+	fn private_transfer() {
 		let (_caller, _) = setup_benchmark_env::<T>();
 		let merkle_root = [1u8; 32];
 
@@ -142,28 +175,43 @@ mod benchmarks {
 
 		let proof: BoundedVec<u8, ConstU32<512>> = vec![0u8; 128].try_into().unwrap();
 
-		// n inputs/outputs: the leaf-insertion loop runs n times (worst case n=2).
-		let mut nulls = Vec::new();
-		let mut comms = Vec::new();
-		let mut memos = Vec::new();
-		for i in 0..n {
-			nulls.push(Nullifier(canonical_bytes((0x20 + i) as u8)));
-			comms.push(Commitment(canonical_bytes((0x30 + i) as u8)));
-			let memo_bytes = vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
-			memos.push(FrameEncryptedMemo(memo_bytes.try_into().unwrap()));
-		}
-		let nullifiers: BoundedVec<Nullifier, ConstU32<2>> = nulls.try_into().unwrap();
-		let commitments: BoundedVec<Commitment, ConstU32<2>> = comms.try_into().unwrap();
+		// Two real inputs and two outputs: the most reads and leaf insertions.
+		let memo = || {
+			FrameEncryptedMemo(
+				vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize]
+					.try_into()
+					.unwrap(),
+			)
+		};
+		let nullifiers: BoundedVec<Nullifier, ConstU32<2>> = vec![
+			Nullifier(canonical_bytes(0x20)),
+			Nullifier(canonical_bytes(0x21)),
+		]
+		.try_into()
+		.unwrap();
+		let commitments: BoundedVec<Commitment, ConstU32<2>> = vec![
+			Commitment(canonical_bytes(0x30)),
+			Commitment(canonical_bytes(0x31)),
+		]
+		.try_into()
+		.unwrap();
 		let encrypted_memos: BoundedVec<FrameEncryptedMemo, ConstU32<2>> =
-			memos.try_into().unwrap();
+			vec![memo(), memo()].try_into().unwrap();
 
 		let asset_id = 0u32;
 		// Must be >= T::Relayer::min_relay_fee() to pass the FeeTooLow check.
 		let fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
-		// Registered relayer on the origin: this measures the resolve-through-the-
-		// registry branch, which is the expensive one. An unrelayed origin would
-		// short-circuit to the block author and under-report the weight.
-		let relayer = setup_relayer::<T>();
+		let op_hash = crate::operations::private_transfer::TransferRequest::<T> {
+			merkle_root,
+			nullifiers: nullifiers.clone(),
+			commitments: commitments.clone(),
+			memos: encrypted_memos.clone(),
+			asset_id,
+			fee,
+			circuit_version: 1,
+		}
+		.op_hash();
+		let relayer = commit_all_relayers::<T>(&op_hash);
 
 		#[extrinsic_call]
 		private_transfer(
@@ -200,9 +248,20 @@ mod benchmarks {
 
 		// Must be >= T::Relayer::min_relay_fee() to pass the FeeTooLow check.
 		let fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
-		// Registered relayer on the origin — measures the resolve-through-the-
-		// registry branch rather than the block-author short-circuit.
-		let relayer = setup_relayer::<T>();
+		let op_hash = crate::operations::unshield::UnshieldRequest::<T> {
+			merkle_root,
+			nullifier,
+			asset_id,
+			amount,
+			recipient: recipient.clone(),
+			fee,
+			change_commitment: Hash::default(),
+			change_memo: Default::default(),
+			circuit_version: 1,
+		}
+		.op_hash()
+		.expect("benchmark recipient is 32 bytes");
+		let relayer = commit_all_relayers::<T>(&op_hash);
 
 		#[extrinsic_call]
 		unshield(
@@ -254,37 +313,38 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn claim_shielded_fees() {
-		let (caller, asset_id) = setup_benchmark_env::<T>();
-		let amount: BalanceOf<T> = bench_amount::<T>();
-		let amount_u128: u128 = amount.saturated_into();
-
-		// Accumulate relay fees for the validator.
-		T::Relayer::accumulate_relay_fee(&caller, asset_id, amount_u128);
-
-		let commitment = Commitment(canonical_bytes(0x11));
-
-		// public_signals layout (76 bytes): commitment(32) | value_le(8) | asset_id_le(4) | owner_hash(32)
-		let mut public_signals = vec![0u8; 76];
-		public_signals[..32].copy_from_slice(&commitment.0);
-		public_signals[32..40].copy_from_slice(&(amount_u128 as u64).to_le_bytes());
-		public_signals[40..44].copy_from_slice(&asset_id.to_le_bytes());
-
-		let proof = vec![0x01u8; 128];
-		let memo_bytes = vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
-		let memo = FrameEncryptedMemo(memo_bytes.try_into().unwrap());
+	fn commit_relay(n: Linear<1, { crate::pallet::MAX_RELAY_COMMITS_PER_CALL }>) {
+		let relayer = setup_relayer::<T>();
+		let commits: BoundedVec<
+			sp_core::H256,
+			ConstU32<{ crate::pallet::MAX_RELAY_COMMITS_PER_CALL }>,
+		> = (0..n)
+			.map(|i| sp_core::H256::from_low_u64_be(i as u64 + 1))
+			.collect::<Vec<_>>()
+			.try_into()
+			.unwrap();
 
 		#[extrinsic_call]
-		claim_shielded_fees(
-			RawOrigin::Signed(caller),
-			commitment,
-			amount,
-			asset_id,
-			memo,
-			proof.try_into().expect("proof fits bound"),
-			public_signals.try_into().expect("signals fit bound"),
-			1u32,
+		commit_relay(crate::RawOrigin::Relayed(relayer), commits);
+	}
+
+	/// Worst case: registered claimant, so the destination is its EVM mirror —
+	/// an account that does not exist yet.
+	#[benchmark]
+	fn claim_relay_fees() {
+		let (_caller, asset_id) = setup_benchmark_env::<T>();
+		let amount: BalanceOf<T> = bench_amount::<T>();
+		let claimant: T::AccountId = account("relayer", 0, 0);
+		setup_relayer::<T>();
+		T::Relayer::accumulate_relay_fee(&claimant, asset_id, amount.saturated_into());
+		PoolBalancePerAsset::<T>::insert(asset_id, amount * 2u32.into());
+		let _ = <T::Currency as Currency<T::AccountId>>::make_free_balance_be(
+			&Pallet::<T>::pool_account_id(),
+			amount * 100u32.into(),
 		);
+
+		#[extrinsic_call]
+		claim_relay_fees(RawOrigin::Signed(claimant), asset_id, amount);
 	}
 
 	/// Cost of one sweep that probes `n` sealed-tree nodes.

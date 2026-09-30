@@ -4,6 +4,67 @@ All notable changes to this pallet are documented here.
 
 ---
 
+## [0.13.0] - 2026-09-29
+
+### Added
+
+- `VkBytes`, the stored key type (`MAX_VK_BYTES`).
+
+### Changed
+
+- **v1 → v2 rotation is done by Root after the upgrade**: register each
+  memo-bound key as version 2, `set_active_version(2)`, `retire_version(1)`.
+  No keys are embedded in the runtime and no migration runs; `STORAGE_VERSION`
+  stays 1.
+- **Version ↔ layout policy.** For the transfer and unshield circuits, a key
+  with the base (v1) layout is refused for any version other than 1
+  (`register_verification_key`, `batch_register_verification_keys`): a v1 key
+  registered as "v2" would retire the real v1 and still let memos and the
+  recipient go unbound.
+
+- **Statements and input layouts.** `verify_transfer_proof` /
+  `verify_unshield_proof` take a `TransferStatement` / `UnshieldStatement` (the
+  spend's domain values, the recipient's raw bytes and the memo digest) instead
+  of positional field elements. The pallet now owns all public-input encoding:
+  the key's arity picks `InputLayout::Base` (v1) or `MemoBound` (base + 1), and
+  `encoding` builds that layout. **Breaking** for `ZkVerifierPort` implementors.
+- **Memo-bound (v2) layout.** Appends `memo_hash = memo_digest mod r` and binds
+  the unshield recipient as `blake2_256(recipient) mod r`, so an alias `R ± r`
+  no longer verifies. v1 keys keep the old encoding until retired.
+- **One key decode per proof.** `verifier::verify_statement` / `verify_raw`
+  prepare the key once and verify against it; a key that does not deserialize
+  fails the proof instead of silently skipping the memo binding. Inputs that do
+  not fill the key's arity fail too.
+- `ZkVerifierPort::verification_weight()`: the weight of one verification, for
+  callers to add to their own. **Breaking** for `ZkVerifierPort` implementors.
+- `set_active_version` refuses a retired version (`UnsupportedCircuitVersion`):
+  wallets proving against the active version would produce proofs that always
+  fail.
+- The `register_verification_key` security note now allows a memo-bound
+  version of an existing circuit id.
+- Every registration path (both extrinsics, genesis) goes through one
+  `register_vk` helper; activation through `activate`. A
+  registration now emits `VerificationKeyRegistered` before `ActiveVersionSet`.
+  The separate `>= 256` byte check is gone: key deserialization checks the exact
+  length.
+- `verification_weight()` derives the largest spend layout from the circuit
+  constants instead of a literal 8.
+
+### Removed
+
+- `ZkVerifierPort::verify_value_proof`, `encoding::encode_value_proof` and
+  `CircuitId::VALUE_PROOF`. Relay fees are now claimed publicly, so the
+  value_proof circuit (id 6) has no caller. **Breaking** for `ZkVerifierPort`
+  implementors.
+- Circuit 6 left the live table, so `purge_circuit(6)` can clear its keys once
+  this runtime is deployed.
+
+### Internal
+
+- Tests moved to `src/tests.rs`, grouped by call; shared mock helpers. `register_vk` takes `set_active` and is the only place a key is registered or activated; `FIRST_VERSION` names the base-layout version.
+
+---
+
 ## [0.12.0] - 2026-08-07
 
 ### Security

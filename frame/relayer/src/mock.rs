@@ -1,5 +1,7 @@
 //! Mock runtime for pallet-relayer tests.
 
+use std::cell::RefCell;
+
 use crate as pallet_relayer;
 use frame_support::{derive_impl, parameter_types};
 use sp_runtime::BuildStorage;
@@ -22,7 +24,9 @@ parameter_types! {
 	pub const DefaultMinRelayFee: u128 = 1_000_000_000_000_000u128; // 1e15 planck
 	pub const MaxAllowedSelectors: u32 = 8;
 	pub const MaxMinRelayFee: u128 = 1_000_000_000_000_000_000u128; // 1 ORB
-
+	pub const MaxCommitsPerRelayerPerBlock: u32 = 4;
+	/// Mutable so tests can change it between recording and pruning.
+	pub storage CommitTtl: u64 = 5;
 }
 
 /// Static block author — always Alice (account 1).
@@ -38,8 +42,6 @@ impl frame_support::traits::Get<Option<u64>> for MockBlockAuthor {
 // Tests declare which accounts count as active validators. Empty by default, so
 // a test that forgets to opt in sees the gate reject — the same way a runtime
 // that forgets to wire `Config::ValidatorSet` does.
-
-use std::cell::RefCell;
 
 thread_local! {
 	static MOCK_VALIDATORS: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
@@ -75,6 +77,8 @@ impl pallet_relayer::Config for Test {
 	type ManageOrigin = frame_system::EnsureRoot<u64>;
 	type MaxAllowedSelectors = MaxAllowedSelectors;
 	type ValidatorSet = MockValidatorSet;
+	type CommitTtl = CommitTtl;
+	type MaxCommitsPerRelayerPerBlock = MaxCommitsPerRelayerPerBlock;
 	type WeightInfo = ();
 }
 
@@ -99,14 +103,14 @@ pub fn register_with_proof(
 	who: u64,
 	seed: &[u8; 32],
 ) -> (sp_core::H160, frame_support::pallet_prelude::DispatchResult) {
-	let (evm_address, signature) = crate::test_signing::signed_binding_with::<Test>(&who, seed);
+	let (evm_address, signature) = proof_for(who, seed);
 	let result = Relayer::register_relayer(RuntimeOrigin::signed(who), evm_address, signature);
 	(evm_address, result)
 }
 
 /// The EVM address `seed` controls, without registering anything.
 pub fn address_for_seed(who: u64, seed: &[u8; 32]) -> sp_core::H160 {
-	crate::test_signing::signed_binding_with::<Test>(&who, seed).0
+	proof_for(who, seed).0
 }
 
 /// The address `seed` controls, plus a signature proving it, bound to `who`.

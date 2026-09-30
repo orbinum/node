@@ -61,12 +61,12 @@ let commitment = note.commitment(&hasher);
 let nullifier  = note.nullifier(&hasher, spending_key);
 ```
 
-### Single-element hash (value_proof circuit)
+### Single-element hash
 
 ```rust
 use orbinum_zk_core::{poseidon_hash_1, FieldElement};
 
-// owner_hash = Poseidon(owner_pubkey) — public signal of the value_proof circuit
+// owner_hash = Poseidon(owner_pubkey), as in selective disclosure
 let owner_hash = poseidon_hash_1(FieldElement::from_u64(owner_pk));
 ```
 
@@ -90,7 +90,7 @@ commitment  = Poseidon(value, asset_id, owner_pubkey, blinding)           // has
 nullifier   = Poseidon(commitment, spending_key)                           // hash_2
 merkle_node = Poseidon(left, right)                                        // hash_2
 eddsa_h     = Poseidon(R8x, R8y, Ax, Ay, msg)                             // hash_5
-owner_hash  = Poseidon(owner_pubkey)                                       // hash_1 (value_proof)
+owner_hash  = Poseidon(owner_pubkey)                                       // hash_1
 ```
 
 All hashes use circomlib-compatible Poseidon (BN254, iden3 parameters).

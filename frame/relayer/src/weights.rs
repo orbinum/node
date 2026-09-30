@@ -43,6 +43,7 @@ pub trait WeightInfo {
 	fn set_allowed_selectors(n: u32, ) -> Weight;
 	fn register_relayer() -> Weight;
 	fn unregister_relayer() -> Weight;
+	fn prune_relay_commits(r: u32, n: u32, ) -> Weight;
 }
 
 /// Weights for pallet_relayer using the Substrate node and recommended hardware.
@@ -135,6 +136,21 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(5_u64))
 			.saturating_add(T::DbWeight::get().writes(4_u64))
 	}
+	/// Storage: `Relayer::CommitsByRelayer` (r:1 + r w:r)
+	/// Storage: `Relayer::RelayCommits` (r:n w:n)
+	/// PROVISIONAL — not benchmarked yet. Regenerate on the reference machine.
+	/// The range of component `r` is `[0, 32]`.
+	/// The range of component `n` is `[0, 2048]`.
+	fn prune_relay_commits(r: u32, n: u32, ) -> Weight {
+		Weight::from_parts(5_000_000, 1489)
+			.saturating_add(Weight::from_parts(2_000_000, 2543).saturating_mul(r.into()))
+			.saturating_add(Weight::from_parts(5_000_000, 2543).saturating_mul(n.into()))
+			.saturating_add(T::DbWeight::get().reads(1_u64))
+			.saturating_add(T::DbWeight::get().reads((1_u64).saturating_mul(r.into())))
+			.saturating_add(T::DbWeight::get().writes((1_u64).saturating_mul(r.into())))
+			.saturating_add(T::DbWeight::get().reads((1_u64).saturating_mul(n.into())))
+			.saturating_add(T::DbWeight::get().writes((1_u64).saturating_mul(n.into())))
+	}
 }
 
 // For backwards compatibility and tests
@@ -225,5 +241,20 @@ impl WeightInfo for () {
 		Weight::from_parts(18_260_000, 3533)
 			.saturating_add(RocksDbWeight::get().reads(5_u64))
 			.saturating_add(RocksDbWeight::get().writes(4_u64))
+	}
+	/// Storage: `Relayer::CommitsByRelayer` (r:1 + r w:r)
+	/// Storage: `Relayer::RelayCommits` (r:n w:n)
+	/// PROVISIONAL — not benchmarked yet. Regenerate on the reference machine.
+	/// The range of component `r` is `[0, 32]`.
+	/// The range of component `n` is `[0, 2048]`.
+	fn prune_relay_commits(r: u32, n: u32, ) -> Weight {
+		Weight::from_parts(5_000_000, 1489)
+			.saturating_add(Weight::from_parts(2_000_000, 2543).saturating_mul(r.into()))
+			.saturating_add(Weight::from_parts(5_000_000, 2543).saturating_mul(n.into()))
+			.saturating_add(RocksDbWeight::get().reads(1_u64))
+			.saturating_add(RocksDbWeight::get().reads((1_u64).saturating_mul(r.into())))
+			.saturating_add(RocksDbWeight::get().writes((1_u64).saturating_mul(r.into())))
+			.saturating_add(RocksDbWeight::get().reads((1_u64).saturating_mul(n.into())))
+			.saturating_add(RocksDbWeight::get().writes((1_u64).saturating_mul(n.into())))
 	}
 }

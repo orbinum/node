@@ -9,7 +9,9 @@ impl pallet_zk_verifier::Config for Runtime {
 	type WeightInfo = pallet_zk_verifier::weights::SubstrateWeight<Runtime>;
 }
 
+/// The current block's author, as `pallet_authorship` reports it.
 pub struct RelayerBlockAuthor;
+
 impl frame_support::traits::Get<Option<AccountId>> for RelayerBlockAuthor {
 	fn get() -> Option<AccountId> {
 		pallet_authorship::Pallet::<Runtime>::author()
@@ -26,6 +28,12 @@ impl pallet_relayer::Config for Runtime {
 	type ManageOrigin = frame_system::EnsureRoot<AccountId>;
 	type MaxAllowedSelectors = ConstU32<16>;
 	type ValidatorSet = ValidatorSet;
+	/// A relay commit credits spends in the next 19 blocks (~2 min at 6 s), then
+	/// expires. Short, since a relayer that commits and never submits holds that
+	/// spend's fee until then.
+	type CommitTtl = ConstU32<20>;
+	/// Covers a busy relayer's block; keeps the expiry index at ≤ 32 × 64 entries.
+	type MaxCommitsPerRelayerPerBlock = ConstU32<64>;
 	type WeightInfo = ();
 }
 
@@ -33,10 +41,20 @@ parameter_types! {
 	pub const ShieldedPoolPalletId: PalletId = PalletId(*b"shld/pol");
 }
 
+/// The account an EVM address controls, per the runtime's address mapping.
+pub struct EvmAccount;
+
+impl sp_runtime::traits::Convert<sp_core::H160, AccountId> for EvmAccount {
+	fn convert(address: sp_core::H160) -> AccountId {
+		crate::evm_account::evm_h160_to_account_id(address)
+	}
+}
+
 impl pallet_shielded_pool::Config for Runtime {
 	type Currency = Balances;
 	type ZkVerifier = ZkVerifier;
 	type Relayer = pallet_relayer::Pallet<Runtime>;
+	type EvmAccount = EvmAccount;
 	type PalletId = ShieldedPoolPalletId;
 	type MaxTreeDepth = ConstU32<20>;
 	/// Safety cap on the historic-root queue, not the retention window: a root expires by
@@ -52,7 +70,7 @@ impl pallet_shielded_pool::Config for Runtime {
 	/// 1_023 Poseidon hashes — ~60ms native, ~180ms in Wasm. Level 12 would free
 	/// only 0.15% more for four times the work. Active trees are never pruned.
 	type SealedTreePrunedBelowLevel = ConstU8<10>;
-	// Pinned to 2^20: clients derive tree_id = leaf_index >> 20 from this.
+	/// Pinned to 2^20: clients derive tree_id = leaf_index >> 20 from this.
 	type MaxLeavesPerTree = ConstU32<1_048_576>;
 	type WeightInfo = pallet_shielded_pool::weights::SubstrateWeight<Runtime>;
 }

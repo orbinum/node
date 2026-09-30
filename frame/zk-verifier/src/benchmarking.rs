@@ -1,4 +1,4 @@
-//! Benchmarking setup for pallet-zk-verifier
+//! Benchmarking setup for pallet-zk-verifier.
 //!
 //! Run benchmarks with (`skip-proof-verification` lets `verify_proof` record
 //! weight even though its synthetic VK makes the pairing fail):
@@ -63,6 +63,19 @@ mod benchmarks {
 		synthetic_vk(orbinum_zk_verifier::TRANSFER_PUBLIC_INPUTS)
 	}
 
+	/// Store the sample key for `(circuit_id, version)`, bypassing registration.
+	fn insert_sample_vk<T: Config>(circuit_id: CircuitId, version: u32) {
+		VerificationKeys::<T>::insert(
+			circuit_id,
+			version,
+			VerificationKeyInfo {
+				key_data: sample_verification_key().try_into().unwrap(),
+				system: ProofSystem::Groth16,
+				registered_at: frame_system::Pallet::<T>::block_number(),
+			},
+		);
+	}
+
 	/// Benchmark for `verify_proof`, parametrized by the public-input count `n`.
 	///
 	/// A synthetic VK of arity `n` forces `verify` to run one G1 scalar-mul per input
@@ -110,7 +123,7 @@ mod benchmarks {
 		let circuit_id = CircuitId::TRANSFER;
 		let version = 1u32;
 		let vk_bytes = sample_verification_key();
-		let bounded_vk: BoundedVec<u8, ConstU32<8192>> = vk_bytes
+		let bounded_vk: crate::VkBytes = vk_bytes
 			.try_into()
 			.expect("benchmark vk bytes must fit bounded verification key size");
 
@@ -125,21 +138,9 @@ mod benchmarks {
 		let circuit_id = CircuitId::TRANSFER;
 		let current_version = 1u32;
 		let new_version = 2u32;
-		let registered_at = frame_system::Pallet::<T>::block_number();
 
-		let vk_v1 = VerificationKeyInfo {
-			key_data: sample_verification_key().try_into().unwrap(),
-			system: ProofSystem::Groth16,
-			registered_at,
-		};
-		let vk_v2 = VerificationKeyInfo {
-			key_data: sample_verification_key().try_into().unwrap(),
-			system: ProofSystem::Groth16,
-			registered_at,
-		};
-
-		VerificationKeys::<T>::insert(circuit_id, current_version, vk_v1);
-		VerificationKeys::<T>::insert(circuit_id, new_version, vk_v2);
+		insert_sample_vk::<T>(circuit_id, current_version);
+		insert_sample_vk::<T>(circuit_id, new_version);
 		ActiveCircuitVersion::<T>::insert(circuit_id, current_version);
 
 		#[extrinsic_call]
@@ -156,21 +157,9 @@ mod benchmarks {
 		let circuit_id = CircuitId::TRANSFER;
 		let active_version = 1u32;
 		let remove_version = 2u32;
-		let registered_at = frame_system::Pallet::<T>::block_number();
 
-		let vk_active = VerificationKeyInfo {
-			key_data: sample_verification_key().try_into().unwrap(),
-			system: ProofSystem::Groth16,
-			registered_at,
-		};
-		let vk_remove = VerificationKeyInfo {
-			key_data: sample_verification_key().try_into().unwrap(),
-			system: ProofSystem::Groth16,
-			registered_at,
-		};
-
-		VerificationKeys::<T>::insert(circuit_id, active_version, vk_active);
-		VerificationKeys::<T>::insert(circuit_id, remove_version, vk_remove);
+		insert_sample_vk::<T>(circuit_id, active_version);
+		insert_sample_vk::<T>(circuit_id, remove_version);
 		ActiveCircuitVersion::<T>::insert(circuit_id, active_version);
 
 		#[extrinsic_call]
@@ -191,21 +180,9 @@ mod benchmarks {
 		let circuit_id = CircuitId::TRANSFER;
 		let active = 1u32;
 		let target = 2u32;
-		let registered_at = frame_system::Pallet::<T>::block_number();
 
-		let vk_active = VerificationKeyInfo {
-			key_data: sample_verification_key().try_into().unwrap(),
-			system: ProofSystem::Groth16,
-			registered_at,
-		};
-		let vk_target = VerificationKeyInfo {
-			key_data: sample_verification_key().try_into().unwrap(),
-			system: ProofSystem::Groth16,
-			registered_at,
-		};
-
-		VerificationKeys::<T>::insert(circuit_id, active, vk_active);
-		VerificationKeys::<T>::insert(circuit_id, target, vk_target);
+		insert_sample_vk::<T>(circuit_id, active);
+		insert_sample_vk::<T>(circuit_id, target);
 		ActiveCircuitVersion::<T>::insert(circuit_id, active);
 
 		#[extrinsic_call]
@@ -219,21 +196,9 @@ mod benchmarks {
 		let circuit_id = CircuitId::TRANSFER;
 		let active_version = 1u32;
 		let retired = 2u32;
-		let registered_at = frame_system::Pallet::<T>::block_number();
 
-		let vk_active = VerificationKeyInfo {
-			key_data: sample_verification_key().try_into().unwrap(),
-			system: ProofSystem::Groth16,
-			registered_at,
-		};
-		let vk_retired = VerificationKeyInfo {
-			key_data: sample_verification_key().try_into().unwrap(),
-			system: ProofSystem::Groth16,
-			registered_at,
-		};
-
-		VerificationKeys::<T>::insert(circuit_id, active_version, vk_active);
-		VerificationKeys::<T>::insert(circuit_id, retired, vk_retired);
+		insert_sample_vk::<T>(circuit_id, active_version);
+		insert_sample_vk::<T>(circuit_id, retired);
 		ActiveCircuitVersion::<T>::insert(circuit_id, active_version);
 		RetiredVersions::<T>::insert(circuit_id, retired, ());
 
@@ -254,18 +219,9 @@ mod benchmarks {
 	#[benchmark]
 	fn purge_circuit(v: Linear<1, 64>) {
 		let circuit_id = CircuitId(99);
-		let registered_at = frame_system::Pallet::<T>::block_number();
 
 		for version in 1..=v {
-			VerificationKeys::<T>::insert(
-				circuit_id,
-				version,
-				VerificationKeyInfo {
-					key_data: sample_verification_key().try_into().unwrap(),
-					system: ProofSystem::Groth16,
-					registered_at,
-				},
-			);
+			insert_sample_vk::<T>(circuit_id, version);
 			VkHashes::<T>::insert(circuit_id, version, [0u8; 32]);
 			VerificationStats::<T>::insert(
 				circuit_id,

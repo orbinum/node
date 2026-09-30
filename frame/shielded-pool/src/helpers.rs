@@ -36,7 +36,7 @@ impl<T: Config> Pallet<T> {
 		MerkleTreeService::verify_merkle_proof(root, leaf, path)
 	}
 
-	/// Find the leaf index for a commitment (linear scan — expensive, only for RPC).
+	/// Leaf index of a commitment, from the `CommitmentToLeafIndex` reverse index.
 	pub fn get_leaf_index(commitment: &Commitment) -> Option<u32> {
 		MerkleTreeService::find_leaf_index::<T>(commitment)
 	}

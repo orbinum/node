@@ -14,9 +14,10 @@
 //! `amount` is not in the ABI: it is `msg.value`, which the EVM executor has
 //! already transferred to the precompile's address before `execute` runs.
 
-use fp_evm::{ExitError, PrecompileFailure, PrecompileHandle};
+use fp_evm::{PrecompileFailure, PrecompileHandle};
 
-use crate::abi;
+use super::{balance, params};
+use crate::{abi, revert};
 
 /// Selector for the signature in this module's header.
 pub const SELECTOR: [u8; 4] = [0x9f, 0xeb, 0x22, 0xea];
@@ -33,32 +34,25 @@ where
 	T: pallet_shielded_pool::Config,
 	pallet_shielded_pool::BalanceOf<T>: TryFrom<u128>,
 {
-	let params = &input[4..];
-
 	// Step 1: require the three-slot head. The memo offset it carries is bounds
 	// checked by the tail decoder in step 5.
-	if params.len() < 96 {
-		return Err(err("shield: input too short"));
-	}
+	let params = params(input, 96, "shield: input too short")?;
 
 	// Step 2: asset_id.
-	let asset_id = abi::decode_u32(&params[0..32])?;
+	let asset_id = abi::read_u32(params, 0)?;
 
 	// Step 3: amount, taken from msg.value rather than the calldata. Zero is
 	// rejected here as well as in the pallet — it would mint a commitment backed
 	// by no funds.
 	let apparent_value = handle.context().apparent_value;
 	if apparent_value.is_zero() {
-		return Err(err("shield: amount must be non-zero"));
+		return Err(revert("shield: amount must be non-zero"));
 	}
-
-	let amount: pallet_shielded_pool::BalanceOf<T> = {
-		let raw: u128 = apparent_value
-			.try_into()
-			.map_err(|_| err("shield: msg.value overflow"))?;
-		raw.try_into()
-			.map_err(|_| err("shield: amount conversion failed"))?
-	};
+	let amount = balance::<T>(
+		apparent_value,
+		"shield: msg.value overflow",
+		"shield: amount conversion failed",
+	)?;
 
 	// Step 4: commitment of the note being created.
 	let commitment = pallet_shielded_pool::Commitment::from(abi::read_bytes32(params, 32)?);
@@ -67,7 +61,7 @@ where
 	// copy of the new note's secrets, so a malformed one fails the call.
 	let memo_bytes = abi::decode_bytes_at_slot(params, 64)?;
 	let encrypted_memo = pallet_shielded_pool::FrameEncryptedMemo::new(memo_bytes)
-		.map_err(|_| err("shield: memo too long or wrong size"))?;
+		.map_err(|_| revert("shield: memo too long or wrong size"))?;
 
 	Ok(pallet_shielded_pool::Call::<T>::shield {
 		asset_id,
@@ -75,12 +69,4 @@ where
 		commitment,
 		encrypted_memo,
 	})
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn err(msg: &'static str) -> PrecompileFailure {
-	PrecompileFailure::Error {
-		exit_status: ExitError::Other(msg.into()),
-	}
 }

@@ -32,7 +32,8 @@ const OUT_DIR = path.join(NODE_DIR, "frame/zk-verifier/src/bench_fixtures");
 // ── Resolve artifacts from npm packages ──────────────────────────────────────
 
 const { getCircuitPaths } = require("@orbinum/circuits");
-const { wasm: WASM_PATH, zkey: ZKEY_PATH } = getCircuitPaths("transfer");
+// v1 inputs below (no memo_hash); circuits >= 0.15 default to the active v2.
+const { wasm: WASM_PATH, zkey: ZKEY_PATH } = getCircuitPaths("transfer", 1);
 
 const { groth16 } = await import("snarkjs");
 const { buildPoseidon, buildBabyjub } = await import("circomlibjs");

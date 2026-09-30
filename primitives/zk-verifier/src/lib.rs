@@ -14,6 +14,7 @@
 
 extern crate alloc;
 
+mod circuits;
 mod snarkjs;
 mod types;
 mod verifier;
@@ -22,16 +23,19 @@ mod verifier;
 
 pub type Bn254Fr = ark_bn254::Fr;
 pub use ark_bn254::Bn254;
+pub use ark_groth16::PreparedVerifyingKey;
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+pub use circuits::{
+	expected_public_inputs, input_layout, InputLayout, CIRCUIT_ID_TRANSFER, CIRCUIT_ID_UNSHIELD,
+	MEMO_HASH_INPUTS, TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS,
+};
 pub use snarkjs::SnarkjsProofPoints;
 #[cfg(feature = "std")]
 pub use snarkjs::{parse_proof_from_snarkjs, parse_public_inputs_from_snarkjs};
 pub use types::{
-	expected_public_inputs, Proof, PublicInputs, VerifierError, VerifyingKey,
-	BASE_VERIFICATION_COST, CIRCUIT_ID_TRANSFER, CIRCUIT_ID_UNSHIELD, CIRCUIT_ID_VALUE_PROOF,
-	MAX_PUBLIC_INPUTS, PER_INPUT_COST, TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS,
-	VALUE_PROOF_PUBLIC_INPUTS,
+	to_field_le, Proof, PublicInputs, VerifierError, VerifyingKey, BASE_VERIFICATION_COST,
+	MAX_PUBLIC_INPUTS, MAX_VK_BYTES, PER_INPUT_COST,
 };
 pub use verifier::Groth16Verifier;
