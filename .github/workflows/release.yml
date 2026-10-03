@@ -1,17 +1,13 @@
 name: Release
 
-# Version = code, network = build flavour. A release is `vX.Y.Z` — no `-rc`: the
-# binary reports `<crate version>-<sha>` to telemetry and `--version`, so the tag IS
-# what operators read there. The same tag is built once per network, since the
-# hyperbridge coprocessor is a compile-time feature:
+# One `vX.Y.Z` tag per release, built once per network: the hyperbridge coprocessor
+# is a compile-time feature, so each network gets its own binary.
 #
-#   - Tag push vX.Y.Z → testnet flavour: image `X.Y.Z-testnet` + `testnet-latest`
-#     (what testnet Watchtower follows), GitHub pre-release.
-#   - workflow_dispatch environment=mainnet, version=X.Y.Z → mainnet flavour of that
-#     same tag: image `X.Y.Z` + `latest`, the GitHub Release gains the mainnet assets
-#     and stops being a pre-release. environment=testnet rebuilds the testnet flavour.
+#   - Tag push → testnet: image `X.Y.Z-testnet` + `testnet-latest`, GitHub pre-release.
+#   - Dispatch with environment=mainnet → mainnet build of the same tag: image `X.Y.Z`
+#     + `latest`, and the release becomes final. environment=testnet rebuilds testnet.
 #
-# Nothing here touches the chain: the runtime upgrade is runtime-upgrade.yml.
+# Builds and publishes only; the on-chain runtime upgrade is runtime-upgrade.yml.
 on:
   push:
     tags:
@@ -33,28 +29,26 @@ on:
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false # never cancel an in-flight deploy
+  cancel-in-progress: false # never cancel an in-flight publish
 
 env:
   BINARY: "dist/orbinum-node"
   WASM: "dist/orbinum_runtime.compact.compressed.wasm"
 
-# ──────────────────────────────────────────────────────────────────────────────
 jobs:
-  # ── 1. Extract tag/version metadata ───────────────────────────────────────
+  # ── 1. Metadata and release gates ──────────────────────────────────────────
   metadata:
     name: Release Metadata
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: read # the mainnet promotion looks up the testnet image
+      packages: read # the mainnet gate reads the testnet image
     outputs:
       version: ${{ steps.meta.outputs.version }}
       environment: ${{ steps.meta.outputs.environment }}
-      # `X.Y.Z-testnet` or `X.Y.Z` (mainnet): the two flavours are different bytes and
-      # must never share a registry tag.
+      # `X.Y.Z-testnet` or `X.Y.Z`: the two builds differ, so they never share a tag.
       image_tag: ${{ steps.meta.outputs.image_tag }}
-      # Testnet builds are pre-releases; a release becomes final when mainnet ships it.
+      # Testnet builds are pre-releases; the mainnet build makes the release final.
       is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
     steps:
       - name: Checkout
@@ -73,7 +67,7 @@ jobs:
             ENV="$INPUT_ENVIRONMENT"
           else
             VERSION="${GITHUB_REF#refs/tags/v}"
-            ENV="testnet"   # every tag ships to testnet first; mainnet is a promotion
+            ENV="testnet"   # a tag push always targets testnet; mainnet is a promotion
           fi
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::version must be X.Y.Z, got '$VERSION'"; exit 1
@@ -87,9 +81,7 @@ jobs:
             echo "is_prerelease=$IS_PRE"
           } >> "$GITHUB_OUTPUT"
 
-      # Every run checks the tag it builds, the tag push and a promotion alike: a tag
-      # whose testnet run failed these checks still exists and could otherwise be
-      # promoted.
+      # Runs on promotions too: a tag that failed its testnet run still exists.
       - name: Verify GPG tag signature
         env:
           RELEASE_GPG_PUBLIC_KEY: ${{ secrets.RELEASE_GPG_PUBLIC_KEY }}
@@ -99,14 +91,13 @@ jobs:
           git fetch origin "+refs/tags/$TAG:refs/tags/$TAG" --force
           git verify-tag "refs/tags/$TAG"
 
-      # The binary reports `<orbinum-node version>-<git hash>` (SUBSTRATE_CLI_IMPL_VERSION),
-      # which is what telemetry and `--version` show. A tag that does not match that
-      # crate version ships a binary nobody can trace back to a release.
+      # The binary reports `<crate version>-<sha>` to telemetry and `--version`; a tag
+      # that differs from the crate version cannot be traced from what nodes report.
       - name: Tag must match the orbinum-node crate version
         env:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
-          # Read at the tag, not the checkout: a promotion runs on main.
+          # Read at the tag: a promotion's checkout is main.
           CRATE=$(git show "v$VERSION:template/node/Cargo.toml" \
             | grep -m1 -E '^version *= *"' | sed -E 's/.*"(.*)".*/\1/')
           if [[ "$VERSION" != "$CRATE" ]]; then
@@ -122,8 +113,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Mainnet only gets what testnet ran first: a version whose testnet image was never
-      # published never had its dress rehearsal.
+      # Mainnet only ships a version that testnet already ran.
       - name: Mainnet promotion requires the testnet release
         if: steps.meta.outputs.environment == 'mainnet'
         env:
@@ -132,16 +122,15 @@ jobs:
           docker buildx imagetools inspect "$TESTNET_IMAGE" >/dev/null \
             || { echo "::error::$TESTNET_IMAGE not found — ship v${{ steps.meta.outputs.version }} to testnet before promoting it"; exit 1; }
 
-  # ── 2. Build binary + runtime WASM (single compile, inside the Dockerfile) ──
-  # The Dockerfile is the only build definition. Compiling here and exporting the
-  # `artifacts` stage to ./dist means the GitHub Release, the Docker image and the
-  # on-chain runtime all come from the same bytes, built against the image's own glibc.
+  # ── 2. Build binary and runtime WASM ───────────────────────────────────────
+  # One compile, inside the Dockerfile: the release assets, the image and the on-chain
+  # runtime all come from the same bytes, linked against the image's glibc.
   build:
     name: Build Release Artifacts
     runs-on: ubuntu-latest
     needs: metadata
     steps:
-      # A substrate release build needs ~20 GB; a stock runner has ~14 GB free.
+      # A release build needs ~20 GB; a stock runner has ~14 GB free.
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -156,12 +145,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          # A mainnet promotion builds the released tag, not whatever main is now.
-          ref: v${{ needs.metadata.outputs.version }}
+          ref: v${{ needs.metadata.outputs.version }} # the tag, also on a promotion
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # No layer cache: `COPY . .` invalidates the compile layer on every release.
       - name: Compile (export `artifacts` stage to ./dist)
         uses: docker/build-push-action@v6
         with:
@@ -169,23 +158,15 @@ jobs:
           file: docker/Dockerfile
           target: artifacts
           outputs: type=local,dest=dist
-          # The coprocessor is a compile-time constant: a testnet release must carry the
-          # hyperbridge-testnet feature or it ships mainnet's `Polkadot(3367)`.
+          # Without the feature, a testnet build targets mainnet's coprocessor.
           build-args: |
             CARGO_FEATURES=${{ needs.metadata.outputs.environment == 'testnet' && 'hyperbridge-testnet' || '' }}
           platforms: linux/amd64
           provenance: false
-          # No gha layer cache on purpose: `COPY . .` invalidates the compile layer on
-          # every release, so the only thing a cache ever stored was a ~3 GB builder blob
-          # that never hit again and evicted the test workflow's cargo cache.
 
+      # Reads the coprocessor off the binary rather than trusting the build flag.
       - name: Verify the binary targets ${{ needs.metadata.outputs.environment }}
         run: |
-          # Reads the coprocessor back off the binary instead of trusting the flag above.
-          # A mismatch here is a wrong deployment that would only surface once a relayer
-          # tried to work, long after the deploy reported success. The binary is built on
-          # bookworm (glibc 2.36) and runs on the newer runner glibc; the reverse would
-          # not be guaranteed, which is why CI compiles inside the image, not on the runner.
           chmod +x "$BINARY"
           bash scripts/verify-coprocessor.sh "${{ needs.metadata.outputs.environment }}" "$BINARY"
 
@@ -198,10 +179,9 @@ jobs:
             exit 1
           fi
 
+      # From inside dist/, so `sha256sum -c` works wherever the files are downloaded.
       - name: Compute checksums
         run: |
-          # Written from inside dist/ so the recorded paths are bare filenames and
-          # `sha256sum -c` works wherever the artifacts are downloaded.
           cd dist && for f in *; do sha256sum "$f" | tee "$f.sha256"; done
 
       - name: Upload binary artifact
@@ -222,17 +202,16 @@ jobs:
             ${{ env.WASM }}.sha256
           retention-days: 30
 
-  # ── 3. Publish Docker image to GHCR ──────────────────────────────────────
-  # Node binaries are updated via Watchtower following `testnet-latest` / `latest`.
-  # No compilation: `build-contexts` replaces the Dockerfile's `artifacts` stage with
-  # the files already verified in `build`, so the image carries exactly those bytes.
+  # ── 3. Publish Docker image ────────────────────────────────────────────────
+  # Watchtower rolls nodes onto `testnet-latest` / `latest`. No compile here:
+  # `build-contexts` swaps in the artifacts verified by `build`.
   docker-publish:
     name: Publish Docker Image
     runs-on: ubuntu-latest
     needs: [metadata, build]
-    # Pushing `latest` IS mainnet's binary rollout — Watchtower takes it from there — so it
-    # waits for the mainnet reviewer. Testnet stays ungated: its tag push is already
-    # GPG-checked, and the testnet environment only admits `main`, which a tag run is not.
+    # Pushing `latest` is mainnet's rollout, so it waits for the mainnet reviewer.
+    # Testnet runs without an environment: the tag is GPG-checked, and the testnet
+    # environment only admits `main`.
     environment: ${{ needs.metadata.outputs.environment == 'mainnet' && 'mainnet' || '' }}
     permissions:
       contents: read
@@ -241,9 +220,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          # The final stage (base image, user, /data, --chmod) comes from this Dockerfile:
-          # a promotion runs on main, and must wrap the tag's binary in the tag's image.
-          ref: v${{ needs.metadata.outputs.version }}
+          ref: v${{ needs.metadata.outputs.version }} # the tag's Dockerfile wraps the tag's binary
 
       - name: Download build artifacts
         uses: actions/download-artifact@v5
@@ -270,8 +247,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository_owner }}/node
-          # Raw, not `type=semver`: a mainnet promotion runs from workflow_dispatch, where
-          # github.ref is a branch and semver derivation would yield nothing.
+          # Raw tags: on a dispatch github.ref is a branch, so `type=semver` yields nothing.
           tags: |
             type=raw,value=${{ needs.metadata.outputs.image_tag }}
             type=raw,value=latest,enable=${{ needs.metadata.outputs.environment == 'mainnet' }}
@@ -289,33 +265,22 @@ jobs:
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
 
-      # rc.23 published an image whose binary had no executable bit: CI chmods the
-      # artifact on the RUNNER, and `upload-artifact` round-trips through a zip, which does
-      # not preserve the bit. Every step was green and every node then died at startup with
-      # `exec: ... permission denied`. Running the binary in the image we just pushed is
-      # what makes "the image works" an assertion rather than an assumption.
+      # Runs the pushed image: the artifact round-trip drops the executable bit, and a
+      # non-runnable binary would otherwise only fail on the nodes.
       - name: Verify the published image actually runs
         run: |
           IMAGE="ghcr.io/${{ github.repository_owner }}/node@${{ steps.build.outputs.digest }}"
           echo "Running --version inside $IMAGE"
           docker run --rm --entrypoint /usr/local/bin/orbinum-node "$IMAGE" --version
-          # And the runtime WASM it ships must be readable by the unprivileged user, since
-          # runtime-upgrade.yml docker-cps it out for the on-chain setCode.
+          # runtime-upgrade.yml copies this WASM out for setCode.
           docker run --rm --entrypoint sh "$IMAGE" -c \
             'test -s /usr/local/share/orbinum/orbinum_runtime.compact.compressed.wasm'
 
-      # Every tag this release pushed — the version AND the floating `<network>-latest`
-      # that ~50 nodes follow through Watchtower — must resolve to the digest we just ran.
-      # By construction they do (one push, many tags), so this exists for the day someone
-      # re-tags by hand or a registry hiccup leaves the floating tag on an older manifest:
-      # that is a fleet-wide rollout of the wrong image, and it should fail here, not there.
+      # Every pushed tag, the floating one included, must point at the image just verified.
       - name: Verify every pushed tag resolves to the verified digest
         run: |
           WANT="${{ steps.build.outputs.digest }}"
-          # A tag's digest is the sha256 of its manifest bytes as the registry stores them,
-          # so `--raw | sha256sum` IS the resolution — no template field to get wrong, and
-          # no dependence on the buildx version's `--format` support (the local desktop
-          # build ignored `{{ .Manifest.Digest }}` outright).
+          # The digest is the sha256 of the raw manifest; no `--format` template needed.
           echo "${{ steps.docker_meta.outputs.tags }}" | while read -r TAG; do
             [ -n "$TAG" ] || continue
             GOT="sha256:$(docker buildx imagetools inspect "$TAG" --raw | sha256sum | cut -d' ' -f1)"
@@ -325,15 +290,14 @@ jobs:
             echo "ok  $TAG -> $GOT"
           done
 
-  # ── 4. Create GitHub Release ──────────────────────────────────────────────
+  # ── 4. GitHub Release ──────────────────────────────────────────────────────
+  # The tag push creates it (testnet assets, pre-release); the mainnet promotion adds its
+  # assets to the same release and makes it final.
   github-release:
     name: GitHub Release
     runs-on: ubuntu-latest
-    # After the image: a promotion the mainnet reviewer rejects must not leave a final
-    # release behind for an image that was never pushed.
+    # After the image: a rejected promotion must not leave a final release behind.
     needs: [metadata, build, docker-publish]
-    # Created by the tag push (testnet assets, pre-release); the mainnet promotion
-    # updates the same release with its own assets and drops the pre-release flag.
     permissions:
       contents: write
     steps:
@@ -349,10 +313,9 @@ jobs:
           pattern: orbinum-*-${{ needs.metadata.outputs.image_tag }}
           path: ./release-artifacts/
 
+      # Asset names carry the image tag, so both builds of a release sit side by side.
       - name: Package artifacts
         run: |
-          # Asset names carry the flavour (`0.2.0-testnet` / `0.2.0`) so both builds of
-          # one release sit side by side without overwriting each other.
           TAG="${{ needs.metadata.outputs.image_tag }}"
           find release-artifacts/ -name "orbinum-node" -not -name "*.sha256" \
             | xargs -I{} cp {} orbinum-node-linux-x86_64-${TAG}
@@ -384,7 +347,7 @@ jobs:
         with:
           tag_name: v${{ needs.metadata.outputs.version }}
           name: "Orbinum ${{ needs.metadata.outputs.version }}"
-          # The mainnet run replaces the testnet body; the testnet assets stay attached.
+          # The mainnet run replaces the body; the testnet assets stay attached.
           body_path: release_notes.md
           prerelease: ${{ needs.metadata.outputs.is_prerelease == 'true' }}
           files: |
