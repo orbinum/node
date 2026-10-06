@@ -6,6 +6,31 @@
 //! WORST CASE MAP SIZE: `1000000`
 //! HOSTNAME: `ubuntu-32gb-fsn1-1`, CPU: `AMD EPYC-Genoa Processor`
 //! EXECUTION: , WASM-EXECUTION: Compiled, CHAIN: Some("dev"), DB CACHE: 1024
+//! ## Hand-corrected value
+//!
+//! `dispatch_get`'s base `proof_size` is set to **3748**, not the generator's output.
+//! The CLI emitted `8433417681689641984` (~8 exabytes) against a measured 283 bytes. The
+//! bug is not deterministic and hits a different extrinsic from run to run: the
+//! previous regeneration corrupted `dispatch_post` instead (`2585700789447993344`).
+//!
+//! Cause, per the upstream fix: these calls read `RequestCommitments` keys owned by
+//! `pallet-ismp`, which declares no `MaxEncodedLen`, so they land in the analysis as
+//! `UNKNOWN KEY`. `min_squares_iqr` runs per storage prefix, and a prefix observed at
+//! only one component value makes the OLS design matrix rank-deficient; `linregress`'s
+//! pseudo-inverse then returns an intercept in the 10^18 range.
+//!
+//! 3748 is what the same benchmark produces at `--steps 3` and `--steps 5` (proof size is
+//! measured storage, so it does not depend on the host), and it equals `dispatch_post`'s
+//! base on this run, which walks the same `RequestCommitments` path. The per-key slope
+//! (`k * 1874`) was not affected and is the generator's.
+//!
+//! **Regenerating this file with an unfixed CLI can reintroduce a bad value.**
+//! `tests::declared_proof_sizes_stay_within_a_sane_ceiling` fails on it; check every
+//! extrinsic's `proof_size` before committing.
+//!
+//! Reported as paritytech/polkadot-sdk#13066; fix proposed in PR #13073. It targets
+//! `master`, while `pallet-ismp` pins us to `polkadot-sdk =2606.0.0`, so this note stands
+//! until we move SDK lines. Then drop it and regenerate.
 
 // Executed Command:
 // ./target/release/orbinum-node
@@ -248,9 +273,9 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	fn dispatch_get(k: u32, ) -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `283`
-		//  Estimated: `8433417681689641984 + k * (1874 ±0)`
+		//  Estimated: `3748 + k * (1874 ±0)`
 		// Minimum execution time: 88_190_000 picoseconds.
-		Weight::from_parts(94_419_325, 8433417681689641984)
+		Weight::from_parts(94_419_325, 3748)
 			// Standard Error: 6_520
 			.saturating_add(Weight::from_parts(1_451_029, 0).saturating_mul(k.into()))
 			.saturating_add(T::DbWeight::get().reads(12_u64))
@@ -593,9 +618,9 @@ impl WeightInfo for () {
 	fn dispatch_get(k: u32, ) -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `283`
-		//  Estimated: `8433417681689641984 + k * (1874 ±0)`
+		//  Estimated: `3748 + k * (1874 ±0)`
 		// Minimum execution time: 88_190_000 picoseconds.
-		Weight::from_parts(94_419_325, 8433417681689641984)
+		Weight::from_parts(94_419_325, 3748)
 			// Standard Error: 6_520
 			.saturating_add(Weight::from_parts(1_451_029, 0).saturating_mul(k.into()))
 			.saturating_add(RocksDbWeight::get().reads(12_u64))
