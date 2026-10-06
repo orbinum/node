@@ -2,12 +2,9 @@
 
 use crate::{
 	merkle::MerkleTreeService,
-	operations::{ensure_valid_proof, fees, statement},
+	operations::{assets::AssetOperation, ensure_valid_proof, fees, statement},
 	pallet::{BalanceOf, Config, Error, Event, Pallet},
-	storage::{
-		AssetRepository, CommitmentRepository, MerkleRepository, NullifierRepository,
-		PoolBalanceRepository,
-	},
+	storage::{CommitmentRepository, MerkleRepository, NullifierRepository, PoolBalanceRepository},
 	types::{Commitment, EncryptedMemo, Nullifier},
 };
 use frame_support::{
@@ -136,9 +133,7 @@ impl UnshieldOperation {
 		};
 		ensure!(memo_ok, Error::<T>::InvalidMemoSize);
 
-		let asset =
-			AssetRepository::get_asset::<T>(req.asset_id).ok_or(Error::<T>::InvalidAssetId)?;
-		ensure!(asset.is_verified, Error::<T>::AssetNotVerified);
+		AssetOperation::ensure_movable::<T>(req.asset_id)?;
 		// The zero account has no known key: paying it burns the withdrawal.
 		ensure!(
 			req.recipient != Pallet::<T>::pool_account_id()

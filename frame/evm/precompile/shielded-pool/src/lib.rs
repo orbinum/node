@@ -43,7 +43,7 @@ pub use calls::private_transfer::MAX_NOTES as MAX_SPEND_INPUTS;
 ///
 /// | Selector     | Solidity signature                                                                    |
 /// |--------------|---------------------------------------------------------------------------------------|
-/// | `0x9feb22ea` | `shield(uint32,bytes32,bytes)` — payable, amount = `msg.value`                        |
+/// | `0xf25897e0` | `shield(uint32,bytes32,bytes,bytes,uint32)` — payable, amount = `msg.value`           |
 /// | `0x66ed2cd4` | `privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)`    |
 /// | `0x4e505348` | `unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)` |
 /// | `0xc9b235ff` | `commitRelay(bytes32[])` — registered relayers                                        |

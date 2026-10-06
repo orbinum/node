@@ -2,6 +2,41 @@
 
 All notable changes to `pallet-shielded-pool` will be documented in this file.
 
+## [Unreleased]
+
+## [0.21.0] - 2026-10-05
+
+A shield must prove its note is worth exactly the deposit. Closes AL-1: a deposit
+of 1 could insert a note worth 1000. **Breaking** — `shield` and `shield_batch`
+change signature; `transaction_version` must move.
+
+### Changed
+
+- **`shield`** takes `proof: Proof` and `circuit_version: u32`. The
+  commitment must open to `amount` of `asset_id` under circuit 3, checked through
+  `ZkVerifierPort::verify_shield_proof` before any funds move;
+  `ProofVerificationFailed` otherwise.
+- **`shield_batch`** entries are `ShieldBatchItem<T>`: `shield`'s arguments,
+  proof and version included. One bad proof reverts the whole batch.
+- Both weights add one proof verification per deposit (`verification_weight`).
+- **Only the native asset moves.** `shield`, `unshield`, `private_transfer` and
+  `claim_relay_fees` refuse a verified non-native asset with the new
+  `AssetNotSupported` (appended to `Error`, no index shift): every transfer in
+  and out of the pool moves `T::Currency`, so a note of another asset was backed
+  by native funds. Checked through `AssetOperation::ensure_movable`, after
+  `InvalidAssetId` / `AssetNotVerified`. `NATIVE_ASSET_ID` (0) names the genesis
+  asset.
+- `ShieldOperation::execute(depositor, &proof, ShieldRequest)`, shaped like the
+  unshield and transfer operations; `ShieldRequest::from_batch_item` splits a
+  batch entry. Everything checkable without the proof runs first, so a bad
+  request costs no verification.
+
+### Added
+
+- `Proof` and `MAX_PROOF_SIZE` (512): the one proof bound for every call, shared
+  with the EVM precompile. `shield`, `shield_batch`, `unshield` and
+  `private_transfer` take it; the encoding is unchanged.
+
 ## [0.20.0] - 2026-09-29
 
 Relay fees follow the relay commit, and are claimed publicly. Closes RL-6: copying

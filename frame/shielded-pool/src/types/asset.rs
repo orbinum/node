@@ -2,11 +2,17 @@
 //!
 //! An asset must be both registered and verified before it can be shielded or
 //! unshielded; `is_verified` doubles as a governance kill-switch for an asset
-//! found to be compromised.
+//! found to be compromised. Only the native asset is backed today: see
+//! [`NATIVE_ASSET_ID`].
 
 use frame_support::{BoundedVec, pallet_prelude::*};
 use parity_scale_codec::{Decode, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
+
+/// The native asset, registered and verified at genesis. Every transfer into or
+/// out of the pool moves `T::Currency`, so this is the only asset whose notes
+/// are backed by what they claim.
+pub const NATIVE_ASSET_ID: u32 = 0;
 
 // AssetMetadata
 

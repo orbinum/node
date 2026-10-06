@@ -4,6 +4,22 @@ All notable changes to this crate are documented here.
 
 ---
 
+## [Unreleased]
+
+## [2.1.0] - 2026-10-05
+
+### Added
+
+- `CIRCUIT_ID_SHIELD` (3) and `SHIELD_PUBLIC_INPUTS` (3): the shield circuit is
+  known, with arity `commitment, value, asset_id`.
+- `has_memo_layout(circuit_id)`: only transfer and unshield have a memo-bound
+  layout.
+
+### Changed
+
+- `input_layout` reads base + `MEMO_HASH_INPUTS` as `MemoBound` only for a circuit
+  with a memo-bound layout; for shield that arity is unusable.
+
 ## [2.0.0] - 2026-09-29
 
 ### Added

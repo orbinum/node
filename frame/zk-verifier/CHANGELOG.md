@@ -4,6 +4,21 @@ All notable changes to this pallet are documented here.
 
 ---
 
+## [Unreleased]
+
+## [0.14.0] - 2026-10-05
+
+### Added
+
+- `CircuitId::SHIELD` (3), `ShieldStatement` and
+  `ZkVerifierPort::verify_shield_proof`. Inputs are `commitment | value | asset_id`,
+  `value` as a `u128` field element.
+
+### Changed
+
+- **Registration's base-layout rule applies to spend circuits only.** A shield key
+  takes its 3-input arity at every version; a 4-input shield key is refused.
+
 ## [0.13.0] - 2026-09-29
 
 ### Added

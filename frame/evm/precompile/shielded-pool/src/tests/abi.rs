@@ -15,7 +15,7 @@ fn router_rejects_empty_input() {
 #[test]
 fn router_rejects_3_byte_selector() {
 	new_test_ext().execute_with(|| {
-		let mut h = MockHandle::new(vec![0x9f, 0xeb, 0x22]);
+		let mut h = MockHandle::new(crate::calls::shield::SELECTOR[..3].to_vec());
 		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
 	});
 }

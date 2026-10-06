@@ -5,8 +5,7 @@ use crate::{
 		Assets, Config, HistoricPoseidonRoots, HistoricRootsHead, HistoricRootsQueue,
 		HistoricRootsTail, MerkleTreeFrontier, NextAssetId, PoseidonRoot,
 	},
-	types::AssetMetadata,
-	types::Hash,
+	types::{AssetMetadata, Hash, NATIVE_ASSET_ID},
 };
 use frame_support::traits::Get;
 use sp_runtime::traits::AccountIdConversion;
@@ -30,9 +29,9 @@ pub fn initialize_genesis<T: Config>(initial_root: Hash) {
 	HistoricRootsHead::<T>::put(1u64);
 	HistoricRootsTail::<T>::put(0u64);
 
-	// Register native asset (asset_id = 0) at genesis
+	// Register the native asset at genesis
 	let native_asset = AssetMetadata {
-		id: 0,
+		id: NATIVE_ASSET_ID,
 		name: b"Orbinum Native Token"
 			.to_vec()
 			.try_into()
@@ -47,8 +46,8 @@ pub fn initialize_genesis<T: Config>(initial_root: Hash) {
 		created_at: 0u32.into(),
 		creator: T::PalletId::get().into_account_truncating(),
 	};
-	Assets::<T>::insert(0, native_asset);
-	NextAssetId::<T>::put(1);
+	Assets::<T>::insert(NATIVE_ASSET_ID, native_asset);
+	NextAssetId::<T>::put(NATIVE_ASSET_ID + 1);
 }
 
 #[cfg(test)]

@@ -129,15 +129,32 @@ fn encode_bytes_array(items: &[Vec<u8>]) -> Vec<u8> {
 
 // ─── Call encoders ───────────────────────────────────────────────────────────
 
-/// `shield(uint32,bytes32,bytes)`, selector `0x9feb22ea`.
+/// `shield(uint32,bytes32,bytes,bytes,uint32)` with a well-formed proof at version 1.
 fn encode_shield(asset_id: u32, commitment: [u8; 32], memo: &[u8]) -> Vec<u8> {
-	let mut input = vec![0x9f, 0xeb, 0x22, 0xea];
-	let mut head = vec![0u8; 96];
+	encode_shield_with(asset_id, commitment, memo, &[0x01; 128], 1)
+}
+
+/// `shield(uint32,bytes32,bytes,bytes,uint32)`, selector `0xf25897e0`.
+fn encode_shield_with(
+	asset_id: u32,
+	commitment: [u8; 32],
+	memo: &[u8],
+	proof: &[u8],
+	circuit_version: u32,
+) -> Vec<u8> {
+	let memo_enc = encode_bytes(memo);
+	let head_size = 160usize;
+
+	let mut input = crate::calls::shield::SELECTOR.to_vec();
+	let mut head = vec![0u8; head_size];
 	head[28..32].copy_from_slice(&asset_id.to_be_bytes());
 	head[32..64].copy_from_slice(&commitment);
-	head[64..96].copy_from_slice(&u256_word(96));
+	head[64..96].copy_from_slice(&u256_word(head_size));
+	head[96..128].copy_from_slice(&u256_word(head_size + memo_enc.len()));
+	head[156..160].copy_from_slice(&circuit_version.to_be_bytes());
 	input.extend_from_slice(&head);
-	input.extend_from_slice(&encode_bytes(memo));
+	input.extend_from_slice(&memo_enc);
+	input.extend_from_slice(&encode_bytes(proof));
 	input
 }
 

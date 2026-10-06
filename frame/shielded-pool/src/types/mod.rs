@@ -8,18 +8,21 @@
 //! - [`merkle`] — Merkle path plus the tree-depth constants.
 //! - [`memo`] — the fixed-size encrypted memo.
 //! - [`asset`] — registered asset metadata.
+//! - [`proof`] — the serialized proof a call carries.
 
 pub mod asset;
 pub mod ids;
 pub mod memo;
 pub mod merkle;
 pub mod note;
+pub mod proof;
 
-pub use asset::AssetMetadata;
+pub use asset::{AssetMetadata, NATIVE_ASSET_ID};
 pub use ids::{AssetId, Commitment, Nullifier};
 pub use memo::{EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE};
 pub use merkle::{DEFAULT_TREE_DEPTH, DefaultMerklePath, MAX_TREE_DEPTH, MerklePath};
 pub use note::Note;
+pub use proof::{MAX_PROOF_SIZE, Proof};
 
 /// A 32-byte hash used for Merkle roots, cryptographic hashes and identifiers.
 ///

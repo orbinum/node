@@ -1,7 +1,7 @@
 use crate::{
 	pallet::{Config, Error, Event, Pallet},
 	storage::AssetRepository,
-	types::AssetMetadata,
+	types::{AssetMetadata, NATIVE_ASSET_ID},
 };
 use frame_support::{BoundedVec, ensure, pallet_prelude::*};
 use frame_system::pallet_prelude::BlockNumberFor;
@@ -97,6 +97,17 @@ impl AssetOperation {
 		let metadata =
 			AssetRepository::get_asset::<T>(asset_id).ok_or(Error::<T>::InvalidAssetId)?;
 		ensure!(metadata.is_verified, Error::<T>::AssetNotVerified);
+		Ok(())
+	}
+
+	/// The asset a pool operation may move: registered, verified, and backed.
+	/// Every transfer into or out of the pool moves `T::Currency`, so a note of
+	/// any other asset would be backed by native funds; such ids are refused
+	/// until they have their own backend.
+	pub fn ensure_movable<T: Config>(asset_id: u32) -> Result<(), Error<T>> {
+		let asset = AssetRepository::get_asset::<T>(asset_id).ok_or(Error::<T>::InvalidAssetId)?;
+		ensure!(asset.is_verified, Error::<T>::AssetNotVerified);
+		ensure!(asset_id == NATIVE_ASSET_ID, Error::<T>::AssetNotSupported);
 		Ok(())
 	}
 

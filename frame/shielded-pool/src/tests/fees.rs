@@ -488,14 +488,30 @@ fn claimant_and_payee_follow_the_caller() {
 #[test]
 fn claims_of_a_frozen_asset_are_refused() {
 	new_test_ext().execute_with(|| {
-		let asset_id = register_asset();
+		let asset_id = setup_asset();
 		fund_pool(asset_id, 500);
 		mock_pending_fees_set(acc(7), asset_id, 100);
+		AssetOperation::unverify::<Test>(asset_id).unwrap();
 		assert_noop!(
 			FeeOperation::claim::<Test>(acc(7), acc(7), asset_id, 10),
 			Error::<Test>::AssetNotVerified
 		);
 		AssetOperation::verify::<Test>(asset_id).unwrap();
 		assert_ok!(FeeOperation::claim::<Test>(acc(7), acc(7), asset_id, 10));
+	});
+}
+
+/// A verified non-native asset is not backed: claiming it would pay native funds.
+#[test]
+fn claims_of_a_non_native_asset_are_refused() {
+	new_test_ext().execute_with(|| {
+		let asset_id = register_asset();
+		AssetOperation::verify::<Test>(asset_id).unwrap();
+		fund_pool(asset_id, 500);
+		mock_pending_fees_set(acc(7), asset_id, 100);
+		assert_noop!(
+			FeeOperation::claim::<Test>(acc(7), acc(7), asset_id, 10),
+			Error::<Test>::AssetNotSupported
+		);
 	});
 }

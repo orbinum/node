@@ -5,7 +5,7 @@ use frame_support::{derive_impl, parameter_types, traits::Get, weights::Weight, 
 use pallet_evm::{
 	AddressMapping, Context, EnsureAddressNever, EnsureAddressRoot, FeeCalculator, PrecompileHandle,
 };
-use pallet_zk_verifier::{TransferStatement, UnshieldStatement, ZkVerifierPort};
+use pallet_zk_verifier::{ShieldStatement, TransferStatement, UnshieldStatement, ZkVerifierPort};
 use sp_core::{H160, H256, U256};
 use sp_runtime::{
 	traits::{BlakeTwo256, IdentityLookup},
@@ -140,6 +140,14 @@ impl ZkVerifierPort for MockZkVerifier {
 	fn verify_unshield_proof(
 		proof: &[u8],
 		_statement: &UnshieldStatement,
+		_version: Option<u32>,
+	) -> Result<bool, sp_runtime::DispatchError> {
+		non_empty(proof)
+	}
+
+	fn verify_shield_proof(
+		proof: &[u8],
+		_statement: &ShieldStatement,
 		_version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
 		non_empty(proof)

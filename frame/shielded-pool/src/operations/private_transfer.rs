@@ -2,9 +2,9 @@
 
 use crate::{
 	merkle::MerkleTreeService,
-	operations::{ensure_valid_proof, fees, statement},
+	operations::{assets::AssetOperation, ensure_valid_proof, fees, statement},
 	pallet::{BalanceOf, Config, Error, Event, Pallet},
-	storage::{AssetRepository, CommitmentRepository, MerkleRepository, NullifierRepository},
+	storage::{CommitmentRepository, MerkleRepository, NullifierRepository},
 	types::{Commitment, EncryptedMemo, Nullifier},
 };
 use frame_support::{
@@ -127,9 +127,7 @@ impl PrivateTransferOperation {
 			Error::<T>::InvalidMemoSize
 		);
 
-		let asset =
-			AssetRepository::get_asset::<T>(req.asset_id).ok_or(Error::<T>::InvalidAssetId)?;
-		ensure!(asset.is_verified, Error::<T>::AssetNotVerified);
+		AssetOperation::ensure_movable::<T>(req.asset_id)?;
 
 		for commitment in req.commitments.iter() {
 			ensure!(

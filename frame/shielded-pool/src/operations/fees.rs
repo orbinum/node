@@ -5,9 +5,9 @@
 //! spend; without one it goes to the block author.
 
 use crate::{
-	operations::SpendRequest,
+	operations::{SpendRequest, assets::AssetOperation},
 	origin::RelayCaller,
-	pallet::{Assets, BalanceOf, Call, Config, Error, Event, Pallet},
+	pallet::{BalanceOf, Call, Config, Error, Event, Pallet},
 	storage::PoolBalanceRepository,
 };
 use frame_support::{
@@ -146,8 +146,7 @@ impl FeeOperation {
 		amount: BalanceOf<T>,
 	) -> DispatchResult {
 		// An unverified asset is frozen: no outflow at all, relay fees included.
-		let asset = Assets::<T>::get(asset_id).ok_or(Error::<T>::InvalidAssetId)?;
-		ensure!(asset.is_verified, Error::<T>::AssetNotVerified);
+		AssetOperation::ensure_movable::<T>(asset_id)?;
 		ensure!(!amount.is_zero(), Error::<T>::InvalidAmount);
 		ensure!(
 			PoolBalanceRepository::get_asset_balance::<T>(asset_id) >= amount,

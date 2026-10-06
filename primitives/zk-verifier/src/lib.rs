@@ -28,8 +28,9 @@ pub use ark_groth16::PreparedVerifyingKey;
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 pub use circuits::{
-	expected_public_inputs, input_layout, InputLayout, CIRCUIT_ID_TRANSFER, CIRCUIT_ID_UNSHIELD,
-	MEMO_HASH_INPUTS, TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS,
+	expected_public_inputs, has_memo_layout, input_layout, InputLayout, CIRCUIT_ID_SHIELD,
+	CIRCUIT_ID_TRANSFER, CIRCUIT_ID_UNSHIELD, MEMO_HASH_INPUTS, SHIELD_PUBLIC_INPUTS,
+	TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS,
 };
 pub use snarkjs::SnarkjsProofPoints;
 #[cfg(feature = "std")]

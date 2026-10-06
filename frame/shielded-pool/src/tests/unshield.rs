@@ -664,7 +664,10 @@ fn unshield_guard_requires_amount_plus_fee() {
 /// shield → unshield(with fee) → claim_relay_fees (fee paid out publicly).
 #[test]
 fn fee_lifecycle_preserves_ledger_invariant() {
-	use crate::operations::{fees::FeeOperation, shield::ShieldOperation};
+	use crate::operations::{
+		fees::FeeOperation,
+		shield::{ShieldOperation, ShieldRequest},
+	};
 
 	new_test_ext().execute_with(|| {
 		let asset_id = setup_asset();
@@ -678,10 +681,14 @@ fn fee_lifecycle_preserves_ledger_invariant() {
 		// Step 1: shield 1000. Ledger and physical both +1000.
 		assert_ok!(ShieldOperation::execute::<Test>(
 			depositor,
-			asset_id,
-			1000u128,
-			Commitment::new(canonical_bytes(0x31)),
-			memo(0x00),
+			&proof(),
+			ShieldRequest {
+				asset_id,
+				amount: 1000u128,
+				commitment: Commitment::new(canonical_bytes(0x31)),
+				encrypted_memo: memo(0x00),
+				circuit_version: 1,
+			},
 		));
 		assert_eq!(tracked(asset_id), pool_physical());
 		assert_eq!(tracked(asset_id), 1000);
@@ -1171,6 +1178,21 @@ fn an_invalid_proof_fails_at_dispatch_and_changes_nothing() {
 				},
 			),
 			Error::<Test>::ProofVerificationFailed
+		);
+	});
+}
+
+/// A verified non-native asset would be withdrawn as native funds.
+#[test]
+fn unshield_of_a_non_native_asset_is_refused() {
+	new_test_ext().execute_with(|| {
+		setup_spend();
+		let id = register_asset();
+		AssetOperation::verify::<Test>(id).unwrap();
+		fund_pool(id, AMOUNT + FEE);
+		assert_noop!(
+			UnshieldOperation::execute::<Test>(&proof(), request(0x71, id)),
+			Error::<Test>::AssetNotSupported
 		);
 	});
 }

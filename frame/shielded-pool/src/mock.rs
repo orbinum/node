@@ -6,7 +6,7 @@ use frame_support::{
 	traits::{ConstU32, ConstU64, ConstU128},
 };
 use frame_system::EnsureRoot;
-use pallet_zk_verifier::{TransferStatement, UnshieldStatement, ZkVerifierPort};
+use pallet_zk_verifier::{ShieldStatement, TransferStatement, UnshieldStatement, ZkVerifierPort};
 use sp_runtime::{AccountId32, BuildStorage, traits::IdentityLookup};
 
 type Block = frame_system::mocking::MockBlock<Test>;
@@ -80,6 +80,7 @@ pub struct MockZkVerifier;
 pub enum VerifiedStatement {
 	Transfer(TransferStatement, Option<u32>),
 	Unshield(UnshieldStatement, Option<u32>),
+	Shield(ShieldStatement, Option<u32>),
 }
 
 std::thread_local! {
@@ -124,6 +125,14 @@ impl ZkVerifierPort for MockZkVerifier {
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
 		record(proof, VerifiedStatement::Unshield(*statement, version))
+	}
+
+	fn verify_shield_proof(
+		proof: &[u8],
+		statement: &ShieldStatement,
+		version: Option<u32>,
+	) -> Result<bool, sp_runtime::DispatchError> {
+		record(proof, VerifiedStatement::Shield(*statement, version))
 	}
 
 	fn is_supported_version(_circuit_id: u32, version: u32) -> bool {

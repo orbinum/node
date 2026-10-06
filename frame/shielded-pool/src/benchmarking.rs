@@ -136,6 +136,8 @@ mod benchmarks {
 		// Memo must be exactly 180 bytes (MAX_ENCRYPTED_MEMO_SIZE): nonce(12) + data(120) + MAC(16) + ephPk(32)
 		let memo_bytes = vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
 		let encrypted_memo = FrameEncryptedMemo(memo_bytes.try_into().unwrap());
+		// Verification is weighed separately (`verification_weight`), so a stub proof.
+		let proof: Proof = vec![0u8; 128].try_into().unwrap();
 
 		#[extrinsic_call]
 		shield(
@@ -144,6 +146,8 @@ mod benchmarks {
 			amount,
 			commitment,
 			encrypted_memo,
+			proof,
+			1u32,
 		);
 	}
 
@@ -157,7 +161,8 @@ mod benchmarks {
 			let commitment = Commitment(canonical_bytes(i as u8));
 			let memo_bytes = vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize];
 			let encrypted_memo = FrameEncryptedMemo(memo_bytes.try_into().unwrap());
-			operations.push((asset_id, amount, commitment, encrypted_memo));
+			let proof: Proof = vec![0u8; 128].try_into().unwrap();
+			operations.push((asset_id, amount, commitment, encrypted_memo, proof, 1u32));
 		}
 		let operations_vec: BoundedVec<_, ConstU32<20>> = operations.try_into().unwrap();
 
@@ -173,7 +178,7 @@ mod benchmarks {
 		// Setup valid root in storage
 		crate::storage::MerkleRepository::add_historic_poseidon_root::<T>(merkle_root);
 
-		let proof: BoundedVec<u8, ConstU32<512>> = vec![0u8; 128].try_into().unwrap();
+		let proof: Proof = vec![0u8; 128].try_into().unwrap();
 
 		// Two real inputs and two outputs: the most reads and leaf insertions.
 		let memo = || {
@@ -243,7 +248,7 @@ mod benchmarks {
 			amount * 100u32.into(),
 		);
 
-		let proof: BoundedVec<u8, ConstU32<512>> = vec![0u8; 128].try_into().unwrap();
+		let proof: Proof = vec![0u8; 128].try_into().unwrap();
 		let nullifier = Nullifier(canonical_bytes(4));
 
 		// Must be >= T::Relayer::min_relay_fee() to pass the FeeTooLow check.

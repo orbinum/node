@@ -45,6 +45,15 @@ pub struct UnshieldStatement {
 	pub memo_digest: [u8; 32],
 }
 
+/// What a shield proof attests to: the inserted commitment opens to the
+/// deposited value and asset.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ShieldStatement {
+	pub commitment: [u8; 32],
+	pub value: u128,
+	pub asset_id: u32,
+}
+
 // ─── Trait ────────────────────────────────────────────────────────────────────
 
 /// Cross-pallet interface for zero-knowledge proof verification.
@@ -63,6 +72,13 @@ pub trait ZkVerifierPort {
 	fn verify_unshield_proof(
 		proof: &[u8],
 		statement: &UnshieldStatement,
+		version: Option<u32>,
+	) -> Result<bool, sp_runtime::DispatchError>;
+
+	/// Verify a shield (pool deposit) proof.
+	fn verify_shield_proof(
+		proof: &[u8],
+		statement: &ShieldStatement,
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError>;
 
@@ -116,6 +132,18 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 		.map(|(ok, _)| ok)
 	}
 
+	fn verify_shield_proof(
+		proof: &[u8],
+		statement: &ShieldStatement,
+		version: Option<u32>,
+	) -> Result<bool, sp_runtime::DispatchError> {
+		// Shield has a single layout; a key of another arity fails the length check.
+		verifier::verify_statement::<T>(CircuitId::SHIELD, version, proof, |_| {
+			encoding::encode_shield(statement)
+		})
+		.map(|(ok, _)| ok)
+	}
+
 	fn is_supported_version(circuit_id: u32, version: u32) -> bool {
 		let cid = CircuitId(circuit_id);
 		VerificationKeys::<T>::contains_key(cid, version)
@@ -135,7 +163,9 @@ mod tests {
 	use super::*;
 	use crate::mock::{Test, activate, insert_vk, new_test_ext};
 	use frame_support::assert_err;
-	use orbinum_zk_verifier::{MEMO_HASH_INPUTS, TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS};
+	use orbinum_zk_verifier::{
+		MEMO_HASH_INPUTS, SHIELD_PUBLIC_INPUTS, TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS,
+	};
 
 	// ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -182,6 +212,21 @@ mod tests {
 		version: Option<u32>,
 	) -> Result<bool, sp_runtime::DispatchError> {
 		<Pallet<Test> as ZkVerifierPort>::verify_unshield_proof(&proof(), s, version)
+	}
+
+	fn shield() -> ShieldStatement {
+		ShieldStatement {
+			commitment: [0x05; 32],
+			value: 1000,
+			asset_id: 0,
+		}
+	}
+
+	fn verify_shield(
+		s: &ShieldStatement,
+		version: Option<u32>,
+	) -> Result<bool, sp_runtime::DispatchError> {
+		<Pallet<Test> as ZkVerifierPort>::verify_shield_proof(&proof(), s, version)
 	}
 
 	// ── verify_transfer_proof ─────────────────────────────────────────────────
@@ -331,6 +376,71 @@ mod tests {
 			insert_vk(CircuitId::UNSHIELD, 1, UNSHIELD_PUBLIC_INPUTS + 2);
 			activate(CircuitId::UNSHIELD, 1);
 			assert_eq!(verify_unshield(&unshield(), None), Ok(false));
+		});
+	}
+
+	// ── verify_shield_proof ───────────────────────────────────────────────────
+
+	#[test]
+	fn shield_empty_proof_is_rejected() {
+		new_test_ext().execute_with(|| {
+			assert_err!(
+				<Pallet<Test> as ZkVerifierPort>::verify_shield_proof(&[], &shield(), Some(1)),
+				Error::<Test>::EmptyProof
+			);
+		});
+	}
+
+	#[test]
+	fn shield_without_an_active_version_is_circuit_not_found() {
+		new_test_ext().execute_with(|| {
+			assert_err!(
+				verify_shield(&shield(), None),
+				Error::<Test>::CircuitNotFound
+			);
+		});
+	}
+
+	#[test]
+	fn shield_verifies_under_its_three_input_key() {
+		new_test_ext().execute_with(|| {
+			insert_vk(CircuitId::SHIELD, 1, SHIELD_PUBLIC_INPUTS);
+			activate(CircuitId::SHIELD, 1);
+			assert_eq!(verify_shield(&shield(), None), Ok(true));
+		});
+	}
+
+	#[test]
+	fn shield_under_a_key_of_foreign_arity_fails() {
+		new_test_ext().execute_with(|| {
+			insert_vk(
+				CircuitId::SHIELD,
+				1,
+				SHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
+			);
+			activate(CircuitId::SHIELD, 1);
+			assert_eq!(verify_shield(&shield(), None), Ok(false));
+		});
+	}
+
+	#[test]
+	fn shield_under_a_retired_or_unregistered_version_is_unsupported() {
+		new_test_ext().execute_with(|| {
+			insert_vk(CircuitId::SHIELD, 1, SHIELD_PUBLIC_INPUTS);
+			insert_vk(CircuitId::SHIELD, 2, SHIELD_PUBLIC_INPUTS);
+			activate(CircuitId::SHIELD, 2);
+			RetiredVersions::<Test>::insert(CircuitId::SHIELD, 1, ());
+
+			// A retired version does not fall back to the active one.
+			assert_err!(
+				verify_shield(&shield(), Some(1)),
+				Error::<Test>::UnsupportedCircuitVersion
+			);
+			assert_err!(
+				verify_shield(&shield(), Some(3)),
+				Error::<Test>::UnsupportedCircuitVersion
+			);
+			assert_eq!(verify_shield(&shield(), Some(2)), Ok(true));
 		});
 	}
 

@@ -5,9 +5,9 @@ set -euo pipefail
 # scripts/vk/workflows/setup-dev.sh
 # DEV setup for on-chain VKs (main entrypoint for developers)
 #
-# Registers + activates ONLY these 2 circuits:
-#   1 transfer
-#   2 unshield
+# Registers + activates these circuits:
+#   1 transfer, 2 unshield  — at the manifest's active version (or the one given)
+#   3 shield                — at its own active version, when the package ships it
 #
 # VK artifacts are resolved from the @orbinum/circuits npm package via unpkg:
 #   1. Fetches manifest.json to determine the latest package_version
@@ -85,8 +85,8 @@ log "Artifact base URL: $CDN_BASE"
 # The vk_json filename of $VERSION for a circuit, from the manifest: the key
 # registered must be the one the manifest publishes under that version.
 get_vk_filename() {
-  local circuit="$1"
-  echo "$MANIFEST_JSON" | jq -r ".circuits[\"$circuit\"].versions[\"$VERSION\"].artifacts.vk_json.file"
+  local circuit="$1" version="${2:-$VERSION}"
+  echo "$MANIFEST_JSON" | jq -r ".circuits[\"$circuit\"].versions[\"$version\"].artifacts.vk_json.file"
 }
 
 TEMP_DIR=""
@@ -94,9 +94,9 @@ TEMP_DIR=""
 # Resolves a VK JSON path (local artifact or CDN download), then converts it
 # to arkworks compressed binary format (.bin) required by the on-chain verifier.
 resolve_vk() {
-  local circuit="$1"
+  local circuit="$1" version="${2:-$VERSION}"
   local filename
-  filename=$(get_vk_filename "$circuit")
+  filename=$(get_vk_filename "$circuit" "$version")
 
   [[ "$filename" != "null" && -n "$filename" ]] \
     || err "Cannot resolve vk_json filename for circuit '$circuit' in manifest"
@@ -138,6 +138,17 @@ bash "$VK_REGISTRY_SCRIPT" batch-register \
   "$VK_TRANSFER" "$VK_UNSHIELD" \
   "$RPC_WS" "$SUDO_SEED"
 
+# Shield versions on its own axis, so it registers at its own active version. The
+# first key of a circuit is activated on registration.
+SHIELD_VERSION=$(echo "$MANIFEST_JSON" | jq -r '.circuits["shield"].active_version // empty')
+if [[ -n "$SHIELD_VERSION" ]]; then
+  VK_SHIELD=$(resolve_vk "shield" "$SHIELD_VERSION")
+  log "Registering shield(3) v$SHIELD_VERSION..."
+  bash "$VK_REGISTRY_SCRIPT" register 3 "$SHIELD_VERSION" "$VK_SHIELD" "$RPC_WS" "$SUDO_SEED"
+else
+  log "WARN: circuits@$PKG_VERSION ships no shield circuit — shield stays unusable on this chain"
+fi
+
 # ─── Cleanup ─────────────────────────────────────────────────────────────────
 
 if [[ -n "$TEMP_DIR" ]]; then
@@ -147,7 +158,7 @@ fi
 
 # Remove any .bin files produced from local artifacts (they are generated
 # artefacts and are excluded from version control via .gitignore)
-for circuit in transfer unshield; do
+for circuit in transfer unshield shield; do
   rm -f "$ARTIFACTS_DIR/verification_key_${circuit}.bin"
 done
 
