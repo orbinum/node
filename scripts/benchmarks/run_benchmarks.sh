@@ -130,6 +130,30 @@ adopt_upstream_trait() {
     fi
 }
 
+# The 2606 CLI can write a corrupted `proof_size` (~10^18) for a call that reads storage
+# without `MaxEncodedLen` — paritytech/polkadot-sdk#13066. It is not deterministic and
+# hits a different extrinsic from run to run, so the pallet's own guard test runs on
+# every regeneration rather than relying on someone reading the numbers.
+check_proof_sizes() {
+    local pallet="$1"
+    local output="$2"
+
+    case "$pallet" in
+        pallet_ismp_messaging) ;;
+        *) return 0 ;;
+    esac
+
+    echo "  > Checking declared proof sizes..."
+    if ! cargo test -q -p pallet-ismp-messaging --lib \
+        declared_proof_sizes_stay_within_a_sane_ceiling >/dev/null 2>&1; then
+        echo "  > FAILED: $output declares a corrupted proof_size (polkadot-sdk#13066)." >&2
+        echo "  > Run 'cargo test -p pallet-ismp-messaging declared_proof_sizes' to see which" >&2
+        echo "  > extrinsic, derive its base with --steps 3 (proof size does not depend on" >&2
+        echo "  > the host), and restore the 'Hand-corrected value' header from git history." >&2
+        return 1
+    fi
+}
+
 run_bench() {
     local pallet="$1"
     local output="$2"
@@ -183,6 +207,8 @@ run_bench() {
     if [[ "$output" == "$RUNTIME_WEIGHTS_DIR"/* ]]; then
         adopt_upstream_trait "$pallet" "$output" || return 1
     fi
+
+    check_proof_sizes "$pallet" "$output" || return 1
 
     echo "  > Done."
 }
