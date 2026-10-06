@@ -12,9 +12,13 @@
 #
 # Run this on the reference hardware: a Hetzner CPX62 (16 vCPU / 32 GB), which is where
 # every committed weights.rs was measured — check the HOSTNAME line in any of them.
-# Weights from different machines are not comparable with each other, and a 16 GB host
-# is not enough: the analysis phase of a pallet with several linear components reaches
-# ~15 GB and gets OOM-killed there.
+# Weights from different machines are not comparable with each other.
+#
+# `--no-median-slopes` keeps memory flat. The median-slopes analysis is only printed —
+# weights come from min-squares (`--output-analysis` default) — but in the 2606 CLI it
+# grows with repeats on any benchmark with a component: `pallet_relayer` and
+# `pallet_ismp_messaging` passed 31 GB and were OOM-killed on the CPX62. Without it,
+# `set_allowed_selectors` at 50/20 peaks at 0.4 GB instead of several GB.
 #
 # Publishable weights need the defaults (50/20). Lowering --steps/--repeat gives numbers
 # good for shape, not for committing.
@@ -27,8 +31,8 @@
 # `max_size`, so the default `max-encoded-len` mode assumes --map-size (1,000,000) per
 # key and overflows to a nonsense 2.5-exabyte estimate against 85 bytes measured.
 #
-# `--db-cache` and `--no-storage-info` exist to trim the footprint on a smaller host,
-# but they do not make a 16 GB box sufficient — use the reference machine instead.
+# `--db-cache` and `--no-storage-info` trim the footprint further; they do not change
+# where publishable weights must be measured.
 
 set -euo pipefail
 
@@ -73,6 +77,7 @@ echo "------------------------------------------------------"
 FEATURES="runtime-benchmarks,skip-proof-verification,poseidon-native"
 NODE="./target/release/orbinum-node"
 TEMPLATE="./scripts/benchmarks/frame-weight-template.hbs"
+RUNTIME_WEIGHTS_DIR="./template/runtime/src/weights"
 SCRATCH_DIR="./target/benchmark-weights"
 
 # Every pallet registered in the runtime's `define_benchmarks!`, paired with where its
@@ -89,15 +94,8 @@ PALLETS=(
     "pallet_relayer:./frame/relayer/src/weights.rs:core"
     "pallet_validator_set:./frame/validator-set/src/weights.rs:core"
     # ISMP crates we do not own: the WeightInfo trait belongs to the upstream crate, so
-    # the generated impl lives runtime-side rather than in the pallet.
-    #
-    # `ismp_grandpa` NEEDS A MANUAL EDIT after regenerating. The CLI always emits a
-    # local `pub trait WeightInfo` plus an `impl WeightInfo for ()`, but the runtime has
-    # to implement the upstream trait. Fix the generated file by deleting the local trait
-    # and the `for ()` impl, then pointing the remaining impl at upstream's:
-    #   impl<T: frame_system::Config> ismp_grandpa::weights::WeightInfo for SubstrateWeight<T>
-    # Without that, `cargo check -p orbinum-runtime` fails with "the trait bound
-    # `SubstrateWeight<Runtime>: ismp_grandpa::WeightInfo` is not satisfied".
+    # the generated impl lives runtime-side rather than in the pallet. Every output under
+    # $RUNTIME_WEIGHTS_DIR is rewritten by `adopt_upstream_trait` to implement it.
     "pallet_ismp_messaging:./frame/ismp-messaging/src/weights.rs:ismp"
     "ismp_grandpa:./template/runtime/src/weights/ismp_grandpa.rs:ismp"
     # Runtime pallets with no versioned weights destination in this repo.
@@ -108,6 +106,53 @@ PALLETS=(
     "pallet_evm_precompile_curve25519:$SCRATCH_DIR/pallet-evm-precompile-curve25519-weights.rs:aux"
     "pallet_evm_precompile_sha3fips:$SCRATCH_DIR/pallet-evm-precompile-sha3fips-weights.rs:aux"
 )
+
+# A runtime-side weights file must implement the upstream crate's trait. The template
+# emits a local `pub trait WeightInfo` and an `impl WeightInfo for ()`; this drops both
+# and points the remaining impl at `<pallet>::weights::WeightInfo`. Without it the
+# runtime fails to build ("`SubstrateWeight<Runtime>: <pallet>::WeightInfo` is not
+# satisfied"), and so does every later run of this script, which rebuilds first.
+adopt_upstream_trait() {
+    local pallet="$1"
+    local file="$2"
+
+    PALLET="$pallet" perl -0pi -e '
+        s{/// Weight functions needed for [^\n]*\npub trait WeightInfo \{.*?\n\}\n\n}{}s;
+        s{impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T>}
+         {impl<T: frame_system::Config> $ENV{PALLET}::weights::WeightInfo for SubstrateWeight<T>};
+        s{\n// For backwards compatibility and tests\nimpl WeightInfo for \(\) \{.*\z}{}s;
+    ' "$file"
+
+    if grep -qE 'pub trait WeightInfo|impl WeightInfo for \(\)' "$file" \
+        || ! grep -q "impl<T: frame_system::Config> ${pallet}::weights::WeightInfo for SubstrateWeight<T>" "$file"; then
+        echo "  > FAILED: could not point $file at ${pallet}::weights::WeightInfo" >&2
+        return 1
+    fi
+}
+
+# The 2606 CLI can write a corrupted `proof_size` (~10^18) for a call that reads storage
+# without `MaxEncodedLen` — paritytech/polkadot-sdk#13066. It is not deterministic and
+# hits a different extrinsic from run to run, so the pallet's own guard test runs on
+# every regeneration rather than relying on someone reading the numbers.
+check_proof_sizes() {
+    local pallet="$1"
+    local output="$2"
+
+    case "$pallet" in
+        pallet_ismp_messaging) ;;
+        *) return 0 ;;
+    esac
+
+    echo "  > Checking declared proof sizes..."
+    if ! cargo test -q -p pallet-ismp-messaging --lib \
+        declared_proof_sizes_stay_within_a_sane_ceiling >/dev/null 2>&1; then
+        echo "  > FAILED: $output declares a corrupted proof_size (polkadot-sdk#13066)." >&2
+        echo "  > Run 'cargo test -p pallet-ismp-messaging declared_proof_sizes' to see which" >&2
+        echo "  > extrinsic, derive its base with --steps 3 (proof size does not depend on" >&2
+        echo "  > the host), and restore the 'Hand-corrected value' header from git history." >&2
+        return 1
+    fi
+}
 
 run_bench() {
     local pallet="$1"
@@ -134,6 +179,7 @@ run_bench() {
         --wasm-execution=compiled \
         --heap-pages="$HEAP_PAGES" \
         --default-pov-mode measured \
+        --no-median-slopes \
         $DB_CACHE_ARG $STORAGE_INFO_ARG \
         --output "$output" \
         --template "$TEMPLATE" || rc=$?
@@ -145,10 +191,8 @@ run_bench() {
         # advice ("check the logs") is useless because the process is simply gone.
         if [[ $rc -eq 137 ]]; then
             echo "  > Exit 137 is SIGKILL — the OOM killer." >&2
-            echo "  > Check the host first: this needs the reference machine (CPX62," >&2
-            echo "  > 16 vCPU / 32 GB). A 16 GB box is killed during the analysis" >&2
-            echo "  > phase, and no flag makes that fit — measured at ~15 GB resident." >&2
-            echo "  > On the right host this simply works." >&2
+            echo "  > With --no-median-slopes every benchmark here stays well under" >&2
+            echo "  > 1 GB; check 'dmesg -T | grep -i oom' and what else holds memory." >&2
         fi
         return $rc
     fi
@@ -159,6 +203,12 @@ run_bench() {
         echo "  > FAILED: $pallet produced no output at $output" >&2
         return 1
     fi
+
+    if [[ "$output" == "$RUNTIME_WEIGHTS_DIR"/* ]]; then
+        adopt_upstream_trait "$pallet" "$output" || return 1
+    fi
+
+    check_proof_sizes "$pallet" "$output" || return 1
 
     echo "  > Done."
 }
