@@ -2,6 +2,22 @@
 
 All notable changes to `pallet-evm-precompile-shielded-pool` will be documented in this file.
 
+## [Unreleased]
+
+## [0.8.0] - 2026-10-05
+
+**Breaking** — the shield ABI changes. Requires the matching `pallet-shielded-pool`.
+
+### Changed
+
+- `shield(uint32,bytes32,bytes,bytes,uint32)` — `0xf25897e0`, was
+  `shield(uint32,bytes32,bytes)` `0x9feb22ea`. Adds the shield `proof` and its
+  `circuitVersion`; the amount is still `msg.value`. Old three-slot calldata
+  reverts with `shield: input too short`, an empty proof with
+  `shield: proof must be non-empty`.
+- The proof bound is `pallet_shielded_pool::Proof`; the precompile no longer
+  keeps its own copy of the 512-byte limit.
+
 ## [0.7.0] - 2026-09-29
 
 **Breaking** — `claimShieldedFees` is gone. Requires the matching

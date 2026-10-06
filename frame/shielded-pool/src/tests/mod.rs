@@ -96,11 +96,9 @@ pub(crate) fn register_asset() -> u32 {
 	AssetOperation::register_asset::<Test>(name, symbol, 18, None, acc(1)).unwrap()
 }
 
-/// Register and verify an asset, returning its id.
+/// The asset pool operations can move: the native one, verified at genesis.
 pub(crate) fn setup_asset() -> u32 {
-	let id = register_asset();
-	AssetOperation::verify::<Test>(id).unwrap();
-	id
+	crate::types::NATIVE_ASSET_ID
 }
 
 /// Fund the pool both physically and in the ledger, as a shield would.

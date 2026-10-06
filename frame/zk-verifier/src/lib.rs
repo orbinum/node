@@ -43,7 +43,7 @@ mod tests;
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
 
-pub use port::{TransferStatement, UnshieldStatement, ZkVerifierPort};
+pub use port::{ShieldStatement, TransferStatement, UnshieldStatement, ZkVerifierPort};
 pub use types::{
 	CircuitId, CircuitVersionInfo, ProofSystem, VerificationKeyInfo, VerificationStatistics,
 	VkBytes, VkEntry, VkVersionHash,
@@ -605,10 +605,11 @@ pub mod pallet {
 		/// Verify the VK deserializes as a BN254 Groth16 key and that its arity
 		/// fits one of the circuit's input layouts (base or memo-bound).
 		///
-		/// For a known circuit, only [`Self::FIRST_VERSION`] may use the base
+		/// For a spend circuit, only [`Self::FIRST_VERSION`] may use the base
 		/// layout: every later version must bind its memos and the full recipient.
 		/// That keeps a v1 key from being registered again as "v2" — a rotation
-		/// that would retire nothing but the version number.
+		/// that would retire nothing but the version number. Shield has one layout
+		/// at every version.
 		///
 		/// Only ids in the known table carry an expected arity; the rest are
 		/// checked to deserialize and nothing more. An id that does not fit a
@@ -616,9 +617,7 @@ pub mod pallet {
 		/// 257 onto 1 and silently validate a key against the wrong circuit's
 		/// arity. `purge_circuit` guards the same lookup the same way.
 		fn ensure_vk_arity(circuit_id: CircuitId, version: u32, key_data: &[u8]) -> DispatchResult {
-			use orbinum_zk_verifier::{
-				InputLayout, VerifyingKey, expected_public_inputs, input_layout,
-			};
+			use orbinum_zk_verifier::{InputLayout, VerifyingKey, has_memo_layout, input_layout};
 
 			let id = u8::try_from(circuit_id.0).map_err(|_| Error::<T>::InvalidVerificationKey)?;
 
@@ -628,9 +627,10 @@ pub mod pallet {
 				.map_err(|_| Error::<T>::InvalidVerificationKey)?;
 
 			let layout = input_layout(id, arity).ok_or(Error::<T>::InvalidVerificationKey)?;
-			let known = expected_public_inputs(id).is_some();
 			ensure!(
-				!(known && version != Self::FIRST_VERSION && layout == InputLayout::Base),
+				!(has_memo_layout(id)
+					&& version != Self::FIRST_VERSION
+					&& layout == InputLayout::Base),
 				Error::<T>::InvalidVerificationKey
 			);
 			Ok(())

@@ -84,8 +84,8 @@ pub use origin::{RelayCaller, ensure_relay_caller, ensure_spend_origin};
 pub use pallet::*;
 pub use types::{
 	AssetId, AssetMetadata, Commitment, DEFAULT_TREE_DEPTH, DefaultMerklePath,
-	EncryptedMemo as FrameEncryptedMemo, Hash, MAX_ENCRYPTED_MEMO_SIZE, MAX_TREE_DEPTH, MerklePath,
-	Note, Nullifier,
+	EncryptedMemo as FrameEncryptedMemo, Hash, MAX_ENCRYPTED_MEMO_SIZE, MAX_PROOF_SIZE,
+	MAX_TREE_DEPTH, MerklePath, Note, Nullifier, Proof,
 };
 pub use weights::WeightInfo;
 
@@ -137,6 +137,17 @@ pub mod pallet {
 	/// The balance type for this pallet
 	pub type BalanceOf<T> =
 		<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+
+	/// One `shield_batch` entry: `(asset_id, amount, commitment, encrypted_memo, proof,
+	/// circuit_version)`, the arguments of a single `shield`.
+	pub type ShieldBatchItem<T> = (
+		u32,
+		BalanceOf<T>,
+		Commitment,
+		FrameEncryptedMemo,
+		Proof,
+		u32,
+	);
 
 	/// Storage version history:
 	/// - v1: `MerkleNodes` (internal Merkle tree nodes), backfilled from `MerkleLeaves`.
@@ -738,6 +749,10 @@ pub mod pallet {
 		EmptyBatch,
 		/// Asset id counter collided with an existing asset (would overwrite it).
 		AssetIdAlreadyExists,
+		/// The asset is registered and verified but not backed: the pool moves
+		/// the native currency for every asset, so only the native asset can be
+		/// shielded, spent, withdrawn or claimed.
+		AssetNotSupported,
 	}
 
 	// ========================================================================
@@ -757,30 +772,38 @@ pub mod pallet {
 		/// * `amount` - Amount of tokens to shield
 		/// * `commitment` - The commitment for the new note (computed off-chain)
 		/// * `encrypted_memo` - Encrypted metadata for note recovery and audit
+		/// * `proof` - Shield proof: `commitment` opens to `amount` of `asset_id`
+		/// * `circuit_version` - Shield circuit version the proof was built for
 		///
 		/// # Errors
 		/// * `InvalidAmount` - Amount is zero
 		/// * `MerkleTreeFull` - No more space in the tree
 		/// * `CommitmentAlreadyExists` - Duplicate commitment
 		/// * `InvalidMemoSize` - Encrypted memo is not exactly 180 bytes
+		/// * `ProofVerificationFailed` - The proof does not bind the commitment to the deposit
 		#[pallet::call_index(0)]
-		#[pallet::weight(T::WeightInfo::shield())]
+		#[pallet::weight(T::WeightInfo::shield().saturating_add(T::ZkVerifier::verification_weight()))]
 		pub fn shield(
 			origin: OriginFor<T>,
 			asset_id: u32,
 			amount: BalanceOf<T>,
 			commitment: Commitment,
 			encrypted_memo: FrameEncryptedMemo,
+			proof: Proof,
+			circuit_version: u32,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
-
-			// Delegate to business operation
-			crate::operations::shield::ShieldOperation::execute::<T>(
+			use crate::operations::shield::{ShieldOperation, ShieldRequest};
+			ShieldOperation::execute::<T>(
 				who,
-				asset_id,
-				amount,
-				commitment,
-				encrypted_memo,
+				&proof,
+				ShieldRequest {
+					asset_id,
+					amount,
+					commitment,
+					encrypted_memo,
+					circuit_version,
+				},
 			)
 		}
 
@@ -792,7 +815,8 @@ pub mod pallet {
 		///
 		/// # Arguments
 		/// * `origin` - The account depositing tokens
-		/// * `operations` - Up to 20 (asset_id, amount, commitment, encrypted_memo) tuples
+		/// * `operations` - Up to 20 (asset_id, amount, commitment, encrypted_memo, proof,
+		///   circuit_version) tuples, one shield proof each
 		///
 		/// # Errors
 		/// * Same as `shield()` for any individual operation
@@ -804,28 +828,21 @@ pub mod pallet {
 		/// # Weight
 		/// Benchmarked per operation count via `shield_batch(n)`.
 		#[pallet::call_index(12)]
-		#[pallet::weight(T::WeightInfo::shield_batch(operations.len() as u32))]
+		#[pallet::weight(
+			T::WeightInfo::shield_batch(operations.len() as u32)
+				.saturating_add(T::ZkVerifier::verification_weight().saturating_mul(operations.len() as u64))
+		)]
 		pub fn shield_batch(
 			origin: OriginFor<T>,
-			operations: BoundedVec<
-				(u32, BalanceOf<T>, Commitment, FrameEncryptedMemo),
-				ConstU32<20>,
-			>,
+			operations: BoundedVec<ShieldBatchItem<T>, ConstU32<20>>,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			ensure!(!operations.is_empty(), Error::<T>::EmptyBatch);
-
-			// Process each shield operation
-			for (asset_id, amount, commitment, encrypted_memo) in operations.into_iter() {
-				crate::operations::shield::ShieldOperation::execute::<T>(
-					who.clone(),
-					asset_id,
-					amount,
-					commitment,
-					encrypted_memo,
-				)?;
+			use crate::operations::shield::{ShieldOperation, ShieldRequest};
+			for item in operations {
+				let (proof, req) = ShieldRequest::from_batch_item(item);
+				ShieldOperation::execute::<T>(who.clone(), &proof, req)?;
 			}
-
 			Ok(())
 		}
 
@@ -863,7 +880,7 @@ pub mod pallet {
 		#[allow(clippy::too_many_arguments)]
 		pub fn private_transfer(
 			origin: OriginFor<T>,
-			proof: BoundedVec<u8, ConstU32<512>>,
+			proof: Proof,
 			merkle_root: Hash,
 			nullifiers: BoundedVec<Nullifier, ConstU32<2>>,
 			commitments: BoundedVec<Commitment, ConstU32<2>>,
@@ -921,7 +938,7 @@ pub mod pallet {
 		#[allow(clippy::too_many_arguments)]
 		pub fn unshield(
 			origin: OriginFor<T>,
-			proof: BoundedVec<u8, ConstU32<512>>,
+			proof: Proof,
 			merkle_root: Hash,
 			nullifier: Nullifier,
 			asset_id: u32,

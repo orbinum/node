@@ -12,7 +12,9 @@ use crate::{
 	types::VkEntry,
 };
 use frame_support::{BoundedVec, assert_err, assert_noop, assert_ok, traits::ConstU32};
-use orbinum_zk_verifier::{MEMO_HASH_INPUTS, TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS};
+use orbinum_zk_verifier::{
+	MEMO_HASH_INPUTS, SHIELD_PUBLIC_INPUTS, TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS,
+};
 use sp_io::TestExternalities;
 use sp_runtime::{BuildStorage, DispatchResult};
 
@@ -54,11 +56,16 @@ fn vk_empty() -> VkBytes {
 }
 
 /// A key registration accepts for `(circuit_id, version)`: the base layout for
-/// the first version, the memo-bound one for any later version of a known circuit.
+/// the first version, the memo-bound one for any later version of a spend circuit.
 fn vk_for(circuit_id: CircuitId, version: u32) -> VkBytes {
-	let base = orbinum_zk_verifier::expected_public_inputs(circuit_id.0 as u8);
-	let arity = match base {
-		Some(base) if version > Pallet::<Test>::FIRST_VERSION => base + MEMO_HASH_INPUTS,
+	let id = circuit_id.0 as u8;
+	let arity = match orbinum_zk_verifier::expected_public_inputs(id) {
+		Some(base)
+			if version > Pallet::<Test>::FIRST_VERSION
+				&& orbinum_zk_verifier::has_memo_layout(id) =>
+		{
+			base + MEMO_HASH_INPUTS
+		}
 		Some(base) => base,
 		None => TRANSFER_PUBLIC_INPUTS,
 	};
@@ -202,6 +209,34 @@ fn register_vk_refuses_the_base_layout_past_version_one() {
 			2,
 			vk_for(CircuitId::TRANSFER, 2)
 		));
+	});
+}
+
+/// Shield has no memo-bound layout: every version takes the base arity, and one
+/// input more — memo-bound for a spend circuit — is refused.
+#[test]
+fn register_vk_takes_shield_at_its_base_arity_for_every_version() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(register(
+			CircuitId::SHIELD,
+			1,
+			real_vk(SHIELD_PUBLIC_INPUTS)
+		));
+		assert_ok!(register(
+			CircuitId::SHIELD,
+			2,
+			real_vk(SHIELD_PUBLIC_INPUTS)
+		));
+		for version in [1, 3] {
+			assert_noop!(
+				register(
+					CircuitId::SHIELD,
+					version,
+					real_vk(SHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS)
+				),
+				Error::<Test>::InvalidVerificationKey
+			);
+		}
 	});
 }
 

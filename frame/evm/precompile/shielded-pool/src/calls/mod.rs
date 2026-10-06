@@ -24,17 +24,10 @@ pub mod shield;
 pub mod unshield;
 
 use fp_evm::PrecompileFailure;
-use frame_support::{traits::ConstU32, BoundedVec};
-use pallet_shielded_pool::BalanceOf;
+use pallet_shielded_pool::{BalanceOf, Proof};
 use sp_core::U256;
 
 use crate::{abi, revert};
-
-/// Maximum byte length of a serialised Groth16 proof accepted by the pallet.
-const MAX_PROOF_LEN: u32 = 512;
-
-/// A spend's proof, bounded as the pallet call expects it.
-type Proof = BoundedVec<u8, ConstU32<MAX_PROOF_LEN>>;
 
 /// The parameters after the selector, once they hold the whole `head_len`-byte
 /// head. Offsets in the head point into the tail, which each dynamic decoder

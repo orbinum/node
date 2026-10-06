@@ -30,6 +30,8 @@ impl CircuitId {
 	pub const TRANSFER: Self = Self(1);
 	/// Unshield circuit ID
 	pub const UNSHIELD: Self = Self(2);
+	/// Shield circuit ID
+	pub const SHIELD: Self = Self(3);
 }
 
 /// Supported proof systems

@@ -1316,3 +1316,23 @@ fn an_invalid_proof_fails_at_dispatch_and_changes_nothing() {
 		);
 	});
 }
+
+/// A verified non-native asset is not backed, so its notes cannot move.
+#[test]
+fn transfer_of_a_non_native_asset_is_refused() {
+	new_test_ext().execute_with(|| {
+		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+		let id = crate::tests::register_asset();
+		crate::operations::assets::AssetOperation::verify::<Test>(id).unwrap();
+		assert_noop!(
+			PrivateTransferOperation::execute::<Test>(
+				&proof(),
+				TransferRequest {
+					asset_id: id,
+					..request([0x72, 0x74])
+				},
+			),
+			Error::<Test>::AssetNotSupported
+		);
+	});
+}

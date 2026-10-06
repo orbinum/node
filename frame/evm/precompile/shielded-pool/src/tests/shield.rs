@@ -14,6 +14,68 @@ fn shield_rejects_truncated_input() {
 	});
 }
 
+/// The pre-proof ABI (`asset_id, commitment, memo`) is three slots: too short now,
+/// so an outdated client fails loudly instead of shielding without a proof.
+#[test]
+fn shield_rejects_the_old_three_slot_head() {
+	new_test_ext().execute_with(|| {
+		let mut input = crate::calls::shield::SELECTOR.to_vec();
+		input.extend_from_slice(&[0u8; 96]);
+		let mut h = MockHandle::with_value(input, 1_000);
+		expect_error_msg(
+			ShieldedPoolPrecompile::<Test>::execute(&mut h),
+			"shield: input too short",
+		);
+	});
+}
+
+#[test]
+fn shield_rejects_an_empty_proof() {
+	new_test_ext().execute_with(|| {
+		let input = encode_shield_with(0, canon(0x12), &[0xAB; 180], &[], 1);
+		let mut h = MockHandle::with_value(input, 1_000);
+		expect_error_msg(
+			ShieldedPoolPrecompile::<Test>::execute(&mut h),
+			"shield: proof must be non-empty",
+		);
+		assert_eq!(pallet_shielded_pool::MerkleTreeSize::<Test>::get(), 0);
+	});
+}
+
+/// The amount reaches the pallet from `msg.value`, and the proof and version
+/// from the calldata, unchanged.
+#[test]
+fn shield_decodes_proof_and_version_into_the_call() {
+	new_test_ext().execute_with(|| {
+		let proof = [0x5Au8; 96];
+		let input = encode_shield_with(3, canon(0x13), &[0xAB; 180], &proof, 7);
+		let h = MockHandle::with_value(input.clone(), 1_000);
+		let call = crate::calls::shield::decode::<Test>(&h, &input)
+			.ok()
+			.unwrap();
+		match call {
+			pallet_shielded_pool::Call::shield {
+				asset_id,
+				amount,
+				commitment,
+				proof: decoded,
+				circuit_version,
+				..
+			} => {
+				assert_eq!(asset_id, 3);
+				assert_eq!(amount, 1_000);
+				assert_eq!(
+					commitment,
+					pallet_shielded_pool::Commitment::from(canon(0x13))
+				);
+				assert_eq!(decoded.into_inner(), proof.to_vec());
+				assert_eq!(circuit_version, 7);
+			}
+			other => panic!("decoded to {other:?}"),
+		}
+	});
+}
+
 #[test]
 fn shield_accepts_smallest_non_zero_amount() {
 	// There is no minimum shield amount: msg.value = 1 must go through.

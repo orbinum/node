@@ -10,7 +10,7 @@ This folder centralizes all Verification Key (VK) operations for development and
     - `set-active`
     - `remove`
 - `workflows/setup-dev.sh`
-  - DEV bootstrap for fixed circuits `1,2`.
+  - DEV bootstrap: circuits `1,2` at one version, and shield `3` at its own active version.
 - `workflows/rotate-dev.sh`
   - Version rotation `old -> new` with RPC validation. The old version is **retired** as soon as the new one is active (the submitter picks the version a spend is verified under, so a live older key lets a copier resubmit under it); `--keep-old` skips that, `--remove-old` also removes it.
 - `policy/verify-window-dev.sh`
@@ -33,6 +33,8 @@ This folder centralizes all Verification Key (VK) operations for development and
   - `bash scripts/vk/workflows/rotate-dev.sh 2 ws://127.0.0.1:9944 "//Alice" 1 --remove-old`
 - Verify window:
   - `bash scripts/vk/policy/verify-window-dev.sh 2 http://127.0.0.1:9944 "1,2" true`
+- Add a new circuit (e.g. shield after the spec 17 upgrade), registered and activated:
+  - `bash scripts/vk/workflows/vk.sh add shield 3 1 wss://rpc-1.testnet.orbinum.io "<sudo>"`
 - Purge a retired circuit:
   - `bash scripts/vk/lib/registry.sh purge 5 ws://127.0.0.1:9944 "//Alice"`
 

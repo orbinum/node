@@ -20,6 +20,48 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
+### spec 17 — tx 5 — [Unreleased]
+
+A shield must prove its note is worth exactly the deposit. `transaction_version`
+moves: `shield` (call 0) gains `proof` and `circuit_version`, and each
+`shield_batch` (call 12) entry gains the same two fields.
+
+#### 1 · Shield bound to its amount (AL-1)
+
+`shield` checked the asset, the amount, the memo and the commitment's form, but
+nothing tied the commitment to the amount: a deposit of 1 could insert a note
+worth 1000, and unshielding it drained other depositors. The commitment must now
+open to the deposited amount and asset under circuit 3 (`shield`, public inputs
+`commitment, value, asset_id`), verified before any funds move. A batch with one
+bad proof reverts entirely. The EVM precompile's shield becomes
+`shield(uint32,bytes32,bytes,bytes,uint32)` (selector `0xf25897e0`, was
+`0x9feb22ea`); the old three-slot calldata reverts as too short.
+
+Only the native asset moves through the pool: shield, unshield, private
+transfer and relay-fee claims refuse any other asset with `AssetNotSupported`.
+The pool always moved `T::Currency`, so a note of a verified non-native asset was
+backed by ORB. Only asset 0 exists on testnet, so nothing on-chain changes.
+
+zk-verifier knows circuit 3 with 3 public inputs. Memo-bound layouts are now
+specific to the spend circuits: shield takes its base arity at every version,
+and a 4-input shield key is refused.
+
+#### 2 · Registering circuit 3 by Root, after the upgrade
+
+No keys are embedded. Between `setCode` and registration every shield fails
+(`UnsupportedCircuitVersion`), so the app pauses shielding first. Root then
+registers the shield key of `@orbinum/circuits` 0.16.0 (`vk_hash`
+`0x4835d34f…5cb7`) as circuit 3 version 1 with `set_active`. There is no previous
+version to retire. Unshield and transfer are unaffected.
+
+Old clients stop working at the upgrade: their shield extrinsics no longer
+decode, and the new transaction version invalidates them anyway. App,
+wallet-sdk and `@orbinum/protocol` ship together with it.
+
+Shield weights add one proof verification per deposit; `shield` and
+`shield_batch(n)` weights are provisional until re-benchmarked on the reference
+machine.
+
 ### spec 16 — tx 4 — [Unreleased]
 
 Relay fees follow the relay commit and are claimed publicly. `transaction_version`
