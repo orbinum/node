@@ -4,6 +4,15 @@ All notable changes to `pallet-evm-precompile-shielded-pool` will be documented 
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-08
+
+### Changed
+
+- **Breaking:** `privateTransfer(bytes,bytes32[],bytes32[],bytes32[],bytes[],uint32,uint256,uint32)`,
+  selector `0x63d0b9a0`: slot 1 is the offset of `merkle_roots`, exactly two
+  roots in input order. The single-root selector `0x66ed2cd4` is removed. The fee
+  stays at slot 6, so the relay RPC's gate is unchanged.
+
 ## [0.8.0] - 2026-10-05
 
 **Breaking** — the shield ABI changes. Requires the matching `pallet-shielded-pool`.

@@ -85,6 +85,28 @@ pub(crate) fn proof() -> BoundedVec<u8, ConstU32<512>> {
 	BoundedVec::try_from(vec![0x01u8; 72]).unwrap()
 }
 
+/// `x + r`, little-endian: different bytes, the same BN254 field element as
+/// `x`. What a copier would submit to give one value a second on-chain identity.
+pub(crate) fn field_twin(x: [u8; 32]) -> [u8; 32] {
+	use ark_bn254::Fr;
+	use ark_ff::{BigInteger, PrimeField};
+	let r = Fr::MODULUS.to_bytes_le();
+	let mut out = [0u8; 32];
+	let mut carry = 0u16;
+	for i in 0..32 {
+		let sum = u16::from(x[i]) + u16::from(r[i]) + carry;
+		out[i] = sum as u8;
+		carry = sum >> 8;
+	}
+	assert_eq!(carry, 0, "x + r must fit in 32 bytes");
+	assert_eq!(
+		Fr::from_le_bytes_mod_order(&out),
+		Fr::from_le_bytes_mod_order(&x),
+		"a twin is the same field element"
+	);
+	out
+}
+
 pub(crate) fn evm(byte: u8) -> H160 {
 	H160::repeat_byte(byte)
 }

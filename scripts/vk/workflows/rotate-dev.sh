@@ -3,17 +3,18 @@ set -euo pipefail
 
 # ============================================================================
 # scripts/vk/workflows/rotate-dev.sh
-# DEV on-chain VK rotation for the 2 supported circuits.
+# DEV on-chain VK rotation for the spend circuits (transfer, unshield).
 #
 # The spec-16 v1 → v2 rotation is done by Root after `setCode`, with services
 # stopped (docs/DEPLOYMENT_FLOW.md, runbook D): the calls below, in this order.
 #
 # Flow:
-#   1) check the new keys: memo-bound arity, hash ≠ old version's, and equal to
-#      the manifest's vk_hash when a manifest is given
-#   2) register NEW_VERSION on 1,2 and make it active (one tx) — skipped for a
-#      circuit that already has it, so a failed run can be repeated
-#   3) retire OLD_VERSION on 1,2 right away (unless --keep-old)
+#   1) check the new keys: arity (memo-bound, or cross-tree for a transfer),
+#      hash ≠ old version's, and equal to the manifest's vk_hash when a manifest
+#      is given
+#   2) register NEW_VERSION and make it active (one tx for both circuits) —
+#      skipped for a circuit that already has it, so a failed run can be repeated
+#   3) retire OLD_VERSION right away (unless --keep-old)
 #   4) optional: remove OLD_VERSION (--remove-old)
 #   5) check the final state: active = NEW, supported = [NEW] (or [OLD,NEW]
 #      with --keep-old), on-chain hashes = the new keys'
@@ -29,6 +30,8 @@ set -euo pipefail
 #   --keep-old          leave old_version live
 #   --remove-old        also remove old_version at the end
 #   --manifest <path>   circuits manifest.json to check the keys' vk_hash against
+#   --circuits <list>   circuits to rotate, comma-separated (default transfer,unshield);
+#                       e.g. `--circuits transfer 3 ws://... //Alice 2` for transfer v3
 #
 # Keys are read from artifacts/verification_key_<circuit>_v<new_version>.json
 # (override the directory with VK_ARTIFACTS_DIR).
@@ -46,12 +49,14 @@ log() {
 REMOVE_OLD=false
 KEEP_OLD=false
 MANIFEST=""
+CIRCUITS="transfer unshield"
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --remove-old) REMOVE_OLD=true; shift ;;
     --keep-old) KEEP_OLD=true; shift ;;
     --manifest) MANIFEST="${2:-}"; [[ -f "$MANIFEST" ]] || err "--manifest needs a file"; shift 2 ;;
+    --circuits) CIRCUITS="${2//,/ }"; shift 2 ;;
     --*) err "unknown flag $1" ;;
     *) POSITIONAL+=("$1"); shift ;;
   esac
@@ -111,15 +116,29 @@ v=int(sys.argv[1]); r=(json.load(sys.stdin).get("result") or {})
 print(next((h["vk_hash"].removeprefix("0x") for h in r.get("vk_hashes",[]) if h["version"]==v), ""))' "$2"
 }
 
+CID_transfer=1
+CID_unshield=2
+for circuit in $CIRCUITS; do
+  [[ "$circuit" == transfer || "$circuit" == unshield ]] || err "unknown circuit $circuit"
+done
+
+# Public inputs a version past 1 may have: memo-bound (base 7 + memo_hash), or
+# for a transfer also cross-tree (+ a second root). The runtime refuses anything
+# else, but failing here names the file.
+accepted_arity() {
+  case "$1" in
+    transfer) echo "8 9" ;;
+    unshield) echo "8" ;;
+  esac
+}
+
 # ── 1. check the new keys ────────────────────────────────────────────────────
-for circuit in transfer unshield; do
+for circuit in $CIRCUITS; do
   json="$ARTIFACTS_DIR/verification_key_${circuit}_v${NEW_VERSION}.json"
   [[ -f "$json" ]] || err "missing $json"
   n_public=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["nPublic"])' "$json")
-  # Versions past 1 must be memo-bound: base 7 inputs + memo_hash. The runtime
-  # refuses anything else, but failing here names the file.
-  if [[ "$NEW_VERSION" != 1 && "$n_public" != 8 ]]; then
-    err "$circuit v$NEW_VERSION has nPublic=$n_public; a memo-bound key has 8"
+  if [[ "$NEW_VERSION" != 1 && " $(accepted_arity "$circuit") " != *" $n_public "* ]]; then
+    err "$circuit v$NEW_VERSION has nPublic=$n_public; expected one of: $(accepted_arity "$circuit")"
   fi
   bin=$(pack_verifying_key "$json")
   eval "BIN_$circuit=\"\$bin\""
@@ -131,30 +150,41 @@ for circuit in transfer unshield; do
   fi
 done
 
-CID_transfer=1
-CID_unshield=2
-for circuit in transfer unshield; do
+for circuit in $CIRCUITS; do
   cid_var="CID_$circuit"
   hash_var="HASH_$circuit"
   old=$(chain_hash "${!cid_var}" "$OLD_VERSION")
   [[ "${!hash_var}" != "$old" ]] || err "$circuit: the new key is the old version's key"
 done
 
-log "RPC: $RPC_WS | old v$OLD_VERSION → new v$NEW_VERSION | keep_old=$KEEP_OLD remove_old=$REMOVE_OLD"
+CIDS=""
+for circuit in $CIRCUITS; do
+  cid_var="CID_$circuit"
+  CIDS="$CIDS ${!cid_var}"
+done
+
+log "RPC: $RPC_WS | circuits: $CIRCUITS | old v$OLD_VERSION → new v$NEW_VERSION | keep_old=$KEEP_OLD remove_old=$REMOVE_OLD"
 
 # ── 2. register + activate (skipped when already there) ──────────────────────
-existing_transfer=$(chain_hash 1 "$NEW_VERSION")
-existing_unshield=$(chain_hash 2 "$NEW_VERSION")
-if [[ -z "$existing_transfer" && -z "$existing_unshield" ]]; then
+if [[ "$CIRCUITS" == "transfer unshield" \
+  && -z "$(chain_hash 1 "$NEW_VERSION")" && -z "$(chain_hash 2 "$NEW_VERSION")" ]]; then
   log "Batch registering + activating both circuits (v$NEW_VERSION)..."
   bash "$VK_REGISTRY_SCRIPT" batch-register "$NEW_VERSION" 1 \
     "$BIN_transfer" "$BIN_unshield" "$RPC_WS" "$SUDO_SEED"
 else
-  [[ "$existing_transfer" == "$HASH_transfer" && "$existing_unshield" == "$HASH_unshield" ]] \
-    || err "v$NEW_VERSION is already registered with different keys"
-  log "v$NEW_VERSION already registered; making it active"
-  for cid in 1 2; do
-    bash "$VK_REGISTRY_SCRIPT" set-active "$cid" "$NEW_VERSION" "$RPC_WS" "$SUDO_SEED"
+  for circuit in $CIRCUITS; do
+    cid_var="CID_$circuit"
+    bin_var="BIN_$circuit"
+    hash_var="HASH_$circuit"
+    existing=$(chain_hash "${!cid_var}" "$NEW_VERSION")
+    if [[ -z "$existing" ]]; then
+      log "[$circuit] register v$NEW_VERSION"
+      bash "$VK_REGISTRY_SCRIPT" register "${!cid_var}" "$NEW_VERSION" "${!bin_var}" "$RPC_WS" "$SUDO_SEED"
+    else
+      [[ "$existing" == "${!hash_var}" ]] || err "$circuit v$NEW_VERSION is already registered with a different key"
+    fi
+    log "[$circuit] make v$NEW_VERSION active"
+    bash "$VK_REGISTRY_SCRIPT" set-active "${!cid_var}" "$NEW_VERSION" "$RPC_WS" "$SUDO_SEED"
   done
 fi
 
@@ -165,7 +195,7 @@ import json,sys
 r=(json.load(sys.stdin).get("result") or {}); print(int(sys.argv[1]) in (r.get("supported_versions") or []))' "$2"
 }
 if [[ "$KEEP_OLD" != true ]]; then
-  for cid in 1 2; do
+  for cid in $CIDS; do
     if [[ "$(supported_has "$cid" "$OLD_VERSION")" == True ]]; then
       log "[circuit $cid] retire v$OLD_VERSION"
       bash "$VK_REGISTRY_SCRIPT" retire "$cid" "$OLD_VERSION" "$RPC_WS" "$SUDO_SEED"
@@ -173,7 +203,7 @@ if [[ "$KEEP_OLD" != true ]]; then
   done
 fi
 if [[ "$REMOVE_OLD" == true ]]; then
-  for cid in 1 2; do
+  for cid in $CIDS; do
     if [[ -n "$(chain_hash "$cid" "$OLD_VERSION")" ]]; then
       log "[circuit $cid] remove v$OLD_VERSION"
       bash "$VK_REGISTRY_SCRIPT" remove "$cid" "$OLD_VERSION" "$RPC_WS" "$SUDO_SEED"
@@ -182,7 +212,7 @@ if [[ "$REMOVE_OLD" == true ]]; then
 fi
 
 # ── 5. final state ───────────────────────────────────────────────────────────
-for circuit in transfer unshield; do
+for circuit in $CIRCUITS; do
   cid_var="CID_$circuit"
   cid="${!cid_var}"
   info=$(rpc zkVerifier_getCircuitVersionInfo "$cid")
@@ -200,5 +230,8 @@ PY
   [[ "$(chain_hash "$cid" "$NEW_VERSION")" == "${!hash_var}" ]] || err "$circuit: on-chain v$NEW_VERSION hash differs"
 done
 
-rm -f "$BIN_transfer" "$BIN_unshield"
+for circuit in $CIRCUITS; do
+  bin_var="BIN_$circuit"
+  rm -f "${!bin_var}"
+done
 log "✅ VK rotation completed"

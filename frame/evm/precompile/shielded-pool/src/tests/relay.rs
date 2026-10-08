@@ -161,7 +161,7 @@ fn relayable_transfer_calldata_hashes_like_the_extrinsic() {
 	);
 	let call = crate::decode_relayable_call::<Test>(&input).expect("privateTransfer decodes");
 	let expected = pallet_shielded_pool::operations::private_transfer::TransferRequest::<Test> {
-		merkle_root: canon(0xBB),
+		merkle_roots: [canon(0xBB); 2],
 		nullifiers: vec![pallet_shielded_pool::Nullifier(canon(1))]
 			.try_into()
 			.unwrap(),

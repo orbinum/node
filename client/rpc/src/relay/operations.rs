@@ -101,8 +101,8 @@ impl RelayableOperation for UnshieldOp {
 	}
 }
 
-/// `privateTransfer(proof, root, nullifiers, commitments, memos, asset_id, fee,
-/// circuit_version)` — `0x66ed2cd4`
+/// `privateTransfer(proof, merkle_roots, nullifiers, commitments, memos, asset_id,
+/// fee, circuit_version)` — `0x63d0b9a0`
 ///
 /// Fee is in ABI slot 6: `calldata[196..228]`. The head is 8 slots (256 bytes)
 /// plus the 4-byte selector = 260 minimum.

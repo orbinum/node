@@ -3,26 +3,36 @@
 //!
 //! The one place that knows each circuit's input order and how a domain value
 //! becomes a BN254 field element (32 bytes, little-endian, canonical). The
-//! [`InputLayout`] comes from the key being verified against, so a v1 and a
-//! memo-bound key each get the inputs they were built for.
+//! [`InputLayout`] comes from the key being verified against, so a v1, a
+//! memo-bound and a cross-tree key each get the inputs they were built for.
 
 use crate::port::{ShieldStatement, TransferStatement, UnshieldStatement};
 use alloc::vec::Vec;
 use orbinum_zk_verifier::{InputLayout, to_field_le};
 
 /// Transfer inputs, in circuit order:
-/// `merkle_root | nullifiers.. | commitments.. | asset_id | fee [| memo_hash]`.
-pub fn encode_transfer(s: &TransferStatement, layout: InputLayout) -> Vec<[u8; 32]> {
-	let mut raw = Vec::with_capacity(4 + s.nullifiers.len() + s.commitments.len());
-	raw.push(s.merkle_root);
+/// `merkle_root | nullifiers.. | commitments.. | asset_id | fee [| memo_hash]`, or
+/// for the cross-tree layout `merkle_roots[0] | merkle_roots[1] | ..` in place of
+/// the single root.
+///
+/// `None` when the key cannot attest to the statement: a key with one root
+/// cannot attest to two, so the proof fails without a pairing.
+pub fn encode_transfer(s: &TransferStatement, layout: InputLayout) -> Option<Vec<[u8; 32]>> {
+	let [root0, root1] = s.merkle_roots;
+	let mut raw = Vec::with_capacity(5 + s.nullifiers.len() + s.commitments.len());
+	match layout {
+		InputLayout::CrossTree => raw.extend_from_slice(&s.merkle_roots),
+		InputLayout::Base | InputLayout::MemoBound if root0 == root1 => raw.push(root0),
+		InputLayout::Base | InputLayout::MemoBound => return None,
+	}
 	raw.extend_from_slice(&s.nullifiers);
 	raw.extend_from_slice(&s.commitments);
 	raw.push(u32_field(s.asset_id));
 	raw.push(u128_field(s.fee));
-	if layout == InputLayout::MemoBound {
+	if matches!(layout, InputLayout::MemoBound | InputLayout::CrossTree) {
 		raw.push(to_field_le(&s.memo_digest));
 	}
-	raw
+	Some(raw)
 }
 
 /// Unshield inputs, in circuit order:
@@ -32,13 +42,17 @@ pub fn encode_transfer(s: &TransferStatement, layout: InputLayout) -> Vec<[u8; 3
 /// it mod r, which maps `R` and `R ± r` to the same input — a copier could
 /// redirect the withdrawal to an alias nobody controls. The memo-bound layout
 /// hashes it first, so an alias would need a blake2 collision.
-pub fn encode_unshield(s: &UnshieldStatement, layout: InputLayout) -> Vec<[u8; 32]> {
+///
+/// `None` for the cross-tree layout: an unshield spends one note, so no such
+/// key can exist for it (`input_layout`).
+pub fn encode_unshield(s: &UnshieldStatement, layout: InputLayout) -> Option<Vec<[u8; 32]>> {
 	let (recipient, memo_hash) = match layout {
 		InputLayout::Base => (to_field_le(&s.recipient), None),
 		InputLayout::MemoBound => (
 			to_field_le(&sp_io::hashing::blake2_256(&s.recipient)),
 			Some(to_field_le(&s.memo_digest)),
 		),
+		InputLayout::CrossTree => return None,
 	};
 	let mut raw = alloc::vec![
 		s.merkle_root,
@@ -50,7 +64,7 @@ pub fn encode_unshield(s: &UnshieldStatement, layout: InputLayout) -> Vec<[u8; 3
 		s.change_commitment,
 	];
 	raw.extend(memo_hash);
-	raw
+	Some(raw)
 }
 
 /// Shield inputs, in circuit order: `commitment | value | asset_id`.
@@ -75,14 +89,16 @@ fn u128_field(v: u128) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use orbinum_zk_verifier::{MEMO_HASH_INPUTS, TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS};
+	use orbinum_zk_verifier::{
+		CROSS_TREE_INPUTS, MEMO_HASH_INPUTS, TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS,
+	};
 
 	const NULLIFIERS: [[u8; 32]; 2] = [[0x02; 32], [0x03; 32]];
 	const COMMITMENTS: [[u8; 32]; 2] = [[0x04; 32], [0x05; 32]];
 
 	fn transfer() -> TransferStatement {
 		TransferStatement {
-			merkle_root: [0x01; 32],
+			merkle_roots: [[0x01; 32]; 2],
 			nullifiers: NULLIFIERS.to_vec(),
 			commitments: COMMITMENTS.to_vec(),
 			asset_id: 7,
@@ -104,8 +120,8 @@ mod tests {
 		}
 	}
 
-	/// `R + r`: a different AccountId32 that is the same field element as `R`.
-	fn alias(recipient: [u8; 32]) -> [u8; 32] {
+	/// `x + r`, little-endian: different bytes, the same field element as `x`.
+	fn field_twin(x: [u8; 32]) -> [u8; 32] {
 		// BN254 r, little-endian.
 		const R: [u8; 32] = [
 			0x01, 0x00, 0x00, 0xf0, 0x93, 0xf5, 0xe1, 0x43, 0x91, 0x70, 0xb9, 0x79, 0x48, 0xe8,
@@ -115,17 +131,18 @@ mod tests {
 		let mut out = [0u8; 32];
 		let mut carry = 0u16;
 		for i in 0..32 {
-			let sum = recipient[i] as u16 + R[i] as u16 + carry;
+			let sum = u16::from(x[i]) + u16::from(R[i]) + carry;
 			out[i] = sum as u8;
 			carry = sum >> 8;
 		}
-		assert_eq!(carry, 0, "recipient + r must fit in 32 bytes");
+		assert_eq!(carry, 0, "x + r must fit in 32 bytes");
+		assert_eq!(to_field_le(&out), to_field_le(&x), "same field element");
 		out
 	}
 
 	#[test]
 	fn transfer_follows_circuit_order() {
-		let raw = encode_transfer(&transfer(), InputLayout::Base);
+		let raw = encode_transfer(&transfer(), InputLayout::Base).unwrap();
 		assert_eq!(raw.len(), TRANSFER_PUBLIC_INPUTS);
 		assert_eq!(raw[0], [0x01; 32]);
 		assert_eq!(&raw[1..3], &NULLIFIERS);
@@ -135,9 +152,65 @@ mod tests {
 	}
 
 	#[test]
+	fn cross_tree_transfer_puts_one_root_per_input_first() {
+		let s = TransferStatement {
+			merkle_roots: [[0x01; 32], [0x09; 32]],
+			..transfer()
+		};
+		let raw = encode_transfer(&s, InputLayout::CrossTree).unwrap();
+		assert_eq!(
+			raw.len(),
+			TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS + CROSS_TREE_INPUTS
+		);
+		assert_eq!(raw[0], [0x01; 32]);
+		assert_eq!(raw[1], [0x09; 32]);
+		assert_eq!(&raw[2..4], &NULLIFIERS);
+		assert_eq!(&raw[4..6], &COMMITMENTS);
+		assert_eq!(raw[6], u32_field(7));
+		assert_eq!(raw[7], u128_field(500));
+		assert_eq!(raw[8], to_field_le(&[0xEE; 32]));
+	}
+
+	#[test]
+	fn a_single_root_key_cannot_attest_to_two_roots() {
+		let s = TransferStatement {
+			merkle_roots: [[0x01; 32], [0x09; 32]],
+			..transfer()
+		};
+		assert!(encode_transfer(&s, InputLayout::Base).is_none());
+		assert!(encode_transfer(&s, InputLayout::MemoBound).is_none());
+	}
+
+	#[test]
+	fn an_unshield_has_no_cross_tree_encoding() {
+		assert!(encode_unshield(&unshield(), InputLayout::CrossTree).is_none());
+	}
+
+	/// `memo_digest` is a blake2 output, so it is reduced mod r rather than
+	/// refused: a 256-bit twin would need a blake2 preimage. Two digests that are
+	/// twins encode the same; two that differ in the field encode differently.
+	#[test]
+	fn memo_digest_twins_encode_the_same_and_distinct_digests_differ() {
+		let digest = [0x11; 32];
+		let twin = field_twin(digest);
+		let encode = |memo_digest| {
+			encode_transfer(
+				&TransferStatement {
+					memo_digest,
+					..transfer()
+				},
+				InputLayout::MemoBound,
+			)
+			.unwrap()
+		};
+		assert_eq!(encode(digest), encode(twin));
+		assert_ne!(encode(digest), encode([0x12; 32]));
+	}
+
+	#[test]
 	fn memo_bound_transfer_appends_the_reduced_memo_digest() {
-		let base = encode_transfer(&transfer(), InputLayout::Base);
-		let bound = encode_transfer(&transfer(), InputLayout::MemoBound);
+		let base = encode_transfer(&transfer(), InputLayout::Base).unwrap();
+		let bound = encode_transfer(&transfer(), InputLayout::MemoBound).unwrap();
 		assert_eq!(bound.len(), TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS);
 		assert_eq!(&bound[..TRANSFER_PUBLIC_INPUTS], &base[..]);
 		assert_eq!(bound[TRANSFER_PUBLIC_INPUTS], to_field_le(&[0xEE; 32]));
@@ -150,18 +223,18 @@ mod tests {
 			..transfer()
 		};
 		assert_eq!(
-			encode_transfer(&transfer(), InputLayout::Base),
-			encode_transfer(&other, InputLayout::Base)
+			encode_transfer(&transfer(), InputLayout::Base).unwrap(),
+			encode_transfer(&other, InputLayout::Base).unwrap()
 		);
 		assert_ne!(
-			encode_transfer(&transfer(), InputLayout::MemoBound),
-			encode_transfer(&other, InputLayout::MemoBound)
+			encode_transfer(&transfer(), InputLayout::MemoBound).unwrap(),
+			encode_transfer(&other, InputLayout::MemoBound).unwrap()
 		);
 	}
 
 	#[test]
 	fn unshield_follows_circuit_order() {
-		let raw = encode_unshield(&unshield(), InputLayout::Base);
+		let raw = encode_unshield(&unshield(), InputLayout::Base).unwrap();
 		assert_eq!(raw.len(), UNSHIELD_PUBLIC_INPUTS);
 		assert_eq!(raw[0], [0x01; 32]);
 		assert_eq!(raw[1], [0x02; 32]);
@@ -174,7 +247,7 @@ mod tests {
 
 	#[test]
 	fn memo_bound_unshield_hashes_the_recipient_and_appends_the_memo_digest() {
-		let raw = encode_unshield(&unshield(), InputLayout::MemoBound);
+		let raw = encode_unshield(&unshield(), InputLayout::MemoBound).unwrap();
 		assert_eq!(raw.len(), UNSHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS);
 		assert_eq!(
 			raw[3],
@@ -187,7 +260,7 @@ mod tests {
 	fn a_recipient_alias_encodes_the_same_only_in_the_base_layout() {
 		let recipient = [0x01; 32];
 		let aliased = UnshieldStatement {
-			recipient: alias(recipient),
+			recipient: field_twin(recipient),
 			..unshield()
 		};
 		let original = UnshieldStatement {
@@ -196,13 +269,13 @@ mod tests {
 		};
 		assert_ne!(original.recipient, aliased.recipient);
 		assert_eq!(
-			encode_unshield(&original, InputLayout::Base),
-			encode_unshield(&aliased, InputLayout::Base),
+			encode_unshield(&original, InputLayout::Base).unwrap(),
+			encode_unshield(&aliased, InputLayout::Base).unwrap(),
 			"v1 cannot tell R from R + r"
 		);
 		assert_ne!(
-			encode_unshield(&original, InputLayout::MemoBound),
-			encode_unshield(&aliased, InputLayout::MemoBound)
+			encode_unshield(&original, InputLayout::MemoBound).unwrap(),
+			encode_unshield(&aliased, InputLayout::MemoBound).unwrap()
 		);
 	}
 
@@ -220,7 +293,8 @@ mod tests {
 					..unshield()
 				},
 				InputLayout::MemoBound,
-			)[3]
+			)
+			.unwrap()[3]
 		};
 		assert_eq!(
 			hex(recipient([0x01; 32])),
@@ -242,7 +316,7 @@ mod tests {
 			..unshield()
 		};
 		for layout in [InputLayout::Base, InputLayout::MemoBound] {
-			let raw = encode_unshield(&max, layout);
+			let raw = encode_unshield(&max, layout).unwrap();
 			assert!(
 				orbinum_zk_verifier::PublicInputs::new(raw)
 					.to_field_elements()
@@ -335,21 +409,7 @@ mod tests {
 		/// this shows the verifier refuses it too.
 		#[test]
 		fn rejects_a_non_canonical_encoding_of_the_commitment() {
-			// BN254 scalar modulus r, little-endian.
-			const R: [u8; 32] = [
-				0x01, 0x00, 0x00, 0xf0, 0x93, 0xf5, 0xe1, 0x43, 0x91, 0x70, 0xb9, 0x79, 0x48, 0xe8,
-				0x33, 0x28, 0x5d, 0x58, 0x81, 0x81, 0xb6, 0x45, 0x50, 0xb8, 0x29, 0xa0, 0x31, 0xe1,
-				0x72, 0x4e, 0x64, 0x30,
-			];
-			let mut shifted = [0u8; 32];
-			let mut carry = 0u16;
-			for i in 0..32 {
-				let sum = COMMITMENT[i] as u16 + R[i] as u16 + carry;
-				shifted[i] = sum as u8;
-				carry = sum >> 8;
-			}
-			assert_eq!(carry, 0, "commitment + r fits 256 bits");
-			assert_eq!(to_field_le(&shifted), COMMITMENT, "same field element");
+			let shifted = super::field_twin(COMMITMENT);
 			assert!(!verifies(ShieldStatement {
 				commitment: shifted,
 				value: 1000,

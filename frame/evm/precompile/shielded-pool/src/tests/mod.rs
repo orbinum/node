@@ -158,8 +158,8 @@ fn encode_shield_with(
 	input
 }
 
-/// `privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)`,
-/// selector `0x66ed2cd4`.
+/// `privateTransfer` with both inputs proven against `merkle_root`, as a
+/// same-tree spend submits it.
 #[allow(clippy::too_many_arguments)]
 fn encode_private_transfer(
 	proof: &[u8],
@@ -171,7 +171,33 @@ fn encode_private_transfer(
 	fee: u128,
 	circuit_version: u32,
 ) -> Vec<u8> {
+	encode_private_transfer_roots(
+		proof,
+		&[merkle_root, merkle_root],
+		nullifiers,
+		commitments,
+		memos,
+		asset_id,
+		fee,
+		circuit_version,
+	)
+}
+
+/// `privateTransfer(bytes,bytes32[],bytes32[],bytes32[],bytes[],uint32,uint256,uint32)`,
+/// selector `0x63d0b9a0`, with any number of roots so malformed counts can be built.
+#[allow(clippy::too_many_arguments)]
+fn encode_private_transfer_roots(
+	proof: &[u8],
+	merkle_roots: &[[u8; 32]],
+	nullifiers: &[[u8; 32]],
+	commitments: &[[u8; 32]],
+	memos: &[Vec<u8>],
+	asset_id: u32,
+	fee: u128,
+	circuit_version: u32,
+) -> Vec<u8> {
 	let proof_enc = encode_bytes(proof);
+	let roots_enc = encode_bytes32_array(merkle_roots);
 	let nullifiers_enc = encode_bytes32_array(nullifiers);
 	let commitments_enc = encode_bytes32_array(commitments);
 	let memos_enc = encode_bytes_array(memos);
@@ -179,14 +205,15 @@ fn encode_private_transfer(
 	// head: 8 slots × 32 = 256 bytes
 	let head_size = 256usize;
 	let off_proof = head_size;
-	let off_nullifiers = off_proof + proof_enc.len();
+	let off_roots = off_proof + proof_enc.len();
+	let off_nullifiers = off_roots + roots_enc.len();
 	let off_commitments = off_nullifiers + nullifiers_enc.len();
 	let off_memos = off_commitments + commitments_enc.len();
 
-	let mut input = vec![0x66, 0xed, 0x2c, 0xd4];
+	let mut input = crate::calls::private_transfer::SELECTOR.to_vec();
 	let mut head = vec![0u8; head_size];
 	head[0..32].copy_from_slice(&u256_word(off_proof));
-	head[32..64].copy_from_slice(&merkle_root);
+	head[32..64].copy_from_slice(&u256_word(off_roots));
 	head[64..96].copy_from_slice(&u256_word(off_nullifiers));
 	head[96..128].copy_from_slice(&u256_word(off_commitments));
 	head[128..160].copy_from_slice(&u256_word(off_memos));
@@ -196,6 +223,7 @@ fn encode_private_transfer(
 
 	input.extend_from_slice(&head);
 	input.extend_from_slice(&proof_enc);
+	input.extend_from_slice(&roots_enc);
 	input.extend_from_slice(&nullifiers_enc);
 	input.extend_from_slice(&commitments_enc);
 	input.extend_from_slice(&memos_enc);

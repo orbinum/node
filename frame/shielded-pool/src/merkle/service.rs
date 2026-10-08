@@ -263,15 +263,23 @@ impl MerkleTreeService {
 			return get_zero_hash_cached(level);
 		}
 		let span = 1u32 << level;
-		let base = tree_id
-			.saturating_mul(cap)
-			.saturating_add(node_index.saturating_mul(span));
+		// Past the tree's capacity the subtree holds none of its leaves: with
+		// `MaxLeavesPerTree` below 2^depth those global indices are the next
+		// tree's.
+		let offset = node_index.saturating_mul(span);
+		if offset >= cap {
+			return get_zero_hash_cached(level);
+		}
+		let base = tree_id.saturating_mul(cap).saturating_add(offset);
 
-		// Read the leaves this node spans. A gap means an empty slot, which the
-		// tree represents with the level-0 zero hash.
+		// Read the leaves this node spans, none past the tree's capacity. A gap
+		// means an empty slot, which the tree represents with the level-0 zero hash.
+		let in_tree = span.min(cap - offset);
 		let mut nodes: Vec<Hash> = (0..span)
 			.map(|i| {
-				MerkleRepository::get_leaf::<T>(base.saturating_add(i))
+				(i < in_tree)
+					.then(|| MerkleRepository::get_leaf::<T>(base.saturating_add(i)))
+					.flatten()
 					.map(|c| c.0)
 					.unwrap_or_else(|| get_zero_hash_cached(0))
 			})
@@ -372,5 +380,36 @@ impl MerkleTreeService {
 				.unwrap_or(0);
 			(next, 1u8, 0u32)
 		})
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::mock::{Test, new_test_ext};
+
+	/// With `MaxLeavesPerTree` below 2^depth, a sealed tree's sibling subtree past
+	/// its capacity spans global leaf indices of the NEXT tree. It must still read
+	/// as empty: those leaves are not this tree's.
+	#[test]
+	fn a_sibling_subtree_past_the_tree_capacity_is_empty() {
+		new_test_ext().execute_with(|| {
+			let cap = <Test as Config>::MaxLeavesPerTree::get();
+			for i in 0..(2 * cap) {
+				MerkleTreeService::insert_leaf::<Test>(Commitment::new([i as u8 + 1; 32])).unwrap();
+			}
+			// Level log2(cap) node 1 of tree 0 would cover global leaves cap..2·cap,
+			// all of them tree 1's.
+			let level = cap.trailing_zeros() as usize;
+			assert_eq!(
+				MerkleTreeService::subtree_root::<Test>(0, level, 1, cap),
+				get_zero_hash_cached(level)
+			);
+			// Inside the tree the subtree is the leaves' own fold, not zero.
+			assert_ne!(
+				MerkleTreeService::subtree_root::<Test>(0, level, 0, cap),
+				get_zero_hash_cached(level)
+			);
+		});
 	}
 }

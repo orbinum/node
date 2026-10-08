@@ -23,7 +23,8 @@ pub const TRANSFER_OUTPUTS: usize = 2;
 /// the circuit skips.
 #[derive(CloneNoBound, PartialEqNoBound, EqNoBound, DebugNoBound)]
 pub struct TransferRequest<T: Config> {
-	pub merkle_root: [u8; 32],
+	/// The root each input is proven against, in input order.
+	pub merkle_roots: [[u8; 32]; TRANSFER_INPUTS],
 	pub nullifiers: BoundedVec<Nullifier, ConstU32<2>>,
 	pub commitments: BoundedVec<Commitment, ConstU32<2>>,
 	/// One per commitment, in the same order.
@@ -38,7 +39,7 @@ impl<T: Config> TransferRequest<T> {
 	/// What the proof attests to.
 	pub fn statement(&self) -> TransferStatement {
 		TransferStatement {
-			merkle_root: self.merkle_root,
+			merkle_roots: self.merkle_roots,
 			nullifiers: self.nullifiers.iter().map(|n| n.0).collect(),
 			commitments: self.commitments.iter().map(|c| c.0).collect(),
 			asset_id: self.asset_id,
@@ -55,6 +56,25 @@ impl<T: Config> TransferRequest<T> {
 	/// The inputs that spend a real note: every nullifier but the zero dummy.
 	pub(crate) fn real_nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
 		self.nullifiers.iter().filter(|n| n.0 != [0u8; 32])
+	}
+
+	/// The roots are sound: each one is known, and a dummy input repeats the
+	/// real input's root. The circuit leaves a dummy's root free, so without the
+	/// second rule that slot would carry a value of the submitter's choosing.
+	/// Roots differ only when both inputs are real, each from its own tree.
+	pub(crate) fn ensure_roots(&self) -> Result<(), Error<T>> {
+		let [root0, root1] = &self.merkle_roots;
+		let has_dummy = self.real_nullifiers().count() < TRANSFER_INPUTS;
+		ensure!(
+			root0 == root1 || !has_dummy,
+			Error::<T>::InvalidPublicSignals
+		);
+		ensure!(
+			MerkleRepository::is_known_root::<T>(root0)
+				&& (root0 == root1 || MerkleRepository::is_known_root::<T>(root1)),
+			Error::<T>::UnknownMerkleRoot
+		);
+		Ok(())
 	}
 }
 
@@ -98,10 +118,7 @@ impl PrivateTransferOperation {
 			req.fee >= T::Relayer::min_relay_fee().saturated_into(),
 			Error::<T>::FeeTooLow
 		);
-		ensure!(
-			MerkleRepository::is_known_root::<T>(&req.merkle_root),
-			Error::<T>::UnknownMerkleRoot
-		);
+		req.ensure_roots()?;
 
 		for nullifier in req.real_nullifiers() {
 			ensure!(nullifier.is_canonical(), Error::<T>::InvalidPublicSignals);

@@ -43,7 +43,7 @@ pub(crate) fn compute_effective_min_fee(min_fee_planck: u128, base_fee_wei: u128
 /// ```text
 ///  bytes [0..4]     selector
 ///  bytes [4..36]    slot 0  — offset pointer for proof (bytes/dynamic)
-///  bytes [36..68]   slot 1  — bytes32  root
+///  bytes [36..68]   slot 1  — bytes32  root       / bytes32[] roots offset
 ///  bytes [68..100]  slot 2  — bytes32  nullifier  / bytes32[] nullifiers offset
 ///  bytes [100..132] slot 3  — uint32   asset_id   / bytes32[] commits offset
 ///  bytes [132..164] slot 4  — uint256  amount     / bytes[]   memos offset

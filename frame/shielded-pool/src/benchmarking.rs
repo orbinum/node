@@ -173,10 +173,12 @@ mod benchmarks {
 	#[benchmark]
 	fn private_transfer() {
 		let (_caller, _) = setup_benchmark_env::<T>();
-		let merkle_root = [1u8; 32];
-
-		// Setup valid root in storage
-		crate::storage::MerkleRepository::add_historic_poseidon_root::<T>(merkle_root);
+		// Two notes from two sealed trees: each root misses the active and
+		// historic lookups and is found last, in `SealedRootIndex`.
+		let merkle_roots = [[1u8; 32], [2u8; 32]];
+		for (tree_id, root) in (0u32..).zip(merkle_roots) {
+			crate::storage::MerkleRepository::insert_sealed_root::<T>(tree_id, root);
+		}
 
 		let proof: Proof = vec![0u8; 128].try_into().unwrap();
 
@@ -207,7 +209,7 @@ mod benchmarks {
 		// Must be >= T::Relayer::min_relay_fee() to pass the FeeTooLow check.
 		let fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
 		let op_hash = crate::operations::private_transfer::TransferRequest::<T> {
-			merkle_root,
+			merkle_roots,
 			nullifiers: nullifiers.clone(),
 			commitments: commitments.clone(),
 			memos: encrypted_memos.clone(),
@@ -222,7 +224,7 @@ mod benchmarks {
 		private_transfer(
 			crate::RawOrigin::Relayed(relayer),
 			proof,
-			merkle_root,
+			merkle_roots,
 			nullifiers,
 			commitments,
 			encrypted_memos,

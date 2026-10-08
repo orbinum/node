@@ -4,6 +4,31 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-08
+
+### Changed
+
+- **Breaking:** `private_transfer` takes `merkle_roots: [Hash; 2]` in place of
+  `merkle_root` — one root per input, so two notes from different trees can be
+  spent together (transfer circuit v3). `transaction_version` moves.
+- Every root must be known (active, recent or sealed); otherwise
+  `UnknownMerkleRoot`, at dispatch and at pool admission (code 1).
+- A dummy input's root must repeat the real input's (the circuit leaves it
+  free); otherwise `InvalidPublicSignals`, at pool admission code 13. Equal
+  roots are looked up once.
+- The `private_transfer` benchmark spends from two sealed trees, the costliest
+  root lookups; weights need regenerating.
+- `transfer_op_hash` hashes both roots, for every circuit version.
+
+### Fixed
+
+- Merkle paths of a sealed tree when `MaxLeavesPerTree` is below 2^depth: the
+  pruned siblings were recomputed from global leaf indices past the tree's
+  capacity, which belong to the next tree, so once that tree held leaves the
+  path no longer matched the sealed root. A subtree past the capacity now reads
+  as empty. Production uses 2^20 = 2^depth and was not affected; test and dev
+  configurations with small trees were.
+
 ## [0.21.0] - 2026-10-05
 
 A shield must prove its note is worth exactly the deposit. Closes AL-1: a deposit

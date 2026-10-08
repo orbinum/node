@@ -44,7 +44,7 @@ fn execute_works_single_note() {
 		assert_ok!(PrivateTransferOperation::execute::<Test>(
 			&proof(),
 			TransferRequest {
-				merkle_root: KNOWN_ROOT,
+				merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 				nullifiers: one_input(0x01),
 				commitments: two_outputs(0x02),
 				memos: memos_of(2),
@@ -64,7 +64,7 @@ fn execute_works_two_notes() {
 		assert_ok!(PrivateTransferOperation::execute::<Test>(
 			&proof(),
 			TransferRequest {
-				merkle_root: KNOWN_ROOT,
+				merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 				nullifiers: nullifiers_of(&[0xA1, 0xA2]),
 				commitments: commitments_of(&[0xB1, 0xB2]),
 				memos: memos_of(2),
@@ -76,6 +76,173 @@ fn execute_works_two_notes() {
 	});
 }
 
+/// Two notes from two trees: one proven against a sealed tree's final root, the
+/// other against the active tree. Both are spent, and both roots reach the
+/// verifier in input order (nothing does under `skip-proof-verification`).
+#[test]
+fn execute_spends_notes_from_two_trees() {
+	new_test_ext().execute_with(|| {
+		let sealed = [0x5E; 32];
+		MerkleRepository::insert_sealed_root::<Test>(0, sealed);
+		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+
+		assert_ok!(PrivateTransferOperation::execute::<Test>(
+			&proof(),
+			TransferRequest {
+				merkle_roots: [sealed, KNOWN_ROOT],
+				nullifiers: nullifiers_of(&[0xA1, 0xA2]),
+				commitments: commitments_of(&[0xB1, 0xB2]),
+				memos: memos_of(2),
+				asset_id: 0u32,
+				fee: 0u128,
+				circuit_version: 3,
+			},
+		));
+		for seed in [0xA1, 0xA2] {
+			assert!(NullifierRepository::is_used::<Test>(&nullifier(seed)));
+		}
+		#[cfg(not(feature = "skip-proof-verification"))]
+		{
+			use crate::mock::{VerifiedStatement, verified_statements};
+			let Some(VerifiedStatement::Transfer(statement, Some(3))) = verified_statements().pop()
+			else {
+				panic!("the transfer statement was not verified");
+			};
+			assert_eq!(statement.merkle_roots, [sealed, KNOWN_ROOT]);
+		}
+	});
+}
+
+/// Two real inputs may come from two trees, but each root must be known.
+#[test]
+fn execute_rejects_an_unknown_root_in_either_slot() {
+	new_test_ext().execute_with(|| {
+		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+		for roots in [[KNOWN_ROOT, [0xFF; 32]], [[0xFF; 32], KNOWN_ROOT]] {
+			assert_noop!(
+				PrivateTransferOperation::execute::<Test>(
+					&proof(),
+					TransferRequest {
+						merkle_roots: roots,
+						nullifiers: nullifiers_of(&[0xA1, 0xA2]),
+						commitments: two_outputs(0x02),
+						memos: memos_of(2),
+						asset_id: 0u32,
+						fee: 0u128,
+						circuit_version: 3,
+					},
+				),
+				Error::<Test>::UnknownMerkleRoot
+			);
+		}
+	});
+}
+
+/// The circuit leaves a dummy input's root free, so the pallet pins it to the
+/// real input's: neither another known root (a sealed tree's) nor an unknown
+/// one is accepted, whichever slot the dummy takes.
+#[test]
+fn execute_rejects_a_dummy_root_that_differs_from_the_real_one() {
+	new_test_ext().execute_with(|| {
+		let sealed = [0x5E; 32];
+		MerkleRepository::insert_sealed_root::<Test>(0, sealed);
+		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+		let dummy_second = one_input(0x01);
+		let dummy_first: BoundedVec<Nullifier, ConstU32<2>> =
+			BoundedVec::try_from(vec![Nullifier::new([0u8; 32]), nullifier(0x01)]).unwrap();
+		for (nullifiers, roots) in [
+			(dummy_second.clone(), [KNOWN_ROOT, sealed]),
+			(dummy_second, [KNOWN_ROOT, [0xFF; 32]]),
+			(dummy_first.clone(), [sealed, KNOWN_ROOT]),
+			(dummy_first, [[0xFF; 32], KNOWN_ROOT]),
+		] {
+			assert_noop!(
+				PrivateTransferOperation::execute::<Test>(
+					&proof(),
+					TransferRequest {
+						merkle_roots: roots,
+						nullifiers,
+						commitments: two_outputs(0x02),
+						memos: memos_of(2),
+						asset_id: 0u32,
+						fee: 0u128,
+						circuit_version: 3,
+					},
+				),
+				Error::<Test>::InvalidPublicSignals
+			);
+		}
+	});
+}
+
+/// `ensure_roots` over every shape: which slot is the dummy, equal or distinct
+/// roots, known or unknown, and two dummies.
+#[test]
+fn ensure_roots_covers_every_shape() {
+	new_test_ext().execute_with(|| {
+		let sealed = [0x5E; 32];
+		let unknown = [0xFF; 32];
+		MerkleRepository::insert_sealed_root::<Test>(0, sealed);
+		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+		let dummy = Nullifier::new([0u8; 32]);
+		let shape = |nullifiers: [Nullifier; 2], merkle_roots| TransferRequest::<Test> {
+			merkle_roots,
+			nullifiers: BoundedVec::try_from(nullifiers.to_vec()).unwrap(),
+			commitments: two_outputs(0x02),
+			memos: memos_of(2),
+			asset_id: 0u32,
+			fee: 0u128,
+			circuit_version: 3,
+		};
+		let (a, b) = (nullifier(0x01), nullifier(0x02));
+		for (nullifiers, roots, expected) in [
+			([a, b], [KNOWN_ROOT, KNOWN_ROOT], Ok(())),
+			([a, b], [sealed, KNOWN_ROOT], Ok(())),
+			(
+				[a, b],
+				[KNOWN_ROOT, unknown],
+				Err(Error::<Test>::UnknownMerkleRoot),
+			),
+			(
+				[a, b],
+				[unknown, unknown],
+				Err(Error::<Test>::UnknownMerkleRoot),
+			),
+			([a, dummy], [KNOWN_ROOT, KNOWN_ROOT], Ok(())),
+			([dummy, b], [sealed, sealed], Ok(())),
+			(
+				[a, dummy],
+				[KNOWN_ROOT, sealed],
+				Err(Error::<Test>::InvalidPublicSignals),
+			),
+			(
+				[dummy, b],
+				[unknown, KNOWN_ROOT],
+				Err(Error::<Test>::InvalidPublicSignals),
+			),
+			(
+				[a, dummy],
+				[unknown, unknown],
+				Err(Error::<Test>::UnknownMerkleRoot),
+			),
+			(
+				[dummy, dummy],
+				[KNOWN_ROOT, sealed],
+				Err(Error::<Test>::InvalidPublicSignals),
+			),
+		] {
+			let expected: Result<(), Error<Test>> = expected;
+			assert_eq!(
+				shape(nullifiers, roots)
+					.ensure_roots()
+					.map_err(sp_runtime::DispatchError::from),
+				expected.map_err(sp_runtime::DispatchError::from),
+				"{nullifiers:?} {roots:?}"
+			);
+		}
+	});
+}
+
 #[test]
 fn execute_unknown_root_fails() {
 	new_test_ext().execute_with(|| {
@@ -84,7 +251,7 @@ fn execute_unknown_root_fails() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: [0xFFu8; 32],
+					merkle_roots: [[0xFFu8; 32], [0xFFu8; 32]],
 					nullifiers: one_input(0x01),
 					commitments: two_outputs(0x02),
 					memos: memos_of(2),
@@ -109,7 +276,7 @@ fn execute_nullifier_already_used_fails() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: one_input(0x20),
 					commitments: two_outputs(0x30),
 					memos: memos_of(2),
@@ -134,7 +301,7 @@ fn execute_two_equal_nullifiers_fails() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: nullifiers_of(&[0x20, 0x20]),
 					commitments: commitments_of(&[0x30, 0x31]),
 					memos: memos_of(2),
@@ -158,7 +325,7 @@ fn execute_memo_commitment_mismatch_fails() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: nullifiers_of(&[0xA1, 0xA2]),
 					commitments: commitments_of(&[0xB1, 0xB2]),
 					memos: memos_of(1), // mismatch: 1 ≠ 2
@@ -185,7 +352,7 @@ fn execute_invalid_memo_size_fails() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: one_input(0x01),
 					commitments: two_outputs(0x02),
 					memos,
@@ -212,7 +379,7 @@ fn execute_marks_nullifiers_used() {
 		assert_ok!(PrivateTransferOperation::execute::<Test>(
 			&proof(),
 			TransferRequest {
-				merkle_root: KNOWN_ROOT,
+				merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 				nullifiers: nullifiers_of(&[0xC1, 0xC2]),
 				commitments: commitments_of(&[0xD1, 0xD2]),
 				memos: memos_of(2),
@@ -238,7 +405,7 @@ fn execute_stores_commitment_memos() {
 		assert_ok!(PrivateTransferOperation::execute::<Test>(
 			&proof(),
 			TransferRequest {
-				merkle_root: KNOWN_ROOT,
+				merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 				nullifiers: one_input(0xE0),
 				commitments: two_outputs(0xE1),
 				memos: memos_of(2),
@@ -263,7 +430,7 @@ fn execute_emits_private_transfer_event() {
 		assert_ok!(PrivateTransferOperation::execute::<Test>(
 			&proof(),
 			TransferRequest {
-				merkle_root: KNOWN_ROOT,
+				merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 				nullifiers: nullifiers.clone(),
 				commitments: commitments.clone(),
 				memos: memos_of(2),
@@ -306,7 +473,7 @@ fn execute_accumulates_fee_to_block_author_when_nonzero() {
 		assert_ok!(PrivateTransferOperation::execute::<Test>(
 			&proof(),
 			TransferRequest {
-				merkle_root: KNOWN_ROOT,
+				merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 				nullifiers: one_input(0x10),
 				commitments: two_outputs(0x11),
 				memos: memos_of(2),
@@ -330,7 +497,7 @@ fn execute_no_fee_accumulated_when_zero() {
 		assert_ok!(PrivateTransferOperation::execute::<Test>(
 			&proof(),
 			TransferRequest {
-				merkle_root: KNOWN_ROOT,
+				merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 				nullifiers: one_input(0x12),
 				commitments: two_outputs(0x13),
 				memos: memos_of(2),
@@ -381,7 +548,7 @@ fn execute_with_dummy_nullifier_only_real_inserted() {
 		assert_ok!(PrivateTransferOperation::execute::<Test>(
 			&proof(),
 			TransferRequest {
-				merkle_root: KNOWN_ROOT,
+				merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 				nullifiers,
 				commitments: commitments_of(&[0x56, 0x57]),
 				memos: memos_of(2),
@@ -416,7 +583,7 @@ fn execute_dummy_nullifier_not_rejected_as_double_spend() {
 		assert_ok!(PrivateTransferOperation::execute::<Test>(
 			&proof(),
 			TransferRequest {
-				merkle_root: KNOWN_ROOT,
+				merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 				nullifiers: nullifiers_tx1,
 				commitments: commitments_of(&[0x62, 0x63]),
 				memos: memos_of(2),
@@ -430,7 +597,7 @@ fn execute_dummy_nullifier_not_rejected_as_double_spend() {
 		assert_ok!(PrivateTransferOperation::execute::<Test>(
 			&proof(),
 			TransferRequest {
-				merkle_root: KNOWN_ROOT,
+				merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 				nullifiers: nullifiers_tx2,
 				commitments: commitments_of(&[0x72, 0x73]),
 				memos: memos_of(2),
@@ -457,7 +624,7 @@ fn execute_rejects_all_dummy_nullifiers() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers,
 					commitments: commitments_of(&[0x10, 0x11]),
 					memos: memos_of(2),
@@ -483,7 +650,7 @@ fn execute_nullifier_commitment_count_mismatch_fails() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: nullifiers_of(&[0xF1]),         // 1 nullifier
 					commitments: commitments_of(&[0xF2, 0xF3]), // 2 commitments
 					memos: memos_of(2),
@@ -523,7 +690,7 @@ fn transfer_preserves_pool_ledger() {
 		assert_ok!(PrivateTransferOperation::execute::<Test>(
 			&proof(),
 			TransferRequest {
-				merkle_root: KNOWN_ROOT,
+				merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 				nullifiers: one_input(0x40),
 				commitments: two_outputs(0x41),
 				memos: memos_of(2),
@@ -561,7 +728,7 @@ fn transfer_fee_follows_the_relay_commit() {
 		let nullifiers = one_input(0x70);
 		let commitments = two_outputs(0x71);
 		let op_hash = TransferRequest::<Test> {
-			merkle_root: KNOWN_ROOT,
+			merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 			nullifiers: nullifiers.clone(),
 			commitments: commitments.clone(),
 			memos: memos_of(2),
@@ -576,7 +743,7 @@ fn transfer_fee_follows_the_relay_commit() {
 		assert_ok!(PrivateTransferOperation::execute::<Test>(
 			&proof(),
 			TransferRequest {
-				merkle_root: KNOWN_ROOT,
+				merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 				nullifiers,
 				commitments,
 				memos: memos_of(2),
@@ -591,7 +758,7 @@ fn transfer_fee_follows_the_relay_commit() {
 		assert_ok!(PrivateTransferOperation::execute::<Test>(
 			&proof(),
 			TransferRequest {
-				merkle_root: KNOWN_ROOT,
+				merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 				nullifiers: one_input(0x72),
 				commitments: two_outputs(0x73),
 				memos: memos_of(2),
@@ -615,7 +782,7 @@ fn transfer_nonzero_fee_without_recipient_errors() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: one_input(0x80),
 					commitments: two_outputs(0x81),
 					memos: memos_of(2),
@@ -643,7 +810,7 @@ fn transfer_frozen_asset_fails() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: one_input(0x90),
 					commitments: two_outputs(0x91),
 					memos: memos_of(2),
@@ -667,7 +834,7 @@ fn transfer_unknown_asset_fails() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: one_input(0x92),
 					commitments: two_outputs(0x93),
 					memos: memos_of(2),
@@ -706,7 +873,7 @@ fn attack_same_nullifier_twice_in_one_extrinsic_is_refused() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: nulls,
 					commitments: commitments_of(&[0xC1, 0xC2]),
 					memos: memos_of(2),
@@ -737,7 +904,7 @@ fn attack_two_dummy_nullifiers_cannot_mint_free_leaves() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: nulls,
 					commitments: commitments_of(&[0xD1, 0xD2]),
 					memos: memos_of(2),
@@ -760,7 +927,7 @@ fn attack_replaying_a_spent_nullifier_is_refused() {
 		assert_ok!(PrivateTransferOperation::execute::<Test>(
 			&proof(),
 			TransferRequest {
-				merkle_root: KNOWN_ROOT,
+				merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 				nullifiers: one_input(0x51),
 				commitments: two_outputs(0x52),
 				memos: memos_of(2),
@@ -775,7 +942,7 @@ fn attack_replaying_a_spent_nullifier_is_refused() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: one_input(0x51),
 					commitments: two_outputs(0x53),
 					memos: memos_of(2),
@@ -814,7 +981,7 @@ fn attack_non_canonical_nullifier_is_refused() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: nulls,
 					commitments: two_outputs(0xE1),
 					memos: memos_of(2),
@@ -848,7 +1015,7 @@ fn attack_non_canonical_commitment_is_refused() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: one_input(0x61),
 					commitments: comms,
 					memos: memos_of(2),
@@ -873,7 +1040,7 @@ fn attack_unknown_merkle_root_is_refused() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: [0xEEu8; 32], // never added
+					merkle_roots: [[0xEEu8; 32], [0xEEu8; 32]], // never added
 					nullifiers: one_input(0x71),
 					commitments: two_outputs(0x72),
 					memos: memos_of(2),
@@ -898,7 +1065,7 @@ fn attack_more_commitments_than_nullifiers_is_refused() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: nullifiers_of(&[0x81]),         // 1 input
 					commitments: commitments_of(&[0x82, 0x83]), // 2 outputs
 					memos: memos_of(2),
@@ -924,7 +1091,7 @@ fn attack_memo_count_mismatch_is_refused() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: nullifiers_of(&[0x91, 0x92]),
 					commitments: commitments_of(&[0x93, 0x94]),
 					memos: memos_of(1), // one memo for two outputs
@@ -953,7 +1120,7 @@ fn attack_undersized_memo_is_refused() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: one_input(0xA9),
 					commitments: two_outputs(0xAA),
 					memos,
@@ -982,7 +1149,7 @@ fn attack_zero_commitment_is_refused() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: one_input(0xB9),
 					commitments: comms,
 					memos: memos_of(2),
@@ -1012,7 +1179,7 @@ fn attack_fee_below_minimum_is_refused_without_spending_the_nullifier() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: one_input(0xC9),
 					commitments: two_outputs(0xCA),
 					memos: memos_of(2),
@@ -1057,7 +1224,7 @@ fn attack_duplicate_commitments_in_one_call_cannot_take_two_leaves() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: nullifiers_of(&[0xF2, 0xF3]),
 					commitments: comms,
 					memos: memos_of(2),
@@ -1109,7 +1276,7 @@ fn attack_memo_contents_never_gate_admission() {
 			assert_ok!(PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: one_input(seed),
 					commitments: two_outputs(seed + 1),
 					memos,
@@ -1126,7 +1293,7 @@ fn attack_memo_contents_never_gate_admission() {
 
 fn request(seeds: [u8; 2]) -> TransferRequest<Test> {
 	TransferRequest {
-		merkle_root: KNOWN_ROOT,
+		merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 		nullifiers: nullifiers_of(&[seeds[0], seeds[0] + 1]),
 		commitments: commitments_of(&[seeds[1], seeds[1] + 1]),
 		memos: vec![memo(0xA1), memo(0xA2)].try_into().unwrap(),
@@ -1139,7 +1306,7 @@ fn request(seeds: [u8; 2]) -> TransferRequest<Test> {
 fn transfer_call(req: &TransferRequest<Test>) -> crate::Call<Test> {
 	crate::Call::<Test>::private_transfer {
 		proof: proof(),
-		merkle_root: req.merkle_root,
+		merkle_roots: req.merkle_roots,
 		nullifiers: req.nullifiers.clone(),
 		commitments: req.commitments.clone(),
 		encrypted_memos: req.memos.clone(),
@@ -1276,7 +1443,7 @@ fn a_one_in_one_out_transfer_is_refused() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: nullifiers_of(&[0x01]),
 					commitments: commitments_of(&[0x02]),
 					memos: memos_of(1),
@@ -1303,7 +1470,7 @@ fn an_invalid_proof_fails_at_dispatch_and_changes_nothing() {
 			PrivateTransferOperation::execute::<Test>(
 				&proof(),
 				TransferRequest {
-					merkle_root: KNOWN_ROOT,
+					merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
 					nullifiers: one_input(0x01),
 					commitments: two_outputs(0x02),
 					memos: memos_of(2),

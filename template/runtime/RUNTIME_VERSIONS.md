@@ -20,11 +20,15 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
-### spec 18 — tx 5 — [Unreleased]
+### spec 18 — tx 6 — [Unreleased]
 
-Governance can require a minimum node version from block authors.
-`transaction_version` stays: validator-set only gains calls 6 and 7. Ships with
-`orbinum-runtime` / `orbinum-node` 0.4.0 and `pallet-validator-set` 0.4.0;
+Governance can require a minimum node version from block authors, and a private
+transfer can spend two notes from different trees. `transaction_version` moves:
+`private_transfer` (call 1) takes `merkle_roots: [Hash; 2]` in place of
+`merkle_root`. Validator-set only gains calls 6 and 7. Ships with
+`orbinum-runtime` / `orbinum-node` 0.4.0, `pallet-validator-set` 0.4.0,
+`pallet-shielded-pool` 0.22.0, `pallet-zk-verifier` 0.15.0,
+`orbinum-zk-verifier` 3.0.0 and `pallet-evm-precompile-shielded-pool` 0.9.0;
 node 0.4.0 is the first binary that declares its version.
 
 #### 1 · Minimum author version
@@ -42,6 +46,57 @@ authoring a block without one, drops them.
 
 Old binaries run spec 18 unchanged (no new host function). Setting a minimum is
 what removes them from authoring; they keep importing and voting in GRANDPA.
+
+#### 2 · Transfer across trees (circuit 1, v3)
+
+The transfer circuit proved both inputs against one root, so two notes from
+different trees of the forest could not be spent together and wallets had to
+consolidate first. Transfer v3 (9 public inputs: `merkle_roots[0..1]`, then the
+v2 inputs) proves each input against its own root.
+
+- **Call:** `private_transfer` takes `merkle_roots: [Hash; 2]`, in input order.
+  Every root must be known (active, recent or a sealed tree's final root). The
+  circuit leaves a dummy input's root free, so the pallet requires it to repeat
+  the real input's (`InvalidPublicSignals`, pool code 13).
+- **Older keys:** a v1 or v2 key attests to one root, so a spend whose roots
+  differ fails verification under it (`ProofVerificationFailed`). Same-tree spends
+  submit `[r, r]` and verify under any version.
+- **zk-verifier:** a transfer key of 9 inputs registers as the cross-tree layout;
+  an unshield key of 9 is still refused. `verification_weight` covers 9 inputs.
+- **Relay op hash:** `transfer_op_hash` hashes both roots, for every version.
+- **EVM precompile:** `privateTransfer(bytes,bytes32[],bytes32[],bytes32[],bytes[],uint32,uint256,uint32)`,
+  selector `0x63d0b9a0`; slot 1 becomes the offset of a two-root array, the fee
+  stays at slot 6. The single-root selector `0x66ed2cd4` is gone. If
+  `pallet_relayer::AllowedSelectors` is set on the chain, Root adds the new one.
+
+**Also:** sealed-tree Merkle paths no longer read leaves of the next tree when
+`MaxLeavesPerTree` is below 2^20 (not the case on testnet; found with 8-leaf test
+trees).
+
+#### 3 · Canonical spending key (transfer v3, unshield v3)
+
+Transfer v1/v2 and unshield v1/v2 accept spending keys that are not reduced
+modulo the Baby JubJub subgroup order, so one note admits several valid
+nullifiers. Transfer v3 and unshield v3 (`@orbinum/circuits`, `SpendingKeyOwner`)
+require a canonical key, which gives each note exactly one nullifier. No runtime
+code changes: unshield v3 keeps the 8-input memo-bound layout of v2. The fix is
+in the keys, so **transfer v2 and unshield v2 must be retired as soon as v3 is
+active.**
+
+**After the upgrade, by Root:** register the v3 keys from `@orbinum/circuits`
+**0.17.1** (release ceremony, beacon = testnet block #1190708), activate both with
+`set_active`, then `retire_version(1, 2)` and `retire_version(2, 2)`.
+
+| Circuit | Version | `vk_hash` |
+|---|---|---|
+| transfer (1) | 3 | `0x04e05d74b320601fe1630ffa5b07c617117340c71d9f8d7b639a479f621a769a` |
+| unshield (2) | 3 | `0x24fb6a97b53300b2cf2effa83547ac5a913c0b83f99788dd428ce54498f4e9f8` |
+
+Do **not** register the v3 keys of circuits 0.17.0: they come from a development
+ceremony. Until v3 is registered, same-tree transfers keep working under v2 and
+cross-tree ones are refused. Clients
+(`@orbinum/protocol`, wallet-sdk, app) ship with the upgrade: the new
+transaction version invalidates the old call encoding.
 
 ### spec 17 — tx 5 — [Unreleased]
 

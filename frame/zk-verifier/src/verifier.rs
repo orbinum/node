@@ -15,17 +15,18 @@ use orbinum_zk_verifier::{Bn254, InputLayout, PreparedVerifyingKey, VerifyingKey
 /// Verify a proof of a circuit statement, encoded for the layout of the key it
 /// is checked against.
 ///
-/// Returns `(valid, resolved_version)`. A key whose arity fits neither of the
-/// circuit's layouts, or inputs that do not fill it, are `valid = false`.
+/// Returns `(valid, resolved_version)`. A key whose arity fits none of the
+/// circuit's layouts, a statement the key cannot attest to (`encode` returns
+/// `None`), or inputs that do not fill it, are `valid = false`.
 pub fn verify_statement<T: Config>(
 	circuit_id: CircuitId,
 	version: Option<u32>,
 	proof: &[u8],
-	encode: impl FnOnce(InputLayout) -> Vec<[u8; 32]>,
+	encode: impl FnOnce(InputLayout) -> Option<Vec<[u8; 32]>>,
 ) -> Result<(bool, u32), sp_runtime::DispatchError> {
 	check::<T>(circuit_id, version, proof, |arity| {
 		let layout = input_layout(u8::try_from(circuit_id.0).ok()?, arity)?;
-		Some(encode(layout)).filter(|raw| raw.len() == arity)
+		encode(layout).filter(|raw| raw.len() == arity)
 	})
 }
 
@@ -148,10 +149,10 @@ mod tests {
 	fn encoder(
 		seen: &mut Option<InputLayout>,
 		len: usize,
-	) -> impl FnOnce(InputLayout) -> Vec<[u8; 32]> + '_ {
+	) -> impl FnOnce(InputLayout) -> Option<Vec<[u8; 32]>> + '_ {
 		move |layout| {
 			*seen = Some(layout);
-			vec![[0x02; 32]; len]
+			Some(vec![[0x02; 32]; len])
 		}
 	}
 
@@ -198,16 +199,28 @@ mod tests {
 		});
 	}
 
+	/// An encoder that cannot attest to the statement fails the proof without
+	/// a pairing, and the attempt is still counted.
+	#[test]
+	fn a_statement_the_key_cannot_attest_to_fails_and_is_counted() {
+		new_test_ext().execute_with(|| {
+			insert_vk(CircuitId::TRANSFER, 1, BASE);
+			let res = verify_statement::<Test>(CircuitId::TRANSFER, Some(1), &proof(), |_| None);
+			assert_eq!(res, Ok((false, 1)));
+			assert_eq!(stats(CircuitId::TRANSFER, 1), (1, 0, 1));
+		});
+	}
+
 	#[test]
 	fn a_key_of_foreign_arity_fails_without_encoding() {
 		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::TRANSFER, 1, BASE + 2);
+			insert_vk(CircuitId::TRANSFER, 1, BASE + 3);
 			let mut seen = None;
 			let res = verify_statement::<Test>(
 				CircuitId::TRANSFER,
 				Some(1),
 				&proof(),
-				encoder(&mut seen, BASE + 2),
+				encoder(&mut seen, BASE + 3),
 			);
 			assert_eq!(res, Ok((false, 1)));
 			assert_eq!(seen, None);

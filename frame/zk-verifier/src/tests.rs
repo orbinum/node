@@ -163,6 +163,49 @@ fn register_vk_accepts_the_memo_bound_arity_next_to_the_base_one() {
 	});
 }
 
+/// A transfer that proves each input against its own root takes one input more
+/// than the memo-bound layout; an unshield has a single input and no such layout.
+#[test]
+fn register_vk_accepts_the_cross_tree_arity_for_a_transfer_only() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(register(
+			CircuitId::TRANSFER,
+			3,
+			real_vk(TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS + 1)
+		));
+		assert_noop!(
+			register(
+				CircuitId::UNSHIELD,
+				3,
+				real_vk(UNSHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS + 1)
+			),
+			Error::<Test>::InvalidVerificationKey
+		);
+	});
+}
+
+/// A rotation that keeps the layout: unshield v3 (canonical spending key) has
+/// the same 8 inputs as v2, so it registers and activates like any later
+/// memo-bound version.
+#[test]
+fn register_vk_accepts_a_memo_bound_rotation_at_the_same_arity() {
+	new_test_ext().execute_with(|| {
+		let arity = UNSHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS;
+		assert_ok!(register(CircuitId::UNSHIELD, 2, real_vk(arity)));
+		assert_ok!(register(CircuitId::UNSHIELD, 3, real_vk(arity)));
+		assert_ok!(ZkVerifier::set_active_version(
+			root().into(),
+			CircuitId::UNSHIELD,
+			3
+		));
+		assert_ok!(ZkVerifier::retire_version(
+			root().into(),
+			CircuitId::UNSHIELD,
+			2
+		));
+	});
+}
+
 /// An identity `gamma_abc` point would leave its public input unbound.
 #[test]
 fn register_vk_rejects_a_point_at_infinity() {
@@ -270,9 +313,14 @@ fn v1_rotates_to_memo_bound_v2_by_extrinsic() {
 #[test]
 fn register_vk_rejects_wrong_arity() {
 	new_test_ext().execute_with(|| {
-		// TRANSFER takes its base arity or base + memo_hash; anything else is rejected.
+		// TRANSFER takes its base arity, memo-bound (+1) or cross-tree (+2);
+		// anything else is rejected.
 		assert_noop!(
-			register(CircuitId::TRANSFER, 1, real_vk(TRANSFER_PUBLIC_INPUTS + 2)),
+			register(CircuitId::TRANSFER, 1, real_vk(TRANSFER_PUBLIC_INPUTS + 3)),
+			Error::<Test>::InvalidVerificationKey
+		);
+		assert_noop!(
+			register(CircuitId::UNSHIELD, 1, real_vk(UNSHIELD_PUBLIC_INPUTS + 2)),
 			Error::<Test>::InvalidVerificationKey
 		);
 		// The matching arity is accepted.
@@ -1466,7 +1514,7 @@ fn genesis_rejects_a_valid_key_with_the_wrong_arity() {
 	let _ = pallet::GenesisConfig::<Test> {
 		verification_keys: vec![(
 			CircuitId::TRANSFER,
-			real_vk(TRANSFER_PUBLIC_INPUTS + 2).into_inner(),
+			real_vk(TRANSFER_PUBLIC_INPUTS + 3).into_inner(),
 		)],
 		_phantom: Default::default(),
 	}

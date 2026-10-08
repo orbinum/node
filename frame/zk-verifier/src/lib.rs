@@ -13,8 +13,9 @@
 //! ## Key rotation
 //!
 //! A known circuit's first version may use its base input layout; every later
-//! version must be memo-bound. Rotation is done by Root: register the new
-//! version, `set_active_version`, then `retire_version` the old one.
+//! version must be memo-bound, and a transfer may also be cross-tree (one root
+//! per input). Rotation is done by Root: register the new version,
+//! `set_active_version`, then `retire_version` the old one.
 //!
 //! ## Usage
 //!
@@ -273,11 +274,15 @@ pub mod pallet {
 		///
 		/// SECURITY INVARIANT: a new version of an EXISTING circuit id must accept
 		/// the same notes under rules at least as strict: a key rotation of the same
-		/// circuit, or its memo-bound variant (the same constraints plus
-		/// `memo_hash`, recognised by arity — see `InputLayout`). A note's circuit
-		/// version is NOT bound into its commitment, so the submitter picks the
-		/// version freely; a version with weaker constraints at a known arity would
-		/// let any note be spent under it. Any other semantic change MUST use a NEW
+		/// circuit, its memo-bound variant (the same constraints plus `memo_hash`),
+		/// or, for a transfer, its cross-tree variant (memo-bound with one Merkle
+		/// root per input instead of one shared root), each recognised by arity —
+		/// see `InputLayout`. The cross-tree variant proves each note against its
+		/// own root under the same constraints; the pool checks every root is known.
+		///
+		/// A note's circuit version is NOT bound into its commitment, so the
+		/// submitter picks the version freely; a version with weaker constraints at
+		/// a known arity would let any note be spent under it. Any other semantic change MUST use a NEW
 		/// circuit id. `ensure_vk_arity` enforces arity, NOT semantics — that is a
 		/// governance responsibility. Retire a superseded version with
 		/// `retire_version` (a v1 key binds neither memos nor the full recipient).
@@ -603,7 +608,8 @@ pub mod pallet {
 		}
 
 		/// Verify the VK deserializes as a BN254 Groth16 key and that its arity
-		/// fits one of the circuit's input layouts (base or memo-bound).
+		/// fits one of the circuit's input layouts (base, memo-bound or, for a
+		/// transfer, cross-tree).
 		///
 		/// For a spend circuit, only [`Self::FIRST_VERSION`] may use the base
 		/// layout: every later version must bind its memos and the full recipient.

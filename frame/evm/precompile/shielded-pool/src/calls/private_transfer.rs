@@ -1,15 +1,15 @@
 //! ABI decoding and call construction for
-//! `privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)`.
+//! `privateTransfer(bytes,bytes32[],bytes32[],bytes32[],bytes[],uint32,uint256,uint32)`.
 //!
 //! ## Selector
-//! `keccak256("privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)")[0..4]`
-//! = `0x66ed2cd4`
+//! `keccak256("privateTransfer(bytes,bytes32[],bytes32[],bytes32[],bytes[],uint32,uint256,uint32)")[0..4]`
+//! = `0x63d0b9a0`
 //!
 //! ## ABI layout (`input[4..]`)
-//! | Slot (bytes) | Type      | Field                 |
-//! |--------------|-----------|-----------------------|
-//! | 0..32        | `uint256` | offset → `proof`      |
-//! | 32..64       | `bytes32` | `merkle_root`         |
+//! | Slot (bytes) | Type      | Field                  |
+//! |--------------|-----------|------------------------|
+//! | 0..32        | `uint256` | offset → `proof`       |
+//! | 32..64       | `uint256` | offset → `merkle_roots`|
 //! | 64..96       | `uint256` | offset → `nullifiers` |
 //! | 96..128      | `uint256` | offset → `commitments`|
 //! | 128..160     | `uint256` | offset → `memos`      |
@@ -18,7 +18,10 @@
 //! | 224..256     | `uint32`  | `circuit_version`     |
 //!
 //! ## Notes
-//! The three arrays are parallel: `commitments[i]` and `memos[i]` describe the
+//! `merkle_roots` holds exactly two roots, one per input note in input order;
+//! they differ when the notes come from different trees.
+//!
+//! The three other arrays are parallel: `commitments[i]` and `memos[i]` describe the
 //! output note paid for by `nullifiers[i]`, so all three must have equal length.
 //!
 //! The relay fee recipient is not in the ABI: it is the relayer that recorded a
@@ -36,7 +39,7 @@ use super::{balance, params, proof};
 use crate::{abi, revert};
 
 /// Selector for the signature in this module's header.
-pub const SELECTOR: [u8; 4] = [0x66, 0xed, 0x2c, 0xd4];
+pub const SELECTOR: [u8; 4] = [0x63, 0xd0, 0xb9, 0xa0];
 
 /// Maximum number of input nullifiers / output commitments in a single transfer.
 pub const MAX_NOTES: u32 = 2;
@@ -61,8 +64,12 @@ where
 		"privateTransfer: proof must be non-empty",
 	)?;
 
-	// Step 3: merkle_root the proof is verified against.
-	let merkle_root: pallet_shielded_pool::Hash = abi::read_bytes32(params, 32)?;
+	// Step 3: one root per input note, in input order. The circuit always has two
+	// inputs (a dummy pads a one-note spend), so exactly two roots.
+	let merkle_roots: [pallet_shielded_pool::Hash; 2] =
+		abi::decode_bytes32_array_at_slot(params, 32, 2)?
+			.try_into()
+			.map_err(|_| revert("privateTransfer: exactly two merkle roots required"))?;
 
 	// Step 4: the three parallel arrays — nullifiers spent, commitments created,
 	// and the memo carrying each new note's secrets. The decoders bound count and
@@ -127,7 +134,7 @@ where
 
 	Ok(pallet_shielded_pool::Call::<T>::private_transfer {
 		proof,
-		merkle_root,
+		merkle_roots,
 		nullifiers,
 		commitments,
 		encrypted_memos,
