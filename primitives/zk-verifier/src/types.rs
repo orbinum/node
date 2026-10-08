@@ -34,13 +34,10 @@ pub const MAX_PUBLIC_INPUTS: usize = 32;
 /// dispatchable.
 pub const MAX_VK_BYTES: usize = 8192;
 
-/// Largest proof this crate will attempt to deserialize.
-///
-/// A compressed Groth16 proof over BN254 is three curve points — 128 bytes,
-/// fixed. The margin is for encoding variations, not for growth: anything an
-/// order of magnitude past this is malformed, and letting it through only gives
-/// the deserializer a length prefix to act on.
-pub const MAX_PROOF_BYTES: usize = 1024;
+/// Exact size of a compressed Groth16 proof over BN254: `A` (G1, 32) + `B` (G2,
+/// 64) + `C` (G1, 32). The deserializer ignores trailing bytes, so without this
+/// bound a proof padded out would be a second encoding of the same proof.
+pub const PROOF_BYTES: usize = 128;
 
 // ─── VerifierError ────────────────────────────────────────────────────────────
 /// Errors that can occur during proof verification.
@@ -109,7 +106,7 @@ impl Proof {
 	}
 
 	pub fn to_ark_proof(&self) -> Result<ArkProof<Bn254>, VerifierError> {
-		if self.bytes.len() > MAX_PROOF_BYTES {
+		if self.bytes.len() != PROOF_BYTES {
 			return Err(VerifierError::InvalidProof);
 		}
 		ArkProof::<Bn254>::deserialize_compressed(&self.bytes[..])
@@ -490,6 +487,107 @@ mod tests {
 		assert_eq!(result.unwrap().len(), 2);
 	}
 
+	/// A point on the twist curve outside the prime-order G2 subgroup. Found by
+	/// walking x coordinates: the cofactor is huge, so almost any curve point
+	/// qualifies, and the check says which.
+	fn off_subgroup_g2() -> ark_bn254::G2Affine {
+		use ark_bn254::{Fq, Fq2, G2Affine};
+		(1u64..)
+			.filter_map(|i| {
+				G2Affine::get_point_from_x_unchecked(Fq2::new(Fq::from(i), Fq::from(1u64)), false)
+			})
+			.find(|p| !p.is_in_correct_subgroup_assuming_on_curve())
+			.expect("a curve point outside the subgroup exists")
+	}
+
+	fn proof_bytes(
+		a: ark_bn254::G1Affine,
+		b: ark_bn254::G2Affine,
+		c: ark_bn254::G1Affine,
+	) -> Vec<u8> {
+		use ark_serialize::CanonicalSerialize;
+		let mut bytes = Vec::new();
+		a.serialize_compressed(&mut bytes).unwrap();
+		b.serialize_compressed(&mut bytes).unwrap();
+		c.serialize_compressed(&mut bytes).unwrap();
+		bytes
+	}
+
+	/// Pairings on a G2 point outside the subgroup are not bilinear, which is how
+	/// a forged proof could pass a verifier that skips the subgroup check. The
+	/// deserializer must refuse the point, for a proof's `B` and for every G2
+	/// element of a key.
+	#[test]
+	fn a_g2_point_outside_the_subgroup_is_refused_in_proofs_and_keys() {
+		use ark_bn254::{G1Affine, G2Affine};
+		use ark_ec::AffineRepr;
+		let off = off_subgroup_g2();
+		assert!(off.is_on_curve());
+		assert!(!off.is_in_correct_subgroup_assuming_on_curve());
+
+		let proof = Proof::new(proof_bytes(
+			G1Affine::generator(),
+			off,
+			G1Affine::generator(),
+		));
+		assert!(proof.to_ark_proof().is_err());
+		// The same bytes with a subgroup point deserialize: the refusal is the point.
+		let fine = Proof::new(proof_bytes(
+			G1Affine::generator(),
+			G2Affine::generator(),
+			G1Affine::generator(),
+		));
+		assert!(fine.to_ark_proof().is_ok());
+
+		assert!(VerifyingKey::new(vk_bytes(3, |vk| vk.beta_g2 = off))
+			.to_ark_vk()
+			.is_err());
+		assert!(VerifyingKey::new(vk_bytes(3, |vk| vk.gamma_g2 = off))
+			.to_ark_vk()
+			.is_err());
+		assert!(VerifyingKey::new(vk_bytes(3, |vk| vk.delta_g2 = off))
+			.to_ark_vk()
+			.is_err());
+	}
+
+	/// Proof points at infinity, all-zero and all-0xff bytes: refused or failing
+	/// verification, never a panic.
+	#[test]
+	fn degenerate_proof_bytes_never_verify_or_panic() {
+		use ark_bn254::{G1Affine, G2Affine};
+		use ark_ec::AffineRepr;
+		let pvk = VerifyingKey::new(well_formed_vk(2)).prepare().unwrap();
+		let inputs = PublicInputs::new(vec![[1u8; 32], [2u8; 32]]);
+		let len = proof_bytes(
+			G1Affine::generator(),
+			G2Affine::generator(),
+			G1Affine::generator(),
+		)
+		.len();
+		let candidates = [
+			proof_bytes(G1Affine::zero(), G2Affine::zero(), G1Affine::zero()),
+			proof_bytes(
+				G1Affine::zero(),
+				G2Affine::generator(),
+				G1Affine::generator(),
+			),
+			vec![0u8; len],
+			vec![0xffu8; len],
+			vec![0u8; len - 1],
+			vec![0u8; len + 1],
+		];
+		for bytes in candidates {
+			let proof = Proof::new(bytes);
+			let res = proof
+				.to_ark_proof()
+				.map_err(|_| VerifierError::VerificationFailed)
+				.and_then(|_| {
+					crate::Groth16Verifier::verify_with_prepared_vk(&pvk, &inputs, &proof)
+				});
+			assert!(res.is_err());
+		}
+	}
+
 	#[test]
 	fn to_field_elements_rejects_non_canonical() {
 		use ark_ff::{BigInteger, PrimeField};
@@ -662,32 +760,27 @@ mod tests {
 		assert!(vk.num_public_inputs().is_err());
 	}
 
-	/// A proof past the bound is refused on size alone.
-	///
 	/// `deserialize_compressed` ignores trailing bytes, so a real proof padded
-	/// out still deserializes — which makes it a fixture the guard is the only
-	/// thing rejecting.
+	/// out would still deserialize: another byte string for the same proof. Only
+	/// the exact compressed size is a proof.
 	#[test]
-	fn oversized_proof_is_rejected_on_size() {
+	fn a_proof_with_trailing_bytes_is_refused() {
 		use ark_bn254::{G1Affine, G2Affine};
 		use ark_ec::AffineRepr;
-
-		let proof = ArkProof::<Bn254> {
-			a: G1Affine::generator(),
-			b: G2Affine::generator(),
-			c: G1Affine::generator(),
-		};
-		let mut bytes = Proof::from_ark_proof(&proof).expect("serializes").bytes;
-		assert!(
-			Proof::new(bytes.clone()).to_ark_proof().is_ok(),
-			"fixture must be valid first"
+		let bytes = proof_bytes(
+			G1Affine::generator(),
+			G2Affine::generator(),
+			G1Affine::generator(),
 		);
-
-		bytes.resize(MAX_PROOF_BYTES + 1, 0u8);
-		assert_eq!(
-			Proof::new(bytes).to_ark_proof(),
-			Err(VerifierError::InvalidProof)
-		);
+		assert_eq!(bytes.len(), PROOF_BYTES);
+		assert!(Proof::new(bytes.clone()).to_ark_proof().is_ok());
+		for padding in [vec![0u8], vec![0xffu8; 8], vec![0u8; 896]] {
+			let padded = [bytes.clone(), padding].concat();
+			assert_eq!(
+				Proof::new(padded).to_ark_proof(),
+				Err(VerifierError::InvalidProof)
+			);
+		}
 	}
 
 	/// The limits must not shadow real input: a genuine BN254 key is ~488 bytes
@@ -713,10 +806,7 @@ mod tests {
 			.expect("serializes")
 			.bytes
 			.len();
-		assert!(
-			real * 4 < MAX_PROOF_BYTES,
-			"proof bound too tight: {real} bytes"
-		);
+		assert_eq!(real, PROOF_BYTES, "proof bound too tight: {real} bytes");
 	}
 
 	/// `MAX_PUBLIC_INPUTS` is enforced here: the pallet bounds its extrinsic

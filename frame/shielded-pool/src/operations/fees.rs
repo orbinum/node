@@ -57,7 +57,7 @@ pub fn transfer_op_hash(s: &TransferStatement, circuit_version: u32) -> [u8; 32]
 	sp_io::hashing::blake2_256(
 		&(
 			TRANSFER_OP_DOMAIN,
-			s.merkle_root,
+			s.merkle_roots,
 			&s.nullifiers,
 			&s.commitments,
 			s.asset_id,

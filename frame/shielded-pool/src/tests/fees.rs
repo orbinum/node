@@ -43,7 +43,7 @@ fn unshield() -> UnshieldStatement {
 
 fn transfer() -> TransferStatement {
 	TransferStatement {
-		merkle_root: ROOT,
+		merkle_roots: [ROOT; 2],
 		nullifiers: vec![NULL],
 		commitments: vec![CHANGE],
 		asset_id: 0,
@@ -94,12 +94,32 @@ fn every_public_value_changes_the_unshield_hash() {
 	assert_ne!(unshield_op_hash(&unshield(), 2), base, "circuit version");
 }
 
+/// The roots are bound in input order: a commit to one order is not a commit
+/// to the swapped one, so a relayer cannot claim a spend it did not commit to
+/// by reordering its roots.
+#[test]
+fn the_transfer_hash_binds_the_order_of_the_roots() {
+	let ab = TransferStatement {
+		merkle_roots: [[0x0A; 32], [0x0B; 32]],
+		..transfer()
+	};
+	let ba = TransferStatement {
+		merkle_roots: [[0x0B; 32], [0x0A; 32]],
+		..transfer()
+	};
+	assert_ne!(transfer_op_hash(&ab, 3), transfer_op_hash(&ba, 3));
+}
+
 #[test]
 fn every_public_value_changes_the_transfer_hash() {
 	let base = transfer_op_hash(&transfer(), 1);
 	let variants = [
 		TransferStatement {
-			merkle_root: [0xFF; 32],
+			merkle_roots: [[0xFF; 32], ROOT],
+			..transfer()
+		},
+		TransferStatement {
+			merkle_roots: [ROOT, [0xFF; 32]],
 			..transfer()
 		},
 		TransferStatement {
@@ -203,7 +223,7 @@ fn relay_op_hash_is_the_extrinsics_own_hash() {
 
 	let transfer_call = Call::<Test>::private_transfer {
 		proof: vec![0xAB; 64].try_into().unwrap(),
-		merkle_root: ROOT,
+		merkle_roots: [ROOT; 2],
 		nullifiers: vec![Nullifier(NULL)].try_into().unwrap(),
 		commitments: vec![Commitment(CHANGE)].try_into().unwrap(),
 		encrypted_memos: vec![Default::default()].try_into().unwrap(),
@@ -212,7 +232,7 @@ fn relay_op_hash_is_the_extrinsics_own_hash() {
 		circuit_version: 1,
 	};
 	let request = TransferRequest::<Test> {
-		merkle_root: ROOT,
+		merkle_roots: [ROOT; 2],
 		nullifiers: vec![Nullifier(NULL)].try_into().unwrap(),
 		commitments: vec![Commitment(CHANGE)].try_into().unwrap(),
 		memos: vec![Default::default()].try_into().unwrap(),

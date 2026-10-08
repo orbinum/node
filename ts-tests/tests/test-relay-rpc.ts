@@ -23,7 +23,7 @@ let MIN_RELAY_FEE: bigint;
 /// a wrong selector still produces "unsupported selector", so the negative
 /// cases go green while the positive ones silently test nothing.
 const SIG_UNSHIELD = "unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)";
-const SIG_PRIVATE_TRANSFER = "privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)";
+const SIG_PRIVATE_TRANSFER = "privateTransfer(bytes,bytes32[],bytes32[],bytes32[],bytes[],uint32,uint256,uint32)";
 
 const SEL_UNSHIELD = ethers.id(SIG_UNSHIELD).slice(2, 10);
 const SEL_PRIVATE_TRANSFER = ethers.id(SIG_PRIVATE_TRANSFER).slice(2, 10);
@@ -73,10 +73,10 @@ function buildUnshieldCalldata(fee: bigint): string {
  */
 function buildPrivateTransferCalldata(fee: bigint): string {
 	const encoded = abiCoder.encode(
-		["bytes", "bytes32", "bytes32[]", "bytes32[]", "bytes[]", "uint32", "uint256", "uint32"],
+		["bytes", "bytes32[]", "bytes32[]", "bytes32[]", "bytes[]", "uint32", "uint256", "uint32"],
 		[
 			"0x" + "aa".repeat(32), // proof
-			"0x" + "bb".repeat(32), // merkle root
+			["0x" + "bb".repeat(32), "0x" + "bb".repeat(32)], // merkle roots, one per input
 			["0x" + "cc".repeat(32)], // nullifiers[]
 			["0x" + "dd".repeat(32)], // output commitments[]
 			["0x" + "ee".repeat(180)], // encrypted memos[] (must be exactly 180 bytes)

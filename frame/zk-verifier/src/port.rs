@@ -18,7 +18,9 @@ use alloc::vec::Vec;
 /// What a private-transfer proof attests to, as the pallet submits it.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct TransferStatement {
-	pub merkle_root: [u8; 32],
+	/// The root each input note is proven against. Equal unless the notes come
+	/// from different trees, which only a cross-tree key can attest to.
+	pub merkle_roots: [[u8; 32]; 2],
 	/// One per input note.
 	pub nullifiers: Vec<[u8; 32]>,
 	/// One per output note, in the order their memos are submitted.
@@ -92,16 +94,21 @@ pub trait ZkVerifierPort {
 
 // ─── Implementation ───────────────────────────────────────────────────────────
 
-/// Public inputs of the largest spend layout: a memo-bound transfer or unshield.
+/// Public inputs of the largest spend layout: a cross-tree transfer.
 const MAX_SPEND_PUBLIC_INPUTS: u32 = {
-	use orbinum_zk_verifier::{MEMO_HASH_INPUTS, TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS};
-	let base = if TRANSFER_PUBLIC_INPUTS > UNSHIELD_PUBLIC_INPUTS {
-		TRANSFER_PUBLIC_INPUTS
-	} else {
-		UNSHIELD_PUBLIC_INPUTS
+	use orbinum_zk_verifier::{CIRCUIT_ID_TRANSFER, CIRCUIT_ID_UNSHIELD, max_public_inputs};
+	let (Some(transfer), Some(unshield)) = (
+		max_public_inputs(CIRCUIT_ID_TRANSFER),
+		max_public_inputs(CIRCUIT_ID_UNSHIELD),
+	) else {
+		panic!("spend circuits have a known arity")
 	};
-	(base + MEMO_HASH_INPUTS) as u32
+	max(transfer, unshield) as u32
 };
+
+const fn max(a: usize, b: usize) -> usize {
+	if a > b { a } else { b }
+}
 
 impl<T: Config> ZkVerifierPort for Pallet<T> {
 	fn verify_transfer_proof(
@@ -139,7 +146,7 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 	) -> Result<bool, sp_runtime::DispatchError> {
 		// Shield has a single layout; a key of another arity fails the length check.
 		verifier::verify_statement::<T>(CircuitId::SHIELD, version, proof, |_| {
-			encoding::encode_shield(statement)
+			Some(encoding::encode_shield(statement))
 		})
 		.map(|(ok, _)| ok)
 	}
@@ -164,7 +171,8 @@ mod tests {
 	use crate::mock::{Test, activate, insert_vk, new_test_ext};
 	use frame_support::assert_err;
 	use orbinum_zk_verifier::{
-		MEMO_HASH_INPUTS, SHIELD_PUBLIC_INPUTS, TRANSFER_PUBLIC_INPUTS, UNSHIELD_PUBLIC_INPUTS,
+		CROSS_TREE_INPUTS, MEMO_HASH_INPUTS, SHIELD_PUBLIC_INPUTS, TRANSFER_PUBLIC_INPUTS,
+		UNSHIELD_PUBLIC_INPUTS,
 	};
 
 	// ── Helpers ───────────────────────────────────────────────────────────────
@@ -178,7 +186,7 @@ mod tests {
 
 	fn transfer() -> TransferStatement {
 		TransferStatement {
-			merkle_root: [0x03; 32],
+			merkle_roots: [[0x03; 32]; 2],
 			nullifiers: NULLIFIERS.to_vec(),
 			commitments: COMMITMENTS.to_vec(),
 			asset_id: 1,
@@ -273,6 +281,46 @@ mod tests {
 			activate(CircuitId::TRANSFER, 1);
 			assert_eq!(verify_transfer(&transfer(), None), Ok(true));
 			assert_eq!(verify_transfer(&transfer(), Some(2)), Ok(true));
+		});
+	}
+
+	/// Every key arity, registered side by side as v1, v2 and v3.
+	fn insert_all_transfer_keys() {
+		insert_vk(CircuitId::TRANSFER, 1, TRANSFER_PUBLIC_INPUTS);
+		insert_vk(
+			CircuitId::TRANSFER,
+			2,
+			TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
+		);
+		insert_vk(
+			CircuitId::TRANSFER,
+			3,
+			TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS + CROSS_TREE_INPUTS,
+		);
+		activate(CircuitId::TRANSFER, 3);
+	}
+
+	#[test]
+	fn a_same_tree_transfer_verifies_under_every_key() {
+		new_test_ext().execute_with(|| {
+			insert_all_transfer_keys();
+			for version in 1..=3 {
+				assert_eq!(verify_transfer(&transfer(), Some(version)), Ok(true));
+			}
+		});
+	}
+
+	#[test]
+	fn only_the_cross_tree_key_verifies_a_spend_across_two_trees() {
+		new_test_ext().execute_with(|| {
+			insert_all_transfer_keys();
+			let across = TransferStatement {
+				merkle_roots: [[0x03; 32], [0x07; 32]],
+				..transfer()
+			};
+			assert_eq!(verify_transfer(&across, Some(3)), Ok(true));
+			assert_eq!(verify_transfer(&across, Some(2)), Ok(false));
+			assert_eq!(verify_transfer(&across, Some(1)), Ok(false));
 		});
 	}
 
@@ -462,7 +510,7 @@ mod tests {
 	#[test]
 	fn verification_weight_covers_the_largest_spend_layout() {
 		use crate::weights::WeightInfo;
-		assert_eq!(MAX_SPEND_PUBLIC_INPUTS, 8);
+		assert_eq!(MAX_SPEND_PUBLIC_INPUTS, 9);
 		assert_eq!(
 			<Pallet<Test> as ZkVerifierPort>::verification_weight(),
 			<Test as crate::Config>::WeightInfo::verify_proof(MAX_SPEND_PUBLIC_INPUTS)

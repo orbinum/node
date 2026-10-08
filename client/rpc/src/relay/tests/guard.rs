@@ -27,13 +27,15 @@ fn unshield(nullifier: [u8; 32]) -> Vec<u8> {
 fn transfer(nullifiers: &[[u8; 32]]) -> Vec<u8> {
 	let mut data = SELECTOR_PRIVATE_TRANSFER.to_vec();
 	data.extend_from_slice(&word(256)); // proof offset
-	data.extend_from_slice(&[0x11; 32]); // root
+	data.extend_from_slice(&word(256 + 32 + 32 * nullifiers.len())); // roots offset
 	data.extend_from_slice(&word(256)); // nullifiers offset
 	data.resize(4 + 256, 0);
 	data.extend_from_slice(&word(nullifiers.len()));
 	for n in nullifiers {
 		data.extend_from_slice(n);
 	}
+	data.extend_from_slice(&word(2));
+	data.extend_from_slice(&[[0x11; 32], [0x12; 32]].concat());
 	data
 }
 
@@ -85,6 +87,41 @@ fn refuses_calldata_that_names_no_note() {
 	let mut bad_offset = transfer(&[[0x33; 32]]);
 	bad_offset[4 + 64..4 + 96].copy_from_slice(&[0xff; 32]);
 	assert_eq!(spend_nullifiers(&bad_offset), None, "offset past the input");
+}
+
+/// Offsets and lengths at the edge of `usize` read nothing and never overflow:
+/// the guard runs on calldata from anyone, before the dry-run.
+#[test]
+fn hostile_offsets_and_lengths_read_nothing() {
+	let near_max = U256::from(usize::MAX - 16).to_big_endian();
+	let mut offset = transfer(&[[0x33; 32]]);
+	offset[4 + 64..4 + 96].copy_from_slice(&near_max);
+	assert_eq!(spend_nullifiers(&offset), None);
+
+	let mut length = transfer(&[[0x33; 32]]);
+	length[4 + 256..4 + 288].copy_from_slice(&near_max);
+	assert_eq!(spend_nullifiers(&length), None);
+
+	let mut short = transfer(&[[0x33; 32], [0x44; 32]]);
+	short.truncate(4 + 256 + 32 + 32);
+	assert_eq!(spend_nullifiers(&short), None, "second nullifier missing");
+}
+
+/// The nullifiers come from head slot 2 whatever slot 1 holds: in the
+/// two-root layout slot 1 is the roots' offset, never a nullifier.
+#[test]
+fn the_roots_array_is_never_read_as_nullifiers() {
+	let mut data = transfer(&[[0x33; 32], [0x44; 32]]);
+	// Point the roots at the nullifiers and the nullifiers at the roots.
+	let roots = data[4 + 32..4 + 64].to_vec();
+	let nullifiers = data[4 + 64..4 + 96].to_vec();
+	data[4 + 32..4 + 64].copy_from_slice(&nullifiers);
+	data[4 + 64..4 + 96].copy_from_slice(&roots);
+	assert_eq!(
+		spend_nullifiers(&data),
+		Some(vec![[0x11; 32], [0x12; 32]]),
+		"slot 2 decides, as it does for the precompile"
+	);
 }
 
 // ── InFlight ─────────────────────────────────────────────────────────────────

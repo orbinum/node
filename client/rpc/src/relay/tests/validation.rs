@@ -78,7 +78,7 @@ fn rejects_calldata_that_ends_before_the_fee_slot() {
 #[test]
 fn selectors_are_keccak_of_the_abi_signatures() {
 	let pt = sp_io::hashing::keccak_256(
-		b"privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)",
+		b"privateTransfer(bytes,bytes32[],bytes32[],bytes32[],bytes[],uint32,uint256,uint32)",
 	);
 	let un = sp_io::hashing::keccak_256(
 		b"unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)",

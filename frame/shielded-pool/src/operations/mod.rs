@@ -32,7 +32,7 @@ impl<T: Config> SpendRequest<T> {
 		Some(match call.clone() {
 			Call::private_transfer {
 				proof,
-				merkle_root,
+				merkle_roots,
 				nullifiers,
 				commitments,
 				encrypted_memos,
@@ -42,7 +42,7 @@ impl<T: Config> SpendRequest<T> {
 			} => (
 				proof.into_inner(),
 				Self::Transfer(TransferRequest {
-					merkle_root,
+					merkle_roots,
 					nullifiers,
 					commitments,
 					memos: encrypted_memos,

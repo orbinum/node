@@ -6,6 +6,33 @@ All notable changes to this crate are documented here.
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-08
+
+### Added
+
+- `InputLayout::CrossTree`: a transfer key with 9 public inputs (the
+  memo-bound layout with one Merkle root per input, `merkle_roots[0..1]` first).
+  `input_layout` maps transfer arity 9 to it; an unshield or shield key of that
+  arity is still refused. `CROSS_TREE_INPUTS` and `has_cross_tree_layout`.
+- `max_public_inputs(circuit_id)`: the arity of a circuit's widest layout, the
+  one place the layouts are added up. The compile-time arity check uses it.
+
+### Changed
+
+- **Breaking:** `InputLayout` gains the `CrossTree` variant; an exhaustive
+  `match` on it must handle it.
+- **Breaking:** `MAX_PROOF_BYTES` is removed; `PROOF_BYTES` (128) is the one
+  accepted proof length.
+
+### Security
+
+- A proof must be exactly `PROOF_BYTES` (128) long. `deserialize_compressed`
+  ignores trailing bytes, so a padded proof was a second byte string for the
+  same proof — a malleability the pool and the relay op hash already tolerate
+  (proofs are re-randomisable), but one encoding per proof is the contract.
+  Found by a live probe. Tests: trailing bytes refused, a G2 point outside the
+  subgroup refused in proofs and keys, degenerate proof bytes never verify.
+
 ## [2.1.0] - 2026-10-05
 
 ### Added

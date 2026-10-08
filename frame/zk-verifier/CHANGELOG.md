@@ -6,6 +6,22 @@ All notable changes to this pallet are documented here.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-08
+
+### Changed
+
+- **Breaking:** `TransferStatement.merkle_root` → `merkle_roots: [[u8; 32]; 2]`,
+  the root each input is proven against.
+- `encode_transfer` emits both roots under a cross-tree key (circuit 1, v3). Under
+  a v1 or v2 key, which attests to one root, a statement whose roots differ
+  fails without a pairing.
+- `encode_transfer` / `encode_unshield` return `Option`: `None` when the key
+  cannot attest to the statement. `verify_statement` takes such an encoder.
+- A transfer key of 9 inputs registers (cross-tree layout); the governance rule
+  on `register_verification_key` documents the exception.
+- `verification_weight` covers the 9-input layout (was 8), read from
+  `max_public_inputs`.
+
 ## [0.14.0] - 2026-10-05
 
 ### Added

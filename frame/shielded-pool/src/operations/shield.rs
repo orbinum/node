@@ -254,30 +254,11 @@ mod tests {
 	#[test]
 	fn execute_non_canonical_commitment_fails() {
 		new_test_ext().execute_with(|| {
-			use ark_bn254::Fr;
-			use ark_ff::{BigInteger, PrimeField};
-
 			let asset_id = setup_asset();
 
 			let mut canonical = [0u8; 32];
 			canonical[0] = 7;
-
-			// n + p: same field element, different bytes.
-			let p_minus_1 = (-Fr::from(1u64)).into_bigint().to_bytes_le();
-			let mut twin = [0u8; 32];
-			twin[..p_minus_1.len()].copy_from_slice(&p_minus_1);
-			let mut carry = 1u16 + 7;
-			for b in twin.iter_mut() {
-				let v = *b as u16 + carry;
-				*b = (v & 0xff) as u8;
-				carry = v >> 8;
-			}
-
-			assert_eq!(
-				Fr::from_le_bytes_mod_order(&canonical),
-				Fr::from_le_bytes_mod_order(&twin),
-				"the pair must reduce to one element, or this proves nothing"
-			);
+			let twin = crate::tests::field_twin(canonical);
 
 			assert_ok!(execute(
 				acc(1),

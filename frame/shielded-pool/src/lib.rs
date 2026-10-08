@@ -857,7 +857,9 @@ pub mod pallet {
 		/// # Arguments
 		/// * `origin` - Unsigned, signed, or the precompile's relayed origin
 		/// * `proof` - The ZK proof of valid transfer
-		/// * `merkle_root` - The Merkle root the proof was computed against
+		/// * `merkle_roots` - The root each input is proven against, in input order.
+		///   Equal unless the notes come from different trees (circuit v3); a
+		///   dummy input's slot repeats the real root
 		/// * `nullifiers` - Nullifiers for notes being spent
 		/// * `commitments` - Commitments for new notes being created
 		/// * `encrypted_memos` - Encrypted metadata for each new note
@@ -867,7 +869,7 @@ pub mod pallet {
 		///
 		/// # Errors
 		/// * `TooManyInputsOrOutputs` - Not two nullifiers and two commitments
-		/// * `UnknownMerkleRoot` - Root is not in historic roots
+		/// * `UnknownMerkleRoot` - Any root is not a known one (active, recent or sealed)
 		/// * `NullifierAlreadyUsed` - Double-spend attempt
 		/// * `ProofVerificationFailed` - ZK proof verification failed
 		/// * `FeeTooLow` - Fee is below `T::Relayer::min_relay_fee()`
@@ -881,7 +883,7 @@ pub mod pallet {
 		pub fn private_transfer(
 			origin: OriginFor<T>,
 			proof: Proof,
-			merkle_root: Hash,
+			merkle_roots: [Hash; 2],
 			nullifiers: BoundedVec<Nullifier, ConstU32<2>>,
 			commitments: BoundedVec<Commitment, ConstU32<2>>,
 			encrypted_memos: BoundedVec<FrameEncryptedMemo, ConstU32<2>>,
@@ -894,7 +896,7 @@ pub mod pallet {
 			PrivateTransferOperation::execute::<T>(
 				&proof,
 				TransferRequest {
-					merkle_root,
+					merkle_roots,
 					nullifiers,
 					commitments,
 					memos: encrypted_memos,

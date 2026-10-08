@@ -9,7 +9,7 @@ use crate::{
 	operations::{assets::AssetOperation, unshield::*},
 	pallet::{Error, Event as PalletEvent},
 	storage::{MerkleRepository, NullifierRepository, PoolBalanceRepository},
-	types::{Commitment, EncryptedMemo},
+	types::{Commitment, EncryptedMemo, Nullifier},
 };
 use frame_support::{assert_err, assert_noop, assert_ok, traits::Currency};
 use sp_runtime::AccountId32;
@@ -1111,6 +1111,32 @@ fn a_partial_unshield_without_a_full_change_memo_is_rejected() {
 				Error::<Test>::InvalidMemoSize
 			);
 		}
+	});
+}
+
+/// A nullifier or change commitment as its modular twin (`x + r`) is the same
+/// field element with another on-chain identity: refused at dispatch as well.
+#[test]
+fn a_non_canonical_nullifier_or_change_commitment_is_refused() {
+	new_test_ext().execute_with(|| {
+		let asset_id = setup_spend();
+		let twin = super::field_twin;
+		let mut aliased_nullifier = request(0x73, asset_id);
+		aliased_nullifier.nullifier = Nullifier::new(twin(aliased_nullifier.nullifier.0));
+		assert_noop!(
+			UnshieldOperation::execute::<Test>(&proof(), aliased_nullifier),
+			Error::<Test>::InvalidPublicSignals
+		);
+		let aliased_change = UnshieldRequest {
+			amount: AMOUNT - 100,
+			change_commitment: twin(canonical_bytes(0x92)),
+			change_memo: change_memo(),
+			..request(0x74, asset_id)
+		};
+		assert_noop!(
+			UnshieldOperation::execute::<Test>(&proof(), aliased_change),
+			Error::<Test>::InvalidPublicSignals
+		);
 	});
 }
 

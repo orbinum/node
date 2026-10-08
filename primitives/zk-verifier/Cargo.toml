@@ -1,6 +1,6 @@
 [package]
 name = "orbinum-zk-verifier"
-version = "2.1.0"
+version = "3.0.0"
 authors = ["Orbinum Network <contact@orbinum.net>"]
 edition = "2021"
 publish = false
