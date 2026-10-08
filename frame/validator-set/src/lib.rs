@@ -31,6 +31,15 @@
 //!   an approved account without keys would occupy a slot without authoring blocks.
 //! - Leaving the set (by either path) notifies [`Config::OnValidatorRemoved`] so
 //!   dependent state, such as the EVM relay binding, is cleaned up.
+//!
+//! ## Minimum author version
+//!
+//! Each block's author declares its node version in an inherent
+//! ([`author_version`]). [`set_min_author_version`][Pallet::set_min_author_version]
+//! makes a block invalid unless its author declared at least that version, so a
+//! lagging binary loses its slots until it upgrades. It is refused unless 2/3 of
+//! the set already authored with that version within [`Config::QuorumWindow`],
+//! so it cannot halt the chain. With no minimum set, any binary may author.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -54,10 +63,17 @@ mod tests;
 pub mod traits;
 pub use traits::{OnValidatorRemoved, ValidatorPrerequisites, ValidatorSetInterface};
 
+pub mod author_version;
+pub use author_version::NodeVersion;
+
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
-	use frame_support::{pallet_prelude::*, traits::EnsureOrigin};
+	use crate::author_version::INHERENT_IDENTIFIER;
+	use frame_support::{
+		pallet_prelude::*,
+		traits::{EnsureOrigin, FindAuthor},
+	};
 	use frame_system::pallet_prelude::*;
 	use pallet_session::SessionManager;
 
@@ -83,6 +99,15 @@ pub mod pallet {
 		/// Notified whenever an account leaves the approved set.
 		type OnValidatorRemoved: crate::OnValidatorRemoved<Self::AccountId>;
 
+		/// The account that authored the current block, from its pre-runtime digests.
+		type FindAuthor: FindAuthor<Self::AccountId>;
+
+		/// How recent a validator's declared version must be to count toward the
+		/// quorum [`Pallet::set_min_author_version`] requires. One session is enough
+		/// for every active validator to author at least once.
+		#[pallet::constant]
+		type QuorumWindow: Get<BlockNumberFor<Self>>;
+
 		/// Weight information for the pallet's dispatchables.
 		type WeightInfo: crate::WeightInfo;
 	}
@@ -98,6 +123,25 @@ pub mod pallet {
 	pub type ApprovedValidators<T: Config> =
 		StorageValue<_, BoundedVec<T::AccountId, T::MaxValidators>, ValueQuery>;
 
+	/// The oldest node version a block author may run. `None`: any version, or none
+	/// declared at all.
+	#[pallet::storage]
+	pub type MinAuthorVersion<T: Config> = StorageValue<_, NodeVersion, OptionQuery>;
+
+	/// The node version each validator last declared, and the block it did so in.
+	#[pallet::storage]
+	pub type LastAuthorVersion<T: Config> = StorageMap<
+		_,
+		Blake2_128Concat,
+		T::AccountId,
+		(NodeVersion, BlockNumberFor<T>),
+		OptionQuery,
+	>;
+
+	/// Whether the current block's author declared a version. Cleared every block.
+	#[pallet::storage]
+	pub type AuthorVersionNoted<T: Config> = StorageValue<_, bool, ValueQuery>;
+
 	// ── Events ─────────────────────────────────────────────────────────────
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
@@ -106,6 +150,8 @@ pub mod pallet {
 		ValidatorAdded { validator: T::AccountId },
 		/// A validator left the approved set, by sudo or voluntarily.
 		ValidatorRemoved { validator: T::AccountId },
+		/// The minimum author version changed; `None` lifts it.
+		MinAuthorVersionSet { version: Option<NodeVersion> },
 	}
 
 	// ── Errors ─────────────────────────────────────────────────────────────
@@ -119,6 +165,30 @@ pub mod pallet {
 		TooManyValidators,
 		/// Session keys (Aura + GRANDPA) not yet registered via `session.setKeys`.
 		NoSessionKeys,
+		/// Fewer than 2/3 of the approved set authored with that version within
+		/// `QuorumWindow`, or the set is empty: setting it could leave the chain
+		/// without authors.
+		VersionQuorumNotMet,
+		/// The author declared a version below `MinAuthorVersion`.
+		AuthorVersionTooOld,
+		/// The author's version was already declared in this block.
+		AuthorVersionAlreadyNoted,
+	}
+
+	// ── Hooks ──────────────────────────────────────────────────────────────
+	#[pallet::hooks]
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		fn on_initialize(_n: BlockNumberFor<T>) -> Weight {
+			// What `on_finalize` reads and clears: the flag, the minimum, the
+			// author lookup and, for an undeclared block, its author's entry.
+			T::DbWeight::get().reads_writes(3, 2)
+		}
+
+		/// Rejects the block if a minimum is set and its author declared no
+		/// version.
+		fn on_finalize(_n: BlockNumberFor<T>) {
+			Self::settle_author_declaration();
+		}
 	}
 
 	// ── Genesis ────────────────────────────────────────────────────────────
@@ -204,12 +274,70 @@ pub mod pallet {
 			Self::remove_from_approved(&who)?;
 			Ok(())
 		}
+
+		// ── Minimum author version ─────────────────────────────────────────────
+
+		/// Set, or with `None` lift, the oldest node version a block author may run.
+		///
+		/// Requires `AddRemoveOrigin`. Setting a version is refused unless 2/3 of the
+		/// approved set authored with at least that version within `QuorumWindow`;
+		/// lifting it is always allowed.
+		#[pallet::call_index(6)]
+		#[pallet::weight(T::WeightInfo::set_min_author_version())]
+		pub fn set_min_author_version(
+			origin: OriginFor<T>,
+			version: Option<NodeVersion>,
+		) -> DispatchResult {
+			T::AddRemoveOrigin::ensure_origin(origin)?;
+			if let Some(min) = &version {
+				ensure!(
+					Self::has_version_quorum(min),
+					Error::<T>::VersionQuorumNotMet
+				);
+			}
+			MinAuthorVersion::<T>::set(version);
+			Self::deposit_event(Event::MinAuthorVersionSet { version });
+			Ok(())
+		}
+
+		/// The block author's declared node version. Inherent: one per block,
+		/// provided by the author's node.
+		#[pallet::call_index(7)]
+		#[pallet::weight((T::WeightInfo::note_author_version(), DispatchClass::Mandatory))]
+		pub fn note_author_version(origin: OriginFor<T>, version: NodeVersion) -> DispatchResult {
+			ensure_none(origin)?;
+			Self::note_declaration(version)
+		}
+	}
+
+	// ── Inherent ───────────────────────────────────────────────────────────
+	#[pallet::inherent]
+	impl<T: Config> ProvideInherent for Pallet<T> {
+		type Call = Call<T>;
+		type Error = sp_inherents::MakeFatalError<()>;
+		const INHERENT_IDENTIFIER: InherentIdentifier = INHERENT_IDENTIFIER;
+
+		/// A node that provides no version (one predating this inherent) yields no
+		/// call, and neither does one the chain would refuse; `on_finalize` decides
+		/// whether that block may stand.
+		fn create_inherent(data: &InherentData) -> Option<Self::Call> {
+			let version = data
+				.get_data::<NodeVersion>(&INHERENT_IDENTIFIER)
+				.ok()
+				.flatten()?;
+			Self::declaration_call(version)
+		}
+
+		fn is_inherent(call: &Self::Call) -> bool {
+			matches!(call, Call::note_author_version { .. })
+		}
 	}
 
 	// ── Internal helpers ───────────────────────────────────────────────────
 	impl<T: Config> Pallet<T> {
-		/// Drop `validator` from the approved set, notify the removal hook and
-		/// emit `ValidatorRemoved`. Fails if the account is not in the set.
+		/// Drop `validator` from the approved set, and its declared version with
+		/// it, notify the removal hook and emit `ValidatorRemoved`. Fails if the
+		/// account is not in the set.
 		fn remove_from_approved(validator: &T::AccountId) -> DispatchResult {
 			ApprovedValidators::<T>::try_mutate(|validators| -> DispatchResult {
 				let pos = validators
@@ -219,6 +347,7 @@ pub mod pallet {
 				validators.remove(pos);
 				Ok(())
 			})?;
+			LastAuthorVersion::<T>::remove(validator);
 
 			T::OnValidatorRemoved::on_validator_removed(validator);
 			Self::deposit_event(Event::ValidatorRemoved {

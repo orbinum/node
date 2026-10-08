@@ -5,6 +5,56 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+---
+
+## [0.4.0] — 2026-10-07
+
+Governance can require a minimum node version from block authors, to coordinate
+upgrades that need every author on a newer binary. **Breaking** — `Config` gains
+`FindAuthor` and `QuorumWindow`. Ships with runtime spec 18 and `orbinum-node`
+0.4.0, the first binary that declares its version.
+
+### Added
+
+#### Minimum author version
+- `note_author_version(NodeVersion)` (call 7): a mandatory inherent through
+  which the author's node declares its crate version (`INHERENT_IDENTIFIER`
+  `*b"nodevers"`, provided by `author_version::InherentDataProvider`). It runs
+  at most once per block and is refused below the minimum. A node below it
+  builds no inherent and logs why, so its block fails in `on_finalize`. The
+  pool rejects the call from any account, signed or not: mandatory calls are
+  never validated as transactions.
+- `set_min_author_version(Option<NodeVersion>)` (call 6), `AddRemoveOrigin`:
+  sets or lifts `MinAuthorVersion` and emits `MinAuthorVersionSet`. `Some(v)` is
+  refused with `VersionQuorumNotMet` unless 2/3 of the approved set declared
+  ≥ `v` within `QuorumWindow` blocks; an empty set is always refused, and
+  lifting needs no quorum.
+- With a minimum set, a block without a declaration is invalid
+  (`on_finalize` panics). Binaries that predate the inherent provide none, so
+  they lose their slots and keep importing.
+- `LastAuthorVersion` records each approved author's last declaration and its
+  block. Leaving the set drops the entry, so the map stays bounded by
+  `MaxValidators`. A block authored without a declaration drops its author's
+  entry too, so a validator that rolled back to an older binary stops counting
+  toward a quorum at once rather than for the rest of `QuorumWindow`.
+- `NodeVersion`: `const fn parse` (so a node parses its crate version at
+  compile time and an unfit version fails the build) and `Display`
+  (`major.minor.patch`).
+
+The version is self-declared: it coordinates honest operators and is not a
+security boundary. Declarations are public, mapping each validator to the
+version it runs.
+
+**Config:** `FindAuthor` and `QuorumWindow` (the runtime uses one session).
+
+**Weights:** `set_min_author_version` and `note_author_version` are estimated,
+not yet benchmarked on the reference machine. `remove_validator` and
+`deregister_validator` gain one storage removal; re-benchmark both.
+
+---
+
 ## [0.3.0] — 2026-08-20
 
 Validator onboarding moves off-chain: the two-phase self-registration flow is

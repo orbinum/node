@@ -43,6 +43,8 @@ use core::marker::PhantomData;
 pub trait WeightInfo {
 	fn add_validator() -> Weight;
 	fn remove_validator() -> Weight;
+	fn set_min_author_version() -> Weight;
+	fn note_author_version() -> Weight;
 }
 
 /// Weights for pallet_validator_set using the Substrate node and recommended hardware.
@@ -92,6 +94,20 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(6_u64))
 			.saturating_add(T::DbWeight::get().writes(5_u64))
 	}
+	/// Estimated, not yet benchmarked on the reference hardware: one read of the set,
+	/// one `LastAuthorVersion` read per validator (`MaxValidators` = 32), one write.
+	fn set_min_author_version() -> Weight {
+		Weight::from_parts(25_000_000, 1520)
+			.saturating_add(T::DbWeight::get().reads(34_u64))
+			.saturating_add(T::DbWeight::get().writes(2_u64))
+	}
+	/// Estimated, not yet benchmarked on the reference hardware: the flag, the
+	/// minimum, the author lookup and the approved set (32 accounts) read.
+	fn note_author_version() -> Weight {
+		Weight::from_parts(12_000_000, 2700)
+			.saturating_add(T::DbWeight::get().reads(5_u64))
+			.saturating_add(T::DbWeight::get().writes(2_u64))
+	}
 }
 
 // For backwards compatibility and tests
@@ -139,5 +155,19 @@ impl WeightInfo for () {
 		Weight::from_parts(21_290_000, 4782)
 			.saturating_add(RocksDbWeight::get().reads(6_u64))
 			.saturating_add(RocksDbWeight::get().writes(5_u64))
+	}
+	/// Estimated, not yet benchmarked on the reference hardware: one read of the set,
+	/// one `LastAuthorVersion` read per validator (`MaxValidators` = 32), one write.
+	fn set_min_author_version() -> Weight {
+		Weight::from_parts(25_000_000, 1520)
+			.saturating_add(RocksDbWeight::get().reads(34_u64))
+			.saturating_add(RocksDbWeight::get().writes(2_u64))
+	}
+	/// Estimated, not yet benchmarked on the reference hardware: the flag, the
+	/// minimum, the author lookup and the approved set (32 accounts) read.
+	fn note_author_version() -> Weight {
+		Weight::from_parts(12_000_000, 2700)
+			.saturating_add(RocksDbWeight::get().reads(5_u64))
+			.saturating_add(RocksDbWeight::get().writes(2_u64))
 	}
 }
