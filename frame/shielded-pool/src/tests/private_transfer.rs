@@ -77,11 +77,11 @@ fn execute_works_two_notes() {
 }
 
 /// Two notes from two trees: one proven against a sealed tree's final root, the
-/// other against the active tree. Both roots reach the verifier, in input order.
+/// other against the active tree. Both are spent, and both roots reach the
+/// verifier in input order (nothing does under `skip-proof-verification`).
 #[test]
 fn execute_spends_notes_from_two_trees() {
 	new_test_ext().execute_with(|| {
-		use crate::mock::{VerifiedStatement, verified_statements};
 		let sealed = [0x5E; 32];
 		MerkleRepository::insert_sealed_root::<Test>(0, sealed);
 		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
@@ -98,11 +98,18 @@ fn execute_spends_notes_from_two_trees() {
 				circuit_version: 3,
 			},
 		));
-		let Some(VerifiedStatement::Transfer(statement, Some(3))) = verified_statements().pop()
-		else {
-			panic!("the transfer statement was not verified");
-		};
-		assert_eq!(statement.merkle_roots, [sealed, KNOWN_ROOT]);
+		for seed in [0xA1, 0xA2] {
+			assert!(NullifierRepository::is_used::<Test>(&nullifier(seed)));
+		}
+		#[cfg(not(feature = "skip-proof-verification"))]
+		{
+			use crate::mock::{VerifiedStatement, verified_statements};
+			let Some(VerifiedStatement::Transfer(statement, Some(3))) = verified_statements().pop()
+			else {
+				panic!("the transfer statement was not verified");
+			};
+			assert_eq!(statement.merkle_roots, [sealed, KNOWN_ROOT]);
+		}
 	});
 }
 
