@@ -1,10 +1,16 @@
-//! Privacy RPC — Orbinum shielded pool (4 endpoints, 1 file)
+//! Privacy RPC — Orbinum shielded pool.
 //!
 //! Endpoints:
-//! - `privacy_getMerkleRoot`       — current Merkle root as hex
-//! - `privacy_getMerkleProof`      — sibling path for a leaf index
-//! - `privacy_getNullifierStatus`  — whether a nullifier has been spent
-//! - `privacy_getPoolStats`        — aggregate pool statistics
+//! - `privacy_getMerkleRoot`              — current Merkle root as hex
+//! - `privacy_getMerkleProof`             — sibling path for a leaf index
+//! - `privacy_getMerkleProofByCommitment` — sibling path for a commitment
+//! - `privacy_getNullifierStatus`         — whether a nullifier has been spent
+//! - `privacy_getPoolStats`               — aggregate pool statistics
+//!
+//! The two proof endpoints run on blocking threads and at most
+//! `MAX_CONCURRENT_PROOFS` at once: a sealed tree's path is rebuilt from
+//! leaves, and inline on the connection task a few of them would stall every
+//! other RPC.
 
 use jsonrpsee::{
 	core::RpcResult,
@@ -37,7 +43,13 @@ use sp_blockchain::HeaderBackend;
 use sp_core::{storage::StorageKey, H256};
 use sp_crypto_hashing::{blake2_128, twox_128};
 use sp_runtime::traits::Block as BlockT;
-use std::{marker::PhantomData, sync::Arc};
+use std::{
+	marker::PhantomData,
+	sync::{
+		atomic::{AtomicUsize, Ordering},
+		Arc,
+	},
+};
 
 // ============================================================================
 // Storage key helpers
@@ -123,14 +135,15 @@ pub trait PrivacyApi {
 	fn get_merkle_root(&self) -> RpcResult<String>;
 
 	/// Returns a Merkle sibling-path proof for the leaf at `leaf_index`.
-	#[method(name = "privacy_getMerkleProof")]
+	#[method(name = "privacy_getMerkleProof", blocking)]
 	fn get_merkle_proof(&self, leaf_index: u32) -> RpcResult<MerkleProofResponse>;
 
 	/// Returns a Merkle sibling-path proof for the given commitment (`0x`-prefixed hex, 32 bytes).
-	/// Resolves the leaf index via the on-chain reverse index (O(1)) and reads the
-	/// stored sibling path (O(depth)). Root and path come from the same block.
-	/// Returns an error if the commitment is not found in the tree.
-	#[method(name = "privacy_getMerkleProofByCommitment")]
+	/// Resolves the leaf index via the on-chain reverse index (O(1)), then reads
+	/// the stored siblings, rebuilding a sealed tree's pruned ones from its
+	/// leaves. Root and path come from the same block. Returns an error if the
+	/// commitment is not found in the tree.
+	#[method(name = "privacy_getMerkleProofByCommitment", blocking)]
 	fn get_merkle_proof_by_commitment(&self, commitment: String) -> RpcResult<MerkleProofResponse>;
 
 	/// Returns whether the nullifier (`0x`-prefixed hex, 32 bytes) has been spent.
@@ -146,9 +159,15 @@ pub trait PrivacyApi {
 // RPC server
 // ============================================================================
 
+/// Merkle proofs computed at once, at most. A sealed tree's path rebuilds
+/// pruned siblings from its leaves, so a proof costs real CPU; past this, a
+/// request is refused as busy rather than queued behind the others.
+const MAX_CONCURRENT_PROOFS: usize = 4;
+
 /// Privacy RPC server for the Orbinum shielded pool.
 pub struct PrivacyRpc<C, B, BE> {
 	client: Arc<C>,
+	proofs: ProofGate,
 	_ph: PhantomData<(B, BE)>,
 }
 
@@ -156,8 +175,43 @@ impl<C, B, BE> PrivacyRpc<C, B, BE> {
 	pub fn new(client: Arc<C>) -> Self {
 		Self {
 			client,
+			proofs: ProofGate::new(MAX_CONCURRENT_PROOFS),
 			_ph: PhantomData,
 		}
+	}
+}
+
+/// Caps how many proofs run at once. A permit is held for the duration of one
+/// request and released when dropped.
+struct ProofGate {
+	in_flight: AtomicUsize,
+	max: usize,
+}
+
+struct ProofPermit<'a>(&'a AtomicUsize);
+
+impl ProofGate {
+	fn new(max: usize) -> Self {
+		Self {
+			in_flight: AtomicUsize::new(0),
+			max,
+		}
+	}
+
+	/// A permit, or `None` when `max` proofs are already running.
+	fn enter(&self) -> Option<ProofPermit<'_>> {
+		self.in_flight
+			.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+				(n < self.max).then_some(n + 1)
+			})
+			.ok()
+			.map(|_| ProofPermit(&self.in_flight))
+	}
+}
+
+impl Drop for ProofPermit<'_> {
+	fn drop(&mut self) {
+		self.0.fetch_sub(1, Ordering::AcqRel);
 	}
 }
 
@@ -185,6 +239,14 @@ fn pool_not_initialized() -> ErrorObject<'static> {
 	ErrorObject::owned(
 		ErrorCode::InternalError.code(),
 		"Shielded pool is not initialized",
+		None::<()>,
+	)
+}
+
+fn busy() -> ErrorObject<'static> {
+	ErrorObject::owned(
+		ErrorCode::ServerIsBusy.code(),
+		"Too many Merkle proofs in flight, try again later",
 		None::<()>,
 	)
 }
@@ -233,6 +295,7 @@ where
 	}
 
 	fn get_merkle_proof(&self, leaf_index: u32) -> RpcResult<MerkleProofResponse> {
+		let _permit = self.proofs.enter().ok_or_else(busy)?;
 		// Both runtime-API calls execute at the same block, so root and path
 		// can never mismatch.
 		let best_hash = self.client.info().best_hash;
@@ -280,6 +343,7 @@ where
 	}
 
 	fn get_merkle_proof_by_commitment(&self, commitment: String) -> RpcResult<MerkleProofResponse> {
+		let _permit = self.proofs.enter().ok_or_else(busy)?;
 		let best_hash = self.client.info().best_hash;
 		let api = self.client.runtime_api();
 
@@ -429,6 +493,31 @@ where
 mod tests {
 	use super::*;
 	use sp_crypto_hashing::twox_128;
+
+	// -------------------------------------------------------------------------
+	// Proof concurrency gate
+	// -------------------------------------------------------------------------
+
+	mod proof_gate {
+		use super::*;
+
+		#[test]
+		fn refuses_past_the_cap_and_frees_a_slot_on_drop() {
+			let gate = ProofGate::new(2);
+			let a = gate.enter().expect("first permit");
+			let b = gate.enter().expect("second permit");
+			assert!(gate.enter().is_none(), "a third proof must be refused");
+			drop(a);
+			let c = gate.enter().expect("a slot frees when a permit drops");
+			drop((b, c));
+			assert_eq!(gate.in_flight.load(Ordering::Acquire), 0);
+		}
+
+		#[test]
+		fn the_busy_error_is_the_standard_server_busy_code() {
+			assert_eq!(busy().code(), ErrorCode::ServerIsBusy.code());
+		}
+	}
 
 	// -------------------------------------------------------------------------
 	// Storage key helpers

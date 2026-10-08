@@ -242,6 +242,12 @@ impl MerkleTreeService {
 				MerkleRepository::get_leaf::<T>(tree_id * cap + sibling_index).map(|c| c.0)
 			} else if is_sealed && level < cut {
 				Some(Self::subtree_root::<T>(tree_id, level, sibling_index, cap))
+			} else if is_sealed {
+				// A sealed tree's node can also be missing at or above the cut if it
+				// was pruned under an earlier, higher cut. Rebuilding is right in
+				// every case: past the capacity it yields the zero hash.
+				MerkleRepository::get_node::<T>(tree_id, level as u8, sibling_index)
+					.or_else(|| Some(Self::subtree_root::<T>(tree_id, level, sibling_index, cap)))
 			} else {
 				MerkleRepository::get_node::<T>(tree_id, level as u8, sibling_index)
 			};
@@ -387,6 +393,40 @@ impl MerkleTreeService {
 mod tests {
 	use super::*;
 	use crate::mock::{Test, new_test_ext};
+
+	/// A sealed tree pruned under an earlier, higher cut is missing nodes at
+	/// levels the current cut keeps. Its paths must still verify against the
+	/// sealed root: the missing siblings are rebuilt from the leaves. This is what
+	/// makes lowering `SealedTreePrunedBelowLevel` safe on a live chain.
+	#[test]
+	fn a_tree_pruned_under_a_higher_cut_still_serves_valid_paths() {
+		new_test_ext().execute_with(|| {
+			let cap = <Test as Config>::MaxLeavesPerTree::get();
+			let leaves: Vec<Commitment> = (0..cap)
+				.map(|i| Commitment::new([i as u8 + 1; 32]))
+				.collect();
+			for leaf in &leaves {
+				MerkleTreeService::insert_leaf::<Test>(*leaf).unwrap();
+			}
+			MerkleTreeService::insert_leaf::<Test>(Commitment::new([0xEE; 32])).unwrap();
+			let sealed = MerkleRepository::get_sealed_root::<Test>(0).expect("tree 0 sealed");
+
+			// Prune as a cut one level above the mock's would have: the mock keeps
+			// this level, so only the fallback can supply it.
+			let kept = <Test as Config>::SealedTreePrunedBelowLevel::get();
+			for index in 0..(cap >> kept) {
+				crate::pallet::MerkleNodes::<Test>::remove((0u32, kept, index));
+			}
+
+			for (i, leaf) in leaves.iter().enumerate() {
+				let path = MerkleTreeService::get_merkle_path::<Test>(i as u32).unwrap();
+				assert!(
+					MerkleTreeService::verify_merkle_proof(&sealed, &leaf.0, &path),
+					"leaf {i}"
+				);
+			}
+		});
+	}
 
 	/// With `MaxLeavesPerTree` below 2^depth, a sealed tree's sibling subtree past
 	/// its capacity spans global leaf indices of the NEXT tree. It must still read
