@@ -9,6 +9,7 @@
 )]
 #![cfg_attr(feature = "runtime-benchmarks", warn(unused_crate_dependencies))]
 
+mod author_version;
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
 mod chain_spec;

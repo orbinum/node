@@ -24,6 +24,7 @@ use orbinum_runtime::{opaque::Block, AccountId, Balance, Nonce, RuntimeApi, Tran
 
 pub use crate::eth::{db_config_dir, EthConfiguration};
 use crate::{
+	author_version,
 	cli::Sealing,
 	client::{BaseRuntimeApiCollection, FullBackend, FullClient, RuntimeApiCollection},
 	eth::{
@@ -245,7 +246,12 @@ where
 				slot_duration,
 			);
 		let dynamic_fee = fp_dynamic_fee::InherentDataProvider(U256::from(target_gas_price));
-		Ok((slot, timestamp, dynamic_fee))
+		Ok((
+			slot,
+			timestamp,
+			dynamic_fee,
+			author_version::inherent_data_provider(),
+		))
 	};
 
 	let import_queue = sc_consensus_aura::import_queue::<AuraPair, _, _, _, _, _>(
@@ -331,6 +337,9 @@ where
 		transaction_pool,
 		other: (mut telemetry, block_import, grandpa_link, frontier_backend, storage_override),
 	} = new_partial(&config, &eth_config, build_import_queue)?;
+	if config.role.is_authority() {
+		author_version::warn_if_below_minimum(&*client);
+	}
 
 	let hwbench = hardware_benchmarks
 		.then(|| {
@@ -506,7 +515,12 @@ where
 				slot_duration,
 			);
 			let dynamic_fee = fp_dynamic_fee::InherentDataProvider(U256::from(target_gas_price));
-			Ok((slot, timestamp, dynamic_fee))
+			Ok((
+				slot,
+				timestamp,
+				dynamic_fee,
+				author_version::inherent_data_provider(),
+			))
 		};
 
 		Box::new(move |subscription_task_executor| {
@@ -667,7 +681,12 @@ where
 				slot_duration,
 			);
 			let dynamic_fee = fp_dynamic_fee::InherentDataProvider(U256::from(target_gas_price));
-			Ok((slot, timestamp, dynamic_fee))
+			Ok((
+				slot,
+				timestamp,
+				dynamic_fee,
+				author_version::inherent_data_provider(),
+			))
 		};
 
 		let aura = sc_consensus_aura::start_aura::<AuraPair, _, _, _, _, _, _, _, _, _, _>(
@@ -808,7 +827,11 @@ where
 	let create_inherent_data_providers = move |_, ()| async move {
 		let timestamp = MockTimestampInherentDataProvider;
 		let dynamic_fee = fp_dynamic_fee::InherentDataProvider(U256::from(target_gas_price));
-		Ok((timestamp, dynamic_fee))
+		Ok((
+			timestamp,
+			dynamic_fee,
+			author_version::inherent_data_provider(),
+		))
 	};
 
 	let manual_seal = match sealing {

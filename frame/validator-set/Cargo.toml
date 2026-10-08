@@ -1,6 +1,6 @@
 [package]
 name = "pallet-validator-set"
-version = "0.3.0"
+version = "0.4.0"
 description = "Sudo-controlled validator set for Orbinum. Validators can only join via governance."
 authors = { workspace = true }
 license = "GPL-3.0-or-later"
@@ -11,7 +11,9 @@ repository = "https://github.com/orbinum/node"
 targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
+async-trait = { workspace = true, optional = true }
 impl-trait-for-tuples = { workspace = true }
+log = { workspace = true }
 scale-codec = { workspace = true }
 scale-info = { workspace = true }
 # Substrate
@@ -19,6 +21,7 @@ frame-benchmarking = { workspace = true, optional = true }
 frame-support = { workspace = true }
 frame-system = { workspace = true }
 pallet-session = { workspace = true }
+sp-inherents = { workspace = true }
 sp-runtime = { workspace = true }
 sp-std = { workspace = true }
 
@@ -34,12 +37,15 @@ sp-runtime = { workspace = true, features = ["std"] }
 [features]
 default = ["std"]
 std = [
+	"async-trait",
+	"log/std",
 	"scale-codec/std",
 	"scale-info/std",
 	"frame-benchmarking?/std",
 	"frame-support/std",
 	"frame-system/std",
 	"pallet-session/std",
+	"sp-inherents/std",
 	"sp-runtime/std",
 	"sp-std/std",
 ]

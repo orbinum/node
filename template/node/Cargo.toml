@@ -1,6 +1,6 @@
 [package]
 name = "orbinum-node"
-version = "0.3.0"
+version = "0.4.0"
 license = "Unlicense"
 build = "build.rs"
 description = "Orbinum Network Node - Privacy-focused blockchain with ZK proofs and EVM compatibility."
@@ -25,6 +25,7 @@ scale-codec = { workspace = true }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
 
 # Substrate
+pallet-validator-set = { workspace = true, features = ["std"] }
 prometheus-endpoint = { workspace = true }
 sc-basic-authorship = { workspace = true }
 sc-chain-spec = { workspace = true }

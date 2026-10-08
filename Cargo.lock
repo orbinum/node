@@ -9911,7 +9911,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orbinum-node"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "async-trait",
  "clap",
@@ -9948,6 +9948,7 @@ dependencies = [
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc",
  "pallet-transaction-payment-rpc-runtime-api",
+ "pallet-validator-set",
  "pallet-zk-verifier-rpc",
  "pallet-zk-verifier-runtime-api",
  "parity-scale-codec",
@@ -9994,7 +9995,7 @@ dependencies = [
 
 [[package]]
 name = "orbinum-runtime"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "ethereum",
@@ -12797,17 +12798,20 @@ dependencies = [
 
 [[package]]
 name = "pallet-validator-set"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
+ "async-trait",
  "frame-benchmarking",
  "frame-support",
  "frame-system",
  "impl-trait-for-tuples",
+ "log",
  "pallet-balances",
  "pallet-session",
  "parity-scale-codec",
  "scale-info",
  "sp-core",
+ "sp-inherents",
  "sp-io",
  "sp-runtime",
  "sp-std",

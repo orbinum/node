@@ -76,11 +76,36 @@ parameter_types! {
 	pub const MaxValidators: u32 = 10;
 }
 
+parameter_types! {
+	pub const QuorumWindow: u64 = 100;
+}
+
+std::thread_local! {
+	static BLOCK_AUTHOR: core::cell::RefCell<Option<AccountId>> = const { core::cell::RefCell::new(None) };
+}
+
+/// Makes `who` the author of the blocks that follow.
+pub fn set_block_author(who: Option<AccountId>) {
+	BLOCK_AUTHOR.with(|a| *a.borrow_mut() = who);
+}
+
+pub struct MockFindAuthor;
+impl frame_support::traits::FindAuthor<AccountId> for MockFindAuthor {
+	fn find_author<'a, I>(_digests: I) -> Option<AccountId>
+	where
+		I: 'a + IntoIterator<Item = (frame_support::ConsensusEngineId, &'a [u8])>,
+	{
+		BLOCK_AUTHOR.with(|a| *a.borrow())
+	}
+}
+
 impl pallet_validator_set::Config for Test {
 	type AddRemoveOrigin = frame_system::EnsureRoot<AccountId>;
 	type MaxValidators = MaxValidators;
 	type Prerequisites = MockPrerequisites;
 	type OnValidatorRemoved = MockOnValidatorRemoved;
+	type FindAuthor = MockFindAuthor;
+	type QuorumWindow = QuorumWindow;
 	type WeightInfo = ();
 }
 
@@ -110,6 +135,7 @@ impl ExtBuilder {
 		// whichever test happens to run next.
 		MOCK_HAS_SESSION_KEYS.with(|v| *v.borrow_mut() = true);
 		REMOVED_HOOK_CALLS.with(|v| v.borrow_mut().clear());
+		set_block_author(None);
 
 		let mut storage = frame_system::GenesisConfig::<Test>::default()
 			.build_storage()

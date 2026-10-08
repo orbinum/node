@@ -474,3 +474,7 @@ fn can_be_re_added_after_deregister() {
 			assert!(ApprovedValidators::<Test>::get().contains(&42));
 		});
 }
+
+// ── Minimum author version ───────────────────────────────────────────────────
+
+mod author_version;

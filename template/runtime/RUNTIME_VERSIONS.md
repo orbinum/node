@@ -20,6 +20,29 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
+### spec 18 — tx 5 — [Unreleased]
+
+Governance can require a minimum node version from block authors.
+`transaction_version` stays: validator-set only gains calls 6 and 7. Ships with
+`orbinum-runtime` / `orbinum-node` 0.4.0 and `pallet-validator-set` 0.4.0;
+node 0.4.0 is the first binary that declares its version.
+
+#### 1 · Minimum author version
+
+Each author's node declares its crate version in the mandatory
+`validatorSet.note_author_version` inherent. While `MinAuthorVersion` is `None`
+(the default) nothing is enforced and every binary, including those that
+predate the inherent, keeps authoring. Root sets it with
+`set_min_author_version`; from then on a block without a declaration, or with
+an older one, is invalid. The call is refused unless 2/3 of the approved set
+declared at least that version within the last session (an empty set is
+refused), so a minimum can never halt Aura. `None` lifts it without the quorum
+check. Only approved validators' declarations are kept; leaving the set, or
+authoring a block without one, drops them.
+
+Old binaries run spec 18 unchanged (no new host function). Setting a minimum is
+what removes them from authoring; they keep importing and voting in GRANDPA.
+
 ### spec 17 — tx 5 — [Unreleased]
 
 A shield must prove its note is worth exactly the deposit. `transaction_version`

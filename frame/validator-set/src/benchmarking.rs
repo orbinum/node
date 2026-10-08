@@ -75,6 +75,48 @@ mod benchmarks {
 		assert!(!ApprovedValidators::<T>::get().contains(&target));
 	}
 
+	// ── set_min_author_version ───────────────────────────────────────────────
+
+	/// Worst case: a full set, every validator counted toward the quorum, so the
+	/// guard reads one `LastAuthorVersion` entry per validator.
+	#[benchmark]
+	fn set_min_author_version() {
+		let max = T::MaxValidators::get();
+		let validators: sp_std::vec::Vec<T::AccountId> = (0..max)
+			.map(|i| account::<T::AccountId>("validator", i, 0))
+			.collect();
+		let min = NodeVersion::new(1, 0, 0);
+		let now = frame_system::Pallet::<T>::block_number();
+		for v in &validators {
+			LastAuthorVersion::<T>::insert(v, (min, now));
+		}
+		let bounded: frame_support::BoundedVec<T::AccountId, T::MaxValidators> = validators
+			.try_into()
+			.expect("max entries == MaxValidators; qed");
+		ApprovedValidators::<T>::put(bounded);
+
+		#[extrinsic_call]
+		set_min_author_version(RawOrigin::Root, Some(min));
+
+		assert_eq!(MinAuthorVersion::<T>::get(), Some(min));
+	}
+
+	// ── note_author_version ──────────────────────────────────────────────────
+
+	/// Worst case: a minimum is set, so the declared version is compared too.
+	/// The runtime's `FindAuthor` needs an Aura pre-digest a benchmark block
+	/// lacks, so the author lookup and the `LastAuthorVersion` write are not
+	/// measured; the estimated weight accounts for them.
+	#[benchmark]
+	fn note_author_version() {
+		MinAuthorVersion::<T>::put(NodeVersion::new(0, 0, 1));
+
+		#[extrinsic_call]
+		note_author_version(RawOrigin::None, NodeVersion::new(1, 0, 0));
+
+		assert!(AuthorVersionNoted::<T>::get());
+	}
+
 	impl_benchmark_test_suite!(
 		Pallet,
 		crate::mock::ExtBuilder::default().build(),

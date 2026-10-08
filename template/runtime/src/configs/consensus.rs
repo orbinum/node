@@ -101,6 +101,8 @@ impl pallet_validator_set::Config for Runtime {
 	type MaxValidators = ConstU32<32>;
 	type Prerequisites = ValidatorPrerequisiteChecker;
 	type OnValidatorRemoved = RelayerCleanup;
+	type FindAuthor = FindAuthorAccountId;
+	type QuorumWindow = Period;
 	type WeightInfo = pallet_validator_set::weights::SubstrateWeight<Runtime>;
 }
 
