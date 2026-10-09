@@ -87,7 +87,10 @@ mod benchmarks {
 	/// `Ok`, so the full verification cost is still recorded.
 	#[benchmark]
 	fn verify_proof(n: Linear<1, 16>) {
-		let circuit_id = CircuitId::TRANSFER;
+		// An id outside the known table: it takes the base layout at any arity. A
+		// known circuit admits only its own arities, so every other `n` would skip
+		// the pairing and the fit would come out far below the real cost.
+		let circuit_id = CircuitId(200);
 
 		// Seed storage with an arity-`n` VK so `do_verify` runs `n` scalar-muls + pairing.
 		let vk_info = VerificationKeyInfo {

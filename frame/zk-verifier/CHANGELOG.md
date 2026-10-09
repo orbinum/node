@@ -24,6 +24,9 @@ All notable changes to this pallet are documented here.
   regenerating as well.
 - `encode_transfer` / `encode_unshield` return `None` for the base layout: the
   base encoding of a spend, and the raw-recipient path with it, is gone.
+- The `verify_proof` benchmark seeds its key under an id outside the known
+  table: a known circuit admits only its own arities, so most `n` would skip
+  the pairing and the regenerated weight would fall far below the real cost.
 
 ## [0.15.0] - 2026-10-08
 
