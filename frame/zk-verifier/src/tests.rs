@@ -1575,6 +1575,28 @@ fn genesis_rejects_a_valid_key_with_the_wrong_arity() {
 	.build_storage();
 }
 
+/// Genesis with one key of `arity` inputs for `circuit_id`.
+fn genesis_with(circuit_id: CircuitId, arity: usize) {
+	let _ = pallet::GenesisConfig::<Test> {
+		verification_keys: vec![(circuit_id, real_vk(arity).into_inner())],
+		_phantom: Default::default(),
+	}
+	.build_storage();
+}
+
+/// A network cannot start with a spend key that binds no memo.
+#[test]
+#[should_panic(expected = "Genesis VK must deserialize")]
+fn genesis_rejects_a_base_transfer_key() {
+	genesis_with(CircuitId::TRANSFER, TRANSFER_PUBLIC_INPUTS);
+}
+
+#[test]
+#[should_panic(expected = "Genesis VK must deserialize")]
+fn genesis_rejects_a_base_unshield_key() {
+	genesis_with(CircuitId::UNSHIELD, UNSHIELD_PUBLIC_INPUTS);
+}
+
 // ── integrity_test ────────────────────────────────────────────────────────────
 
 /// The integrity_test must abort when verification is compiled out WITHOUT the
