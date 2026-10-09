@@ -6,6 +6,25 @@ All notable changes to this pallet are documented here.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-08
+
+### Security
+
+- **Breaking:** a spend circuit (transfer, unshield) never takes a key of the
+  base layout, at any version: such a key binds neither the memos nor the full
+  recipient. The `FIRST_VERSION` exception is gone; genesis keys for spend
+  circuits must be memo-bound. Shield is unchanged.
+- `unretire_version` re-checks the key against the same rule, so a base spend
+  key retired for being unsafe cannot come back. It now reads the key:
+  `unretire_version`'s weight needs regenerating.
+- A base spend key already in storage — left by an older runtime or a raw
+  storage write — verifies nothing: the verifier refuses the layout on every
+  path, so a proof under it cannot spend with swapped memos. `set_active_version`
+  refuses such a key too; it now reads the key, so its weight needs
+  regenerating as well.
+- `encode_transfer` / `encode_unshield` return `None` for the base layout: the
+  base encoding of a spend, and the raw-recipient path with it, is gone.
+
 ## [0.15.0] - 2026-10-08
 
 ### Changed

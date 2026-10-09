@@ -269,8 +269,10 @@ mod tests {
 		});
 	}
 
+	/// A base key in storage — never registrable, but left by an older runtime
+	/// or a raw storage write — verifies nothing, active or named.
 	#[test]
-	fn transfer_verifies_under_the_base_and_the_memo_bound_key() {
+	fn transfer_verifies_under_the_memo_bound_key_only() {
 		new_test_ext().execute_with(|| {
 			insert_vk(CircuitId::TRANSFER, 1, TRANSFER_PUBLIC_INPUTS);
 			insert_vk(
@@ -279,7 +281,8 @@ mod tests {
 				TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
 			);
 			activate(CircuitId::TRANSFER, 1);
-			assert_eq!(verify_transfer(&transfer(), None), Ok(true));
+			assert_eq!(verify_transfer(&transfer(), None), Ok(false));
+			assert_eq!(verify_transfer(&transfer(), Some(1)), Ok(false));
 			assert_eq!(verify_transfer(&transfer(), Some(2)), Ok(true));
 		});
 	}
@@ -301,10 +304,11 @@ mod tests {
 	}
 
 	#[test]
-	fn a_same_tree_transfer_verifies_under_every_key() {
+	fn a_same_tree_transfer_verifies_under_every_admitted_key() {
 		new_test_ext().execute_with(|| {
 			insert_all_transfer_keys();
-			for version in 1..=3 {
+			assert_eq!(verify_transfer(&transfer(), Some(1)), Ok(false));
+			for version in 2..=3 {
 				assert_eq!(verify_transfer(&transfer(), Some(version)), Ok(true));
 			}
 		});
@@ -403,8 +407,10 @@ mod tests {
 		});
 	}
 
+	/// A base key in storage — never registrable, but left by an older runtime
+	/// or a raw storage write — verifies nothing, active or named.
 	#[test]
-	fn unshield_verifies_under_the_base_and_the_memo_bound_key() {
+	fn unshield_verifies_under_the_memo_bound_key_only() {
 		new_test_ext().execute_with(|| {
 			insert_vk(CircuitId::UNSHIELD, 1, UNSHIELD_PUBLIC_INPUTS);
 			insert_vk(
@@ -413,7 +419,8 @@ mod tests {
 				UNSHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
 			);
 			activate(CircuitId::UNSHIELD, 1);
-			assert_eq!(verify_unshield(&unshield(), None), Ok(true));
+			assert_eq!(verify_unshield(&unshield(), None), Ok(false));
+			assert_eq!(verify_unshield(&unshield(), Some(1)), Ok(false));
 			assert_eq!(verify_unshield(&unshield(), Some(2)), Ok(true));
 		});
 	}

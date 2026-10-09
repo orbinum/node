@@ -3,15 +3,16 @@
 //!
 //! The one place that knows each circuit's input order and how a domain value
 //! becomes a BN254 field element (32 bytes, little-endian, canonical). The
-//! [`InputLayout`] comes from the key being verified against, so a v1, a
-//! memo-bound and a cross-tree key each get the inputs they were built for.
+//! [`InputLayout`] comes from the key being verified against, so a memo-bound
+//! and a cross-tree key each get the inputs they were built for. A base spend
+//! key gets none: it binds no memo, and the verifier never admits it.
 
 use crate::port::{ShieldStatement, TransferStatement, UnshieldStatement};
 use alloc::vec::Vec;
 use orbinum_zk_verifier::{InputLayout, to_field_le};
 
 /// Transfer inputs, in circuit order:
-/// `merkle_root | nullifiers.. | commitments.. | asset_id | fee [| memo_hash]`, or
+/// `merkle_root | nullifiers.. | commitments.. | asset_id | fee | memo_hash`, or
 /// for the cross-tree layout `merkle_roots[0] | merkle_roots[1] | ..` in place of
 /// the single root.
 ///
@@ -22,49 +23,40 @@ pub fn encode_transfer(s: &TransferStatement, layout: InputLayout) -> Option<Vec
 	let mut raw = Vec::with_capacity(5 + s.nullifiers.len() + s.commitments.len());
 	match layout {
 		InputLayout::CrossTree => raw.extend_from_slice(&s.merkle_roots),
-		InputLayout::Base | InputLayout::MemoBound if root0 == root1 => raw.push(root0),
-		InputLayout::Base | InputLayout::MemoBound => return None,
+		InputLayout::MemoBound if root0 == root1 => raw.push(root0),
+		InputLayout::MemoBound | InputLayout::Base => return None,
 	}
 	raw.extend_from_slice(&s.nullifiers);
 	raw.extend_from_slice(&s.commitments);
 	raw.push(u32_field(s.asset_id));
 	raw.push(u128_field(s.fee));
-	if matches!(layout, InputLayout::MemoBound | InputLayout::CrossTree) {
-		raw.push(to_field_le(&s.memo_digest));
-	}
+	raw.push(to_field_le(&s.memo_digest));
 	Some(raw)
 }
 
 /// Unshield inputs, in circuit order:
-/// `merkle_root | nullifier | amount | recipient | asset_id | fee | change_commitment [| memo_hash]`.
+/// `merkle_root | nullifier | amount | recipient | asset_id | fee | change_commitment | memo_hash`.
 ///
-/// `recipient` is an AccountId32, wider than the field. The base layout takes
-/// it mod r, which maps `R` and `R ± r` to the same input — a copier could
-/// redirect the withdrawal to an alias nobody controls. The memo-bound layout
-/// hashes it first, so an alias would need a blake2 collision.
+/// `recipient` is an AccountId32, wider than the field, so it is hashed first:
+/// taken mod r, `R` and `R ± r` would be the same input, and a copier could
+/// redirect the withdrawal to an alias nobody controls.
 ///
-/// `None` for the cross-tree layout: an unshield spends one note, so no such
-/// key can exist for it (`input_layout`).
+/// `None` for any layout but the memo-bound one: an unshield spends one note,
+/// so no cross-tree key can exist for it (`input_layout`).
 pub fn encode_unshield(s: &UnshieldStatement, layout: InputLayout) -> Option<Vec<[u8; 32]>> {
-	let (recipient, memo_hash) = match layout {
-		InputLayout::Base => (to_field_le(&s.recipient), None),
-		InputLayout::MemoBound => (
-			to_field_le(&sp_io::hashing::blake2_256(&s.recipient)),
-			Some(to_field_le(&s.memo_digest)),
-		),
-		InputLayout::CrossTree => return None,
-	};
-	let mut raw = alloc::vec![
+	if layout != InputLayout::MemoBound {
+		return None;
+	}
+	Some(alloc::vec![
 		s.merkle_root,
 		s.nullifier,
 		u128_field(s.amount),
-		recipient,
+		to_field_le(&sp_io::hashing::blake2_256(&s.recipient)),
 		u32_field(s.asset_id),
 		u128_field(s.fee),
 		s.change_commitment,
-	];
-	raw.extend(memo_hash);
-	Some(raw)
+		to_field_le(&s.memo_digest),
+	])
 }
 
 /// Shield inputs, in circuit order: `commitment | value | asset_id`.
@@ -142,13 +134,20 @@ mod tests {
 
 	#[test]
 	fn transfer_follows_circuit_order() {
-		let raw = encode_transfer(&transfer(), InputLayout::Base).unwrap();
-		assert_eq!(raw.len(), TRANSFER_PUBLIC_INPUTS);
+		let raw = encode_transfer(&transfer(), InputLayout::MemoBound).unwrap();
+		assert_eq!(raw.len(), TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS);
 		assert_eq!(raw[0], [0x01; 32]);
 		assert_eq!(&raw[1..3], &NULLIFIERS);
 		assert_eq!(&raw[3..5], &COMMITMENTS);
 		assert_eq!(raw[5], u32_field(7));
 		assert_eq!(raw[6], u128_field(500));
+		assert_eq!(raw[7], to_field_le(&[0xEE; 32]));
+	}
+
+	#[test]
+	fn a_base_spend_key_gets_no_encoding() {
+		assert!(encode_transfer(&transfer(), InputLayout::Base).is_none());
+		assert!(encode_unshield(&unshield(), InputLayout::Base).is_none());
 	}
 
 	#[test]
@@ -177,7 +176,6 @@ mod tests {
 			merkle_roots: [[0x01; 32], [0x09; 32]],
 			..transfer()
 		};
-		assert!(encode_transfer(&s, InputLayout::Base).is_none());
 		assert!(encode_transfer(&s, InputLayout::MemoBound).is_none());
 	}
 
@@ -208,56 +206,25 @@ mod tests {
 	}
 
 	#[test]
-	fn memo_bound_transfer_appends_the_reduced_memo_digest() {
-		let base = encode_transfer(&transfer(), InputLayout::Base).unwrap();
-		let bound = encode_transfer(&transfer(), InputLayout::MemoBound).unwrap();
-		assert_eq!(bound.len(), TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS);
-		assert_eq!(&bound[..TRANSFER_PUBLIC_INPUTS], &base[..]);
-		assert_eq!(bound[TRANSFER_PUBLIC_INPUTS], to_field_le(&[0xEE; 32]));
-	}
-
-	#[test]
-	fn memo_digest_only_matters_when_bound() {
-		let other = TransferStatement {
-			memo_digest: [0x11; 32],
-			..transfer()
-		};
-		assert_eq!(
-			encode_transfer(&transfer(), InputLayout::Base).unwrap(),
-			encode_transfer(&other, InputLayout::Base).unwrap()
-		);
-		assert_ne!(
-			encode_transfer(&transfer(), InputLayout::MemoBound).unwrap(),
-			encode_transfer(&other, InputLayout::MemoBound).unwrap()
-		);
-	}
-
-	#[test]
-	fn unshield_follows_circuit_order() {
-		let raw = encode_unshield(&unshield(), InputLayout::Base).unwrap();
-		assert_eq!(raw.len(), UNSHIELD_PUBLIC_INPUTS);
+	fn unshield_follows_circuit_order_with_a_hashed_recipient() {
+		let raw = encode_unshield(&unshield(), InputLayout::MemoBound).unwrap();
+		assert_eq!(raw.len(), UNSHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS);
 		assert_eq!(raw[0], [0x01; 32]);
 		assert_eq!(raw[1], [0x02; 32]);
 		assert_eq!(raw[2], u128_field(100));
-		assert_eq!(raw[3], to_field_le(&[0xFF; 32]));
-		assert_eq!(raw[4], u32_field(7));
-		assert_eq!(raw[5], u128_field(5));
-		assert_eq!(raw[6], [0x06; 32]);
-	}
-
-	#[test]
-	fn memo_bound_unshield_hashes_the_recipient_and_appends_the_memo_digest() {
-		let raw = encode_unshield(&unshield(), InputLayout::MemoBound).unwrap();
-		assert_eq!(raw.len(), UNSHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS);
 		assert_eq!(
 			raw[3],
 			to_field_le(&sp_io::hashing::blake2_256(&[0xFF; 32]))
 		);
-		assert_eq!(raw[UNSHIELD_PUBLIC_INPUTS], to_field_le(&[0xEE; 32]));
+		assert_eq!(raw[4], u32_field(7));
+		assert_eq!(raw[5], u128_field(5));
+		assert_eq!(raw[6], [0x06; 32]);
+		assert_eq!(raw[7], to_field_le(&[0xEE; 32]));
 	}
 
+	/// `R + r` is the same field element as `R`; hashed first, it is another input.
 	#[test]
-	fn a_recipient_alias_encodes_the_same_only_in_the_base_layout() {
+	fn a_recipient_alias_encodes_differently() {
 		let recipient = [0x01; 32];
 		let aliased = UnshieldStatement {
 			recipient: field_twin(recipient),
@@ -268,11 +235,6 @@ mod tests {
 			..unshield()
 		};
 		assert_ne!(original.recipient, aliased.recipient);
-		assert_eq!(
-			encode_unshield(&original, InputLayout::Base).unwrap(),
-			encode_unshield(&aliased, InputLayout::Base).unwrap(),
-			"v1 cannot tell R from R + r"
-		);
 		assert_ne!(
 			encode_unshield(&original, InputLayout::MemoBound).unwrap(),
 			encode_unshield(&aliased, InputLayout::MemoBound).unwrap()
@@ -315,15 +277,12 @@ mod tests {
 			fee: u128::MAX,
 			..unshield()
 		};
-		for layout in [InputLayout::Base, InputLayout::MemoBound] {
-			let raw = encode_unshield(&max, layout).unwrap();
-			assert!(
-				orbinum_zk_verifier::PublicInputs::new(raw)
-					.to_field_elements()
-					.is_ok(),
-				"{layout:?}"
-			);
-		}
+		let raw = encode_unshield(&max, InputLayout::MemoBound).unwrap();
+		assert!(
+			orbinum_zk_verifier::PublicInputs::new(raw)
+				.to_field_elements()
+				.is_ok()
+		);
 	}
 
 	#[test]

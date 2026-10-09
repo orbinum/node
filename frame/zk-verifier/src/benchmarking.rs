@@ -57,10 +57,12 @@ mod benchmarks {
 			.bytes
 	}
 
-	/// VK for the TRANSFER circuit (arity 7) — used by the storage benchmarks,
-	/// which validate that a registered VK deserializes and matches circuit arity.
+	/// A memo-bound TRANSFER key (arity 8), the layout registration and
+	/// `unretire_version` accept for a spend circuit.
 	fn sample_verification_key() -> Vec<u8> {
-		synthetic_vk(orbinum_zk_verifier::TRANSFER_PUBLIC_INPUTS)
+		synthetic_vk(
+			orbinum_zk_verifier::TRANSFER_PUBLIC_INPUTS + orbinum_zk_verifier::MEMO_HASH_INPUTS,
+		)
 	}
 
 	/// Store the sample key for `(circuit_id, version)`, bypassing registration.

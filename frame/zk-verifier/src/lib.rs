@@ -282,10 +282,11 @@ pub mod pallet {
 		///
 		/// A note's circuit version is NOT bound into its commitment, so the
 		/// submitter picks the version freely; a version with weaker constraints at
-		/// a known arity would let any note be spent under it. Any other semantic change MUST use a NEW
-		/// circuit id. `ensure_vk_arity` enforces arity, NOT semantics — that is a
-		/// governance responsibility. Retire a superseded version with
-		/// `retire_version` (a v1 key binds neither memos nor the full recipient).
+		/// a known arity would let any note be spent under it. Any other semantic
+		/// change MUST use a NEW circuit id. `ensure_vk_arity` enforces arity, NOT
+		/// semantics — that is a governance responsibility. A spend circuit's key
+		/// is never of the base layout, which binds neither memos nor the full
+		/// recipient; retire a superseded version with `retire_version`.
 		#[pallet::call_index(0)]
 		#[pallet::weight(T::WeightInfo::register_verification_key())]
 		pub fn register_verification_key(
@@ -307,16 +308,16 @@ pub mod pallet {
 			version: u32,
 		) -> DispatchResult {
 			ensure_root(origin)?;
-			ensure!(
-				VerificationKeys::<T>::contains_key(circuit_id, version),
-				Error::<T>::VerificationKeyNotFound
-			);
-			// A retired version cannot verify: making it active would leave wallets
-			// proving against a key every proof then fails.
+			let info = VerificationKeys::<T>::get(circuit_id, version)
+				.ok_or(Error::<T>::VerificationKeyNotFound)?;
+			// A retired version, or a key of a layout the pallet does not admit,
+			// cannot verify: making it active would leave wallets proving against
+			// a key every proof then fails.
 			ensure!(
 				!RetiredVersions::<T>::contains_key(circuit_id, version),
 				Error::<T>::UnsupportedCircuitVersion
 			);
+			Self::ensure_vk_arity(circuit_id, &info.key_data)?;
 
 			Self::activate(circuit_id, version);
 			Ok(())
@@ -460,6 +461,11 @@ pub mod pallet {
 				RetiredVersions::<T>::contains_key(circuit_id, version),
 				Error::<T>::VersionNotRetired
 			);
+			// A key retired for being unsafe must not come back: it is held to the
+			// rules a new registration would face.
+			let info = VerificationKeys::<T>::get(circuit_id, version)
+				.ok_or(Error::<T>::VerificationKeyNotFound)?;
+			Self::ensure_vk_arity(circuit_id, &info.key_data)?;
 			RetiredVersions::<T>::remove(circuit_id, version);
 			Self::deposit_event(Event::VersionUnretired {
 				circuit_id,
@@ -581,7 +587,7 @@ pub mod pallet {
 			set_active: bool,
 		) -> DispatchResult {
 			ensure!(!key_data.is_empty(), Error::<T>::EmptyVerificationKey);
-			Self::ensure_vk_arity(circuit_id, version, &key_data)?;
+			Self::ensure_vk_arity(circuit_id, &key_data)?;
 			// Never overwrite: a replaced key would silently change what verifies.
 			ensure!(
 				!VerificationKeys::<T>::contains_key(circuit_id, version),
@@ -611,35 +617,22 @@ pub mod pallet {
 		/// fits one of the circuit's input layouts (base, memo-bound or, for a
 		/// transfer, cross-tree).
 		///
-		/// For a spend circuit, only [`Self::FIRST_VERSION`] may use the base
-		/// layout: every later version must bind its memos and the full recipient.
-		/// That keeps a v1 key from being registered again as "v2" — a rotation
-		/// that would retire nothing but the version number. Shield has one layout
-		/// at every version.
+		/// A spend circuit never takes the base layout, at any version: a base key
+		/// binds neither the memos nor the full recipient, so a copier could swap
+		/// a spend's memos or alias its recipient. Shield has one layout, the base.
 		///
 		/// Only ids in the known table carry an expected arity; the rest are
 		/// checked to deserialize and nothing more. An id that does not fit a
 		/// `u8` is rejected outright rather than truncated — `as u8` would alias
 		/// 257 onto 1 and silently validate a key against the wrong circuit's
 		/// arity. `purge_circuit` guards the same lookup the same way.
-		fn ensure_vk_arity(circuit_id: CircuitId, version: u32, key_data: &[u8]) -> DispatchResult {
-			use orbinum_zk_verifier::{InputLayout, VerifyingKey, has_memo_layout, input_layout};
-
-			let id = u8::try_from(circuit_id.0).map_err(|_| Error::<T>::InvalidVerificationKey)?;
-
-			let vk = VerifyingKey::new(key_data.to_vec());
-			let arity = vk
+		fn ensure_vk_arity(circuit_id: CircuitId, key_data: &[u8]) -> DispatchResult {
+			let arity = orbinum_zk_verifier::VerifyingKey::new(key_data.to_vec())
 				.num_public_inputs()
 				.map_err(|_| Error::<T>::InvalidVerificationKey)?;
-
-			let layout = input_layout(id, arity).ok_or(Error::<T>::InvalidVerificationKey)?;
-			ensure!(
-				!(has_memo_layout(id)
-					&& version != Self::FIRST_VERSION
-					&& layout == InputLayout::Base),
-				Error::<T>::InvalidVerificationKey
-			);
-			Ok(())
+			verifier::admitted_layout(circuit_id, arity)
+				.map(|_| ())
+				.ok_or(Error::<T>::InvalidVerificationKey.into())
 		}
 
 		/// Insert a validated VK for `(circuit_id, version)` and store its hash,

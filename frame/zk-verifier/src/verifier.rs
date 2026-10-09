@@ -10,22 +10,23 @@ use crate::{
 	types::CircuitId,
 };
 use alloc::vec::Vec;
-use orbinum_zk_verifier::{Bn254, InputLayout, PreparedVerifyingKey, VerifyingKey, input_layout};
+use orbinum_zk_verifier::{
+	Bn254, InputLayout, PreparedVerifyingKey, VerifyingKey, has_memo_layout, input_layout,
+};
 
 /// Verify a proof of a circuit statement, encoded for the layout of the key it
 /// is checked against.
 ///
-/// Returns `(valid, resolved_version)`. A key whose arity fits none of the
-/// circuit's layouts, a statement the key cannot attest to (`encode` returns
-/// `None`), or inputs that do not fill it, are `valid = false`.
+/// Returns `(valid, resolved_version)`. A key of a layout the pallet does not
+/// admit, a statement the key cannot attest to (`encode` returns `None`), or
+/// inputs that do not fill it, are `valid = false`.
 pub fn verify_statement<T: Config>(
 	circuit_id: CircuitId,
 	version: Option<u32>,
 	proof: &[u8],
 	encode: impl FnOnce(InputLayout) -> Option<Vec<[u8; 32]>>,
 ) -> Result<(bool, u32), sp_runtime::DispatchError> {
-	check::<T>(circuit_id, version, proof, |arity| {
-		let layout = input_layout(u8::try_from(circuit_id.0).ok()?, arity)?;
+	check::<T>(circuit_id, version, proof, |layout, arity| {
 		encode(layout).filter(|raw| raw.len() == arity)
 	})
 }
@@ -39,16 +40,24 @@ pub fn verify_raw<T: Config>(
 	raw_inputs: Vec<[u8; 32]>,
 ) -> Result<(bool, u32), sp_runtime::DispatchError> {
 	frame_support::ensure!(!raw_inputs.is_empty(), Error::<T>::EmptyPublicInputs);
-	check::<T>(circuit_id, version, proof, |_| Some(raw_inputs))
+	check::<T>(circuit_id, version, proof, |_, _| Some(raw_inputs))
 }
 
-/// Shared path: resolve and prepare the key, build the inputs for its arity,
+/// The layout a key of `arity` inputs gives `circuit_id`, if admitted. A spend
+/// circuit never takes the base layout, which binds neither its memos nor the
+/// full recipient: such a key verifies nothing, however it reached storage.
+pub(crate) fn admitted_layout(circuit_id: CircuitId, arity: usize) -> Option<InputLayout> {
+	let id = u8::try_from(circuit_id.0).ok()?;
+	input_layout(id, arity).filter(|layout| !(has_memo_layout(id) && *layout == InputLayout::Base))
+}
+
+/// Shared path: resolve and prepare the key, build the inputs for its layout,
 /// verify, record. `inputs` returns `None` to fail the proof without verifying.
 fn check<T: Config>(
 	circuit_id: CircuitId,
 	version: Option<u32>,
 	proof: &[u8],
-	inputs: impl FnOnce(usize) -> Option<Vec<[u8; 32]>>,
+	inputs: impl FnOnce(InputLayout, usize) -> Option<Vec<[u8; 32]>>,
 ) -> Result<(bool, u32), sp_runtime::DispatchError> {
 	frame_support::ensure!(!proof.is_empty(), Error::<T>::EmptyProof);
 	let (key_data, resolved) = resolve_key::<T>(circuit_id, version)?;
@@ -58,7 +67,9 @@ fn check<T: Config>(
 	let result = match VerifyingKey::new(key_data).prepare() {
 		Ok(pvk) => {
 			let arity = pvk.vk.gamma_abc_g1.len().saturating_sub(1);
-			inputs(arity).is_some_and(|raw| do_verify(&pvk, proof, raw))
+			admitted_layout(circuit_id, arity)
+				.and_then(|layout| inputs(layout, arity))
+				.is_some_and(|raw| do_verify(&pvk, proof, raw))
 		}
 		Err(_) => false,
 	};
@@ -137,9 +148,11 @@ mod tests {
 		pallet::VerificationStats,
 	};
 	use frame_support::assert_err;
-	use orbinum_zk_verifier::{MEMO_HASH_INPUTS, TRANSFER_PUBLIC_INPUTS};
+	use orbinum_zk_verifier::{MEMO_HASH_INPUTS, SHIELD_PUBLIC_INPUTS, TRANSFER_PUBLIC_INPUTS};
 
 	const BASE: usize = TRANSFER_PUBLIC_INPUTS;
+	/// A transfer key the pallet admits: the memo-bound layout.
+	const KEY: usize = BASE + MEMO_HASH_INPUTS;
 
 	fn proof() -> Vec<u8> {
 		vec![0x01; 128]
@@ -168,18 +181,37 @@ mod tests {
 	// ── verify_statement ──────────────────────────────────────────────────────
 
 	#[test]
-	fn a_base_key_gets_the_base_layout() {
+	fn a_base_shield_key_gets_the_base_layout() {
 		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::TRANSFER, 1, BASE);
+			insert_vk(CircuitId::SHIELD, 1, SHIELD_PUBLIC_INPUTS);
 			let mut seen = None;
 			let res = verify_statement::<Test>(
-				CircuitId::TRANSFER,
+				CircuitId::SHIELD,
 				Some(1),
 				&proof(),
-				encoder(&mut seen, BASE),
+				encoder(&mut seen, SHIELD_PUBLIC_INPUTS),
 			);
 			assert_eq!(res, Ok((true, 1)));
 			assert_eq!(seen, Some(InputLayout::Base));
+		});
+	}
+
+	/// A base spend key binds no memo: wherever it came from, it verifies
+	/// nothing, on either path, and the attempt is counted.
+	#[test]
+	fn a_base_spend_key_verifies_nothing() {
+		new_test_ext().execute_with(|| {
+			for cid in [CircuitId::TRANSFER, CircuitId::UNSHIELD] {
+				insert_vk(cid, 1, BASE);
+				let mut seen = None;
+				let res =
+					verify_statement::<Test>(cid, Some(1), &proof(), encoder(&mut seen, BASE));
+				assert_eq!(res, Ok((false, 1)));
+				assert_eq!(seen, None);
+				let raw = verify_raw::<Test>(cid, Some(1), &proof(), vec![[0x02; 32]; BASE]);
+				assert_eq!(raw, Ok((false, 1)));
+				assert_eq!(stats(cid, 1), (2, 0, 2));
+			}
 		});
 	}
 
@@ -204,7 +236,7 @@ mod tests {
 	#[test]
 	fn a_statement_the_key_cannot_attest_to_fails_and_is_counted() {
 		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::TRANSFER, 1, BASE);
+			insert_vk(CircuitId::TRANSFER, 1, KEY);
 			let res = verify_statement::<Test>(CircuitId::TRANSFER, Some(1), &proof(), |_| None);
 			assert_eq!(res, Ok((false, 1)));
 			assert_eq!(stats(CircuitId::TRANSFER, 1), (1, 0, 1));
@@ -231,13 +263,13 @@ mod tests {
 	#[test]
 	fn inputs_that_do_not_fill_the_key_fail() {
 		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::TRANSFER, 1, BASE);
+			insert_vk(CircuitId::TRANSFER, 1, KEY);
 			let mut seen = None;
 			let res = verify_statement::<Test>(
 				CircuitId::TRANSFER,
 				Some(1),
 				&proof(),
-				encoder(&mut seen, BASE - 2),
+				encoder(&mut seen, KEY - 2),
 			);
 			assert_eq!(res, Ok((false, 1)));
 		});
@@ -298,7 +330,7 @@ mod tests {
 	#[test]
 	fn verify_raw_does_not_encode_inputs() {
 		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::TRANSFER, 1, BASE);
+			insert_vk(CircuitId::TRANSFER, 1, KEY);
 			activate(CircuitId::TRANSFER, 1);
 			assert_eq!(
 				verify_raw::<Test>(CircuitId::TRANSFER, None, &proof(), vec![[0x02; 32]]),
@@ -343,8 +375,8 @@ mod tests {
 	#[test]
 	fn an_explicit_version_overrides_the_active_one() {
 		new_test_ext().execute_with(|| {
-			insert_vk(CircuitId::TRANSFER, 1, BASE);
-			insert_vk(CircuitId::TRANSFER, 2, BASE);
+			insert_vk(CircuitId::TRANSFER, 1, KEY);
+			insert_vk(CircuitId::TRANSFER, 2, KEY);
 			activate(CircuitId::TRANSFER, 1);
 			let (_, version) =
 				verify_raw::<Test>(CircuitId::TRANSFER, Some(2), &proof(), vec![[0x02; 32]])
@@ -359,7 +391,7 @@ mod tests {
 	fn stats_count_per_circuit_and_version() {
 		new_test_ext().execute_with(|| {
 			for cid in [CircuitId::TRANSFER, CircuitId::UNSHIELD] {
-				insert_vk(cid, 1, BASE);
+				insert_vk(cid, 1, KEY);
 			}
 			let raw = || vec![[0x02; 32]];
 			verify_raw::<Test>(CircuitId::TRANSFER, Some(1), &proof(), raw()).unwrap();
