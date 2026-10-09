@@ -8,6 +8,8 @@ use super::hashing::{hash_pair, hash_pair_poseidon};
 use crate::types::Hash;
 use sp_std::vec::Vec;
 
+/// Root of a `DEPTH`-level tree holding `leaves` from index 0, the rest empty.
+/// Empty input yields the zero leaf, not the empty tree's root.
 pub fn compute_root_from_leaves_poseidon<const DEPTH: usize>(leaves: &[Hash]) -> Hash {
 	if leaves.is_empty() {
 		return [0u8; 32];
@@ -41,6 +43,8 @@ pub fn compute_root_from_leaves_poseidon<const DEPTH: usize>(leaves: &[Hash]) ->
 	current_level.first().copied().unwrap_or([0u8; 32])
 }
 
+/// Root of a `DEPTH`-level tree holding `leaves` from index 0, the rest empty.
+/// Empty input yields the empty tree's root.
 pub fn compute_root_from_leaves<const DEPTH: usize>(leaves: &[Hash]) -> Hash {
 	if leaves.is_empty() {
 		let mut current = [0u8; 32];

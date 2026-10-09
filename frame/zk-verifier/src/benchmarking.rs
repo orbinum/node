@@ -57,10 +57,12 @@ mod benchmarks {
 			.bytes
 	}
 
-	/// VK for the TRANSFER circuit (arity 7) — used by the storage benchmarks,
-	/// which validate that a registered VK deserializes and matches circuit arity.
+	/// A memo-bound TRANSFER key (arity 8), the layout registration and
+	/// `unretire_version` accept for a spend circuit.
 	fn sample_verification_key() -> Vec<u8> {
-		synthetic_vk(orbinum_zk_verifier::TRANSFER_PUBLIC_INPUTS)
+		synthetic_vk(
+			orbinum_zk_verifier::TRANSFER_PUBLIC_INPUTS + orbinum_zk_verifier::MEMO_HASH_INPUTS,
+		)
 	}
 
 	/// Store the sample key for `(circuit_id, version)`, bypassing registration.
@@ -85,7 +87,10 @@ mod benchmarks {
 	/// `Ok`, so the full verification cost is still recorded.
 	#[benchmark]
 	fn verify_proof(n: Linear<1, 16>) {
-		let circuit_id = CircuitId::TRANSFER;
+		// An id outside the known table: it takes the base layout at any arity. A
+		// known circuit admits only its own arities, so every other `n` would skip
+		// the pairing and the fit would come out far below the real cost.
+		let circuit_id = CircuitId(200);
 
 		// Seed storage with an arity-`n` VK so `do_verify` runs `n` scalar-muls + pairing.
 		let vk_info = VerificationKeyInfo {

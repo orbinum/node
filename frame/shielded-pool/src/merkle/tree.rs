@@ -9,10 +9,15 @@ use crate::types::MerklePath;
 use frame_support::pallet_prelude::*;
 use sp_std::vec::Vec;
 
+/// An append-only Merkle tree of depth `DEPTH`, kept as its frontier: the last
+/// left child seen at each level is all an insert needs.
 #[derive(Clone, Encode, Decode, TypeInfo, MaxEncodedLen, Debug)]
 pub struct IncrementalMerkleTree<const DEPTH: usize> {
+	/// The last left child at each level, waiting for its right sibling.
 	pub frontier: [[u8; 32]; DEPTH],
+	/// Index the next leaf takes; also the number of leaves.
 	pub next_index: u32,
+	/// Current root.
 	pub root: [u8; 32],
 }
 
@@ -23,19 +28,15 @@ impl<const DEPTH: usize> Default for IncrementalMerkleTree<DEPTH> {
 }
 
 impl<const DEPTH: usize> IncrementalMerkleTree<DEPTH> {
-	/// `capacity()` shifts into a `u32`, so a depth of 32 or more is undefined:
-	/// debug builds panic, release builds wrap to 1 and the tree reports itself
-	/// full after a single leaf.
-	///
-	/// The bound belongs on the type rather than in the runtime config. The
-	/// pallet's `integrity_test` pins `MaxTreeDepth` to 20, but this struct is
-	/// `pub` and generic, so nothing stopped a downstream caller from picking
-	/// its own depth. Instantiating past the limit now fails to compile.
+	/// `capacity()` shifts into a `u32`, so a depth of 32 or more would wrap. The
+	/// bound sits on the type, not in the runtime config, because the struct is
+	/// public and generic: instantiating it past the limit fails to compile.
 	const _DEPTH_FITS_IN_U32: () = assert!(
 		DEPTH < 32,
 		"IncrementalMerkleTree DEPTH must be below 32: capacity() shifts into a u32"
 	);
 
+	/// An empty tree.
 	pub fn new() -> Self {
 		let root = Self::compute_empty_root();
 		Self {
@@ -45,6 +46,7 @@ impl<const DEPTH: usize> IncrementalMerkleTree<DEPTH> {
 		}
 	}
 
+	/// Root of the tree with no leaves.
 	fn compute_empty_root() -> [u8; 32] {
 		let mut current = [0u8; 32];
 		for _ in 0..DEPTH {
@@ -53,18 +55,22 @@ impl<const DEPTH: usize> IncrementalMerkleTree<DEPTH> {
 		current
 	}
 
+	/// Digest of an empty subtree at `level`.
 	fn zero_hash(level: usize) -> [u8; 32] {
 		get_zero_hash_cached(level)
 	}
 
+	/// Leaves the tree can hold: `2^DEPTH`.
 	pub fn capacity(&self) -> u32 {
 		let () = Self::_DEPTH_FITS_IN_U32;
 		1u32 << DEPTH
 	}
+	/// Whether no further leaf fits.
 	pub fn is_full(&self) -> bool {
 		self.next_index >= self.capacity()
 	}
 
+	/// Append `leaf` and return its index: O(DEPTH), one walk up the frontier.
 	pub fn insert(&mut self, leaf: [u8; 32]) -> Result<u32, &'static str> {
 		if self.is_full() {
 			return Err("Merkle tree is full");
@@ -89,13 +95,17 @@ impl<const DEPTH: usize> IncrementalMerkleTree<DEPTH> {
 		Ok(index)
 	}
 
+	/// Current root.
 	pub fn root(&self) -> [u8; 32] {
 		self.root
 	}
+	/// Number of leaves inserted.
 	pub fn size(&self) -> u32 {
 		self.next_index
 	}
 
+	/// The path of `leaf_index`, rebuilt from every leaf: O(n), for tests and
+	/// off-chain use. `leaves` must be exactly the leaves inserted so far.
 	pub fn generate_proof(
 		&self,
 		leaf_index: u32,
@@ -145,6 +155,8 @@ impl<const DEPTH: usize> IncrementalMerkleTree<DEPTH> {
 		Ok(MerklePath { siblings, indices })
 	}
 
+	/// Whether `path` takes `leaf` to `root`; `indices[level]` is 1 when the
+	/// node is a right child.
 	pub fn verify_proof(root: &[u8; 32], leaf: &[u8; 32], path: &MerklePath<DEPTH>) -> bool {
 		let mut current = *leaf;
 		for level in 0..DEPTH {

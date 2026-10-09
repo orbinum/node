@@ -4,6 +4,18 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-08
+
+### Changed
+
+- `get_merkle_path`: a sealed tree's node missing at or above the prune cut
+  (pruned under an earlier, higher cut) is rebuilt from the leaves instead of
+  read as zero, so lowering `SealedTreePrunedBelowLevel` on a live chain keeps
+  every path valid. The runtime lowers it from 10 to 6 in spec 18: a path now
+  rebuilds its pruned siblings from 62 leaves instead of 1_022.
+- `SealedTreePrunedBelowLevel` documents the trade per cut (`2^(21−c) − 2`
+  stored nodes, `2^c − 2` leaves per path) and why lowering it is safe.
+
 ## [0.22.0] - 2026-10-08
 
 ### Changed

@@ -245,14 +245,15 @@ pub mod pallet {
 		/// tree is immutable, so anything dropped here is recomputed from
 		/// `MerkleLeaves` on demand.
 		///
-		/// The trade is storage against query latency, and it is lopsided: nodes
-		/// concentrate at the bottom, so cutting at level 10 drops 99.8% of the
-		/// entries (1_048_574 -> 2_046 per tree) while a path costs 2^10 leaf
-		/// reads and 1_023 Poseidon hashes — about 60ms native, ~180ms in Wasm.
-		/// Cutting at 12 frees only 0.15% more for four times the work.
+		/// The trade is storage against query latency. A cut `c` keeps
+		/// 2^(21−c) − 2 nodes per tree and makes a path read 2^c − 2 leaves:
+		/// nodes concentrate at the bottom, so each level less halves the reads and
+		/// doubles what is stored. Paths are served by the public RPC, so the read
+		/// cost is also what an attacker can make a node pay per request.
 		///
-		/// Configurable rather than fixed: the recompute cost tracks validator
-		/// hardware. Must be non-zero and below the tree depth (`integrity_test`).
+		/// Lowering it on a live chain is safe: a sealed tree's node pruned under an
+		/// earlier, higher cut is rebuilt from the leaves when a path needs it.
+		/// Must be non-zero and below the tree depth (`integrity_test`).
 		#[pallet::constant]
 		type SealedTreePrunedBelowLevel: Get<u8>;
 

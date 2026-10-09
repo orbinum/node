@@ -21,7 +21,7 @@ set -euo pipefail
 #
 # EXAMPLES:
 #   bash scripts/vk/workflows/setup-dev.sh
-#   bash scripts/vk/workflows/setup-dev.sh ws://127.0.0.1:9944 "//Alice" 1
+#   bash scripts/vk/workflows/setup-dev.sh ws://127.0.0.1:9944 "//Alice" 3
 #   bash scripts/vk/workflows/setup-dev.sh ws://10.0.0.5:9944 "<mnemonic>" 2 "@orbinum/circuits@0.4.4"
 # ============================================================================
 

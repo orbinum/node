@@ -1,13 +1,23 @@
 //! Orbinum privacy stack: ZK verifier, relayer, and the shielded pool.
+//!
+//! One `///` line per associated type: what it is wired to, or what the value
+//! means. The reasoning behind each bound lives on the pallet's `Config`.
 
 use crate::*;
 use frame_support::parameter_types;
 
+// ─── ZK verifier ──────────────────────────────────────────────────────────────
+
 impl pallet_zk_verifier::Config for Runtime {
+	/// A compressed Groth16 proof over BN254: exactly 128 bytes.
 	type MaxProofSize = ConstU32<128>;
+	/// Public inputs `verify_proof` takes at most; the widest circuit has 9.
 	type MaxPublicInputs = ConstU32<32>;
+	/// Benchmarked weights.
 	type WeightInfo = pallet_zk_verifier::weights::SubstrateWeight<Runtime>;
 }
+
+// ─── Relayer ──────────────────────────────────────────────────────────────────
 
 /// The current block's author, as `pallet_authorship` reports it.
 pub struct RelayerBlockAuthor;
@@ -19,23 +29,27 @@ impl frame_support::traits::Get<Option<AccountId>> for RelayerBlockAuthor {
 }
 
 impl pallet_relayer::Config for Runtime {
+	/// Who earns a spend's fee when no relayer committed to it.
 	type BlockAuthor = RelayerBlockAuthor;
-	/// 0.001 ORB, anti-spam floor. Overridable via `set_min_relay_fee`.
-	type DefaultMinRelayFee = ConstU128<1_000_000_000_000_000>;
-	/// Ceiling for `set_min_relay_fee`: 1 ORB. Room to react to price swings, far below
-	/// where a typo would brick relaying until the next runtime upgrade.
-	type MaxMinRelayFee = ConstU128<1_000_000_000_000_000_000>;
-	type ManageOrigin = frame_system::EnsureRoot<AccountId>;
-	type MaxAllowedSelectors = ConstU32<16>;
+	/// The validator set relayers are registered against.
 	type ValidatorSet = ValidatorSet;
-	/// A relay commit credits spends in the next 19 blocks (~2 min at 6 s), then
-	/// expires. Short, since a relayer that commits and never submits holds that
-	/// spend's fee until then.
+	/// Root sets the fee floor and the allowed selectors.
+	type ManageOrigin = frame_system::EnsureRoot<AccountId>;
+	/// Fee floor until Root sets one: 0.001 ORB, against spam.
+	type DefaultMinRelayFee = ConstU128<1_000_000_000_000_000>;
+	/// Highest floor Root may set: 1 ORB, room for price swings but not for typos.
+	type MaxMinRelayFee = ConstU128<1_000_000_000_000_000_000>;
+	/// Precompile selectors the relay may be allowed to call.
+	type MaxAllowedSelectors = ConstU32<16>;
+	/// A commit credits spends for the next 19 blocks (~2 min), then expires.
 	type CommitTtl = ConstU32<20>;
-	/// Covers a busy relayer's block; keeps the expiry index at ≤ 32 × 64 entries.
+	/// Commits one relayer may record per block.
 	type MaxCommitsPerRelayerPerBlock = ConstU32<64>;
+	/// No benchmarked weights yet: the pallet's defaults.
 	type WeightInfo = ();
 }
+
+// ─── Shielded pool ────────────────────────────────────────────────────────────
 
 parameter_types! {
 	pub const ShieldedPoolPalletId: PalletId = PalletId(*b"shld/pol");
@@ -51,26 +65,26 @@ impl sp_runtime::traits::Convert<sp_core::H160, AccountId> for EvmAccount {
 }
 
 impl pallet_shielded_pool::Config for Runtime {
+	/// The native token: the pool holds only asset 0.
 	type Currency = Balances;
+	/// Verifies every shield, transfer and unshield proof.
 	type ZkVerifier = ZkVerifier;
+	/// Fee floor, relay commits and fee crediting.
 	type Relayer = pallet_relayer::Pallet<Runtime>;
+	/// Maps an EVM caller to the account it pays from or is paid to.
 	type EvmAccount = EvmAccount;
+	/// Derives the pool's account, which holds every shielded deposit.
 	type PalletId = ShieldedPoolPalletId;
+	/// Tree depth, fixed by the circuits (`integrity_test` pins it).
 	type MaxTreeDepth = ConstU32<20>;
-	/// Safety cap on the historic-root queue, not the retention window: a root expires by
-	/// elapsed blocks, so `RootRetentionBlocks` is what frees one. Sized for ~27
-	/// transfers/block sustained across a full window, well past the ~127 proof
-	/// verifications a block can fit.
-	type MaxHistoricRoots = ConstU32<16384>;
-	/// Roots stay spendable for 300 blocks (~30 min at 6s), comfortably above
-	/// the 64-block mempool longevity of an unsigned transaction.
-	type RootRetentionBlocks = ConstU32<300>;
-	/// Prune sealed trees below level 10: drops 99.8% of their internal nodes
-	/// (1_048_574 -> 2_046 each) while a Merkle path costs 2^10 leaf reads and
-	/// 1_023 Poseidon hashes — ~60ms native, ~180ms in Wasm. Level 12 would free
-	/// only 0.15% more for four times the work. Active trees are never pruned.
-	type SealedTreePrunedBelowLevel = ConstU8<10>;
-	/// Pinned to 2^20: clients derive tree_id = leaf_index >> 20 from this.
+	/// Leaves per tree, pinned to 2^20: clients derive `tree_id = leaf_index >> 20`.
 	type MaxLeavesPerTree = ConstU32<1_048_576>;
+	/// Sealed trees keep nodes from level 6 up: a path reads 62 leaves, not 1_022.
+	type SealedTreePrunedBelowLevel = ConstU8<6>;
+	/// A root stays spendable for 300 blocks (~30 min), past the mempool's 64.
+	type RootRetentionBlocks = ConstU32<300>;
+	/// Safety cap on the historic-root queue: ~27 inserts per block over a window.
+	type MaxHistoricRoots = ConstU32<16384>;
+	/// Benchmarked weights.
 	type WeightInfo = pallet_shielded_pool::weights::SubstrateWeight<Runtime>;
 }

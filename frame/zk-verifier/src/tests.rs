@@ -43,8 +43,9 @@ fn register(circuit_id: CircuitId, version: u32, key: VkBytes) -> DispatchResult
 	ZkVerifier::register_verification_key(root().into(), circuit_id, version, key)
 }
 
+/// A transfer key registration accepts: the memo-bound layout.
 fn vk_bytes() -> VkBytes {
-	real_vk(TRANSFER_PUBLIC_INPUTS)
+	real_vk(TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS)
 }
 
 fn vk_too_short() -> VkBytes {
@@ -55,17 +56,13 @@ fn vk_empty() -> VkBytes {
 	BoundedVec::default()
 }
 
-/// A key registration accepts for `(circuit_id, version)`: the base layout for
-/// the first version, the memo-bound one for any later version of a spend circuit.
-fn vk_for(circuit_id: CircuitId, version: u32) -> VkBytes {
+/// A key registration accepts for `circuit_id`: memo-bound for a spend
+/// circuit, the base layout for shield and unknown ids. The version does not
+/// matter.
+fn vk_for(circuit_id: CircuitId, _version: u32) -> VkBytes {
 	let id = circuit_id.0 as u8;
 	let arity = match orbinum_zk_verifier::expected_public_inputs(id) {
-		Some(base)
-			if version > Pallet::<Test>::FIRST_VERSION
-				&& orbinum_zk_verifier::has_memo_layout(id) =>
-		{
-			base + MEMO_HASH_INPUTS
-		}
+		Some(base) if orbinum_zk_verifier::has_memo_layout(id) => base + MEMO_HASH_INPUTS,
 		Some(base) => base,
 		None => TRANSFER_PUBLIC_INPUTS,
 	};
@@ -140,25 +137,56 @@ fn register_vk_rejects_key_shorter_than_256_bytes() {
 	});
 }
 
-/// A version that binds its memos takes one input more; it registers
-/// alongside the base version, which keeps verifying until retired.
+/// A spend circuit's key must bind its memos at every version, the first
+/// included: a base key would let a copier swap memos or alias the recipient.
 #[test]
-fn register_vk_accepts_the_memo_bound_arity_next_to_the_base_one() {
+fn register_vk_refuses_a_base_spend_key_at_every_version() {
 	new_test_ext().execute_with(|| {
+		for (cid, base) in [
+			(CircuitId::TRANSFER, TRANSFER_PUBLIC_INPUTS),
+			(CircuitId::UNSHIELD, UNSHIELD_PUBLIC_INPUTS),
+		] {
+			for version in [1, 2] {
+				assert_noop!(
+					register(cid, version, real_vk(base)),
+					Error::<Test>::InvalidVerificationKey
+				);
+				assert_ok!(register(cid, version, real_vk(base + MEMO_HASH_INPUTS)));
+			}
+		}
+		// Shield has only the base layout.
 		assert_ok!(register(
-			CircuitId::TRANSFER,
+			CircuitId::SHIELD,
 			1,
-			real_vk(TRANSFER_PUBLIC_INPUTS)
+			real_vk(SHIELD_PUBLIC_INPUTS)
 		));
-		assert_ok!(register(
+	});
+}
+
+/// A key retired for being unsafe cannot come back: `unretire_version` holds
+/// it to the rules a new registration faces.
+#[test]
+fn unretire_refuses_a_base_spend_key() {
+	new_test_ext().execute_with(|| {
+		insert_vk(CircuitId::TRANSFER, 1, TRANSFER_PUBLIC_INPUTS);
+		insert_vk(
 			CircuitId::TRANSFER,
 			2,
-			real_vk(TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS)
+			TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
+		);
+		activate(CircuitId::TRANSFER, 2);
+		assert_ok!(ZkVerifier::retire_version(
+			root().into(),
+			CircuitId::TRANSFER,
+			1
 		));
-		assert_ok!(register(
-			CircuitId::UNSHIELD,
-			2,
-			real_vk(UNSHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS)
+		assert_noop!(
+			ZkVerifier::unretire_version(root().into(), CircuitId::TRANSFER, 1),
+			Error::<Test>::InvalidVerificationKey
+		);
+		assert!(RetiredVersions::<Test>::contains_key(
+			CircuitId::TRANSFER,
+			1
 		));
 	});
 }
@@ -233,28 +261,6 @@ fn register_vk_rejects_a_point_at_infinity() {
 	});
 }
 
-/// A later version of a known circuit must be memo-bound: re-registering a
-/// base (v1-layout) key as "v2" would rotate nothing but the number.
-#[test]
-fn register_vk_refuses_the_base_layout_past_version_one() {
-	new_test_ext().execute_with(|| {
-		for (version, key) in [
-			(2, real_vk(TRANSFER_PUBLIC_INPUTS)),
-			(7, real_vk(TRANSFER_PUBLIC_INPUTS)),
-		] {
-			assert_noop!(
-				register(CircuitId::TRANSFER, version, key),
-				Error::<Test>::InvalidVerificationKey
-			);
-		}
-		assert_ok!(register(
-			CircuitId::TRANSFER,
-			2,
-			vk_for(CircuitId::TRANSFER, 2)
-		));
-	});
-}
-
 /// Shield has no memo-bound layout: every version takes the base arity, and one
 /// input more — memo-bound for a spend circuit — is refused.
 #[test]
@@ -284,7 +290,8 @@ fn register_vk_takes_shield_at_its_base_arity_for_every_version() {
 }
 
 /// The v1 → v2 rotation, done by Root extrinsics after the upgrade: register
-/// the memo-bound keys as version 2, make them active, retire version 1.
+/// the memo-bound keys as version 2, make them active, retire version 1. The v1
+/// key is one registered under the old rules, so it is placed in storage.
 #[test]
 fn v1_rotates_to_memo_bound_v2_by_extrinsic() {
 	new_test_ext().execute_with(|| {
@@ -292,7 +299,8 @@ fn v1_rotates_to_memo_bound_v2_by_extrinsic() {
 			(CircuitId::TRANSFER, TRANSFER_PUBLIC_INPUTS),
 			(CircuitId::UNSHIELD, UNSHIELD_PUBLIC_INPUTS),
 		] {
-			assert_ok!(register(cid, 1, real_vk(base)));
+			insert_vk(cid, 1, base);
+			activate(cid, 1);
 			assert_ok!(register(cid, 2, vk_for(cid, 2)));
 			// Registering v2 leaves v1 active until Root switches.
 			assert_eq!(ActiveCircuitVersion::<Test>::get(cid), Some(1));
@@ -313,8 +321,8 @@ fn v1_rotates_to_memo_bound_v2_by_extrinsic() {
 #[test]
 fn register_vk_rejects_wrong_arity() {
 	new_test_ext().execute_with(|| {
-		// TRANSFER takes its base arity, memo-bound (+1) or cross-tree (+2);
-		// anything else is rejected.
+		// TRANSFER takes memo-bound (+1) or cross-tree (+2); anything else,
+		// the base arity included, is rejected.
 		assert_noop!(
 			register(CircuitId::TRANSFER, 1, real_vk(TRANSFER_PUBLIC_INPUTS + 3)),
 			Error::<Test>::InvalidVerificationKey
@@ -323,12 +331,8 @@ fn register_vk_rejects_wrong_arity() {
 			register(CircuitId::UNSHIELD, 1, real_vk(UNSHIELD_PUBLIC_INPUTS + 2)),
 			Error::<Test>::InvalidVerificationKey
 		);
-		// The matching arity is accepted.
-		assert_ok!(register(
-			CircuitId::TRANSFER,
-			1,
-			real_vk(TRANSFER_PUBLIC_INPUTS)
-		));
+		// A matching arity is accepted.
+		assert_ok!(register(CircuitId::TRANSFER, 1, vk_bytes()));
 	});
 }
 
@@ -420,7 +424,7 @@ fn register_vk_different_circuits_are_independent() {
 		assert_ok!(register(
 			CircuitId::UNSHIELD,
 			1,
-			real_vk(UNSHIELD_PUBLIC_INPUTS)
+			real_vk(UNSHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS)
 		));
 		assert!(VerificationKeys::<Test>::contains_key(
 			CircuitId::TRANSFER,
@@ -450,7 +454,7 @@ fn register_vk_rejects_duplicate_circuit_version() {
 #[test]
 fn register_stores_the_vk_hash() {
 	new_test_ext().execute_with(|| {
-		let vk = real_vk(TRANSFER_PUBLIC_INPUTS);
+		let vk = vk_bytes();
 		assert_ok!(register(CircuitId::TRANSFER, 1, vk.clone()));
 		let expected = sp_io::hashing::blake2_256(vk.as_slice());
 		assert_eq!(
@@ -495,8 +499,16 @@ fn set_active_version_requires_root() {
 #[test]
 fn set_active_version_rejects_a_retired_version() {
 	new_test_ext().execute_with(|| {
-		insert_vk(CircuitId::TRANSFER, 1, TRANSFER_PUBLIC_INPUTS);
-		insert_vk(CircuitId::TRANSFER, 2, TRANSFER_PUBLIC_INPUTS);
+		insert_vk(
+			CircuitId::TRANSFER,
+			1,
+			TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
+		);
+		insert_vk(
+			CircuitId::TRANSFER,
+			2,
+			TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
+		);
 		RetiredVersions::<Test>::insert(CircuitId::TRANSFER, 1, ());
 		assert_noop!(
 			ZkVerifier::set_active_version(root().into(), CircuitId::TRANSFER, 1),
@@ -507,6 +519,19 @@ fn set_active_version_rejects_a_retired_version() {
 			CircuitId::TRANSFER,
 			2
 		));
+	});
+}
+
+/// A base spend key already in storage — never registrable, but left by an
+/// older runtime or a raw storage write — cannot be made active.
+#[test]
+fn set_active_version_refuses_a_base_spend_key() {
+	new_test_ext().execute_with(|| {
+		insert_vk(CircuitId::TRANSFER, 1, TRANSFER_PUBLIC_INPUTS);
+		assert_noop!(
+			ZkVerifier::set_active_version(root().into(), CircuitId::TRANSFER, 1),
+			Error::<Test>::InvalidVerificationKey
+		);
 	});
 }
 
@@ -523,8 +548,16 @@ fn set_active_version_rejects_non_existent_vk() {
 #[test]
 fn set_active_version_updates_storage_and_emits_event() {
 	new_test_ext().execute_with(|| {
-		insert_vk(CircuitId::TRANSFER, 1, TRANSFER_PUBLIC_INPUTS);
-		insert_vk(CircuitId::TRANSFER, 2, TRANSFER_PUBLIC_INPUTS);
+		insert_vk(
+			CircuitId::TRANSFER,
+			1,
+			TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
+		);
+		insert_vk(
+			CircuitId::TRANSFER,
+			2,
+			TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
+		);
 		activate(CircuitId::TRANSFER, 1);
 
 		assert_ok!(ZkVerifier::set_active_version(
@@ -546,8 +579,16 @@ fn set_active_version_updates_storage_and_emits_event() {
 #[test]
 fn set_active_version_can_downgrade() {
 	new_test_ext().execute_with(|| {
-		insert_vk(CircuitId::TRANSFER, 1, TRANSFER_PUBLIC_INPUTS);
-		insert_vk(CircuitId::TRANSFER, 2, TRANSFER_PUBLIC_INPUTS);
+		insert_vk(
+			CircuitId::TRANSFER,
+			1,
+			TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
+		);
+		insert_vk(
+			CircuitId::TRANSFER,
+			2,
+			TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
+		);
 		activate(CircuitId::TRANSFER, 2);
 
 		assert_ok!(ZkVerifier::set_active_version(
@@ -791,7 +832,11 @@ fn verify_proof_empty_public_inputs_returns_error() {
 fn verify_proof_happy_path_emits_proof_verified_event() {
 	// In test cfg, do_verify always returns true.
 	new_test_ext().execute_with(|| {
-		insert_vk(CircuitId::TRANSFER, 1, TRANSFER_PUBLIC_INPUTS);
+		insert_vk(
+			CircuitId::TRANSFER,
+			1,
+			TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
+		);
 		activate(CircuitId::TRANSFER, 1);
 		assert_ok!(ZkVerifier::verify_proof(
 			signed().into(),
@@ -862,12 +907,13 @@ fn batch_register_rejects_empty_vk() {
 	});
 }
 
+/// The batch path holds keys to the same rule: no base spend key, even as v1.
 #[test]
-fn batch_register_refuses_the_base_layout_past_version_one() {
+fn batch_register_refuses_a_base_spend_key() {
 	new_test_ext().execute_with(|| {
 		let bad = VkEntry {
 			circuit_id: CircuitId::TRANSFER,
-			version: 2,
+			version: 1,
 			verification_key: real_vk(TRANSFER_PUBLIC_INPUTS),
 			set_active: true,
 		};
@@ -1044,8 +1090,16 @@ fn retire_version_rejects_active_and_unknown() {
 #[test]
 fn retire_then_unretire_toggles_the_flag() {
 	new_test_ext().execute_with(|| {
-		insert_vk(CircuitId::TRANSFER, 1, TRANSFER_PUBLIC_INPUTS);
-		insert_vk(CircuitId::TRANSFER, 2, TRANSFER_PUBLIC_INPUTS);
+		insert_vk(
+			CircuitId::TRANSFER,
+			1,
+			TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
+		);
+		insert_vk(
+			CircuitId::TRANSFER,
+			2,
+			TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
+		);
 		activate(CircuitId::TRANSFER, 1);
 
 		assert_ok!(ZkVerifier::retire_version(
@@ -1383,7 +1437,7 @@ fn runtime_api_circuit_version_info_vk_hashes_are_blake2_256_of_key_data() {
 		activate(CircuitId::TRANSFER, 1);
 		let info =
 			Pallet::<Test>::runtime_api_get_circuit_version_info(CircuitId::TRANSFER.0).unwrap();
-		let expected_hash = sp_io::hashing::blake2_256(&vk_bytes());
+		let expected_hash = sp_io::hashing::blake2_256(&real_vk(TRANSFER_PUBLIC_INPUTS));
 		assert_eq!(info.vk_hashes[0].vk_hash, expected_hash);
 		assert_eq!(info.vk_hashes[0].version, 1u32);
 	});
@@ -1434,7 +1488,7 @@ fn genesis_registers_vk_at_version_1_and_activates_it() {
 		// Genesis runs the registration checks, so the key must be a real one.
 		verification_keys: vec![(
 			CircuitId::TRANSFER,
-			real_vk(TRANSFER_PUBLIC_INPUTS).into_inner(),
+			real_vk(TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS).into_inner(),
 		)],
 		_phantom: Default::default(),
 	}
@@ -1459,11 +1513,11 @@ fn genesis_multiple_circuits_are_all_registered() {
 		verification_keys: vec![
 			(
 				CircuitId::TRANSFER,
-				real_vk(TRANSFER_PUBLIC_INPUTS).into_inner(),
+				real_vk(TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS).into_inner(),
 			),
 			(
 				CircuitId::UNSHIELD,
-				real_vk(UNSHIELD_PUBLIC_INPUTS).into_inner(),
+				real_vk(UNSHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS).into_inner(),
 			),
 		],
 		_phantom: Default::default(),
@@ -1519,6 +1573,28 @@ fn genesis_rejects_a_valid_key_with_the_wrong_arity() {
 		_phantom: Default::default(),
 	}
 	.build_storage();
+}
+
+/// Genesis with one key of `arity` inputs for `circuit_id`.
+fn genesis_with(circuit_id: CircuitId, arity: usize) {
+	let _ = pallet::GenesisConfig::<Test> {
+		verification_keys: vec![(circuit_id, real_vk(arity).into_inner())],
+		_phantom: Default::default(),
+	}
+	.build_storage();
+}
+
+/// A network cannot start with a spend key that binds no memo.
+#[test]
+#[should_panic(expected = "Genesis VK must deserialize")]
+fn genesis_rejects_a_base_transfer_key() {
+	genesis_with(CircuitId::TRANSFER, TRANSFER_PUBLIC_INPUTS);
+}
+
+#[test]
+#[should_panic(expected = "Genesis VK must deserialize")]
+fn genesis_rejects_a_base_unshield_key() {
+	genesis_with(CircuitId::UNSHIELD, UNSHIELD_PUBLIC_INPUTS);
 }
 
 // ── integrity_test ────────────────────────────────────────────────────────────
