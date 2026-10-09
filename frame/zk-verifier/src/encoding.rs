@@ -301,7 +301,7 @@ mod tests {
 		assert_eq!(raw[2], u32_field(7));
 	}
 
-	// ── shield against a real proof ───────────────────────────────────────────
+	// ── Shield against a real proof ───────────────────────────────────────────
 
 	/// A real shield proof of `@orbinum/circuits` 0.16.0 (`fixtures/shield.input.json`:
 	/// a 1000-unit note of asset 0), checked through `encode_shield` against the

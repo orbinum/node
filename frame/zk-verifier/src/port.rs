@@ -25,25 +25,32 @@ pub struct TransferStatement {
 	pub nullifiers: Vec<[u8; 32]>,
 	/// One per output note, in the order their memos are submitted.
 	pub commitments: Vec<[u8; 32]>,
+	/// The asset of every note.
 	pub asset_id: u32,
+	/// Relay fee, taken from the inputs.
 	pub fee: u128,
-	/// `blake2_256` of the SCALE-encoded output memos. Bound by memo-bound versions.
+	/// `blake2_256` of the SCALE-encoded output memos; every transfer key binds it.
 	pub memo_digest: [u8; 32],
 }
 
 /// What an unshield proof attests to, as the pallet submits it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct UnshieldStatement {
+	/// The root the spent note is proven against.
 	pub merkle_root: [u8; 32],
+	/// The spent note's nullifier.
 	pub nullifier: [u8; 32],
+	/// What the recipient receives.
 	pub amount: u128,
 	/// The recipient account's raw 32 bytes. See [`encoding::encode_unshield`].
 	pub recipient: [u8; 32],
+	/// The asset of the spent note.
 	pub asset_id: u32,
+	/// Relay fee, taken from the note.
 	pub fee: u128,
 	/// Zero for a total unshield.
 	pub change_commitment: [u8; 32],
-	/// `blake2_256` of the SCALE-encoded `[change_memo]`. Bound by memo-bound versions.
+	/// `blake2_256` of the SCALE-encoded `[change_memo]`; every unshield key binds it.
 	pub memo_digest: [u8; 32],
 }
 
@@ -51,8 +58,11 @@ pub struct UnshieldStatement {
 /// deposited value and asset.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ShieldStatement {
+	/// The commitment inserted into the tree.
 	pub commitment: [u8; 32],
+	/// The deposited value.
 	pub value: u128,
+	/// The deposited asset.
 	pub asset_id: u32,
 }
 

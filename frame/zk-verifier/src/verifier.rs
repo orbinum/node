@@ -1,8 +1,8 @@
 //! Core Groth16 proof verification.
 //!
 //! Resolves the circuit version, loads and prepares its key once, picks the
-//! [`InputLayout`] the key implies, and records statistics. Encoding the inputs
-//! is the caller's (see [`crate::encoding`]).
+//! [`InputLayout`] the key implies — only an admitted one — and records
+//! statistics. Encoding the inputs is the caller's (see [`crate::encoding`]).
 
 use crate::{
 	Error,
@@ -43,9 +43,12 @@ pub fn verify_raw<T: Config>(
 	check::<T>(circuit_id, version, proof, |_, _| Some(raw_inputs))
 }
 
-/// The layout a key of `arity` inputs gives `circuit_id`, if admitted. A spend
-/// circuit never takes the base layout, which binds neither its memos nor the
-/// full recipient: such a key verifies nothing, however it reached storage.
+/// The layout a key of `arity` inputs gives `circuit_id`, if admitted.
+///
+/// A spend circuit never takes the base layout, which binds neither its memos
+/// nor the full recipient: such a key verifies nothing, however it reached
+/// storage. An id past `u8::MAX` gets none rather than aliasing a known one
+/// (`as u8` maps 257 to 1).
 pub(crate) fn admitted_layout(circuit_id: CircuitId, arity: usize) -> Option<InputLayout> {
 	let id = u8::try_from(circuit_id.0).ok()?;
 	input_layout(id, arity).filter(|layout| !(has_memo_layout(id) && *layout == InputLayout::Base))
@@ -97,13 +100,11 @@ fn resolve_key<T: Config>(
 	Ok((info.key_data.into_inner(), resolved))
 }
 
-/// Record a verification outcome into `VerificationStats`.
+/// Count a verification outcome in `VerificationStats`, failures too.
 ///
-/// Failed attempts are counted too. Note the asymmetry between call paths:
-/// the `verify_proof` extrinsic returns `Err` on failure, so the runtime
-/// reverts this write; the Port path returns `Ok((false, _))`, so the write
-/// **persists**. This is deliberate — persisting Port-side failures gives
-/// observability into invalid proofs reaching the pool (client bugs / attacks).
+/// `verify_proof` returns `Err` on failure, so its write reverts; the port
+/// returns `Ok(false)`, so its write persists — on purpose: invalid proofs
+/// reaching the pool stay observable.
 fn record_stats<T: Config>(circuit_id: CircuitId, version: u32, result: bool) {
 	VerificationStats::<T>::mutate(circuit_id, version, |s| {
 		s.total_verifications = s.total_verifications.saturating_add(1);
@@ -339,7 +340,7 @@ mod tests {
 		});
 	}
 
-	// ── version resolution ────────────────────────────────────────────────────
+	// ── Version resolution ────────────────────────────────────────────────────
 
 	#[test]
 	fn no_active_version_is_circuit_not_found() {
@@ -385,7 +386,7 @@ mod tests {
 		});
 	}
 
-	// ── statistics ────────────────────────────────────────────────────────────
+	// ── Statistics ────────────────────────────────────────────────────────────
 
 	#[test]
 	fn stats_count_per_circuit_and_version() {
