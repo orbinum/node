@@ -100,6 +100,7 @@ fp-rpc = { workspace = true, features = ["default"] }
 # Orbinum: ZK primitives with native Poseidon host interface
 orbinum-runtime = { workspace = true, features = ["std"] }
 orbinum-zk-core = { workspace = true, features = ["std"] }
+orbinum-zk-verifier = { workspace = true, features = ["std", "groth16-native"] }
 
 # Cumulus primitives
 cumulus-primitives-proof-size-hostfunction = { workspace = true }

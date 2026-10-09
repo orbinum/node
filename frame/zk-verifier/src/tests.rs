@@ -839,11 +839,16 @@ fn verify_proof_happy_path_emits_proof_verified_event() {
 			TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
 		);
 		activate(CircuitId::TRANSFER, 1);
+		let inputs: PublicInputs = (0..TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS)
+			.map(|_| vec![0x02u8; 32].try_into().unwrap())
+			.collect::<Vec<_>>()
+			.try_into()
+			.unwrap();
 		assert_ok!(ZkVerifier::verify_proof(
 			signed().into(),
 			CircuitId::TRANSFER,
 			proof_bytes(),
-			one_public_input(),
+			inputs,
 		));
 		assert!(has_event(Event::ProofVerified {
 			circuit_id: CircuitId::TRANSFER,

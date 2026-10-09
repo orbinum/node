@@ -585,3 +585,23 @@ fn signed_extra_implicit_succeeds_with_check_metadata_hash() {
 			.expect("SignedPayload::new must succeed with disabled CheckMetadataHash");
 	});
 }
+
+// ── Host functions ────────────────────────────────────────────────────────────
+
+/// The runtime must not import `bn254_groth16_verify` before every node
+/// registers it: a node without it cannot instantiate the runtime and stops
+/// importing. Flip when a runtime turns it on.
+#[test]
+fn the_runtime_does_not_import_the_groth16_host_function_yet() {
+	let Some(blob) = crate::WASM_BINARY else {
+		return; // SKIP_WASM_BUILD
+	};
+	// Release builds embed the compressed blob.
+	let wasm = sp_maybe_compressed_blob::decompress(blob, 64 << 20).expect("runtime blob");
+	let imports = |symbol: &[u8]| wasm.windows(symbol.len()).any(|w| w == symbol);
+	// The search works: Poseidon's host function is imported.
+	assert!(imports(b"ext_poseidon_host_interface_poseidon_hash_2"));
+	assert!(!imports(
+		b"ext_groth_16_host_interface_bn254_groth16_verify"
+	));
+}

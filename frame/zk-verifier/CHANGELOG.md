@@ -6,6 +6,18 @@ All notable changes to this pallet are documented here.
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-09
+
+### Changed
+
+- Verification always works from the key's prepared form: a key with none is
+  prepared on the fly, and its arity is read from the prepared layout.
+  The pairing runs through `orbinum_zk_verifier::verify_prepared`, the same
+  function the node's `bn254_groth16_verify` host function runs.
+- `verify_proof` (raw inputs) refuses inputs that do not match the key's arity
+  before the pairing, as statement verification already did; it used to leave
+  the count to the verifier.
+
 ## [0.17.0] - 2026-10-09
 
 ### Changed

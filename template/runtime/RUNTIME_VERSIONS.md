@@ -27,8 +27,8 @@ transfer can spend two notes from different trees. `transaction_version` moves:
 `private_transfer` (call 1) takes `merkle_roots: [Hash; 2]` in place of
 `merkle_root`. Validator-set only gains calls 6 and 7. Ships with
 `orbinum-runtime` / `orbinum-node` 0.4.0, `pallet-validator-set` 0.4.0,
-`pallet-shielded-pool` 0.23.0, `pallet-zk-verifier` 0.17.0,
-`orbinum-zk-verifier` 3.1.0 and `pallet-evm-precompile-shielded-pool` 0.9.0;
+`pallet-shielded-pool` 0.23.0, `pallet-zk-verifier` 0.17.1,
+`orbinum-zk-verifier` 3.2.0 and `pallet-evm-precompile-shielded-pool` 0.9.0;
 node 0.4.0 is the first binary that declares its version.
 
 #### 1 · Minimum author version
@@ -101,6 +101,14 @@ active.**
 - **zk-verifier:** keys are stored prepared (`PreparedKeys`), so a proof no longer
   prepares its key: verification ~2.2× cheaper. Storage v2; `MigrateToV2`
   prepares the keys already registered, during the upgrade.
+- **Node 0.4.0** registers the `bn254_groth16_verify` host function
+  (`register_only`): this runtime does not call it, so nodes without it keep
+  working. A later spec turns it on (a transfer validated in ~1.5 ms instead of
+  ~4.6 ms on a dev node). That runtime imports
+  `ext_groth_16_host_interface_bn254_groth16_verify_version_1`, and a node without
+  it stops importing at the upgrade block, for good (reproduced). Before that
+  `setCode`: every RPC, archive and validator node on 0.4.0+, 2/3 of the authors
+  declaring it (`lastAuthorVersion`), and `setMinAuthorVersion(0.4.0)`.
 
 **After the upgrade, by Root:** register the v3 keys from `@orbinum/circuits`
 **0.17.1** (release ceremony, beacon = testnet block #1190708), activate both with
