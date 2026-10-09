@@ -18,18 +18,24 @@ use frame_support::{ensure, pallet_prelude::*, traits::Get};
 use sp_runtime::traits::Saturating;
 use sp_std::vec::Vec;
 
+/// The forest's storage operations. Stateless: every method reads and writes
+/// through [`MerkleRepository`].
 pub struct MerkleTreeService;
 
 impl MerkleTreeService {
-	/// Insert a new leaf into the Merkle tree.
+	// ── Leaves and sealing ──────────────────────────────────────────────────
+
+	/// Insert a leaf into the active tree and return its global index.
 	///
-	/// Uses an incremental frontier algorithm: O(depth) hashes per insert,
-	/// replacing the former O(n) full recomputation from all leaves.
+	/// 1. Bounds: the global index fits a `u32`, the commitment is new.
+	/// 2. Walk up the stored frontier — O(depth) — persisting each new node so
+	///    path reads stay point lookups.
+	/// 3. Store the leaf, the new root and its historic entry; emit the update.
+	/// 4. Seal the tree if this leaf filled it.
 	pub fn insert_leaf<T: Config>(commitment: Commitment) -> Result<u32, DispatchError> {
 		let index = MerkleRepository::get_tree_size::<T>();
-		// Absolute forest ceiling: the global u32 leaf index must stay
-		// representable (4096 trees at depth 20). Per-tree fullness rolls
-		// over to a fresh tree below instead of erroring.
+		// 1. Bounds. Only the forest has a ceiling (4096 trees at depth 20); a
+		// full tree rolls over to a fresh one in step 4.
 		ensure!(index < u32::MAX, Error::<T>::MerkleTreeFull);
 		ensure!(
 			!CommitmentRepository::exists::<T>(&commitment),
@@ -40,25 +46,24 @@ impl MerkleTreeService {
 		let tree_id = index / cap;
 		let local = index % cap;
 
-		// Load frontier from storage and run one incremental update.
-		// Depth is always DEFAULT_TREE_DEPTH (20) — matches the fixed-size frontier array.
+		// 2. Frontier walk, at the depth the frontier array is sized for.
 		let mut frontier = MerkleRepository::get_frontier::<T>();
 		let mut current_hash = commitment.0;
 		let mut current_index = local;
 
 		for (level, frontier_slot) in frontier.iter_mut().enumerate() {
 			if current_index.is_multiple_of(2) {
-				// Left node: save in frontier, pair with zero-sibling
+				// Left child: remember it, pair it with the empty right subtree.
 				*frontier_slot = current_hash;
 				let zero = get_zero_hash_cached(level);
 				current_hash = hash_pair(&current_hash, &zero);
 			} else {
-				// Right node: combine with stored left sibling
+				// Right child: pair it with the stored left sibling.
 				current_hash = hash_pair(frontier_slot, &current_hash);
 			}
 			current_index /= 2;
-			// current_hash is now the node at (level + 1, current_index). Persist
-			// levels 1..=19 so proof reads are O(depth); level 20 is PoseidonRoot.
+			// `current_hash` is now node (level + 1, current_index). Levels 1..=19
+			// are stored; level 20 is `PoseidonRoot`.
 			if level + 1 < crate::types::DEFAULT_TREE_DEPTH {
 				MerkleRepository::set_node::<T>(
 					tree_id,
@@ -69,6 +74,7 @@ impl MerkleTreeService {
 			}
 		}
 
+		// 3. Store.
 		let new_poseidon_root = current_hash;
 		let old_poseidon_root = MerkleRepository::get_poseidon_root::<T>();
 
@@ -80,27 +86,27 @@ impl MerkleTreeService {
 		MerkleRepository::set_poseidon_root::<T>(new_poseidon_root);
 		Self::add_poseidon_historic_root::<T>(new_poseidon_root);
 
-		// The freshly inserted leaf belongs to `new_poseidon_root`, so this
-		// event fires before any seal resets the active root.
+		// Emitted before any seal resets the active root: the leaf belongs to this one.
 		Pallet::<T>::deposit_event(Event::MerkleRootUpdated {
 			old_root: old_poseidon_root,
 			new_root: new_poseidon_root,
 			tree_size: index.saturating_add(1),
 		});
 
+		// 4. Seal.
 		if local + 1 == cap {
 			Self::seal_tree::<T>(tree_id, new_poseidon_root, cap);
 		}
 		Ok(index)
 	}
 
-	/// Seal a full tree and open a fresh one, eagerly in the same insert.
+	/// Seal a full tree and open a fresh one, in the same insert.
 	///
-	/// The final root becomes a permanent anchor (`SealedTreeRoots` /
-	/// `SealedRootIndex`) — unlike the historic ring it never expires, so
-	/// notes in sealed trees stay spendable forever. The active tree resets
-	/// to the empty state; the empty root joins the historic ring to keep
-	/// the `PoseidonRoot ∈ known roots` invariant.
+	/// 1. The final root becomes a permanent anchor (`SealedTreeRoots`,
+	///    `SealedRootIndex`): it never expires, so the tree's notes stay
+	///    spendable forever.
+	/// 2. The active tree resets to empty, and the empty root joins the historic
+	///    window so `PoseidonRoot` is always a known root.
 	fn seal_tree<T: Config>(tree_id: u32, final_root: Hash, cap: u32) {
 		MerkleRepository::insert_sealed_root::<T>(tree_id, final_root);
 		MerkleRepository::set_frontier::<T>([[0u8; 32]; crate::types::DEFAULT_TREE_DEPTH]);
@@ -116,11 +122,17 @@ impl MerkleTreeService {
 		});
 	}
 
-	/// Record the new root and drop the ones whose retention window has passed.
+	// ── Historic roots ──────────────────────────────────────────────────────
+
+	/// Record a new root, dropping the ones whose retention window has passed.
 	///
-	/// Retention is measured in blocks (`RootRetentionBlocks`), so the window
-	/// always outlives the mempool longevity a transaction was admitted with.
-	/// `MaxHistoricRoots` is only a safety cap on queue length.
+	/// The window is measured in blocks (`RootRetentionBlocks`); the queue only
+	/// orders roots by expiry.
+	///
+	/// 1. Drain expired slots from the tail, at most `MAX_ROOTS_PRUNED_PER_INSERT`.
+	/// 2. If the queue still reaches `MaxHistoricRoots` — a safety cap, not the
+	///    window — evict the oldest and log the misconfiguration.
+	/// 3. Append the new root.
 	pub(crate) fn add_poseidon_historic_root<T: Config>(poseidon_root: Hash) {
 		let now = frame_system::Pallet::<T>::block_number();
 		let expires_at = now.saturating_add(T::RootRetentionBlocks::get());
@@ -128,48 +140,38 @@ impl MerkleTreeService {
 		let mut head = MerkleRepository::get_historic_roots_head::<T>();
 		let mut tail = MerkleRepository::get_historic_roots_tail::<T>();
 
-		// Drain expired slots from the tail. Slots sit in expiry order because
-		// every insert stores `now + retention` with a non-decreasing `now`, so
-		// the first live slot ends the scan.
+		// 1. Drain. Slots are in expiry order (each stores `now + retention`), so
+		// the first live one ends the scan.
 		let mut pruned = 0usize;
 		while tail < head && pruned < MAX_ROOTS_PRUNED_PER_INSERT {
 			let Some((root, slot_expiry)) = MerkleRepository::get_historic_root_slot::<T>(tail)
 			else {
-				// Defensive: this path never leaves holes, but skipping keeps the
-				// queue draining instead of wedging on one forever. Counted against
-				// the cap so a long run of holes cannot turn into an unbounded read
-				// loop inside a dispatchable.
+				// A hole, which this code never leaves: skip it, and count it so the
+				// scan stays bounded.
 				tail = tail.saturating_add(1);
 				pruned = pruned.saturating_add(1);
 				continue;
 			};
 			if slot_expiry >= now {
-				break; // still live — and so is every slot behind it
+				break; // live, and so is every slot after it
 			}
 			MerkleRepository::remove_historic_root_slot::<T>(tail);
 			tail = tail.saturating_add(1);
 			pruned = pruned.saturating_add(1);
 
-			// A root can occupy several slots (re-inserted, or an insert that left
-			// the root unchanged). The map holds one expiry per root — the latest,
-			// since `add_historic_poseidon_root_until` only extends it — so it is
-			// the authority on whether the root is still spendable. O(1) per slot,
-			// which keeps this loop linear.
+			// A root can sit in several slots; its map entry holds the latest expiry
+			// and decides whether it is still spendable.
 			match MerkleRepository::get_historic_root_expiry::<T>(&root) {
 				Some(expiry) if expiry >= now => {}
 				_ => MerkleRepository::remove_poseidon_historic_root::<T>(&root),
 			}
 		}
 
-		// The cap is a backstop, not the window: reaching it means the window
-		// holds more roots than `MaxHistoricRoots` allows, which would silently
-		// shorten it. Evict the oldest so inserts keep working, and log the
-		// misconfiguration rather than failing quietly.
+		// 2. Cap. Reaching it means the window holds more roots than allowed:
+		// evict the oldest so inserts keep working, and say so.
 		if head.saturating_sub(tail) >= T::MaxHistoricRoots::get() as u64 {
-			// Not `defensive!`: that expands to `debug_assert!(false)` and panics in
-			// any debug-assertions build. This branch is a reachable operational
-			// state, so a validator on a debug build must not halt where a release
-			// build keeps producing.
+			// A log, not `defensive!`: that panics in debug builds, and this state
+			// is reachable.
 			frame_support::__private::log::warn!(
 				target: "runtime::shielded-pool",
 				"historic-root cap reached before retention elapsed; \
@@ -179,11 +181,8 @@ impl MerkleTreeService {
 				MerkleRepository::remove_historic_root_slot::<T>(tail);
 				match MerkleRepository::get_historic_root_expiry::<T>(&root) {
 					Some(expiry) if expiry >= now => {
-						// Still live: re-queue at the head rather than drop it.
-						// Deleting the slot while keeping the map entry would strand
-						// that entry outside `[tail, head)` — unreachable by the drain
-						// loop, so never prunable and permanently spendable. Forgetting
-						// it instead would reject spends that are still valid.
+						// Still live: re-queue it. Dropping only the slot would leave the
+						// entry unprunable; dropping both would refuse valid spends.
 						MerkleRepository::set_historic_root_slot::<T>(head, root, slot_expiry);
 						head = head.saturating_add(1);
 					}
@@ -193,6 +192,7 @@ impl MerkleTreeService {
 			tail = tail.saturating_add(1);
 		}
 
+		// 3. Append.
 		MerkleRepository::set_historic_root_slot::<T>(head, poseidon_root, expires_at);
 		head = head.saturating_add(1);
 
@@ -201,6 +201,10 @@ impl MerkleTreeService {
 		MerkleRepository::set_historic_roots_tail::<T>(tail);
 	}
 
+	// ── Roots and paths ─────────────────────────────────────────────────────
+
+	/// Whether a spend may be proven against `root`: the active root, a root
+	/// still in its retention window, or a sealed tree's final root.
 	pub fn is_known_root<T: Config>(root: &Hash) -> bool {
 		MerkleRepository::is_known_root::<T>(root)
 	}
@@ -212,9 +216,10 @@ impl MerkleTreeService {
 	/// empty subtree, so the canonical zero hash for that level is used.
 	///
 	/// A **sealed** tree has its levels below `SealedTreePrunedBelowLevel` dropped
-	/// (see [`Self::prune_sealed_nodes`]), so those siblings are recomputed from
-	/// the leaves instead. Only the sibling subtree is rebuilt, not the whole
-	/// tree: at a cut of 10 that is 2^10 leaf reads and 1_023 hashes.
+	/// (see [`Self::prune_sealed_nodes`]), so those siblings are rebuilt from the
+	/// leaves: only each sibling subtree, `2^cut − 2` leaf reads in all. A node
+	/// missing at or above the cut — pruned under an earlier, higher cut — is
+	/// rebuilt the same way.
 	pub fn get_merkle_path<T: Config>(leaf_index: u32) -> Option<DefaultMerklePath> {
 		let size = MerkleRepository::get_tree_size::<T>();
 		if leaf_index >= size {
@@ -228,7 +233,7 @@ impl MerkleTreeService {
 		let mut siblings = [[0u8; 32]; crate::types::DEFAULT_TREE_DEPTH];
 		let mut indices = [0u8; crate::types::DEFAULT_TREE_DEPTH];
 
-		// Only sealed trees are pruned; the active one always has every node.
+		// Only sealed trees are pruned; the active one keeps every node.
 		let is_sealed = tree_id < size / cap;
 		let cut = T::SealedTreePrunedBelowLevel::get() as usize;
 
@@ -237,18 +242,18 @@ impl MerkleTreeService {
 			indices[level] = (node_index & 1) as u8;
 			let sibling_index = node_index ^ 1;
 			let sibling = if level == 0 {
-				// Level-0 nodes are the leaves; map the tree-local sibling
-				// back to its global MerkleLeaves index.
+				// Leaves: the tree-local sibling, at its global index.
 				MerkleRepository::get_leaf::<T>(tree_id * cap + sibling_index).map(|c| c.0)
 			} else if is_sealed && level < cut {
+				// Pruned level of a sealed tree: rebuilt from the leaves.
 				Some(Self::subtree_root::<T>(tree_id, level, sibling_index, cap))
 			} else if is_sealed {
-				// A sealed tree's node can also be missing at or above the cut if it
-				// was pruned under an earlier, higher cut. Rebuilding is right in
-				// every case: past the capacity it yields the zero hash.
+				// Kept level of a sealed tree. A node pruned under an earlier, higher
+				// cut is rebuilt; past the capacity that yields the zero hash.
 				MerkleRepository::get_node::<T>(tree_id, level as u8, sibling_index)
 					.or_else(|| Some(Self::subtree_root::<T>(tree_id, level, sibling_index, cap)))
 			} else {
+				// Active tree: a missing node is an empty subtree.
 				MerkleRepository::get_node::<T>(tree_id, level as u8, sibling_index)
 			};
 			siblings[level] = sibling.unwrap_or_else(|| get_zero_hash_cached(level));
@@ -259,27 +264,23 @@ impl MerkleTreeService {
 	/// Rebuild the node at `(level, node_index)` from the leaves beneath it.
 	///
 	/// Reads the `2^level` leaves the node spans and folds them pairwise. Used only
-	/// for pruned levels of sealed trees, where the leaves are immutable, so the
-	/// result is exactly what was stored before pruning.
+	/// for pruned nodes of sealed trees, whose leaves are immutable, so the result
+	/// is exactly what was stored before pruning.
 	fn subtree_root<T: Config>(tree_id: u32, level: usize, node_index: u32, cap: u32) -> Hash {
-		// `level` is bounded by DEFAULT_TREE_DEPTH at every call site, but the
-		// shift below would overflow if that ever changed, so fail soft instead of
-		// wrapping into a wrong-but-plausible root.
+		// Callers stay below the tree depth; past 31 the shift would wrap into a
+		// plausible but wrong root, so fail to the zero hash instead.
 		if level >= 32 {
 			return get_zero_hash_cached(level);
 		}
 		let span = 1u32 << level;
-		// Past the tree's capacity the subtree holds none of its leaves: with
-		// `MaxLeavesPerTree` below 2^depth those global indices are the next
-		// tree's.
+		// Past the tree's capacity the span is the next tree's leaves: empty here.
 		let offset = node_index.saturating_mul(span);
 		if offset >= cap {
 			return get_zero_hash_cached(level);
 		}
 		let base = tree_id.saturating_mul(cap).saturating_add(offset);
 
-		// Read the leaves this node spans, none past the tree's capacity. A gap
-		// means an empty slot, which the tree represents with the level-0 zero hash.
+		// Read the span, none past the capacity; a gap is an empty leaf.
 		let in_tree = span.min(cap - offset);
 		let mut nodes: Vec<Hash> = (0..span)
 			.map(|i| {
@@ -291,9 +292,8 @@ impl MerkleTreeService {
 			})
 			.collect();
 
-		// Fold pairwise up to `level`; the vector halves each round, so one node
-		// remains. A missing right sibling pairs with its level's zero hash,
-		// matching what `insert_leaf` stored.
+		// Fold pairwise up to `level`; a missing right sibling is that level's
+		// zero hash, as `insert_leaf` stored it.
 		for lvl in 0..level {
 			let zero = get_zero_hash_cached(lvl);
 			nodes = nodes
@@ -307,23 +307,25 @@ impl MerkleTreeService {
 			.unwrap_or_else(|| get_zero_hash_cached(level))
 	}
 
+	/// Whether `path` takes `leaf` to `root`.
 	pub fn verify_merkle_proof(root: &Hash, leaf: &Hash, path: &DefaultMerklePath) -> bool {
 		IncrementalMerkleTree::<20>::verify_proof(root, leaf, path)
 	}
 
+	/// The global leaf index of `commitment`, if it is in the forest.
 	pub fn find_leaf_index<T: Config>(commitment: &Commitment) -> Option<u32> {
 		MerkleRepository::find_leaf_index::<T>(commitment)
 	}
 
-	/// Drop internal nodes below the cut level for trees that have already sealed.
+	// ── Sealed-tree pruning ─────────────────────────────────────────────────
+
+	/// Drop sealed trees' nodes below the cut, at most `budget` probes per call;
+	/// returns how many were removed.
 	///
-	/// Returns the number of keys removed. Bounded by `budget`: a full tree holds
-	/// ~1M prunable nodes, far past what one block can absorb, so the sweep parks
-	/// its position in `SealedPruneCursor` and resumes on the next call.
-	///
-	/// Safe because `MerkleNodes` serves Merkle paths only — no dispatchable reads
-	/// it — and a sealed tree's leaves never change, so anything dropped here is
-	/// reproducible by [`Self::subtree_root`].
+	/// Safe: `MerkleNodes` serves paths only — no dispatchable reads it — and a
+	/// sealed tree's leaves never change, so [`Self::subtree_root`] rebuilds
+	/// anything dropped. A full tree holds ~1M prunable nodes, so the sweep parks
+	/// in `SealedPruneCursor` and resumes on the next call.
 	pub(crate) fn prune_sealed_nodes<T: Config>(budget: u32) -> u32 {
 		if budget == 0 {
 			return 0;
@@ -338,26 +340,26 @@ impl MerkleTreeService {
 		let (mut tree, mut level, mut index) = Self::prune_resume_point::<T>();
 
 		let mut removed = 0u32;
-		// Every probe is charged, not just the ones that remove something: a level
-		// already swept is all misses, and an uncharged scan could walk hundreds of
-		// thousands of keys inside one block.
+		// Every probe counts against the budget, hit or miss, so an already swept
+		// level cannot turn into an unbounded scan.
 		let mut probed = 0u32;
 
 		while probed < budget {
 			if tree >= active_tree {
-				// Caught up with the active tree — which is never pruned. Nothing
-				// more to do until another tree seals.
+				// Caught up: the active tree is never pruned.
 				crate::pallet::SealedPruneCursor::<T>::kill();
 				return removed;
 			}
 			if level >= cut {
+				// This tree is done: everything below the cut is gone.
 				crate::pallet::LastPrunedTree::<T>::put(tree);
 				tree = tree.saturating_add(1);
 				level = 1;
 				index = 0;
 				continue;
 			}
-			// A node at `level` spans 2^level leaves, so the level holds cap >> level.
+			// Level done: it holds cap >> level nodes. Levels above the tree's height
+			// hold none here; their nodes lead to the forest root and are kept.
 			if index >= (cap >> level) {
 				level = level.saturating_add(1);
 				index = 0;
@@ -377,8 +379,7 @@ impl MerkleTreeService {
 	}
 
 	/// Where the next sweep starts: the parked cursor, or the tree after the last
-	/// one fully swept. Starting past `LastPrunedTree` keeps a restart from
-	/// re-walking trees that are already clean.
+	/// one fully swept, so a restart never re-walks clean trees.
 	fn prune_resume_point<T: Config>() -> (u32, u8, u32) {
 		crate::pallet::SealedPruneCursor::<T>::get().unwrap_or_else(|| {
 			let next = crate::pallet::LastPrunedTree::<T>::get()

@@ -50,7 +50,7 @@ mod tests {
 		types::{Commitment, Hash},
 	};
 
-	// ── hash functions ──────────────────────────────────────────────────────
+	// ── Hash functions ──────────────────────────────────────────────────────
 
 	#[test]
 	fn hash_pair_poseidon_deterministic() {
@@ -164,7 +164,7 @@ mod tests {
 		assert_ne!(deep, [0u8; 32]);
 	}
 
-	// ── IncrementalMerkleTree ────────────────────────────────────────────────
+	// ── IncrementalMerkleTree ───────────────────────────────────────────────
 
 	#[test]
 	fn tree_new_has_zero_size() {
@@ -278,7 +278,7 @@ mod tests {
 		assert!(tree.generate_proof(5, &leaves).is_err());
 	}
 
-	// ── compute_root_from_leaves_poseidon ────────────────────────────────────
+	// ── compute_root_from_leaves_poseidon ───────────────────────────────────
 
 	#[test]
 	fn compute_root_poseidon_empty_is_zero() {
@@ -307,7 +307,7 @@ mod tests {
 		assert_ne!(r1, r2);
 	}
 
-	// ── MerkleTreeService (FRAME-backed) ─────────────────────────────────────
+	// ── MerkleTreeService (FRAME-backed) ────────────────────────────────────
 
 	#[test]
 	fn service_insert_leaf_returns_sequential_indices() {
@@ -324,8 +324,8 @@ mod tests {
 		new_test_ext().execute_with(|| {
 			let c = Commitment::new([0x01u8; 32]);
 			MerkleTreeService::insert_leaf::<Test>(c).unwrap();
-			// Duplicate detection is based on CommitmentMemos; simulate a prior memo insert
-			// (operations layer stores the memo when shielding/transferring)
+			// Duplicates are detected through `CommitmentMemos`, which the operations
+			// layer fills on shield and transfer: simulate that.
 			use crate::storage::CommitmentRepository;
 			use crate::types::{EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE};
 			CommitmentRepository::store_memo::<Test>(
@@ -479,7 +479,7 @@ mod tests {
 		});
 	}
 
-	// ── Stored-node path reads vs recomputed reference ───────────────────────
+	// ── Stored-node path reads vs recomputed reference ──────────────────────
 
 	/// Reference sibling-path builder: recomputes every level from the full
 	/// leaf set. Oracle for the O(depth) stored-node read path.
@@ -588,7 +588,7 @@ mod tests {
 		});
 	}
 
-	// ── Incremental frontier vs batch consistency ────────────────────────────
+	// ── Incremental frontier vs batch consistency ───────────────────────────
 
 	#[test]
 	fn incremental_root_matches_batch_root_after_single_insert() {
@@ -675,9 +675,8 @@ mod tests {
 		});
 	}
 
-	// Simulates storage round-trip across multiple separate execute_with calls,
-	// mimicking the frontier being persisted between blocks.
-	// Verifies SCALE serialization of [[u8; 32]; 20] survives storage read/write cycles.
+	// The frontier, persisted between blocks (separate `execute_with` calls),
+	// survives the SCALE round trip of `[[u8; 32]; 20]`.
 	#[test]
 	fn frontier_survives_storage_round_trip_across_separate_calls() {
 		use crate::pallet::MerkleTreeFrontier;
@@ -716,7 +715,7 @@ mod tests {
 		);
 	}
 
-	// ── tree-depth consistency ────────────────────────────────────────────────
+	// ── Tree-depth consistency ──────────────────────────────────────────────
 
 	/// integrity_test passes when MaxTreeDepth equals the fixed tree depth. The
 	/// mock is aligned to MAX_TREE_DEPTH, so construction must not panic; a
@@ -739,7 +738,7 @@ mod tests {
 		assert!(cap.is_power_of_two() && cap <= 1 << MAX_TREE_DEPTH);
 	}
 
-	// ── Multi-tree forest: sealing and rollover ──────────────────────────────
+	// ── Multi-tree forest: sealing and rollover ─────────────────────────────
 
 	fn fill_leaves(from: u8, count: u8) {
 		for i in 0..count {
@@ -946,7 +945,7 @@ mod tests {
 		});
 	}
 
-	// ── historic-root window ──────────────────────────────────────────────────
+	// ── Historic-root window ────────────────────────────────────────────────
 
 	/// integrity_test rejects a zero root window (checked via the mock's non-zero
 	/// MaxHistoricRoots passing construction).
@@ -1444,7 +1443,7 @@ mod prune_tests {
 		crate::pallet::MerkleNodes::<Test>::iter().count()
 	}
 
-	// ── adversarial: can anything reintroduce the divergence? ─────────────────
+	// ── Adversarial: can anything reintroduce the divergence? ───────────────
 	//
 	// The fix is only worth what it survives. Each of these attacks the sweep
 	// from a different angle, trying to make two nodes running the same block
