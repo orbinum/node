@@ -119,7 +119,7 @@ pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 
 /// Runs on upgrade, oldest first. Drop an entry once every live chain has passed its
 /// version: a migration that can no longer run could be re-armed by mistake.
-pub type Migrations = ();
+pub type Migrations = (pallet_zk_verifier::migrations::v2::MigrateToV2<Runtime>,);
 
 pub type Executive = frame_executive::Executive<
 	Runtime,

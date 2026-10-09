@@ -7,7 +7,8 @@ use crate::{
 		new_test_ext, real_vk,
 	},
 	pallet::{
-		ActiveCircuitVersion, Event, RetiredVersions, VerificationKeys, VerificationStats, VkHashes,
+		ActiveCircuitVersion, Event, PreparedKeys, RetiredVersions, VerificationKeys,
+		VerificationStats, VkHashes,
 	},
 	types::VkEntry,
 };
@@ -1500,6 +1501,10 @@ fn genesis_registers_vk_at_version_1_and_activates_it() {
 			CircuitId::TRANSFER,
 			1u32
 		));
+		assert!(PreparedKeys::<Test>::contains_key(
+			CircuitId::TRANSFER,
+			1u32
+		));
 		assert_eq!(
 			ActiveCircuitVersion::<Test>::get(CircuitId::TRANSFER),
 			Some(1u32)
@@ -1611,4 +1616,310 @@ fn genesis_rejects_a_base_unshield_key() {
 fn integrity_test_panics_when_verification_disabled() {
 	use frame_support::traits::Hooks;
 	<ZkVerifier as Hooks<frame_system::pallet_prelude::BlockNumberFor<Test>>>::integrity_test();
+}
+
+// ── Prepared keys ─────────────────────────────────────────────────────────────
+
+fn memo_bound_transfer_key() -> VkBytes {
+	real_vk(TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS)
+}
+
+#[test]
+fn registration_stores_the_prepared_key() {
+	new_test_ext().execute_with(|| {
+		let key = memo_bound_transfer_key();
+		assert_ok!(register(CircuitId::TRANSFER, 2, key.clone()));
+		assert_eq!(
+			PreparedKeys::<Test>::get(CircuitId::TRANSFER, 2),
+			Some(ZkVerifier::prepare_vk(&key).unwrap())
+		);
+	});
+}
+
+#[test]
+fn removing_or_purging_a_key_drops_its_prepared_form() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(register(CircuitId::TRANSFER, 2, memo_bound_transfer_key()));
+		assert_ok!(register(CircuitId::TRANSFER, 3, memo_bound_transfer_key()));
+		activate(CircuitId::TRANSFER, 3);
+		assert_ok!(ZkVerifier::remove_verification_key(
+			root().into(),
+			CircuitId::TRANSFER,
+			2
+		));
+		assert!(!PreparedKeys::<Test>::contains_key(CircuitId::TRANSFER, 2));
+
+		let retired = CircuitId(99);
+		ZkVerifier::store_vk(retired, 1, real_vk(3)).unwrap();
+		activate(retired, 1);
+		assert_ok!(ZkVerifier::purge_circuit(root().into(), retired));
+		assert_eq!(PreparedKeys::<Test>::iter_key_prefix(retired).count(), 0);
+	});
+}
+
+/// A memo-bound transfer key distinct from [`memo_bound_transfer_key`].
+fn other_transfer_key() -> VkBytes {
+	use ark_bn254::{Bn254, G1Affine, G2Affine};
+	use ark_ec::{AffineRepr, CurveGroup};
+	let g = G1Affine::generator();
+	let vk = ark_groth16::VerifyingKey::<Bn254> {
+		alpha_g1: (g + g).into_affine(),
+		beta_g2: G2Affine::generator(),
+		gamma_g2: G2Affine::generator(),
+		delta_g2: G2Affine::generator(),
+		gamma_abc_g1: vec![g; TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS + 1],
+	};
+	orbinum_zk_verifier::VerifyingKey::from_ark_vk(&vk)
+		.unwrap()
+		.bytes
+		.try_into()
+		.unwrap()
+}
+
+/// Every entry any map holds for `circuit_id`.
+fn entries_of(circuit_id: CircuitId) -> usize {
+	ZkVerifier::circuit_entries(circuit_id)
+		.iter()
+		.sum::<usize>()
+		+ usize::from(ActiveCircuitVersion::<Test>::contains_key(circuit_id))
+}
+
+/// A version removed and registered again with another key verifies under the
+/// new key's prepared form, never a stale one.
+#[test]
+fn a_reregistered_version_gets_the_new_keys_prepared_form() {
+	new_test_ext().execute_with(|| {
+		let (first, second) = (memo_bound_transfer_key(), other_transfer_key());
+		assert_ne!(first, second);
+		assert_ok!(register(CircuitId::TRANSFER, 2, first));
+		assert_ok!(register(CircuitId::TRANSFER, 3, memo_bound_transfer_key()));
+		activate(CircuitId::TRANSFER, 3);
+		assert_ok!(ZkVerifier::remove_verification_key(
+			root().into(),
+			CircuitId::TRANSFER,
+			2
+		));
+		assert_ok!(register(CircuitId::TRANSFER, 2, second.clone()));
+		assert_eq!(
+			PreparedKeys::<Test>::get(CircuitId::TRANSFER, 2),
+			Some(ZkVerifier::prepare_vk(&second).unwrap())
+		);
+	});
+}
+
+#[test]
+fn a_purged_circuit_registered_again_gets_the_new_keys_prepared_form() {
+	new_test_ext().execute_with(|| {
+		let retired = CircuitId(99);
+		ZkVerifier::store_vk(retired, 1, real_vk(3)).unwrap();
+		activate(retired, 1);
+		assert_ok!(ZkVerifier::purge_circuit(root().into(), retired));
+		assert_eq!(entries_of(retired), 0);
+		assert_ok!(register(retired, 1, real_vk(5)));
+		assert_eq!(
+			PreparedKeys::<Test>::get(retired, 1),
+			Some(ZkVerifier::prepare_vk(&real_vk(5)).unwrap())
+		);
+	});
+}
+
+/// Removing a version leaves nothing of it in any map, and the versions next
+/// to it untouched.
+#[test]
+fn removing_a_version_leaves_no_orphan() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(register(CircuitId::TRANSFER, 2, memo_bound_transfer_key()));
+		assert_ok!(register(CircuitId::TRANSFER, 3, memo_bound_transfer_key()));
+		activate(CircuitId::TRANSFER, 3);
+		RetiredVersions::<Test>::insert(CircuitId::TRANSFER, 2, ());
+		VerificationStats::<Test>::insert(
+			CircuitId::TRANSFER,
+			2,
+			VerificationStatistics::default(),
+		);
+		assert_ok!(ZkVerifier::remove_verification_key(
+			root().into(),
+			CircuitId::TRANSFER,
+			2
+		));
+		assert!(!VerificationKeys::<Test>::contains_key(
+			CircuitId::TRANSFER,
+			2
+		));
+		assert!(!PreparedKeys::<Test>::contains_key(CircuitId::TRANSFER, 2));
+		assert!(!VkHashes::<Test>::contains_key(CircuitId::TRANSFER, 2));
+		assert!(!RetiredVersions::<Test>::contains_key(
+			CircuitId::TRANSFER,
+			2
+		));
+		assert!(!VerificationStats::<Test>::contains_key(
+			CircuitId::TRANSFER,
+			2
+		));
+		assert!(PreparedKeys::<Test>::contains_key(CircuitId::TRANSFER, 3));
+	});
+}
+
+/// A batch is all or nothing: one bad key leaves no key and no prepared form.
+#[test]
+fn a_batch_with_one_bad_key_stores_nothing() {
+	new_test_ext().execute_with(|| {
+		let mut entries: Vec<VkEntry> = (1..=9)
+			.map(|v| make_vk_entry(CircuitId::TRANSFER, v, false))
+			.collect();
+		entries.push(VkEntry {
+			circuit_id: CircuitId::TRANSFER,
+			version: 10,
+			verification_key: real_vk(TRANSFER_PUBLIC_INPUTS),
+			set_active: false,
+		});
+		assert_noop!(
+			ZkVerifier::batch_register_verification_keys(root().into(), batch(entries)),
+			Error::<Test>::InvalidVerificationKey
+		);
+		assert_eq!(PreparedKeys::<Test>::iter().count(), 0);
+	});
+}
+
+#[test]
+fn a_full_batch_stores_every_prepared_form() {
+	new_test_ext().execute_with(|| {
+		let entries = (1..=10)
+			.map(|v| make_vk_entry(CircuitId::TRANSFER, v, false))
+			.collect();
+		assert_ok!(ZkVerifier::batch_register_verification_keys(
+			root().into(),
+			batch(entries)
+		));
+		for v in 1..=10 {
+			assert!(
+				PreparedKeys::<Test>::contains_key(CircuitId::TRANSFER, v),
+				"v{v}"
+			);
+		}
+	});
+}
+
+mod migration_to_v2 {
+	use super::*;
+	use crate::migrations::v2::MigrateToV2;
+	use frame_support::traits::{GetStorageVersion, OnRuntimeUpgrade, StorageVersion};
+
+	/// Keys stored before v2: only the raw key, no prepared form.
+	fn v1_chain(keys: &[(CircuitId, u32, VkBytes)]) {
+		StorageVersion::new(1).put::<ZkVerifier>();
+		for (circuit_id, version, key) in keys {
+			crate::mock::insert_key(*circuit_id, *version, key.clone());
+		}
+	}
+
+	#[test]
+	fn prepares_every_stored_key_and_bumps_the_version() {
+		new_test_ext().execute_with(|| {
+			let transfer = memo_bound_transfer_key();
+			let shield = real_vk(SHIELD_PUBLIC_INPUTS);
+			v1_chain(&[
+				(CircuitId::TRANSFER, 3, transfer.clone()),
+				(CircuitId::SHIELD, 1, shield.clone()),
+			]);
+			MigrateToV2::<Test>::on_runtime_upgrade();
+			assert_eq!(
+				PreparedKeys::<Test>::get(CircuitId::TRANSFER, 3),
+				Some(ZkVerifier::prepare_vk(&transfer).unwrap())
+			);
+			assert_eq!(
+				PreparedKeys::<Test>::get(CircuitId::SHIELD, 1),
+				Some(ZkVerifier::prepare_vk(&shield).unwrap())
+			);
+			assert_eq!(ZkVerifier::on_chain_storage_version(), 2);
+		});
+	}
+
+	/// Once at v2 it does nothing, whatever storage holds.
+	#[test]
+	fn runs_once() {
+		new_test_ext().execute_with(|| {
+			v1_chain(&[(CircuitId::TRANSFER, 3, memo_bound_transfer_key())]);
+			MigrateToV2::<Test>::on_runtime_upgrade();
+			crate::mock::insert_key(CircuitId::TRANSFER, 4, memo_bound_transfer_key());
+			MigrateToV2::<Test>::on_runtime_upgrade();
+			assert!(!PreparedKeys::<Test>::contains_key(CircuitId::TRANSFER, 4));
+		});
+	}
+
+	/// A prepared form already there is replaced by the key's own preparation:
+	/// a stale or wrong one does not survive the upgrade.
+	#[test]
+	fn overwrites_a_stale_prepared_form() {
+		new_test_ext().execute_with(|| {
+			let key = memo_bound_transfer_key();
+			v1_chain(&[(CircuitId::TRANSFER, 3, key.clone())]);
+			let stale = ZkVerifier::prepare_vk(&other_transfer_key()).unwrap();
+			PreparedKeys::<Test>::insert(CircuitId::TRANSFER, 3, stale);
+			MigrateToV2::<Test>::on_runtime_upgrade();
+			assert_eq!(
+				PreparedKeys::<Test>::get(CircuitId::TRANSFER, 3),
+				Some(ZkVerifier::prepare_vk(&key).unwrap())
+			);
+		});
+	}
+
+	/// A key that does not prepare loses any prepared form it had: verifying
+	/// under it falls back to the key itself.
+	#[test]
+	fn drops_the_prepared_form_of_a_key_that_does_not_prepare() {
+		new_test_ext().execute_with(|| {
+			v1_chain(&[(CircuitId::TRANSFER, 3, vec![0x01; 100].try_into().unwrap())]);
+			let stale = ZkVerifier::prepare_vk(&memo_bound_transfer_key()).unwrap();
+			PreparedKeys::<Test>::insert(CircuitId::TRANSFER, 3, stale);
+			MigrateToV2::<Test>::on_runtime_upgrade();
+			assert!(!PreparedKeys::<Test>::contains_key(CircuitId::TRANSFER, 3));
+		});
+	}
+
+	#[cfg(feature = "try-runtime")]
+	#[test]
+	fn post_upgrade_accepts_the_migrated_state_and_refuses_a_tampered_one() {
+		use crate::migrations::v2::PrepareKeys;
+		use frame_support::traits::UncheckedOnRuntimeUpgrade;
+		new_test_ext().execute_with(|| {
+			let key = memo_bound_transfer_key();
+			v1_chain(&[(CircuitId::TRANSFER, 3, key.clone())]);
+			MigrateToV2::<Test>::on_runtime_upgrade();
+			assert!(PrepareKeys::<Test>::post_upgrade(Vec::new()).is_ok());
+
+			let wrong = ZkVerifier::prepare_vk(&other_transfer_key()).unwrap();
+			PreparedKeys::<Test>::insert(CircuitId::TRANSFER, 3, wrong.clone());
+			assert!(
+				PrepareKeys::<Test>::post_upgrade(Vec::new()).is_err(),
+				"a wrong form"
+			);
+
+			PreparedKeys::<Test>::insert(
+				CircuitId::TRANSFER,
+				3,
+				ZkVerifier::prepare_vk(&key).unwrap(),
+			);
+			PreparedKeys::<Test>::insert(CircuitId::TRANSFER, 4, wrong);
+			assert!(
+				PrepareKeys::<Test>::post_upgrade(Vec::new()).is_err(),
+				"an orphan"
+			);
+		});
+	}
+
+	/// A key that does not prepare is skipped, not fatal: the others still are.
+	#[test]
+	fn skips_a_key_that_does_not_prepare() {
+		new_test_ext().execute_with(|| {
+			v1_chain(&[
+				(CircuitId::TRANSFER, 3, vec![0x01; 100].try_into().unwrap()),
+				(CircuitId::SHIELD, 1, real_vk(SHIELD_PUBLIC_INPUTS)),
+			]);
+			MigrateToV2::<Test>::on_runtime_upgrade();
+			assert!(!PreparedKeys::<Test>::contains_key(CircuitId::TRANSFER, 3));
+			assert!(PreparedKeys::<Test>::contains_key(CircuitId::SHIELD, 1));
+			assert_eq!(ZkVerifier::on_chain_storage_version(), 2);
+		});
+	}
 }

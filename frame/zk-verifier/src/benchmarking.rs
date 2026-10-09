@@ -65,17 +65,16 @@ mod benchmarks {
 		)
 	}
 
+	/// Store `key` for `(circuit_id, version)` with its hash and prepared form,
+	/// bypassing registration's checks.
+	fn store_key<T: Config>(circuit_id: CircuitId, version: u32, key: Vec<u8>) {
+		Pallet::<T>::store_vk(circuit_id, version, key.try_into().unwrap())
+			.expect("benchmark key stores");
+	}
+
 	/// Store the sample key for `(circuit_id, version)`, bypassing registration.
 	fn insert_sample_vk<T: Config>(circuit_id: CircuitId, version: u32) {
-		VerificationKeys::<T>::insert(
-			circuit_id,
-			version,
-			VerificationKeyInfo {
-				key_data: sample_verification_key().try_into().unwrap(),
-				system: ProofSystem::Groth16,
-				registered_at: frame_system::Pallet::<T>::block_number(),
-			},
-		);
+		store_key::<T>(circuit_id, version, sample_verification_key());
 	}
 
 	/// Benchmark for `verify_proof`, parametrized by the public-input count `n`.
@@ -92,13 +91,9 @@ mod benchmarks {
 		// the pairing and the fit would come out far below the real cost.
 		let circuit_id = CircuitId(200);
 
-		// Seed storage with an arity-`n` VK so `do_verify` runs `n` scalar-muls + pairing.
-		let vk_info = VerificationKeyInfo {
-			key_data: synthetic_vk(n as usize).try_into().unwrap(),
-			system: ProofSystem::Groth16,
-			registered_at: frame_system::Pallet::<T>::block_number(),
-		};
-		VerificationKeys::<T>::insert(circuit_id, 1, vk_info);
+		// An arity-`n` key, stored prepared as registration leaves it, so
+		// `do_verify` runs `n` scalar-muls + pairing on the path every proof takes.
+		store_key::<T>(circuit_id, 1, synthetic_vk(n as usize));
 		crate::pallet::ActiveCircuitVersion::<T>::insert(circuit_id, 1);
 
 		let proof: BoundedVec<u8, T::MaxProofSize> = BENCH_PROOF
@@ -246,6 +241,11 @@ mod benchmarks {
 				.is_none()
 		);
 		assert!(VkHashes::<T>::iter_key_prefix(circuit_id).next().is_none());
+		assert!(
+			PreparedKeys::<T>::iter_key_prefix(circuit_id)
+				.next()
+				.is_none()
+		);
 		assert!(
 			VerificationStats::<T>::iter_key_prefix(circuit_id)
 				.next()

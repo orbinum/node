@@ -15,6 +15,7 @@
 extern crate alloc;
 
 mod circuits;
+mod prepared;
 mod snarkjs;
 mod types;
 mod verifier;
@@ -33,6 +34,7 @@ pub use circuits::{
 	CROSS_TREE_INPUTS, MEMO_HASH_INPUTS, SHIELD_PUBLIC_INPUTS, TRANSFER_PUBLIC_INPUTS,
 	UNSHIELD_PUBLIC_INPUTS,
 };
+pub use prepared::{prepared_from_stored, MAX_PREPARED_VK_BYTES};
 pub use snarkjs::SnarkjsProofPoints;
 #[cfg(feature = "std")]
 pub use snarkjs::{parse_proof_from_snarkjs, parse_public_inputs_from_snarkjs};

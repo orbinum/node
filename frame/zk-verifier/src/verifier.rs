@@ -1,17 +1,20 @@
 //! Core Groth16 proof verification.
 //!
-//! Resolves the circuit version, loads and prepares its key once, picks the
-//! [`InputLayout`] the key implies — only an admitted one — and records
-//! statistics. Encoding the inputs is the caller's (see [`crate::encoding`]).
+//! Resolves the circuit version, loads its key — prepared at registration —
+//! picks the [`InputLayout`] the key implies — only an admitted one — and
+//! records statistics. Encoding the inputs is the caller's (see
+//! [`crate::encoding`]).
 
 use crate::{
-	Error,
-	pallet::{ActiveCircuitVersion, Config, RetiredVersions, VerificationKeys, VerificationStats},
+	Error, Pallet,
+	keys::StoredKey,
+	pallet::{ActiveCircuitVersion, Config, RetiredVersions, VerificationStats},
 	types::CircuitId,
 };
 use alloc::vec::Vec;
 use orbinum_zk_verifier::{
 	Bn254, InputLayout, PreparedVerifyingKey, VerifyingKey, has_memo_layout, input_layout,
+	prepared_from_stored,
 };
 
 /// Verify a proof of a circuit statement, encoded for the layout of the key it
@@ -63,11 +66,15 @@ fn check<T: Config>(
 	inputs: impl FnOnce(InputLayout, usize) -> Option<Vec<[u8; 32]>>,
 ) -> Result<(bool, u32), sp_runtime::DispatchError> {
 	frame_support::ensure!(!proof.is_empty(), Error::<T>::EmptyProof);
-	let (key_data, resolved) = resolve_key::<T>(circuit_id, version)?;
+	let (key, resolved) = resolve_key::<T>(circuit_id, version)?;
 
-	// Registration checked the key deserializes; if one ever did not, the proof
-	// fails rather than verifying under guessed inputs.
-	let result = match VerifyingKey::new(key_data).prepare() {
+	// Registration validated the key; if a stored one ever did not load, the
+	// proof fails rather than verifying under guessed inputs.
+	let prepared = match key {
+		StoredKey::Prepared(bytes) => prepared_from_stored(&bytes),
+		StoredKey::Raw(bytes) => VerifyingKey::new(bytes).prepare(),
+	};
+	let result = match prepared {
 		Ok(pvk) => {
 			let arity = pvk.vk.gamma_abc_g1.len().saturating_sub(1);
 			admitted_layout(circuit_id, arity)
@@ -80,11 +87,11 @@ fn check<T: Config>(
 	Ok((result, resolved))
 }
 
-/// The key bytes and version to verify against: `version`, or the active one.
+/// The key and version to verify against: `version`, or the active one.
 fn resolve_key<T: Config>(
 	circuit_id: CircuitId,
 	version: Option<u32>,
-) -> Result<(Vec<u8>, u32), Error<T>> {
+) -> Result<(StoredKey, u32), Error<T>> {
 	let resolved = version
 		.or_else(|| ActiveCircuitVersion::<T>::get(circuit_id))
 		.ok_or(Error::<T>::CircuitNotFound)?;
@@ -92,12 +99,12 @@ fn resolve_key<T: Config>(
 		!RetiredVersions::<T>::contains_key(circuit_id, resolved),
 		Error::<T>::UnsupportedCircuitVersion
 	);
-	let info = VerificationKeys::<T>::get(circuit_id, resolved).ok_or(if version.is_some() {
+	let key = Pallet::<T>::load_vk(circuit_id, resolved).ok_or(if version.is_some() {
 		Error::<T>::UnsupportedCircuitVersion
 	} else {
 		Error::<T>::VerificationKeyNotFound
 	})?;
-	Ok((info.key_data.into_inner(), resolved))
+	Ok((key, resolved))
 }
 
 /// Count a verification outcome in `VerificationStats`, failures too.
@@ -145,8 +152,9 @@ fn do_verify(pvk: &PreparedVerifyingKey<Bn254>, proof: &[u8], raw_inputs: Vec<[u
 mod tests {
 	use super::*;
 	use crate::{
-		mock::{Test, activate, insert_key, insert_vk, new_test_ext},
-		pallet::VerificationStats,
+		PreparedVkBytes,
+		mock::{Test, activate, insert_key, insert_vk, new_test_ext, real_vk},
+		pallet::{PreparedKeys, VerificationStats},
 	};
 	use frame_support::assert_err;
 	use orbinum_zk_verifier::{MEMO_HASH_INPUTS, SHIELD_PUBLIC_INPUTS, TRANSFER_PUBLIC_INPUTS};
@@ -383,6 +391,117 @@ mod tests {
 				verify_raw::<Test>(CircuitId::TRANSFER, Some(2), &proof(), vec![[0x02; 32]])
 					.unwrap();
 			assert_eq!(version, 2);
+		});
+	}
+
+	// ── Prepared keys ─────────────────────────────────────────────────────────
+
+	fn store(circuit_id: CircuitId, version: u32, arity: usize) {
+		crate::Pallet::<Test>::store_vk(circuit_id, version, real_vk(arity)).unwrap();
+	}
+
+	#[test]
+	fn a_stored_key_verifies_from_its_prepared_form() {
+		new_test_ext().execute_with(|| {
+			store(CircuitId::TRANSFER, 2, KEY);
+			assert!(PreparedKeys::<Test>::contains_key(CircuitId::TRANSFER, 2));
+			let mut seen = None;
+			let res = verify_statement::<Test>(
+				CircuitId::TRANSFER,
+				Some(2),
+				&proof(),
+				encoder(&mut seen, KEY),
+			);
+			assert_eq!(res, Ok((true, 2)));
+			assert_eq!(seen, Some(InputLayout::MemoBound));
+		});
+	}
+
+	/// With both forms stored, the prepared one is what verifies: spoiling the
+	/// raw key changes nothing.
+	#[test]
+	fn the_prepared_form_is_read_over_the_raw_key() {
+		new_test_ext().execute_with(|| {
+			store(CircuitId::TRANSFER, 2, KEY);
+			insert_key(CircuitId::TRANSFER, 2, vec![0x01; 100].try_into().unwrap());
+			let res = verify_raw::<Test>(CircuitId::TRANSFER, Some(2), &proof(), vec![[0x02; 32]]);
+			assert_eq!(res, Ok((true, 2)));
+		});
+	}
+
+	/// A prepared form that does not load fails the proof, never panics, and the
+	/// attempt is counted.
+	#[test]
+	fn a_prepared_form_that_does_not_load_fails_the_proof() {
+		new_test_ext().execute_with(|| {
+			store(CircuitId::TRANSFER, 2, KEY);
+			let good = PreparedKeys::<Test>::get(CircuitId::TRANSFER, 2).unwrap();
+			let truncated = good[..good.len() - 1].to_vec();
+			for (i, bad) in [vec![0xFF; 1000], truncated, vec![]]
+				.into_iter()
+				.enumerate()
+			{
+				PreparedKeys::<Test>::insert(
+					CircuitId::TRANSFER,
+					2,
+					PreparedVkBytes::truncate_from(bad),
+				);
+				let res =
+					verify_raw::<Test>(CircuitId::TRANSFER, Some(2), &proof(), vec![[0x02; 32]]);
+				assert_eq!(res, Ok((false, 2)));
+				assert_eq!(
+					stats(CircuitId::TRANSFER, 2),
+					(i as u64 + 1, 0, i as u64 + 1)
+				);
+			}
+		});
+	}
+
+	/// A prepared form of another arity in the slot fails closed: the arity it
+	/// carries is not one the circuit admits.
+	#[test]
+	fn a_prepared_form_of_another_circuit_in_the_slot_fails_closed() {
+		new_test_ext().execute_with(|| {
+			store(CircuitId::TRANSFER, 2, KEY);
+			let shield = crate::Pallet::<Test>::prepare_vk(&real_vk(SHIELD_PUBLIC_INPUTS)).unwrap();
+			PreparedKeys::<Test>::insert(CircuitId::TRANSFER, 2, shield);
+			let mut seen = None;
+			let res = verify_statement::<Test>(
+				CircuitId::TRANSFER,
+				Some(2),
+				&proof(),
+				encoder(&mut seen, KEY),
+			);
+			assert_eq!(res, Ok((false, 2)));
+			assert_eq!(seen, None);
+		});
+	}
+
+	#[test]
+	fn a_base_spend_key_verifies_nothing_from_its_prepared_form_either() {
+		new_test_ext().execute_with(|| {
+			store(CircuitId::TRANSFER, 1, BASE);
+			let mut seen = None;
+			let res = verify_statement::<Test>(
+				CircuitId::TRANSFER,
+				Some(1),
+				&proof(),
+				encoder(&mut seen, BASE),
+			);
+			assert_eq!(res, Ok((false, 1)));
+			assert_eq!(seen, None);
+		});
+	}
+
+	#[test]
+	fn a_retired_version_is_refused_before_its_prepared_form_loads() {
+		new_test_ext().execute_with(|| {
+			store(CircuitId::TRANSFER, 2, KEY);
+			RetiredVersions::<Test>::insert(CircuitId::TRANSFER, 2, ());
+			assert_err!(
+				verify_raw::<Test>(CircuitId::TRANSFER, Some(2), &proof(), vec![[0x02; 32]]),
+				Error::<Test>::UnsupportedCircuitVersion
+			);
 		});
 	}
 
