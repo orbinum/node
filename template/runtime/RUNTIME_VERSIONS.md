@@ -27,8 +27,8 @@ transfer can spend two notes from different trees. `transaction_version` moves:
 `private_transfer` (call 1) takes `merkle_roots: [Hash; 2]` in place of
 `merkle_root`. Validator-set only gains calls 6 and 7. Ships with
 `orbinum-runtime` / `orbinum-node` 0.4.0, `pallet-validator-set` 0.4.0,
-`pallet-shielded-pool` 0.23.0, `pallet-zk-verifier` 0.16.0,
-`orbinum-zk-verifier` 3.0.0 and `pallet-evm-precompile-shielded-pool` 0.9.0;
+`pallet-shielded-pool` 0.23.0, `pallet-zk-verifier` 0.17.0,
+`orbinum-zk-verifier` 3.1.0 and `pallet-evm-precompile-shielded-pool` 0.9.0;
 node 0.4.0 is the first binary that declares its version.
 
 #### 1 · Minimum author version
@@ -83,11 +83,12 @@ code changes: unshield v3 keeps the 8-input memo-bound layout of v2. The fix is
 in the keys, so **transfer v2 and unshield v2 must be retired as soon as v3 is
 active.**
 
-#### 4 · Cheaper sealed-tree paths, safer keys
+#### 4 · Cheaper sealed-tree paths and proofs, safer keys
 
 - **Prune cut 10 → 6** (`SealedTreePrunedBelowLevel`). A sealed tree's Merkle path
-  rebuilds its pruned siblings from leaves: 62 leaf reads (~11ms in Wasm) instead
-  of 1_022 (~180ms), at 32_766 stored nodes per tree instead of 2_046. Paths are
+  rebuilds its pruned siblings from leaves: 62 leaf reads instead of 1_022
+  (measured on a sealed 2^20 tree: ~2.5 ms instead of ~30 ms), at 32_766 stored
+  nodes per tree instead of 2_046. Paths are
   public RPC, so that cost was what one request could make a node pay. Lowering
   the cut is safe whenever it lands: a node pruned under the old cut is rebuilt
   on demand.
@@ -97,6 +98,9 @@ active.**
 - **zk-verifier:** a spend circuit never takes a base-layout key (no memo
   binding), at any version: not on registration, activation or unretiring, and a
   base key already in storage verifies nothing.
+- **zk-verifier:** keys are stored prepared (`PreparedKeys`), so a proof no longer
+  prepares its key: verification ~2.2× cheaper. Storage v2; `MigrateToV2`
+  prepares the keys already registered, during the upgrade.
 
 **After the upgrade, by Root:** register the v3 keys from `@orbinum/circuits`
 **0.17.1** (release ceremony, beacon = testnet block #1190708), activate both with

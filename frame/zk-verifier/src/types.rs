@@ -7,6 +7,11 @@ use serde::{Deserialize, Serialize};
 /// A serialized verifying key as stored: at most [`orbinum_zk_verifier::MAX_VK_BYTES`].
 pub type VkBytes = BoundedVec<u8, ConstU32<{ orbinum_zk_verifier::MAX_VK_BYTES as u32 }>>;
 
+/// A verifying key prepared once at registration, uncompressed: at most
+/// [`orbinum_zk_verifier::MAX_PREPARED_VK_BYTES`].
+pub type PreparedVkBytes =
+	BoundedVec<u8, ConstU32<{ orbinum_zk_verifier::MAX_PREPARED_VK_BYTES as u32 }>>;
+
 /// Circuit identifier type (pallet-specific wrapper)
 #[derive(
 	Clone,

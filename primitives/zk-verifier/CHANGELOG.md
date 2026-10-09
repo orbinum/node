@@ -6,6 +6,19 @@ All notable changes to this crate are documented here.
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-09
+
+### Added
+
+- `VerifyingKey::prepared_bytes`: the key validated and prepared once,
+  uncompressed, for storing. `prepared_from_stored` reads it back without
+  re-validating its points, after checking every length prefix against the
+  bytes (`ark-serialize` reserves a `Vec` from its prefix before reading it).
+  `MAX_PREPARED_VK_BYTES` bounds it: the size for `MAX_PUBLIC_INPUTS` inputs.
+  The layout is fixed but for the input count: 87 line coefficients for each of
+  `-gamma`, `-delta` and a clear infinity flag, so a prefix that adds up but
+  differs is refused too. Lives in its own module, `prepared`.
+
 ## [3.0.0] - 2026-10-08
 
 ### Added

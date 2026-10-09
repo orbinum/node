@@ -14,7 +14,9 @@ use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisE
 use ark_snark::SNARK;
 use ark_std::rand::{rngs::StdRng, SeedableRng};
 
-use orbinum_zk_verifier::{Groth16Verifier, Proof, PublicInputs, VerifierError, VerifyingKey};
+use orbinum_zk_verifier::{
+	prepared_from_stored, Groth16Verifier, Proof, PublicInputs, VerifierError, VerifyingKey,
+};
 
 /// Circuit proving knowledge of `a`, `b` with `a * b == c`, where `c` is public.
 #[derive(Clone)]
@@ -133,4 +135,61 @@ fn real_proof_rejects_non_canonical_input() {
 		Groth16Verifier::verify(&vk, &PublicInputs::new(vec![n_plus_p]), &proof),
 		Err(VerifierError::InvalidPublicInput)
 	);
+}
+
+/// A key stored prepared and read back unchecked verifies exactly like one
+/// prepared from the VK: the valid statement passes, a wrong one fails.
+#[test]
+fn a_stored_prepared_key_verifies_like_a_fresh_one() {
+	let (vk, proof, inputs) = setup_and_prove();
+	let pvk = prepared_from_stored(&vk.prepared_bytes().unwrap()).unwrap();
+	assert_eq!(
+		Groth16Verifier::verify_with_prepared_vk(&pvk, &PublicInputs::new(inputs), &proof),
+		Ok(())
+	);
+	let mut wrong = [0u8; 32];
+	wrong[0] = 34;
+	assert_eq!(
+		Groth16Verifier::verify_with_prepared_vk(&pvk, &PublicInputs::new(vec![wrong]), &proof),
+		Err(VerifierError::VerificationFailed)
+	);
+}
+
+/// No corruption of a stored prepared key makes an invalid proof verify, and
+/// none panics. Each case flips one random bit; a key that still loads (the
+/// flip landed in a coordinate) is driven through the verifier with a wrong
+/// public input, which must never pass.
+#[test]
+fn a_corrupted_stored_key_never_verifies_an_invalid_proof() {
+	use ark_std::rand::Rng;
+	let (vk, proof, inputs) = setup_and_prove();
+	let good = vk.prepared_bytes().unwrap();
+	let mut wrong = [0u8; 32];
+	wrong[0] = 34;
+	let wrong = PublicInputs::new(vec![wrong]);
+	let right = PublicInputs::new(inputs);
+
+	let mut rng = StdRng::seed_from_u64(7);
+	let (mut loaded, mut still_valid) = (0, 0);
+	for _ in 0..400 {
+		let mut bad = good.clone();
+		let at = rng.gen_range(0..bad.len());
+		bad[at] ^= 1 << rng.gen_range(0..8);
+		let Ok(pvk) = prepared_from_stored(&bad) else {
+			continue;
+		};
+		loaded += 1;
+		assert!(
+			Groth16Verifier::verify_with_prepared_vk(&pvk, &wrong, &proof).is_err(),
+			"a flip at byte {at} let a wrong input verify"
+		);
+		if Groth16Verifier::verify_with_prepared_vk(&pvk, &right, &proof).is_ok() {
+			still_valid += 1;
+		}
+	}
+	// Most flips land in a coordinate and load; the pairing then rejects them. A
+	// few land in `beta`/`gamma`/`delta` of the embedded key, which verification
+	// never reads, and the valid proof still passes.
+	assert!(loaded > 300, "only {loaded} corrupted keys loaded");
+	println!("{loaded} corrupted keys loaded, {still_valid} still verify the valid proof");
 }

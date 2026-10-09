@@ -6,6 +6,33 @@ All notable changes to this pallet are documented here.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-09
+
+### Changed
+
+- A key is stored prepared as well (`PreparedKeys`, written and removed with it),
+  and a proof is verified from that form instead of preparing the key each time:
+  `verify_proof` measured 5.6 → 2.6 ms in Wasm. The prepared form is loaded
+  without re-validating its points, after a layout check; a missing one falls
+  back to preparing the key.
+- Key storage lives in one module (`keys`): a key, its hash and its prepared
+  form are written, removed and purged together, and nothing else writes
+  `PreparedKeys`.
+- **Storage v2:** `migrations::v2::MigrateToV2` prepares every key already
+  stored, overwriting any prepared form there (a key that does not prepare loses
+  it); the runtime must list it in its migrations. Under `try-runtime`,
+  `post_upgrade` checks every prepared form is its key's preparation and none is
+  orphaned.
+- Weights need regenerating. Measured here (Apple M, `--steps 50 --repeat 20`):
+
+  | Call | Committed (EPYC) | Regenerated |
+  |---|---|---|
+  | `verify_proof` | 10.37 ms, 3.9 KB proof | 2.43 ms, 38 KB proof |
+  | `register_verification_key` | 2.36 ms | 4.12 ms |
+  | `batch_register_verification_keys` | 0.06 + 3.5·n ms | 4.10 + 3.5·n ms |
+  | `set_active_version`, `unretire_version` | 0.015 ms | 1.23 ms (they validate the key since 0.16.0) |
+  | `remove_verification_key`, `purge_circuit` | ~unchanged | ~unchanged |
+
 ## [0.16.0] - 2026-10-08
 
 ### Security

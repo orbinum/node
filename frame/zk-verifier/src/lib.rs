@@ -29,6 +29,8 @@ extern crate alloc;
 pub use pallet::*;
 
 mod encoding;
+mod keys;
+pub mod migrations;
 mod port;
 mod runtime_api;
 mod types;
@@ -45,8 +47,8 @@ mod benchmarking;
 
 pub use port::{ShieldStatement, TransferStatement, UnshieldStatement, ZkVerifierPort};
 pub use types::{
-	CircuitId, CircuitVersionInfo, ProofSystem, VerificationKeyInfo, VerificationStatistics,
-	VkBytes, VkEntry, VkVersionHash,
+	CircuitId, CircuitVersionInfo, PreparedVkBytes, ProofSystem, VerificationKeyInfo,
+	VerificationStatistics, VkBytes, VkEntry, VkVersionHash,
 };
 pub use weights::WeightInfo;
 
@@ -61,10 +63,8 @@ pub mod pallet {
 
 	/// Storage version history:
 	/// - v1: the retired `private_link` circuit (id 5) is dropped.
-	///
-	/// No migration code remains: every live chain is at v1 and a new chain starts
-	/// there via genesis.
-	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+	/// - v2: every key also stored prepared ([`PreparedKeys`]); see [`migrations`].
+	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(2);
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
@@ -117,6 +117,20 @@ pub mod pallet {
 		Blake2_128Concat,
 		u32,
 		[u8; 32],
+		OptionQuery,
+	>;
+
+	/// Each key of `VerificationKeys`, prepared once when it is stored, so a
+	/// verification skips preparing it: about half the cost of a proof. Written
+	/// and removed with the key; a missing entry falls back to preparing.
+	#[pallet::storage]
+	pub type PreparedKeys<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat,
+		CircuitId,
+		Blake2_128Concat,
+		u32,
+		PreparedVkBytes,
 		OptionQuery,
 	>;
 
@@ -320,10 +334,7 @@ pub mod pallet {
 				.ok_or(Error::<T>::ActiveVersionNotSet)?;
 			ensure!(active != version, Error::<T>::CannotRemoveActiveVersion);
 
-			VerificationKeys::<T>::remove(circuit_id, version);
-			RetiredVersions::<T>::remove(circuit_id, version);
-			VkHashes::<T>::remove(circuit_id, version);
-			VerificationStats::<T>::remove(circuit_id, version);
+			Self::remove_vk(circuit_id, version);
 			Self::deposit_event(Event::VerificationKeyRemoved {
 				circuit_id,
 				version,
@@ -466,7 +477,7 @@ pub mod pallet {
 		///    `None`).
 		/// 2. Count every map's entries, plus a stale `ActiveCircuitVersion`.
 		/// 3. Refuse a map wider than `MAX_VERSIONS_PER_CIRCUIT`.
-		/// 4. Clear all five maps by prefix — so entries without a
+		/// 4. Clear all six maps by prefix — so entries without a
 		///    `VerificationKeys` row go too — and report the entries cleared.
 		///
 		/// `ActiveCircuitVersion` is cleared, not required empty: no extrinsic ever
@@ -489,12 +500,7 @@ pub mod pallet {
 			// 2. Count, by iterating: `clear_prefix`'s counters miss this block's
 			// overlay writes. Summed per map, as nothing forces the maps to share a
 			// version set.
-			let per_map = [
-				VerificationKeys::<T>::iter_key_prefix(circuit_id).count(),
-				VkHashes::<T>::iter_key_prefix(circuit_id).count(),
-				VerificationStats::<T>::iter_key_prefix(circuit_id).count(),
-				RetiredVersions::<T>::iter_key_prefix(circuit_id).count(),
-			];
+			let per_map = Self::circuit_entries(circuit_id);
 			// A stale active pointer is an entry to clear too.
 			let active_entries = usize::from(ActiveCircuitVersion::<T>::contains_key(circuit_id));
 			let entries = per_map.iter().sum::<usize>().saturating_add(active_entries);
@@ -509,19 +515,15 @@ pub mod pallet {
 			);
 
 			// 4. Clear, in one pass: the count proved every prefix fits the cap.
-			let _ = VerificationKeys::<T>::clear_prefix(circuit_id, u32::MAX, None);
-			let _ = VkHashes::<T>::clear_prefix(circuit_id, u32::MAX, None);
-			let _ = VerificationStats::<T>::clear_prefix(circuit_id, u32::MAX, None);
-			let _ = RetiredVersions::<T>::clear_prefix(circuit_id, u32::MAX, None);
-			ActiveCircuitVersion::<T>::remove(circuit_id);
+			Self::clear_circuit(circuit_id);
 
 			// Entries, not versions: the figure an indexer reconciles against.
 			Self::deposit_event(Event::CircuitPurged {
 				circuit_id,
 				removed: entries as u32,
 			});
-			// Weighed by versions: the benchmark charges one read and four writes
-			// per version, the cost of clearing all four maps.
+			// Weighed by versions: the benchmark charges one read and a write per
+			// map for each version.
 			Ok(Some(T::WeightInfo::purge_circuit(widest as u32)).into())
 		}
 	}
@@ -584,29 +586,6 @@ pub mod pallet {
 			verifier::admitted_layout(circuit_id, arity)
 				.map(|_| ())
 				.ok_or(Error::<T>::InvalidVerificationKey.into())
-		}
-
-		/// Insert a validated VK for `(circuit_id, version)` and store its hash,
-		/// within the per-circuit version cap.
-		fn store_vk(circuit_id: CircuitId, version: u32, key_data: VkBytes) -> DispatchResult {
-			let count = VerificationKeys::<T>::iter_key_prefix(circuit_id).count() as u32;
-			ensure!(
-				count < Self::MAX_VERSIONS_PER_CIRCUIT,
-				Error::<T>::TooManyVersions
-			);
-
-			let hash = sp_io::hashing::blake2_256(key_data.as_slice());
-			VerificationKeys::<T>::insert(
-				circuit_id,
-				version,
-				VerificationKeyInfo {
-					key_data,
-					system: ProofSystem::Groth16,
-					registered_at: frame_system::Pallet::<T>::block_number(),
-				},
-			);
-			VkHashes::<T>::insert(circuit_id, version, hash);
-			Ok(())
 		}
 	}
 }
