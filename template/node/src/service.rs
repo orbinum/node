@@ -121,12 +121,15 @@ where
 
 	let executor = sc_service::new_wasm_executor(&config.executor);
 
+	// Import must not record proofs: the proposer does not, and the EVM meters PoV gas
+	// with `get_proof_size()`, so recording only on import makes importers compute a
+	// different gas (and Ethereum block hash) than the author and reject the block.
 	let (client, backend, keystore_container, task_manager) =
 		sc_service::new_full_parts_record_import::<B, RA, _>(
 			config,
 			telemetry.as_ref().map(|(_, telemetry)| telemetry.handle()),
 			executor,
-			true,
+			false,
 			Vec::new(),
 		)?;
 	let client = Arc::new(client);
