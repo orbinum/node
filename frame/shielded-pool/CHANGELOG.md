@@ -4,6 +4,8 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-09
+
 ### Added
 
 - `get_subtree_roots(tree_id, start, count)` and `SubtreeRoots`: up to

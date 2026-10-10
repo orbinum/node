@@ -1,6 +1,6 @@
 [package]
 name = "pallet-shielded-pool-runtime-api"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Orbinum Team"]
 edition = "2024"
 license = "GPL-3.0-or-later"
