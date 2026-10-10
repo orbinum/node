@@ -1,6 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use pallet_shielded_pool::{DefaultMerklePath, Hash};
+use pallet_shielded_pool::{DefaultMerklePath, Hash, SubtreeRoots};
 
 /// Configuration exposed by the runtime for the node-native EVM relay.
 ///
@@ -60,5 +60,11 @@ sp_api::decl_runtime_apis! {
 		/// calldata that is not a relayable spend.
 		#[api_version(3)]
 		fn relay_commit_hash(calldata: sp_std::vec::Vec<u8>, relayer: [u8; 20]) -> Option<[u8; 32]>;
+
+		/// Up to `count` level-6 subtree roots of `tree_id` from `start`, with the
+		/// root the tree anchors to, read from one state, so a wallet can build
+		/// its own Merkle paths. None for a tree that does not exist yet.
+		#[api_version(4)]
+		fn get_subtree_roots(tree_id: u32, start: u32, count: u32) -> Option<SubtreeRoots>;
 	}
 }

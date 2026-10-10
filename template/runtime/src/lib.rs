@@ -925,6 +925,7 @@ impl_runtime_apis! {
 	}
 
 	// ShieldedPool Runtime API implementation
+	#[api_version(4)]
 	impl pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi<Block> for Runtime {
 		fn get_merkle_tree_info() -> (pallet_shielded_pool::Hash, u32, u32) {
 			ShieldedPool::get_merkle_tree_info()
@@ -946,6 +947,14 @@ impl_runtime_apis! {
 			commitment: pallet_shielded_pool::Hash,
 		) -> Option<(u32, pallet_shielded_pool::DefaultMerklePath)> {
 			ShieldedPool::get_merkle_proof_for_commitment(commitment)
+		}
+
+		fn get_subtree_roots(
+			tree_id: u32,
+			start: u32,
+			count: u32,
+		) -> Option<pallet_shielded_pool::SubtreeRoots> {
+			ShieldedPool::get_subtree_roots(tree_id, start, count)
 		}
 
 		fn relay_config() -> pallet_shielded_pool_runtime_api::RelayConfig {
