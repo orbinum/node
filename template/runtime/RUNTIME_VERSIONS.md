@@ -92,9 +92,10 @@ active.**
   public RPC, so that cost was what one request could make a node pay. Lowering
   the cut is safe whenever it lands: a node pruned under the old cut is rebuilt
   on demand.
-- **Node:** the `privacy_getMerkleProof*` RPCs run on blocking threads, at most 4
-  at once; the excess is refused as busy (`-32009`) instead of stalling every
-  other RPC.
+- **Node:** the `privacy_getMerkleProof*` RPCs run on blocking threads, half the
+  node's cores at once; the rest wait in a queue of 128 for up to 2 s. Only past
+  that (a full queue or a saturated node) is a request refused as busy
+  (`-32009`), so a burst no longer stalls every other RPC or gets refused.
 - **zk-verifier:** a spend circuit never takes a base-layout key (no memo
   binding), at any version: not on registration, activation or unretiring, and a
   base key already in storage verifies nothing.
