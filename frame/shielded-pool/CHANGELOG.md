@@ -4,6 +4,17 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-09
+
+### Added
+
+- `get_subtree_roots(tree_id, start, count)` and `SubtreeRoots`: up to
+  `MAX_SUBTREE_ROOTS` (4096) level-`SUBTREE_LEVEL` (6) roots of one tree, with
+  the root it anchors to, read from one state. A wallet builds its own Merkle
+  path from them and the 64 leaves of its note's block, so no node learns which
+  note is spent. A sealed tree's node pruned under an earlier, higher cut is
+  rebuilt from its leaves. Runtime API v4 (`ShieldedPoolRuntimeApi`).
+
 ## [0.23.0] - 2026-10-08
 
 ### Changed

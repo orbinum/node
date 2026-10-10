@@ -102,6 +102,9 @@ active.**
 - **zk-verifier:** keys are stored prepared (`PreparedKeys`), so a proof no longer
   prepares its key: verification ~2.2× cheaper. Storage v2; `MigrateToV2`
   prepares the keys already registered, during the upgrade.
+- **Runtime API v4:** `get_subtree_roots`, behind the `privacy_getSubtreeRoots`
+  RPC: a tree's level-6 subtree roots, from which a wallet builds its own Merkle
+  paths instead of asking a node for one (which tells the node the note).
 - **Node 0.4.0** registers the `bn254_groth16_verify` host function
   (`register_only`): this runtime does not call it, so nodes without it keep
   working. A later spec turns it on (a transfer validated in ~1.5 ms instead of

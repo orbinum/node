@@ -85,7 +85,8 @@ pub use pallet::*;
 pub use types::{
 	AssetId, AssetMetadata, Commitment, DEFAULT_TREE_DEPTH, DefaultMerklePath,
 	EncryptedMemo as FrameEncryptedMemo, Hash, MAX_ENCRYPTED_MEMO_SIZE, MAX_PROOF_SIZE,
-	MAX_TREE_DEPTH, MerklePath, Note, Nullifier, Proof,
+	MAX_SUBTREE_ROOTS, MAX_TREE_DEPTH, MerklePath, Note, Nullifier, Proof, SUBTREE_LEVEL,
+	SubtreeRoots,
 };
 pub use weights::WeightInfo;
 

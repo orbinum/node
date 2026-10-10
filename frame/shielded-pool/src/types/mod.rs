@@ -20,7 +20,10 @@ pub mod proof;
 pub use asset::{AssetMetadata, NATIVE_ASSET_ID};
 pub use ids::{AssetId, Commitment, Nullifier};
 pub use memo::{EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE};
-pub use merkle::{DEFAULT_TREE_DEPTH, DefaultMerklePath, MAX_TREE_DEPTH, MerklePath};
+pub use merkle::{
+	DEFAULT_TREE_DEPTH, DefaultMerklePath, MAX_SUBTREE_ROOTS, MAX_TREE_DEPTH, MerklePath,
+	SUBTREE_LEVEL, SubtreeRoots,
+};
 pub use note::Note;
 pub use proof::{MAX_PROOF_SIZE, Proof};
 

@@ -261,6 +261,52 @@ impl MerkleTreeService {
 		Some(DefaultMerklePath { siblings, indices })
 	}
 
+	/// Up to `count` (capped at [`MAX_SUBTREE_ROOTS`]) level-[`SUBTREE_LEVEL`]
+	/// roots of `tree_id` from `start`, with the tree's anchoring root, all read
+	/// from the current state. `None` for a tree that does not exist yet.
+	///
+	/// Only blocks holding at least one leaf are returned: past them every node
+	/// is the zero hash, which the caller knows. A node missing from storage (a
+	/// sealed tree pruned under an earlier, higher cut) is rebuilt from leaves.
+	pub fn get_subtree_roots<T: Config>(
+		tree_id: u32,
+		start: u32,
+		count: u32,
+	) -> Option<crate::types::SubtreeRoots> {
+		use crate::types::{MAX_SUBTREE_ROOTS, SUBTREE_LEVEL, SubtreeRoots};
+		let size = MerkleRepository::get_tree_size::<T>();
+		let cap = T::MaxLeavesPerTree::get();
+		let current = size / cap;
+		if tree_id > current {
+			return None;
+		}
+		let sealed = tree_id < current;
+		let (tree_leaves, root) = if sealed {
+			(cap, MerkleRepository::get_sealed_root::<T>(tree_id)?)
+		} else {
+			(size % cap, MerkleRepository::get_poseidon_root::<T>())
+		};
+		let level = SUBTREE_LEVEL as usize;
+		let blocks = tree_leaves.div_ceil(1 << level);
+		let end = start
+			.saturating_add(count.min(MAX_SUBTREE_ROOTS))
+			.min(blocks);
+		let roots = (start..end)
+			.map(|i| {
+				MerkleRepository::get_node::<T>(tree_id, SUBTREE_LEVEL, i)
+					.unwrap_or_else(|| Self::subtree_root::<T>(tree_id, level, i, cap))
+			})
+			.collect();
+		Some(SubtreeRoots {
+			tree_id,
+			tree_leaves,
+			sealed,
+			root,
+			start,
+			roots,
+		})
+	}
+
 	/// Rebuild the node at `(level, node_index)` from the leaves beneath it.
 	///
 	/// Reads the `2^level` leaves the node spans and folds them pairwise. Used only

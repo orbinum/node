@@ -22,7 +22,7 @@ use pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi;
 use sc_client_api::StorageProvider as ScStorageProvider;
 use scale_codec::Decode;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use sp_api::ProvideRuntimeApi;
+use sp_api::{ApiExt, ProvideRuntimeApi};
 
 /// `u128` serde helper: serialises as a decimal string so JavaScript clients
 /// can parse values larger than `Number.MAX_SAFE_INTEGER` without precision loss.
@@ -72,6 +72,26 @@ fn map_key(item: &[u8], k: &[u8]) -> Vec<u8> {
 // ============================================================================
 // Response types
 // ============================================================================
+
+/// Level-6 subtree roots of one tree (`privacy_getSubtreeRoots`).
+///
+/// Every root but the last of an active tree is final. Past the last block the
+/// nodes are the zero hash; the response omits them.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SubtreeRootsResponse {
+	pub tree_id: u32,
+	/// Level of the roots: each covers `2^level` leaves.
+	pub level: u8,
+	/// Leaves in the tree: the capacity once sealed.
+	pub tree_leaves: u32,
+	pub sealed: bool,
+	/// Root the tree anchors to at the same state (`0x`-prefixed hex).
+	pub root: String,
+	/// Index of `roots[0]` within the level.
+	pub start: u32,
+	/// `0x`-prefixed hex, little-endian field elements.
+	pub roots: Vec<String>,
+}
 
 /// Response for `privacy_getMerkleProof`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,6 +163,17 @@ pub trait PrivacyApi {
 	/// commitment is not found in the tree.
 	#[method(name = "privacy_getMerkleProofByCommitment", blocking)]
 	fn get_merkle_proof_by_commitment(&self, commitment: String) -> RpcResult<MerkleProofResponse>;
+
+	/// Up to `count` (at most 4096) level-6 subtree roots of tree `tree_id` from
+	/// `start`, with the root the tree anchors to, so a wallet can build Merkle
+	/// paths itself. Needs runtime API v4.
+	#[method(name = "privacy_getSubtreeRoots", blocking)]
+	fn get_subtree_roots(
+		&self,
+		tree_id: u32,
+		start: u32,
+		count: u32,
+	) -> RpcResult<SubtreeRootsResponse>;
 
 	/// Returns whether the nullifier (`0x`-prefixed hex, 32 bytes) has been spent.
 	#[method(name = "privacy_getNullifierStatus")]
@@ -458,6 +489,38 @@ where
 			leaf_index,
 			tree_depth,
 			tree_id,
+		})
+	}
+
+	fn get_subtree_roots(
+		&self,
+		tree_id: u32,
+		start: u32,
+		count: u32,
+	) -> RpcResult<SubtreeRootsResponse> {
+		let _permit = self.proofs.enter().ok_or_else(busy)?;
+		let best_hash = self.client.info().best_hash;
+		let api = self.client.runtime_api();
+		let version = api
+			.api_version::<dyn ShieldedPoolRuntimeApi<B>>(best_hash)
+			.map_err(internal_error)?
+			.unwrap_or(0);
+		if version < 4 {
+			return Err(internal_error("subtree roots need runtime API v4"));
+		}
+		let found = api
+			.get_subtree_roots(best_hash, tree_id, start, count)
+			.map_err(internal_error)?
+			.ok_or_else(|| invalid_params(format!("tree {tree_id} does not exist")))?;
+		let hex32 = |h: [u8; 32]| format!("0x{}", hex::encode(h));
+		Ok(SubtreeRootsResponse {
+			tree_id: found.tree_id,
+			level: pallet_shielded_pool::SUBTREE_LEVEL,
+			tree_leaves: found.tree_leaves,
+			sealed: found.sealed,
+			root: hex32(found.root),
+			start: found.start,
+			roots: found.roots.into_iter().map(hex32).collect(),
 		})
 	}
 

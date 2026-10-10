@@ -12411,7 +12411,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-shielded-pool"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.5.0",
@@ -12434,7 +12434,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-shielded-pool-runtime-api"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "pallet-shielded-pool",
  "parity-scale-codec",
