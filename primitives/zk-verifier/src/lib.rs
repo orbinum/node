@@ -15,6 +15,8 @@
 extern crate alloc;
 
 mod circuits;
+#[cfg(feature = "groth16-native")]
+pub mod host_interface;
 mod prepared;
 mod snarkjs;
 mod types;
@@ -34,7 +36,7 @@ pub use circuits::{
 	CROSS_TREE_INPUTS, MEMO_HASH_INPUTS, SHIELD_PUBLIC_INPUTS, TRANSFER_PUBLIC_INPUTS,
 	UNSHIELD_PUBLIC_INPUTS,
 };
-pub use prepared::{prepared_from_stored, MAX_PREPARED_VK_BYTES};
+pub use prepared::{prepared_arity, prepared_from_stored, verify_prepared, MAX_PREPARED_VK_BYTES};
 pub use snarkjs::SnarkjsProofPoints;
 #[cfg(feature = "std")]
 pub use snarkjs::{parse_proof_from_snarkjs, parse_public_inputs_from_snarkjs};

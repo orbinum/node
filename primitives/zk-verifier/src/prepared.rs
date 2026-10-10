@@ -11,7 +11,10 @@ use ark_bn254::Bn254;
 use ark_groth16::PreparedVerifyingKey;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 
-use crate::{VerifierError, VerifyingKey, MAX_PUBLIC_INPUTS};
+use crate::{
+	Groth16Verifier, Proof, PublicInputs, VerifierError, VerifyingKey, MAX_PUBLIC_INPUTS,
+	PROOF_BYTES,
+};
 
 /// Uncompressed sizes of the parts of a prepared key.
 mod layout {
@@ -65,6 +68,52 @@ pub fn prepared_from_stored(bytes: &[u8]) -> Result<PreparedVerifyingKey<Bn254>,
 	}
 	PreparedVerifyingKey::<Bn254>::deserialize_uncompressed_unchecked(bytes)
 		.map_err(|_| VerifierError::InvalidVerifyingKey)
+}
+
+/// Whether `proof` verifies `inputs` under a key stored by
+/// [`VerifyingKey::prepared_bytes`].
+///
+/// Both execution paths run this one function (the runtime in Wasm, the node
+/// behind `bn254_groth16_verify`), so their answers cannot differ.
+///
+/// - `proof`: [`PROOF_BYTES`], compressed.
+/// - `inputs`: one 32-byte little-endian canonical field element per key input,
+///   concatenated.
+///
+/// Shapes are checked before any curve arithmetic; anything malformed is
+/// `false`, never a panic.
+pub fn verify_prepared(prepared_vk: &[u8], proof: &[u8], inputs: &[u8]) -> bool {
+	if proof.len() != PROOF_BYTES || !inputs.len().is_multiple_of(32) {
+		return false;
+	}
+	let Ok(pvk) = prepared_from_stored(prepared_vk) else {
+		return false;
+	};
+	if pvk.vk.gamma_abc_g1.len() != inputs.len() / 32 + 1 {
+		return false;
+	}
+	let inputs = inputs
+		.chunks_exact(32)
+		.filter_map(|c| <[u8; 32]>::try_from(c).ok())
+		.collect();
+	Groth16Verifier::verify_with_prepared_vk(
+		&pvk,
+		&PublicInputs::new(inputs),
+		&Proof::new(proof.to_vec()),
+	)
+	.is_ok()
+}
+
+/// The input count of a key stored by [`VerifyingKey::prepared_bytes`], read
+/// from its layout without deserializing a point. `None` where
+/// [`prepared_from_stored`] refuses the layout.
+pub fn prepared_arity(bytes: &[u8]) -> Option<usize> {
+	if !layout_fits(bytes) {
+		return None;
+	}
+	let points = bytes.get(layout::KEY_HEADER..layout::KEY_HEADER + layout::LEN)?;
+	let points = u64::from_le_bytes(points.try_into().ok()?);
+	usize::try_from(points).ok()?.checked_sub(1)
 }
 
 /// Whether `bytes` has exactly the layout of a prepared key: a `gamma_abc`
@@ -209,6 +258,26 @@ mod tests {
 			bad[GAMMA_AT_3..GAMMA_AT_3 + LEN].copy_from_slice(&(gamma as u64).to_le_bytes());
 			bad[DELTA_AT_3..DELTA_AT_3 + LEN].copy_from_slice(&(delta as u64).to_le_bytes());
 			assert!(refused(&bad), "lines {gamma} / {delta}");
+		}
+	}
+
+	#[test]
+	fn prepared_arity_reads_the_input_count() {
+		for arity in [0, 1, 3, 9, MAX_PUBLIC_INPUTS] {
+			assert_eq!(prepared_arity(&stored(arity)), Some(arity));
+		}
+	}
+
+	#[test]
+	fn prepared_arity_refuses_what_the_loader_refuses() {
+		let good = stored(3);
+		let mut flag = good.clone();
+		flag[GAMMA_AT_3 + LEN + LINES * LINE] = 1;
+		let mut prefix = good.clone();
+		prefix[KEY_HEADER..KEY_HEADER + LEN].copy_from_slice(&u64::MAX.to_le_bytes());
+		for bad in [&good[..good.len() - 1], &flag[..], &prefix[..], &[][..]] {
+			assert!(refused(bad));
+			assert_eq!(prepared_arity(bad), None);
 		}
 	}
 

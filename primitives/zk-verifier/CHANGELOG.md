@@ -6,6 +6,26 @@ All notable changes to this crate are documented here.
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-10-09
+
+### Added
+
+- `host_interface` (feature `groth16-native`, in `default`): Groth16
+  verification over BN254 as a native host function, `bn254_groth16_verify`,
+  from a key in its prepared form; `verify_proof` measured 2.43 → 0.61 ms once a
+  runtime uses it. Every malformed argument is `false` (proof not
+  `PROOF_BYTES`, inputs not a multiple of 32 bytes or not the key's arity,
+  non-canonical input, a key whose layout does not fit) and it never panics.
+- It ships `#[version(1, register_only)]`: nodes register it, no runtime can
+  call it yet. A later runtime drops `register_only` once every node runs a
+  release with it; version 1 itself is frozen.
+- `verify_prepared(prepared_vk, proof, inputs)`: verification on raw bytes from a
+  prepared key, checking every argument's shape first (`false` on any
+  malformation, never a panic). The host function's body, and what the runtime
+  runs in Wasm meanwhile: both paths run the same code.
+- `prepared_arity`: a prepared key's input count, read from its layout without
+  deserializing a point.
+
 ## [3.1.0] - 2026-10-09
 
 ### Added

@@ -13,8 +13,7 @@ use crate::{
 };
 use alloc::vec::Vec;
 use orbinum_zk_verifier::{
-	Bn254, InputLayout, PreparedVerifyingKey, VerifyingKey, has_memo_layout, input_layout,
-	prepared_from_stored,
+	InputLayout, VerifyingKey, has_memo_layout, input_layout, prepared_arity,
 };
 
 /// Verify a proof of a circuit statement, encoded for the layout of the key it
@@ -29,13 +28,12 @@ pub fn verify_statement<T: Config>(
 	proof: &[u8],
 	encode: impl FnOnce(InputLayout) -> Option<Vec<[u8; 32]>>,
 ) -> Result<(bool, u32), sp_runtime::DispatchError> {
-	check::<T>(circuit_id, version, proof, |layout, arity| {
-		encode(layout).filter(|raw| raw.len() == arity)
-	})
+	check::<T>(circuit_id, version, proof, encode)
 }
 
-/// Verify a proof against caller-supplied inputs, taken as-is. Serves the
-/// `verify_proof` extrinsic, whose caller encodes every input itself.
+/// Verify a proof against caller-encoded inputs, taken as-is (the
+/// `verify_proof` extrinsic). Inputs that do not fill the key are
+/// `valid = false`, as for a statement.
 pub fn verify_raw<T: Config>(
 	circuit_id: CircuitId,
 	version: Option<u32>,
@@ -43,7 +41,7 @@ pub fn verify_raw<T: Config>(
 	raw_inputs: Vec<[u8; 32]>,
 ) -> Result<(bool, u32), sp_runtime::DispatchError> {
 	frame_support::ensure!(!raw_inputs.is_empty(), Error::<T>::EmptyPublicInputs);
-	check::<T>(circuit_id, version, proof, |_, _| Some(raw_inputs))
+	check::<T>(circuit_id, version, proof, |_| Some(raw_inputs))
 }
 
 /// The layout a key of `arity` inputs gives `circuit_id`, if admitted.
@@ -57,32 +55,41 @@ pub(crate) fn admitted_layout(circuit_id: CircuitId, arity: usize) -> Option<Inp
 	input_layout(id, arity).filter(|layout| !(has_memo_layout(id) && *layout == InputLayout::Base))
 }
 
-/// Shared path: resolve and prepare the key, build the inputs for its layout,
-/// verify, record. `inputs` returns `None` to fail the proof without verifying.
+/// The path both entry points share:
+///
+/// 1. Resolve the version and load its key, in prepared form.
+/// 2. Read the key's arity and the layout it gives the circuit, if admitted.
+/// 3. Build the inputs for that layout (`inputs` returns `None` to fail).
+/// 4. Verify, if the inputs fill the key exactly.
+/// 5. Count the outcome.
+///
+/// Any step that fails makes the proof invalid; only an unknown circuit or
+/// version is an error.
 fn check<T: Config>(
 	circuit_id: CircuitId,
 	version: Option<u32>,
 	proof: &[u8],
-	inputs: impl FnOnce(InputLayout, usize) -> Option<Vec<[u8; 32]>>,
+	inputs: impl FnOnce(InputLayout) -> Option<Vec<[u8; 32]>>,
 ) -> Result<(bool, u32), sp_runtime::DispatchError> {
 	frame_support::ensure!(!proof.is_empty(), Error::<T>::EmptyProof);
 	let (key, resolved) = resolve_key::<T>(circuit_id, version)?;
 
-	// Registration validated the key; if a stored one ever did not load, the
-	// proof fails rather than verifying under guessed inputs.
+	// 1. A key without a prepared form (storage written outside `keys`) is
+	// prepared here; one that does not prepare fails the proof.
 	let prepared = match key {
-		StoredKey::Prepared(bytes) => prepared_from_stored(&bytes),
-		StoredKey::Raw(bytes) => VerifyingKey::new(bytes).prepare(),
+		StoredKey::Prepared(bytes) => Some(bytes),
+		StoredKey::Raw(bytes) => VerifyingKey::new(bytes).prepared_bytes().ok(),
 	};
-	let result = match prepared {
-		Ok(pvk) => {
-			let arity = pvk.vk.gamma_abc_g1.len().saturating_sub(1);
+	// 2–4.
+	let result = prepared.is_some_and(|prepared| {
+		prepared_arity(&prepared).is_some_and(|arity| {
 			admitted_layout(circuit_id, arity)
-				.and_then(|layout| inputs(layout, arity))
-				.is_some_and(|raw| do_verify(&pvk, proof, raw))
-		}
-		Err(_) => false,
-	};
+				.and_then(inputs)
+				.filter(|raw| raw.len() == arity)
+				.is_some_and(|raw| do_verify(&prepared, proof, &raw))
+		})
+	});
+	// 5.
 	record_stats::<T>(circuit_id, resolved, result);
 	Ok((result, resolved))
 }
@@ -123,26 +130,23 @@ fn record_stats<T: Config>(circuit_id: CircuitId, version: u32, result: bool) {
 	});
 }
 
-/// The pairing check.
+/// The pairing, under a key in prepared form: [`verify_prepared`], the same
+/// function the node's `bn254_groth16_verify` host function runs.
 ///
-/// Always `true` in **test** builds: unit tests use keys that deserialize but
-/// no real proofs. Benchmarks run the full pairing so weights reflect its cost.
-fn do_verify(pvk: &PreparedVerifyingKey<Bn254>, proof: &[u8], raw_inputs: Vec<[u8; 32]>) -> bool {
+/// Always `true` in **test** builds, whose keys deserialize but carry no real
+/// proofs. Benchmarks run the full pairing, so weights include it.
+///
+/// [`verify_prepared`]: orbinum_zk_verifier::verify_prepared
+fn do_verify(prepared: &[u8], proof: &[u8], inputs: &[[u8; 32]]) -> bool {
 	#[cfg(test)]
 	{
-		let _ = (pvk, proof, raw_inputs);
+		let _ = (prepared, proof, inputs);
 		true
 	}
 
 	#[cfg(not(test))]
 	{
-		use orbinum_zk_verifier::{Groth16Verifier, Proof, PublicInputs};
-		Groth16Verifier::verify_with_prepared_vk(
-			pvk,
-			&PublicInputs::new(raw_inputs),
-			&Proof::new(proof.to_vec()),
-		)
-		.is_ok()
+		orbinum_zk_verifier::verify_prepared(prepared, proof, &inputs.concat())
 	}
 }
 
@@ -334,17 +338,38 @@ mod tests {
 		});
 	}
 
-	/// Raw inputs are not encoded or counted here; the count check against the
-	/// key is ark-groth16's, which the test build stubs out.
+	/// Raw inputs are never encoded: any values pass as long as they fill the key.
 	#[test]
 	fn verify_raw_does_not_encode_inputs() {
 		new_test_ext().execute_with(|| {
 			insert_vk(CircuitId::TRANSFER, 1, KEY);
 			activate(CircuitId::TRANSFER, 1);
 			assert_eq!(
-				verify_raw::<Test>(CircuitId::TRANSFER, None, &proof(), vec![[0x02; 32]]),
+				verify_raw::<Test>(CircuitId::TRANSFER, None, &proof(), vec![[0x02; 32]; KEY]),
 				Ok((true, 1))
 			);
+		});
+	}
+
+	/// Raw inputs that do not fill the key fail before the pairing, as a
+	/// statement's do.
+	#[test]
+	fn verify_raw_refuses_inputs_that_do_not_fill_the_key() {
+		new_test_ext().execute_with(|| {
+			insert_vk(CircuitId::TRANSFER, 1, KEY);
+			activate(CircuitId::TRANSFER, 1);
+			for count in [1, KEY - 1, KEY + 1] {
+				assert_eq!(
+					verify_raw::<Test>(
+						CircuitId::TRANSFER,
+						None,
+						&proof(),
+						vec![[0x02; 32]; count]
+					),
+					Ok((false, 1)),
+					"{count} inputs"
+				);
+			}
 		});
 	}
 
@@ -424,7 +449,12 @@ mod tests {
 		new_test_ext().execute_with(|| {
 			store(CircuitId::TRANSFER, 2, KEY);
 			insert_key(CircuitId::TRANSFER, 2, vec![0x01; 100].try_into().unwrap());
-			let res = verify_raw::<Test>(CircuitId::TRANSFER, Some(2), &proof(), vec![[0x02; 32]]);
+			let res = verify_raw::<Test>(
+				CircuitId::TRANSFER,
+				Some(2),
+				&proof(),
+				vec![[0x02; 32]; KEY],
+			);
 			assert_eq!(res, Ok((true, 2)));
 		});
 	}
@@ -513,7 +543,7 @@ mod tests {
 			for cid in [CircuitId::TRANSFER, CircuitId::UNSHIELD] {
 				insert_vk(cid, 1, KEY);
 			}
-			let raw = || vec![[0x02; 32]];
+			let raw = || vec![[0x02; 32]; KEY];
 			verify_raw::<Test>(CircuitId::TRANSFER, Some(1), &proof(), raw()).unwrap();
 			verify_raw::<Test>(CircuitId::UNSHIELD, Some(1), &proof(), raw()).unwrap();
 			verify_raw::<Test>(CircuitId::UNSHIELD, Some(1), &proof(), raw()).unwrap();

@@ -15,7 +15,8 @@ use ark_snark::SNARK;
 use ark_std::rand::{rngs::StdRng, SeedableRng};
 
 use orbinum_zk_verifier::{
-	prepared_from_stored, Groth16Verifier, Proof, PublicInputs, VerifierError, VerifyingKey,
+	prepared_from_stored, verify_prepared, Groth16Verifier, Proof, PublicInputs, VerifierError,
+	VerifyingKey,
 };
 
 /// Circuit proving knowledge of `a`, `b` with `a * b == c`, where `c` is public.
@@ -176,6 +177,10 @@ fn a_corrupted_stored_key_never_verifies_an_invalid_proof() {
 		let at = rng.gen_range(0..bad.len());
 		bad[at] ^= 1 << rng.gen_range(0..8);
 		let Ok(pvk) = prepared_from_stored(&bad) else {
+			assert!(
+				!flat(&bad, &proof.bytes, &right),
+				"byte {at}: refused, yet verified"
+			);
 			continue;
 		};
 		loaded += 1;
@@ -183,13 +188,167 @@ fn a_corrupted_stored_key_never_verifies_an_invalid_proof() {
 			Groth16Verifier::verify_with_prepared_vk(&pvk, &wrong, &proof).is_err(),
 			"a flip at byte {at} let a wrong input verify"
 		);
-		if Groth16Verifier::verify_with_prepared_vk(&pvk, &right, &proof).is_ok() {
+		let valid = Groth16Verifier::verify_with_prepared_vk(&pvk, &right, &proof).is_ok();
+		if valid {
 			still_valid += 1;
 		}
+		assert!(!flat(&bad, &proof.bytes, &wrong), "byte {at}: diverged");
+		assert_eq!(
+			flat(&bad, &proof.bytes, &right),
+			valid,
+			"byte {at}: diverged"
+		);
 	}
 	// Most flips land in a coordinate and load; the pairing then rejects them. A
 	// few land in `beta`/`gamma`/`delta` of the embedded key, which verification
 	// never reads, and the valid proof still passes.
 	assert!(loaded > 300, "only {loaded} corrupted keys loaded");
 	println!("{loaded} corrupted keys loaded, {still_valid} still verify the valid proof");
+}
+
+// ─── verify_prepared ──────────────────────────────────────────────────────────
+
+/// [`verify_prepared`] on a statement, with its inputs concatenated.
+fn flat(prepared: &[u8], proof: &[u8], inputs: &PublicInputs) -> bool {
+	verify_prepared(prepared, proof, &inputs.inputs.concat())
+}
+
+/// Answers as an independent oracle (the raw key, prepared from scratch): the
+/// valid statement passes, a wrong or non-canonical input fails.
+#[test]
+fn verify_prepared_answers_as_the_raw_key() {
+	let (vk, proof, inputs) = setup_and_prove();
+	let prepared = vk.prepared_bytes().unwrap();
+	let mut wrong = [0u8; 32];
+	wrong[0] = 34;
+	let mut non_canonical = inputs[0];
+	// `c + p`: same field element, non-canonical bytes. `c = 33` and `p` leaves
+	// the top byte room, so the sum fits.
+	let p = ark_bn254::Fr::MODULUS.to_bytes_le();
+	let mut carry = 0u16;
+	for (byte, p) in non_canonical.iter_mut().zip(p) {
+		let v = *byte as u16 + p as u16 + carry;
+		*byte = v as u8;
+		carry = v >> 8;
+	}
+	assert_eq!(carry, 0, "c + p must fit in 32 bytes");
+	for (statement, expected) in [
+		(PublicInputs::new(inputs), true),
+		(PublicInputs::new(vec![wrong]), false),
+		(PublicInputs::new(vec![non_canonical]), false),
+	] {
+		assert_eq!(
+			Groth16Verifier::verify(&vk, &statement, &proof).is_ok(),
+			expected
+		);
+		assert_eq!(flat(&prepared, &proof.bytes, &statement), expected);
+	}
+}
+
+/// Every malformed argument is `false`, never a panic.
+#[test]
+fn verify_prepared_refuses_malformed_arguments() {
+	let (vk, proof, inputs) = setup_and_prove();
+	let prepared = vk.prepared_bytes().unwrap();
+	let flat = inputs.concat();
+	let verify = verify_prepared;
+	assert!(
+		verify(&prepared, &proof.bytes, &flat),
+		"the well-formed call verifies"
+	);
+
+	let mut longer_proof = proof.bytes.clone();
+	longer_proof.push(0);
+	for bad_proof in [
+		&[][..],
+		&proof.bytes[..127],
+		&longer_proof[..],
+		&[0xFF; 128][..],
+	] {
+		assert!(
+			!verify(&prepared, bad_proof, &flat),
+			"proof of {} bytes",
+			bad_proof.len()
+		);
+	}
+
+	let two_inputs = [flat.clone(), flat.clone()].concat();
+	for bad_inputs in [
+		&[][..],
+		&flat[..31],
+		&[flat.clone(), vec![0]].concat()[..],
+		&two_inputs[..],
+	] {
+		assert!(
+			!verify(&prepared, &proof.bytes, bad_inputs),
+			"inputs of {} bytes",
+			bad_inputs.len()
+		);
+	}
+
+	let mut longer_key = prepared.clone();
+	longer_key.push(0);
+	let mut absurd = prepared.clone();
+	absurd[64 + 3 * 128..64 + 3 * 128 + 8].copy_from_slice(&u64::MAX.to_le_bytes());
+	for bad_key in [
+		&[][..],
+		&prepared[..prepared.len() - 1],
+		&longer_key[..],
+		&absurd[..],
+		&vk.bytes[..],
+	] {
+		assert!(
+			!verify(bad_key, &proof.bytes, &flat),
+			"key of {} bytes",
+			bad_key.len()
+		);
+	}
+	assert!(!verify(&[], &[], &[]));
+}
+
+/// Random proofs never verify and never panic.
+#[test]
+fn random_proofs_never_verify() {
+	use ark_std::rand::RngCore;
+	let (vk, _, inputs) = setup_and_prove();
+	let prepared = vk.prepared_bytes().unwrap();
+	let flat_inputs = inputs.concat();
+	let mut rng = StdRng::seed_from_u64(11);
+	for _ in 0..2000 {
+		let mut proof = [0u8; 128];
+		rng.fill_bytes(&mut proof);
+		assert!(!verify_prepared(&prepared, &proof, &flat_inputs));
+	}
+}
+
+/// No single-bit change to a valid proof verifies, nor swapping `A` and `C`.
+#[test]
+fn a_mutated_valid_proof_never_verifies() {
+	let (vk, proof, inputs) = setup_and_prove();
+	let prepared = vk.prepared_bytes().unwrap();
+	let flat_inputs = inputs.concat();
+	assert!(verify_prepared(&prepared, &proof.bytes, &flat_inputs));
+	for bit in 0..proof.bytes.len() * 8 {
+		let mut bad = proof.bytes.clone();
+		bad[bit / 8] ^= 1 << (bit % 8);
+		assert!(!verify_prepared(&prepared, &bad, &flat_inputs), "bit {bit}");
+	}
+	let mut swapped = proof.bytes.clone();
+	swapped[..32].copy_from_slice(&proof.bytes[96..]);
+	swapped[96..].copy_from_slice(&proof.bytes[..32]);
+	assert!(!verify_prepared(&prepared, &swapped, &flat_inputs));
+}
+
+/// Random public inputs never verify the valid proof.
+#[test]
+fn random_inputs_never_verify() {
+	use ark_std::rand::RngCore;
+	let (vk, proof, _) = setup_and_prove();
+	let prepared = vk.prepared_bytes().unwrap();
+	let mut rng = StdRng::seed_from_u64(13);
+	for _ in 0..500 {
+		let mut input = [0u8; 32];
+		rng.fill_bytes(&mut input);
+		assert!(!verify_prepared(&prepared, &proof.bytes, &input));
+	}
 }

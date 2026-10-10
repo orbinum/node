@@ -40,6 +40,7 @@ pub type HostFunctions = (
 	sp_io::SubstrateHostFunctions,
 	frame_benchmarking::benchmarking::HostFunctions,
 	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
+	orbinum_zk_verifier::host_interface::groth_16_host_interface::HostFunctions,
 	orbinum_zk_core::host_interface::poseidon_host_interface::HostFunctions,
 );
 #[cfg(all(feature = "runtime-benchmarks", not(feature = "poseidon-native")))]
@@ -47,18 +48,21 @@ pub type HostFunctions = (
 	sp_io::SubstrateHostFunctions,
 	frame_benchmarking::benchmarking::HostFunctions,
 	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
+	orbinum_zk_verifier::host_interface::groth_16_host_interface::HostFunctions,
 );
 /// Otherwise we use empty host functions for ext host functions.
 #[cfg(all(not(feature = "runtime-benchmarks"), feature = "poseidon-native"))]
 pub type HostFunctions = (
 	sp_io::SubstrateHostFunctions,
 	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
+	orbinum_zk_verifier::host_interface::groth_16_host_interface::HostFunctions,
 	orbinum_zk_core::host_interface::poseidon_host_interface::HostFunctions,
 );
 #[cfg(all(not(feature = "runtime-benchmarks"), not(feature = "poseidon-native")))]
 pub type HostFunctions = (
 	sp_io::SubstrateHostFunctions,
 	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
+	orbinum_zk_verifier::host_interface::groth_16_host_interface::HostFunctions,
 );
 
 pub type Backend = FullBackend<Block>;
@@ -909,4 +913,21 @@ pub fn new_chain_ops(
 		build_aura_grandpa_import_queue,
 	)?;
 	Ok((client, backend, import_queue, task_manager, other.3))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{HostFunctions, HostFunctionsT};
+
+	/// Every build registers `bn254_groth16_verify`, so a later runtime can call
+	/// it on any node from this release on.
+	#[test]
+	fn the_node_registers_the_groth16_host_function() {
+		let names: Vec<_> = HostFunctions::host_functions()
+			.iter()
+			.map(|f| f.name())
+			.collect();
+		assert!(names.contains(&"ext_groth_16_host_interface_bn254_groth16_verify_version_1"));
+		assert!(names.contains(&"ext_poseidon_host_interface_poseidon_hash_2_version_1"));
+	}
 }

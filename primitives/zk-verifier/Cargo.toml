@@ -1,6 +1,6 @@
 [package]
 name = "orbinum-zk-verifier"
-version = "3.1.0"
+version = "3.2.0"
 authors = ["Orbinum Network <contact@orbinum.net>"]
 edition = "2021"
 publish = false
@@ -34,6 +34,9 @@ orbinum-zk-core = { path = "../zk-core", default-features = false }
 parity-scale-codec = { version = "3.7.5", default-features = false, features = ["derive"], optional = true }
 scale-info = { version = "2.11", default-features = false, features = ["derive"], optional = true }
 
+# Native host function (`groth16-native`)
+sp-runtime-interface = { version = "37.0.0", default-features = false, optional = true }
+
 # For parsing verification key from JSON (std only)
 num-bigint = { version = "0.4", default-features = false, optional = true }
 
@@ -45,7 +48,7 @@ ark-snark = { version = "0.5.0", default-features = false }
 ark-std = { version = "0.5.0", default-features = false, features = ["std"] }
 
 [features]
-default = ["std"]
+default = ["std", "groth16-native"]
 
 # Standard library support (enables JSON parsing, BigInt, etc.)
 std = [
@@ -57,7 +60,13 @@ std = [
 	"ark-std/std",
 	"num-bigint",
 	"orbinum-zk-core/std",
+	"sp-runtime-interface?/std",
 ]
+
+# Groth16 verification host function. `no_std`-compatible: generates the Wasm
+# import and the native implementation. Ships `register_only` (see
+# `src/host_interface.rs`).
+groth16-native = ["sp-runtime-interface"]
 
 # Substrate runtime integration (requires codec)
 substrate = [
