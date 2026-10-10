@@ -8,11 +8,14 @@ Thank you for your interest in contributing to Orbinum Network Node! This docume
 
 Orbinum Network Node is in early development phase and the core team is working on establishing the base architecture and completing the initial security audit.
 
-**Estimated opening date:** Q2 2026
+We will update this section when that changes. If you are reading this well
+after the date of the last commit and it still says contributions are closed,
+please ask in [GitHub Discussions](https://github.com/orbinum/node/discussions)
+rather than assuming it is stale.
 
 **In the meantime, you can:**
 - Star the project to follow updates
-- Report critical security vulnerabilities to: security@orbinum.net
+- Report security vulnerabilities privately to security@orbinum.net (see [SECURITY.md](SECURITY.md))
 - Participate in [GitHub Discussions](https://github.com/orbinum/node/discussions)
 - Review documentation and suggest minor improvements
 
