@@ -58,9 +58,9 @@
 # Both subcommands are one-shot. Omit the subcommand to run the relayer as a daemon.
 #
 # ── Requirement ───────────────────────────────────────────────────────────────
-# Substrate RPCs must expose unsafe methods (`--rpc-methods Unsafe`). Tesseract
-# calls methods that are off by default; without them it fails at runtime, not at
-# startup.
+# The Orbinum RPC must serve the ISMP queries (`ismp_*`) and `grandpa_proveFinality`.
+# Both work under `--rpc-methods Safe`: the testnet relayer reads rpc-1 through an
+# endpoint with `methods=safe`.
 
 # ── Hyperbridge on Paseo ──────────────────────────────────────────────────────
 [hyperbridge]

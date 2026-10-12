@@ -68,17 +68,14 @@ pub fn run() -> sc_cli::Result<()> {
 	cli.run.offchain_worker_params.indexing_enabled = true;
 
 	// GRANDPA consensus proofs are large; the defaults (15 MiB) truncate them.
+	// Applies to `--rpc-port`; an `--experimental-rpc-endpoint` sets its own
+	// `max-request-size` / `max-response-size`.
+	//
+	// RPC methods are left to the operator: the ISMP queries carry no unsafe check,
+	// so a relayer reaches them under `Safe`, and forcing `Unsafe` exposed the key,
+	// pool and peering methods on every public node.
 	cli.run.rpc_params.rpc_max_request_size = 150;
 	cli.run.rpc_params.rpc_max_response_size = 150;
-
-	// The ISMP query methods are not in Substrate's Safe set, so under the default a
-	// remote relayer cannot call `ismp_queryStateProof` — proof fetching fails while
-	// local calls keep working, a confusing way to find out. Hyperbridge's own node
-	// does the same.
-	//
-	// This exposes the rest of the unsafe namespace, so a public endpoint belongs
-	// behind a method-allowlisting proxy. A deployment concern, not the binary's.
-	cli.run.rpc_params.rpc_methods = sc_cli::RpcMethods::Unsafe;
 
 	match &cli.subcommand {
 		Some(Subcommand::Key(cmd)) => cmd.run(&cli),
