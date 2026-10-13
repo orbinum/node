@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `Config::FindAuthor` is documented as returning the author's validator account
+  (an `ApprovedValidators` entry), not its consensus key. The Orbinum runtime
+  read the Aura key as an account, so a validator that set its keys from another
+  account was never recorded in `LastAuthorVersion` and the quorum for
+  `set_min_author_version` could not be reached; runtime spec 19 maps the Aura
+  authority index to its session validator instead.
+
 ---
 
 ## [0.4.0] — 2026-10-07

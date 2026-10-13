@@ -14,6 +14,7 @@ use sp_io as _;
 mod configs;
 mod evm_account;
 mod genesis_config_preset;
+mod migrations;
 mod orbinum_signature;
 mod precompiles;
 mod weights;
@@ -119,7 +120,7 @@ pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 
 /// Runs on upgrade, oldest first. Drop an entry once every live chain has passed its
 /// version: a migration that can no longer run could be re-armed by mistake.
-pub type Migrations = (pallet_zk_verifier::migrations::v2::MigrateToV2<Runtime>,);
+pub type Migrations = (migrations::MoveAuraKeyRelayFees,);
 
 pub type Executive = frame_executive::Executive<
 	Runtime,
@@ -160,7 +161,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: Cow::Borrowed("orbinum"),
 	impl_name: Cow::Borrowed("orbinum"),
 	authoring_version: 1,
-	spec_version: 18,
+	spec_version: 19,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 6,

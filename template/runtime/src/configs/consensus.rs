@@ -101,31 +101,24 @@ impl pallet_validator_set::Config for Runtime {
 	type MaxValidators = ConstU32<32>;
 	type Prerequisites = ValidatorPrerequisiteChecker;
 	type OnValidatorRemoved = RelayerCleanup;
-	type FindAuthor = FindAuthorAccountId;
+	type FindAuthor = ValidatorAuthor;
 	type QuorumWindow = Period;
 	type WeightInfo = pallet_validator_set::weights::SubstrateWeight<Runtime>;
 }
 
 impl pallet_authorship::Config for Runtime {
-	type FindAuthor = FindAuthorAccountId;
+	type FindAuthor = ValidatorAuthor;
 	type EventHandler = ();
 }
 
-/// Maps an Aura authority index to its `AccountId32`: upstream's `AuraAuthorId` yields
-/// the index, and the sr25519 public key at that index is the account's 32 bytes.
-pub struct FindAuthorAccountId;
-impl FindAuthor<AccountId> for FindAuthorAccountId {
-	fn find_author<'a, I>(digests: I) -> Option<AccountId>
-	where
-		I: 'a + IntoIterator<Item = (ConsensusEngineId, &'a [u8])>,
-	{
-		if let Some(aura_id) = pallet_aura::AuraAuthorId::<Runtime>::find_author(digests) {
-			let raw: [u8; 32] = aura_id.to_raw_vec().try_into().unwrap_or([0u8; 32]);
-			return Some(AccountId::from(raw));
-		}
-		None
-	}
-}
+/// The block author's validator account: the session validator at the Aura
+/// authority index the block's pre-digest names. Aura's authorities are set from
+/// the session's validators, in the same order.
+///
+/// Not the Aura key read as an account: that is the validator's account only when
+/// the operator registered the key as its own account, so every validator that
+/// called `session.setKeys` from another account went unrecognised.
+pub type ValidatorAuthor = pallet_session::FindAccountFromAuthorIndex<Runtime, Aura>;
 
 impl pallet_grandpa::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;

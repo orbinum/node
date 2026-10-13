@@ -99,7 +99,10 @@ pub mod pallet {
 		/// Notified whenever an account leaves the approved set.
 		type OnValidatorRemoved: crate::OnValidatorRemoved<Self::AccountId>;
 
-		/// The account that authored the current block, from its pre-runtime digests.
+		/// The validator account that authored the current block, from its
+		/// pre-runtime digests: the account in [`ApprovedValidators`], not the
+		/// author's consensus key. A declaration from an author it cannot place
+		/// there is dropped, and that validator never counts toward a quorum.
 		type FindAuthor: FindAuthor<Self::AccountId>;
 
 		/// How recent a validator's declared version must be to count toward the
