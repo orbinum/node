@@ -1,14 +1,12 @@
 //! Public traits exposed by pallet-validator-set.
 //!
-//! Mirrors the port pattern used by `pallet_relayer::RelayerInterface`: other
-//! pallets depend on these traits, never on concrete storage. Tests supply
+//! Other pallets depend on these traits, never on concrete storage. Tests supply
 //! lightweight mock implementations in their own `mock.rs`.
 
 /// Read access to the approved validator set.
 ///
-/// Production impl: `pallet_validator_set::Pallet<T>`.
-/// Consumed by `pallet-relayer` to gate EVM relay address registration on
-/// membership of the active set.
+/// Production impl: `pallet_validator_set::Pallet<T>`. For a pallet that gates an
+/// action on membership of the active set.
 pub trait ValidatorSetInterface<AccountId> {
 	/// Returns `true` when `who` is in the approved (active) validator set.
 	fn is_active_validator(who: &AccountId) -> bool;
@@ -55,7 +53,7 @@ pub trait ValidatorPrerequisites<AccountId> {
 /// Notified when an account leaves the approved validator set.
 ///
 /// Lets the runtime clean up state that is only valid while the account is an
-/// active validator — for instance the EVM relay binding in `pallet-relayer`.
+/// active validator.
 ///
 /// Deliberately infallible: leaving the set must always succeed, so a failure to
 /// clean up dependent state can never block removal. A no-op is the safe default
@@ -77,7 +75,7 @@ pub trait OnValidatorRemoved<AccountId> {
 }
 
 /// Tuple impl, so a runtime can subscribe several consumers:
-/// `type OnValidatorRemoved = (RelayerCleanup, SomethingElse);`
+/// `type OnValidatorRemoved = (FirstCleanup, SecondCleanup);`
 ///
 /// This also covers `()` — the empty tuple is the no-op default, which is safe
 /// because dependent cleanup is opt-in.

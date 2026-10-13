@@ -706,38 +706,110 @@ mod block_author {
 	}
 
 	#[test]
-	fn fallback_relay_fees_go_to_the_validator_account() {
+	fn spend_fees_go_to_the_validator_account() {
+		use frame_support::traits::Get;
 		super::with_ext(|| {
 			let set = validator_set();
 			frame_system::Pallet::<Runtime>::initialize(&1, &Default::default(), &digest(1));
 			assert_eq!(
 				pallet_authorship::Pallet::<Runtime>::author(),
+				Some(set.bob.clone())
+			);
+			assert_eq!(
+				crate::configs::privacy::ValidatorAccountAuthor::get(),
 				Some(set.bob)
 			);
 		});
 	}
 
 	#[test]
-	fn the_migration_moves_fees_off_aura_keys_once() {
-		use pallet_relayer::PendingRelayerFees as Fees;
+	fn relayer_fees_move_to_the_pool_and_off_aura_keys_once() {
+		use crate::migrations::{relayer::PendingRelayerFees as Old, RelayerFeesToPool};
+		use pallet_shielded_pool::PendingFees as New;
 		super::with_ext(|| {
 			let set = validator_set();
 			let bob_key = as_account(&set.bob_aura);
 			let stranger: AccountId = [0x5c; 32].into();
-			Fees::<Runtime>::insert(&bob_key, 0, 10u128);
-			Fees::<Runtime>::insert(&set.bob, 0, 5u128);
-			Fees::<Runtime>::insert(&set.alice, 0, 7u128); // her key is her account
-			Fees::<Runtime>::insert(&stranger, 0, 3u128); // no validator owns it
+			Old::insert(&bob_key, 0, 10u128);
+			Old::insert(&set.bob, 0, 5u128);
+			Old::insert(&set.alice, 0, 7u128); // her key is her account
+			Old::insert(&stranger, 0, 3u128); // no validator owns it
 
-			crate::migrations::MoveAuraKeyRelayFees::on_runtime_upgrade();
+			RelayerFeesToPool::on_runtime_upgrade();
 
-			assert_eq!(Fees::<Runtime>::get(&set.bob, 0), 15);
-			assert!(!Fees::<Runtime>::contains_key(&bob_key, 0));
-			assert_eq!(Fees::<Runtime>::get(&set.alice, 0), 7);
-			assert_eq!(Fees::<Runtime>::get(&stranger, 0), 3);
+			assert_eq!(New::<Runtime>::get(&set.bob, 0), 15);
+			assert!(!New::<Runtime>::contains_key(&bob_key, 0));
+			assert_eq!(New::<Runtime>::get(&set.alice, 0), 7);
+			assert_eq!(New::<Runtime>::get(&stranger, 0), 3);
+			assert!(Old::iter().next().is_none());
 
-			crate::migrations::MoveAuraKeyRelayFees::on_runtime_upgrade();
-			assert_eq!(Fees::<Runtime>::get(&set.bob, 0), 15);
+			RelayerFeesToPool::on_runtime_upgrade();
+			assert_eq!(New::<Runtime>::get(&set.bob, 0), 15);
+		});
+	}
+
+	#[test]
+	fn the_relayer_prefix_is_cleared() {
+		super::with_ext(|| {
+			let prefix = sp_io::hashing::twox_128(b"Relayer");
+			let mut key = prefix.to_vec();
+			key.extend_from_slice(&sp_io::hashing::twox_128(b"RelayerRegistry"));
+			key.extend_from_slice(&[0x11; 20]);
+			sp_io::storage::set(&key, &[1]);
+
+			crate::migrations::RemoveRelayerPallet::on_runtime_upgrade();
+
+			assert!(sp_io::storage::next_key(&prefix)
+				.filter(|k| k.starts_with(&prefix))
+				.is_none());
+		});
+	}
+
+	/// The account the pre-spec-19 coinbase paid an Aura key's tips to.
+	fn stranded(key: &AuraId) -> AccountId {
+		let raw: &[u8] = key.as_ref();
+		crate::evm_account::evm_h160_to_account_id(sp_core::H160::from_slice(&raw[4..24]))
+	}
+
+	#[test]
+	fn stranded_evm_tips_move_to_their_validators_once() {
+		use frame_support::traits::fungible::{Inspect, Mutate};
+		type B = crate::Balances;
+		super::with_ext(|| {
+			let set = validator_set();
+			let orphan = aura_key("//Rotated"); // no validator owns it any more
+			B::mint_into(&stranded(&set.bob_aura), 40).unwrap();
+			B::mint_into(&stranded(&orphan), 9).unwrap();
+			let issuance = B::total_issuance();
+
+			crate::migrations::MoveStrandedEvmTips::on_runtime_upgrade();
+
+			assert_eq!(B::balance(&set.bob), 40);
+			assert_eq!(B::balance(&stranded(&set.bob_aura)), 0);
+			assert_eq!(B::balance(&stranded(&orphan)), 9);
+			assert_eq!(B::total_issuance(), issuance);
+
+			crate::migrations::MoveStrandedEvmTips::on_runtime_upgrade();
+			assert_eq!(B::balance(&set.bob), 40);
+		});
+	}
+
+	#[test]
+	fn an_evm_tip_goes_to_the_validator_and_burns_without_one() {
+		use frame_support::traits::fungible::{Balanced, Inspect};
+		use pallet_evm::OnChargeEVMTransaction;
+		type B = crate::Balances;
+		type Tips = crate::configs::evm::TipToValidator;
+		super::with_ext(|| {
+			let set = validator_set();
+			// No pre-digest: no author, so the tip is burned.
+			let before = B::total_issuance();
+			Tips::pay_priority_fee(Some(B::issue(6)));
+			assert_eq!(B::total_issuance(), before);
+
+			frame_system::Pallet::<Runtime>::initialize(&1, &Default::default(), &digest(1));
+			Tips::pay_priority_fee(Some(B::issue(25)));
+			assert_eq!(B::balance(&set.bob), 25);
 		});
 	}
 }

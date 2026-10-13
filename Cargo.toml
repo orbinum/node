@@ -23,8 +23,6 @@ members = [
 	"frame/evm-polkavm/uapi",
 	"frame/hotfix-sufficients",
 	"frame/ismp-messaging",
-	"frame/relayer/runtime-api",
-	"frame/relayer/rpc",
 	"frame/zk-verifier/runtime-api",
 	"frame/zk-verifier/rpc",
 	"client/api",
@@ -267,9 +265,6 @@ pallet-evm-precompile-shielded-pool = { path = "frame/evm/precompile/shielded-po
 pallet-evm-precompile-simple = { path = "frame/evm/precompile/simple", default-features = false }
 pallet-evm-test-vector-support = { path = "frame/evm/test-vector-support" }
 pallet-hotfix-sufficients = { path = "frame/hotfix-sufficients", default-features = false }
-pallet-relayer = { path = "frame/relayer", default-features = false }
-pallet-relayer-rpc = { path = "frame/relayer/rpc" }
-pallet-relayer-runtime-api = { path = "frame/relayer/runtime-api", default-features = false }
 pallet-shielded-pool = { path = "frame/shielded-pool", default-features = false }
 pallet-shielded-pool-runtime-api = { path = "frame/shielded-pool/runtime-api", default-features = false }
 pallet-validator-set = { path = "frame/validator-set", default-features = false }

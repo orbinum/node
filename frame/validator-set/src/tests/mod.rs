@@ -289,7 +289,7 @@ fn deregister_does_not_touch_balances() {
 		});
 }
 
-// ── ValidatorSetInterface (consumed by pallet-relayer) ────────────────────────
+// ── ValidatorSetInterface ─────────────────────────────────────────────────────
 
 #[test]
 fn interface_reports_membership() {
@@ -306,9 +306,8 @@ fn interface_reports_membership() {
 
 #[test]
 fn interface_tracks_additions_and_removals() {
-	// This is the gate pallet-relayer depends on: an account must stop being an
-	// active validator the moment it leaves the set, or its EVM binding could
-	// outlive the membership that authorised it.
+	// A consumer gating on membership relies on this: an account stops being an
+	// active validator the moment it leaves the set.
 	use crate::ValidatorSetInterface;
 
 	ExtBuilder::default()

@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.4.1] — 2026-10-13
+
+Docs only; ships with runtime spec 19.
+
 ### Fixed
 
 - `Config::FindAuthor` is documented as returning the author's validator account
@@ -15,6 +21,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   account was never recorded in `LastAuthorVersion` and the quorum for
   `set_min_author_version` could not be reached; runtime spec 19 maps the Aura
   authority index to its session validator instead.
+- Docs and tests no longer refer to `pallet-relayer`, removed in spec 19;
+  `ValidatorSetInterface` and `OnValidatorRemoved` stay as generic ports.
 
 ---
 

@@ -20,24 +20,57 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
-### spec 19 — tx 6 — [Unreleased]
+### spec 19 — tx 7 — [Unreleased]
 
-The block author is the validator account at the Aura authority index, not the
-Aura key read as an account. No call or encoding changes.
+A validator is its account and session keys, nothing else: the EVM relayer layer
+is removed. Private spends are submitted only unsigned, and every spend's fee and
+every EVM priority tip goes to the validator that authored the block.
+`transaction_version` moves: pallet index 16 and `shielded_pool` call 18 are
+gone, and call 19 is renamed. Ships with `orbinum-runtime` / `orbinum-node`
+0.5.0, `pallet-shielded-pool` 0.25.0, `pallet-shielded-pool-runtime-api` 0.4.0,
+`pallet-evm-precompile-shielded-pool` 0.10.0 and `pallet-validator-set` 0.4.1.
 
-- **Author lookup.** `pallet_validator_set` and `pallet_authorship` take
-  `FindAuthor = pallet_session::FindAccountFromAuthorIndex<Runtime, Aura>`.
-  Reading the Aura key as an `AccountId` matched only validators that registered
-  their key as their own account: on testnet 9 of 14 had set their keys from
-  another account, so their `note_author_version` declarations were dropped (the
-  quorum for `set_min_author_version` was unreachable) and their fallback relay
-  fees were credited to their Aura keys.
-- **Migration `MoveAuraKeyRelayFees`.** Each `PendingRelayerFees` balance on an
-  Aura key owned by a current validator (`pallet_session::KeyOwner`) moves to
-  that validator's account; keys no validator owns are left alone. Idempotent.
-  try-runtime on testnet state: 9 balances moved, 0.27% of block weight.
-- `pallet_zk_verifier::migrations::v2::MigrateToV2` is no longer run: every
-  live chain is at storage version 2.
+#### 1 · Block author is the session validator
+
+`pallet_validator_set` and `pallet_authorship` take
+`FindAuthor = pallet_session::FindAccountFromAuthorIndex<Runtime, Aura>`. Reading
+the Aura key as an `AccountId` matched only validators that registered their key
+as their own account: on testnet 9 of 14 had set their keys from another account,
+so their `note_author_version` declarations were dropped (the quorum for
+`set_min_author_version` was unreachable) and their fees were credited to their
+Aura keys.
+
+#### 2 · No relayers
+
+- `pallet_relayer` (index 16) is removed: relay address registration, relay
+  commits, allowed selectors and `MinRelayFee`. Runtime APIs `RelayerRuntimeApi`,
+  `relay_config` and `relay_commit_hash` go with it (`ShieldedPoolRuntimeApi` v5).
+- `shielded_pool`: `private_transfer` and `unshield` accept only an unsigned
+  origin (a signed spend linked the signer to the spend's nullifiers). Call 18
+  `commit_relay` is retired; call 19 `claim_relay_fees` becomes
+  `claim_fees(asset_id, amount)`, signed by the validator and paid to it.
+- The fee ledger lives in the pool: `PendingFees(validator, asset)`, credited to
+  the block author on every spend (`FeeCredited`), drained by `claim_fees`
+  (`FeesClaimed`). The floor is the constant `MinSpendFee` (0.001 ORB).
+- Precompile `0x…0801` keeps `shield`; `privateTransfer`, `unshield`,
+  `commitRelay` and `claimRelayFees` revert.
+
+#### 3 · EVM tips
+
+A transaction's priority tip goes to the block author's validator account
+(`TipToValidator`); `block.coinbase` is the zero address. It used to be bytes
+4..24 of the Aura key, whose mapped account no key controls.
+
+#### Migrations
+
+- `RelayerFeesToPool` — drains `Relayer::PendingRelayerFees` into
+  `ShieldedPool::PendingFees`, re-keying a balance held by an Aura key to the
+  validator that owns it (`pallet_session::KeyOwner`).
+- `RemoveRelayerPallet` — clears the rest of the `Relayer` prefix.
+- `MoveStrandedEvmTips` — moves the balance of each Aura-derived coinbase account
+  to the validator owning the key; a key no validator owns is left alone.
+- `pallet_zk_verifier::migrations::v2::MigrateToV2` is no longer run: every live
+  chain is at storage version 2.
 
 ### spec 18 — tx 6 — 2026-10-12 (`v0.4.0`)
 

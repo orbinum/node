@@ -1,25 +1,51 @@
 //! Frontier EVM layer: EVM, Ethereum, fee models, and dev-only manual seal.
 //!
-//! `FindAuthorTruncated` bridges Substrate's 32-byte author to the 20-byte
-//! address the EVM expects, which is what lets `block.coinbase` work.
+//! A transaction's priority tip goes to the validator that authored the block
+//! (`TipToValidator`). `block.coinbase` is the zero address: no H160 maps onto a
+//! validator's sr25519 account, so any other value would name an account nobody
+//! controls.
 
 use crate::*;
-use frame_support::parameter_types;
+use frame_support::{
+	parameter_types,
+	traits::fungible::{Balanced, Credit},
+};
 
 impl pallet_evm_chain_id::Config for Runtime {}
 
-pub struct FindAuthorTruncated<F>(PhantomData<F>);
-impl<F: FindAuthor<u32>> FindAuthor<H160> for FindAuthorTruncated<F> {
-	fn find_author<'a, I>(digests: I) -> Option<H160>
-	where
-		I: 'a + IntoIterator<Item = (ConsensusEngineId, &'a [u8])>,
-	{
-		if let Some(author_index) = F::find_author(digests) {
-			let authority_id =
-				pallet_aura::Authorities::<Runtime>::get()[author_index as usize].clone();
-			return Some(H160::from_slice(&authority_id.to_raw_vec()[4..24]));
+/// Pays an EVM transaction's priority tip to the validator that authored the
+/// block; the base fee is burned. Without an author (an RPC simulation) the tip
+/// is burned too.
+pub struct TipToValidator;
+
+impl pallet_evm::OnChargeEVMTransaction<Runtime> for TipToValidator {
+	type LiquidityInfo = Option<Credit<AccountId, Balances>>;
+
+	fn withdraw_fee(
+		who: &H160,
+		fee: U256,
+	) -> Result<Self::LiquidityInfo, pallet_evm::Error<Runtime>> {
+		<pallet_evm::EVMFungibleAdapter<Balances, ()> as pallet_evm::OnChargeEVMTransaction<
+			Runtime,
+		>>::withdraw_fee(who, fee)
+	}
+
+	fn correct_and_deposit_fee(
+		who: &H160,
+		corrected_fee: U256,
+		base_fee: U256,
+		already_withdrawn: Self::LiquidityInfo,
+	) -> Self::LiquidityInfo {
+		<pallet_evm::EVMFungibleAdapter<Balances, ()> as pallet_evm::OnChargeEVMTransaction<
+			Runtime,
+		>>::correct_and_deposit_fee(who, corrected_fee, base_fee, already_withdrawn)
+	}
+
+	fn pay_priority_fee(tip: Self::LiquidityInfo) {
+		if let (Some(tip), Some(author)) = (tip, pallet_authorship::Pallet::<Runtime>::author()) {
+			// A refused deposit drops the credit, which burns it.
+			let _ = <Balances as Balanced<AccountId>>::resolve(&author, tip);
 		}
-		None
 	}
 }
 
@@ -51,9 +77,9 @@ impl pallet_evm::Config for Runtime {
 	type ChainId = EVMChainId;
 	type BlockGasLimit = BlockGasLimit;
 	type Runner = pallet_evm::runner::stack::Runner<Self>;
-	type OnChargeTransaction = ();
+	type OnChargeTransaction = TipToValidator;
 	type OnCreate = ();
-	type FindAuthor = FindAuthorTruncated<Aura>;
+	type FindAuthor = ();
 	type GasLimitPovSizeRatio = GasLimitPovSizeRatio;
 	type GasLimitStorageGrowthRatio = GasLimitStorageGrowthRatio;
 	type Timestamp = Timestamp;

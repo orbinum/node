@@ -45,7 +45,7 @@ io.merge(ChainRpc::new(client.clone()).into_rpc())?;
 
 Returns `true` if the given SS58-encoded account is an active Aura block author.
 
-Reads `pallet_aura::Authorities` directly from storage — no runtime API call is made. Intended for UIs that need to gate actions (e.g. relayer registration) on validator eligibility without waiting for an extrinsic to fail.
+Reads `pallet_aura::Authorities` directly from storage — no runtime API call is made. Intended for UIs that need to gate actions on validator eligibility without waiting for an extrinsic to fail.
 
 **Parameters**
 

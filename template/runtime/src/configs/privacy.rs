@@ -1,4 +1,4 @@
-//! Orbinum privacy stack: ZK verifier, relayer, and the shielded pool.
+//! Orbinum privacy stack: ZK verifier and the shielded pool.
 //!
 //! One `///` line per associated type: what it is wired to, or what the value
 //! means. The reasoning behind each bound lives on the pallet's `Config`.
@@ -17,50 +17,23 @@ impl pallet_zk_verifier::Config for Runtime {
 	type WeightInfo = pallet_zk_verifier::weights::SubstrateWeight<Runtime>;
 }
 
-// ─── Relayer ──────────────────────────────────────────────────────────────────
-
-/// The current block's author, as `pallet_authorship` reports it.
-pub struct RelayerBlockAuthor;
-
-impl frame_support::traits::Get<Option<AccountId>> for RelayerBlockAuthor {
-	fn get() -> Option<AccountId> {
-		pallet_authorship::Pallet::<Runtime>::author()
-	}
-}
-
-impl pallet_relayer::Config for Runtime {
-	/// Who earns a spend's fee when no relayer committed to it.
-	type BlockAuthor = RelayerBlockAuthor;
-	/// The validator set relayers are registered against.
-	type ValidatorSet = ValidatorSet;
-	/// Root sets the fee floor and the allowed selectors.
-	type ManageOrigin = frame_system::EnsureRoot<AccountId>;
-	/// Fee floor until Root sets one: 0.001 ORB, against spam.
-	type DefaultMinRelayFee = ConstU128<1_000_000_000_000_000>;
-	/// Highest floor Root may set: 1 ORB, room for price swings but not for typos.
-	type MaxMinRelayFee = ConstU128<1_000_000_000_000_000_000>;
-	/// Precompile selectors the relay may be allowed to call.
-	type MaxAllowedSelectors = ConstU32<16>;
-	/// A commit credits spends for the next 19 blocks (~2 min), then expires.
-	type CommitTtl = ConstU32<20>;
-	/// Commits one relayer may record per block.
-	type MaxCommitsPerRelayerPerBlock = ConstU32<64>;
-	/// No benchmarked weights yet: the pallet's defaults.
-	type WeightInfo = ();
-}
-
 // ─── Shielded pool ────────────────────────────────────────────────────────────
 
 parameter_types! {
 	pub const ShieldedPoolPalletId: PalletId = PalletId(*b"shld/pol");
 }
 
-/// The account an EVM address controls, per the runtime's address mapping.
-pub struct EvmAccount;
+/// The validator account that authored the current block, as `pallet_authorship`
+/// reports it through `ValidatorAuthor`.
+pub struct ValidatorAccountAuthor;
 
-impl sp_runtime::traits::Convert<sp_core::H160, AccountId> for EvmAccount {
-	fn convert(address: sp_core::H160) -> AccountId {
-		crate::evm_account::evm_h160_to_account_id(address)
+impl frame_support::traits::Get<Option<AccountId>> for ValidatorAccountAuthor {
+	fn get() -> Option<AccountId> {
+		let author = pallet_authorship::Pallet::<Runtime>::author();
+		// A benchmark block carries no Aura pre-digest, so it has no author.
+		#[cfg(feature = "runtime-benchmarks")]
+		let author = author.or(Some(AccountId::from([0xbe; 32])));
+		author
 	}
 }
 
@@ -69,10 +42,10 @@ impl pallet_shielded_pool::Config for Runtime {
 	type Currency = Balances;
 	/// Verifies every shield, transfer and unshield proof.
 	type ZkVerifier = ZkVerifier;
-	/// Fee floor, relay commits and fee crediting.
-	type Relayer = pallet_relayer::Pallet<Runtime>;
-	/// Maps an EVM caller to the account it pays from or is paid to.
-	type EvmAccount = EvmAccount;
+	/// Earns each spend's fee: the validator that authored the block.
+	type BlockAuthor = ValidatorAccountAuthor;
+	/// Spend fee floor: 0.001 ORB, against spam.
+	type MinSpendFee = ConstU128<1_000_000_000_000_000>;
 	/// Derives the pool's account, which holds every shielded deposit.
 	type PalletId = ShieldedPoolPalletId;
 	/// Tree depth, fixed by the circuits (`integrity_test` pins it).

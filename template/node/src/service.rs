@@ -321,7 +321,6 @@ where
 	RA: Send + Sync + 'static,
 	RA::RuntimeApi: RuntimeApiCollection<B, AuraId, AccountId, Nonce, Balance>,
 	RA::RuntimeApi: pallet_zk_verifier_runtime_api::ZkVerifierRuntimeApi<B>,
-	RA::RuntimeApi: pallet_relayer_runtime_api::RelayerRuntimeApi<B>,
 	RA::RuntimeApi: pallet_ismp_runtime_api::IsmpRuntimeApi<B, <B as BlockT>::Hash>,
 	// The ISMP RPC converts block numbers to u64 when answering height queries.
 	u64: From<NumberFor<B>>,
@@ -463,8 +462,6 @@ where
 	// for ethereum-compatibility rpc.
 	config.rpc.id_provider = Some(Box::new(fc_rpc::EthereumSubIdProvider));
 
-	let evm_key = crate::evm_relay_key::resolve(&config);
-
 	// GRANDPA pieces for the RPC, pulled out before `grandpa_link` is moved into the
 	// voter below. `shared_voter_state` is created here rather than at the voter so both
 	// sides hold the same one — a detached state leaves `grandpa_roundState` reporting
@@ -489,11 +486,9 @@ where
 		let pool = transaction_pool.clone();
 		let network = network.clone();
 		let sync_service = sync_service.clone();
-		let keystore = keystore_container.keystore();
 
 		let is_authority = role.is_authority();
 		let enable_dev_signer = eth_config.enable_dev_signer;
-		let evm_key = evm_key.clone();
 		let max_past_logs = eth_config.max_past_logs;
 		let max_block_range = eth_config.max_block_range;
 		let rpc_allow_unprotected_txs = eth_config.rpc_allow_unprotected_txs;
@@ -537,7 +532,6 @@ where
 				converter: Some(TransactionConverter::<B>::default()),
 				is_authority,
 				enable_dev_signer,
-				evm_key: evm_key.clone(),
 				network: network.clone(),
 				sync: sync_service.clone(),
 				frontier_backend: match &*frontier_backend {
@@ -568,7 +562,6 @@ where
 				} else {
 					None
 				},
-				keystore: keystore.clone(),
 				eth: eth_deps,
 				grandpa: crate::rpc::GrandpaDeps {
 					shared_voter_state: shared_voter_state.clone(),
@@ -626,8 +619,6 @@ where
 		pubsub_notification_sinks,
 	)
 	.await;
-
-	crate::evm_relay_key::report_identity(evm_key.as_deref());
 
 	if let Some(hwbench) = hwbench {
 		sc_sysinfo::print_hwbench(&hwbench);

@@ -6,6 +6,10 @@
 //! WORST CASE MAP SIZE: `1000000`
 //! HOSTNAME: `ubuntu-32gb-fsn1-1`, CPU: `AMD EPYC-Genoa Processor`
 //! EXECUTION: , WASM-EXECUTION: Compiled, CHAIN: Some("dev"), DB CACHE: 1024
+//!
+//! Spec 19, by hand until re-benchmarked: `remove_validator` drops the relay
+//! binding cleanup (the runtime's `OnValidatorRemoved` is now `()`); its time and
+//! proof-size terms still include it, so it over-estimates.
 
 // Executed Command:
 // ./target/release/orbinum-node
@@ -73,8 +77,6 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	}
 	/// Storage: `ValidatorSet::ApprovedValidators` (r:1 w:1)
 	/// Proof: `ValidatorSet::ApprovedValidators` (`max_values`: Some(1), `max_size`: Some(1025), added: 1520, mode: `Measured`)
-	/// Storage: `Relayer::RelayerByAccount` (r:1 w:1)
-	/// Proof: `Relayer::RelayerByAccount` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `Measured`)
 	/// Storage: `System::Number` (r:1 w:0)
 	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `Measured`)
 	/// Storage: `System::ExecutionPhase` (r:1 w:0)
@@ -83,16 +85,14 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `Measured`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	/// Storage: `Relayer::RelayerRegistry` (r:0 w:1)
-	/// Proof: `Relayer::RelayerRegistry` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `Measured`)
 	fn remove_validator() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `1317`
 		//  Estimated: `4782`
 		// Minimum execution time: 20_200_000 picoseconds.
 		Weight::from_parts(21_290_000, 4782)
-			.saturating_add(T::DbWeight::get().reads(6_u64))
-			.saturating_add(T::DbWeight::get().writes(5_u64))
+			.saturating_add(T::DbWeight::get().reads(5_u64))
+			.saturating_add(T::DbWeight::get().writes(3_u64))
 	}
 	/// Estimated, not yet benchmarked on the reference hardware: one read of the set,
 	/// one `LastAuthorVersion` read per validator (`MaxValidators` = 32), one write.
@@ -135,8 +135,6 @@ impl WeightInfo for () {
 	}
 	/// Storage: `ValidatorSet::ApprovedValidators` (r:1 w:1)
 	/// Proof: `ValidatorSet::ApprovedValidators` (`max_values`: Some(1), `max_size`: Some(1025), added: 1520, mode: `Measured`)
-	/// Storage: `Relayer::RelayerByAccount` (r:1 w:1)
-	/// Proof: `Relayer::RelayerByAccount` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `Measured`)
 	/// Storage: `System::Number` (r:1 w:0)
 	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `Measured`)
 	/// Storage: `System::ExecutionPhase` (r:1 w:0)
@@ -145,16 +143,14 @@ impl WeightInfo for () {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `Measured`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	/// Storage: `Relayer::RelayerRegistry` (r:0 w:1)
-	/// Proof: `Relayer::RelayerRegistry` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `Measured`)
 	fn remove_validator() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `1317`
 		//  Estimated: `4782`
 		// Minimum execution time: 20_200_000 picoseconds.
 		Weight::from_parts(21_290_000, 4782)
-			.saturating_add(RocksDbWeight::get().reads(6_u64))
-			.saturating_add(RocksDbWeight::get().writes(5_u64))
+			.saturating_add(RocksDbWeight::get().reads(5_u64))
+			.saturating_add(RocksDbWeight::get().writes(3_u64))
 	}
 	/// Estimated, not yet benchmarked on the reference hardware: one read of the set,
 	/// one `LastAuthorVersion` read per validator (`MaxValidators` = 32), one write.

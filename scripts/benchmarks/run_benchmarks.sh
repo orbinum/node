@@ -16,16 +16,16 @@
 #
 # `--no-median-slopes` keeps memory flat. The median-slopes analysis is only printed —
 # weights come from min-squares (`--output-analysis` default) — but in the 2606 CLI it
-# grows with repeats on any benchmark with a component: `pallet_relayer` and
-# `pallet_ismp_messaging` passed 31 GB and were OOM-killed on the CPX62. Without it,
-# `set_allowed_selectors` at 50/20 peaks at 0.4 GB instead of several GB.
+# grows with repeats on any benchmark with a component: `pallet_ismp_messaging` passed
+# 31 GB and was OOM-killed on the CPX62. Without it, a component benchmark at 50/20
+# peaks at 0.4 GB instead of several GB.
 #
 # Publishable weights need the defaults (50/20). Lowering --steps/--repeat gives numbers
 # good for shape, not for committing.
 #
 # `--default-pov-mode measured` records the storage footprint actually observed instead
 # of the theoretical maximum. It is a no-op for a pallet whose maps declare their size
-# (verified: relayer, validator-set and zk-verifier produce identical proof sizes either
+# (verified: validator-set and zk-verifier produce identical proof sizes either
 # way), but it is what keeps `pallet_ismp_messaging::dispatch_post` honest: that call
 # touches ~50 `RequestCommitments` keys owned by `pallet-ismp`, which declares no
 # `max_size`, so the default `max-encoded-len` mode assumes --map-size (1,000,000) per
@@ -91,7 +91,6 @@ PALLETS=(
     # pallet:output:group
     "pallet_zk_verifier:./frame/zk-verifier/src/weights.rs:core"
     "pallet_shielded_pool:./frame/shielded-pool/src/weights.rs:core"
-    "pallet_relayer:./frame/relayer/src/weights.rs:core"
     "pallet_validator_set:./frame/validator-set/src/weights.rs:core"
     # ISMP crates we do not own: the WeightInfo trait belongs to the upstream crate, so
     # the generated impl lives runtime-side rather than in the pallet. Every output under

@@ -18,16 +18,13 @@ use sp_blockchain::{Error as BlockChainError, HeaderBackend, HeaderMetadata};
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_core::H256;
 use sp_inherents::CreateInherentDataProviders;
-use sp_keystore::Keystore;
 use sp_runtime::traits::{Block as BlockT, NumberFor};
 // Runtime
 use orbinum_runtime::{AccountId, Balance, Hash, Nonce};
 
 mod eth;
-mod relayer_author;
 mod storage_override;
 pub use self::eth::{create_eth, EthDeps, LogsJournalConfig};
-use self::relayer_author::{RelayerAuthor, RelayerAuthorApiServer};
 use self::storage_override::EeSuffixStorageOverride;
 
 /// GRANDPA-specific dependencies.
@@ -64,8 +61,6 @@ pub struct FullDeps<B: BlockT, C, P, BE, CT, CIDP> {
 	pub backend: Arc<BE>,
 	/// Manual seal command sink
 	pub command_sink: Option<mpsc::Sender<EngineCommand<Hash>>>,
-	/// Keystore — holds the node's session keys and its `evmr` relay key.
-	pub keystore: Arc<dyn Keystore>,
 	/// Ethereum-compatibility specific dependencies.
 	pub eth: EthDeps<B, C, P, CT, CIDP>,
 	/// GRANDPA finality RPC dependencies.
@@ -107,7 +102,6 @@ where
 	C::Api: fp_rpc::EthereumRuntimeRPCApi<B>,
 	C::Api: pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi<B>,
 	C::Api: pallet_zk_verifier_runtime_api::ZkVerifierRuntimeApi<B>,
-	C::Api: pallet_relayer_runtime_api::RelayerRuntimeApi<B>,
 	C::Api: pallet_ismp_runtime_api::IsmpRuntimeApi<B, B::Hash>,
 	C: sc_client_api::ProofProvider<B> + sc_client_api::BlockBackend<B>,
 	C::Api: sp_api::Core<B>,
@@ -122,7 +116,6 @@ where
 	NumberFor<B>: sc_consensus_grandpa::BlockNumberOps,
 {
 	use pallet_ismp_rpc::{IsmpApiServer, IsmpRpcHandler};
-	use pallet_relayer_rpc::{Relayer, RelayerApiServer};
 	use pallet_transaction_payment_rpc::{TransactionPayment, TransactionPaymentApiServer};
 	use pallet_zk_verifier_rpc::{ZkVerifier, ZkVerifierApiServer};
 	use sc_consensus_grandpa_rpc::{Grandpa, GrandpaApiServer};
@@ -138,7 +131,6 @@ where
 		pool,
 		backend,
 		command_sink,
-		keystore,
 		eth,
 		grandpa,
 	} = deps;
@@ -156,8 +148,6 @@ where
 	)?;
 	io.merge(TransactionPayment::new(client.clone()).into_rpc())?;
 	io.merge(ZkVerifier::new(client.clone()).into_rpc())?;
-	io.merge(Relayer::new(client.clone()).into_rpc())?;
-	io.merge(RelayerAuthor::new(client.clone(), keystore).into_rpc())?;
 	// Exposes the `ismp_query*` methods. `new` fails if the backend has no offchain
 	// storage — the misconfiguration that leaves relayers unable to see our messages.
 	io.merge(IsmpRpcHandler::new(client.clone(), backend.clone())?.into_rpc())?;
