@@ -10016,6 +10016,7 @@ dependencies = [
  "ismp",
  "ismp-grandpa",
  "libsecp256k1",
+ "log",
  "pallet-aura",
  "pallet-authorship",
  "pallet-balances",

@@ -20,7 +20,26 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
-### spec 18 — tx 6 — [Unreleased]
+### spec 19 — tx 6 — [Unreleased]
+
+The block author is the validator account at the Aura authority index, not the
+Aura key read as an account. No call or encoding changes.
+
+- **Author lookup.** `pallet_validator_set` and `pallet_authorship` take
+  `FindAuthor = pallet_session::FindAccountFromAuthorIndex<Runtime, Aura>`.
+  Reading the Aura key as an `AccountId` matched only validators that registered
+  their key as their own account: on testnet 9 of 14 had set their keys from
+  another account, so their `note_author_version` declarations were dropped (the
+  quorum for `set_min_author_version` was unreachable) and their fallback relay
+  fees were credited to their Aura keys.
+- **Migration `MoveAuraKeyRelayFees`.** Each `PendingRelayerFees` balance on an
+  Aura key owned by a current validator (`pallet_session::KeyOwner`) moves to
+  that validator's account; keys no validator owns are left alone. Idempotent.
+  try-runtime on testnet state: 9 balances moved, 0.27% of block weight.
+- `pallet_zk_verifier::migrations::v2::MigrateToV2` is no longer run: every
+  live chain is at storage version 2.
+
+### spec 18 — tx 6 — 2026-10-12 (`v0.4.0`)
 
 Governance can require a minimum node version from block authors, and a private
 transfer can spend two notes from different trees. `transaction_version` moves:
