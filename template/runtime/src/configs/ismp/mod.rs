@@ -36,10 +36,9 @@ parameter_types! {
 	/// 0.01 ORB per signed dispatch, plus a per-byte term, paid to the ISMP treasury and
 	/// never refunded. Starting values only — Root moves both with `set_message_fee`.
 	///
-	/// Ten times `pallet_relayer`'s 0.001 ORB anti-spam floor, because a cross-chain
-	/// dispatch costs this chain real gas on the far side where a shielded relay does not,
-	/// and a hundredth of the 1 ORB ceiling that the same pallet already settled on as
-	/// "room to react to price swings" (`configs/privacy.rs:23-24`).
+	/// Ten times the shielded pool's 0.001 ORB spend fee floor (`MinSpendFee`), because a
+	/// cross-chain dispatch costs this chain real gas on the far side where a spend does
+	/// not, and a hundredth of the 1 ORB ceiling below.
 	///
 	/// Not escrowed in `FeeMetadata`, deliberately — a refundable anti-spam charge is not a
 	/// charge, because it can be recycled every timeout. See the pallet's
@@ -49,7 +48,7 @@ parameter_types! {
 	/// of the largest message this chain will carry. Hyperbridge prices its own outbound
 	/// traffic per byte for the same reason (`pallet-bandwidth`).
 	pub const IsmpDefaultMessageByteFee: Balance = 1_000_000_000_000;
-	/// 1 ORB, the same ceiling `pallet_relayer` uses for `MaxMinRelayFee`: far enough above
+	/// 1 ORB: far enough above
 	/// the default to absorb a token repricing, far below where a typo would price dispatch
 	/// out of reach until the next runtime upgrade.
 	pub const IsmpMaxMessageFee: Balance = 1_000_000_000_000_000_000;

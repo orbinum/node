@@ -4,7 +4,7 @@ FRAME pallet for privacy-preserving transactions in Orbinum using ZK-SNARKs.
 
 ## Status
 
-MVP in active development. Core shield / transfer / unshield flows are functional, including partial unshield with automatic change note handling. Relay fees are attributed by relay commit and claimed publicly (no proof).
+MVP in active development. Core shield / transfer / unshield flows are functional, including partial unshield with automatic change note handling. Spends are unsigned only; each spend's fee is credited to the block author and claimed publicly (no proof).
 
 ## What this pallet does
 
@@ -33,10 +33,9 @@ This ensures change note commitments are **not linkable** to other notes belongi
 |-----------|--------|-------------|
 | `shield` | Signed | Deposit tokens; insert one commitment into the Merkle tree |
 | `shield_batch` | Signed | Deposit and insert multiple commitments in one call |
-| `private_transfer` | Unsigned / Signed / Relayed | ZK-proven private transfer between notes. Fee goes to the committed relayer, else the block author |
-| `unshield` | Unsigned / Signed / Relayed | ZK-proven withdrawal to a public account. Accepts a `change_commitment` and a 180-byte `change_encrypted_memo` for partial unshield with stealth change notes (empty for a total unshield) |
-| `commit_relay` | Signed / Relayed (registered relayer) | Record relay commits for spends about to be submitted |
-| `claim_relay_fees` | Signed / Relayed | Pay the caller's pending relay fees out of the pool to its EVM mirror (no proof) |
+| `private_transfer` | Unsigned | ZK-proven private transfer between notes. Fee is credited to the block author |
+| `unshield` | Unsigned | ZK-proven withdrawal to a public account. Accepts a `change_commitment` and a 180-byte `change_encrypted_memo` for partial unshield with stealth change notes (empty for a total unshield) |
+| `claim_fees` | Signed | Pay the caller's pending fees out of the pool to the caller (no proof) |
 | `register_asset` | Signed | Register a new asset for multi-asset support |
 | `verify_asset` | Root | Mark a registered asset as verified (enables shielding) |
 | `unverify_asset` | Root | Remove verified status from an asset |
@@ -55,12 +54,21 @@ This ensures change note commitments are **not linkable** to other notes belongi
 | `Assets` | Registered asset metadata |
 | `NextAssetId` | Auto-increment for asset IDs |
 | `PoolBalancePerAsset` | Total shielded balance per asset |
+| `PendingFees` | Spend fees credited to a validator and not yet claimed, per asset |
+
+## Fees
+
+A spend's fee stays in the pool. It is added to `PendingFees` of the block
+author (`Config::BlockAuthor`, the validator account); a spend with a non-zero
+fee fails with `FeeRecipientUnavailable` when the block has no known author.
+`claim_fees` pays pending fees out to the validator. Every spend's fee must be at
+least `Config::MinSpendFee`, a constant changed by runtime upgrade.
 
 ## Module layout
 
 ```
 src/
-  lib.rs               — Config, Storage, Events, Errors, extrinsics, origin helpers
+  lib.rs               — Config, Storage, Events, Errors, extrinsics
   types/               — Commitment, Nullifier, Hash, EncryptedMemo and aliases
   merkle/              — Poseidon Merkle forest (pure tree logic + MerkleTreeService)
   operations/
@@ -69,7 +77,7 @@ src/
     private_transfer.rs — TransferRequest + PrivateTransferOperation
     unshield.rs        — UnshieldRequest + UnshieldOperation (partial and total)
     statement.rs       — pool values → verifier statement (memo digest, recipient bytes)
-    fees.rs            — relay op hashes, fee attribution by commit, public claim
+    fees.rs            — fee crediting to the block author, public claim
     assets.rs          — register / verify / unverify asset
   storage/             — one Repository per storage domain
   validate_unsigned/   — mempool anti-spam checks
@@ -101,7 +109,6 @@ These are design properties of the current MVP. No formal security audit has bee
 ## Dependencies
 
 - `pallet-zk-verifier`: proof verification via `ZkVerifierPort`.
-- `pallet-relayer`: relay fee accounting via `RelayerInterface`.
 - `orbinum-zk-core`: Poseidon hash, commitment and nullifier types.
 - FRAME: `frame-support`, `frame-system`, `sp-runtime`.
 

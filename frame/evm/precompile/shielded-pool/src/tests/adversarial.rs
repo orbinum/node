@@ -2,28 +2,30 @@
 //!
 //! This is the only surface where untrusted bytes reach the node directly: an
 //! EVM caller can send arbitrary calldata to the precompile address. Each test
-//! below is an attempt to make the decoder panic, over-allocate, or read out of
-//! bounds. A panic here is a node crash, not a rejected transaction.
+//! below is an attempt to make the `shield` decoder panic, over-allocate, or read
+//! out of bounds. A panic here is a node crash, not a rejected transaction.
 
 use super::*;
+
+/// Well-formed `shield` calldata, the base every attack mutates.
+fn base() -> Vec<u8> {
+	encode_shield(0, canon(0x0C), &[0xAB; 180])
+}
+
+/// Runs `input` with a non-zero `msg.value`, so decoding gets past the amount
+/// check and reaches the offsets under attack.
+fn run(input: Vec<u8>) -> Result<fp_evm::PrecompileOutput, PrecompileFailure> {
+	let mut h = MockHandle::with_value(input, 1_000);
+	ShieldedPoolPrecompile::<Test>::execute(&mut h)
+}
 
 #[test]
 fn attack_truncation_at_every_offset_never_panics() {
 	new_test_ext().execute_with(|| {
-		let full = encode_private_transfer(
-			&[0x01u8; 72],
-			canon(0xBB),
-			&[canon(1)],
-			&[canon(2)],
-			&[vec![0x01u8; 180]],
-			0,
-			0,
-			1,
-		);
-		for len in 0..full.len().min(600) {
-			let mut h = MockHandle::new(full[..len].to_vec());
+		let full = base();
+		for len in 0..full.len() {
 			// Must not panic. Any Result is acceptable.
-			let _ = ShieldedPoolPrecompile::<Test>::execute(&mut h);
+			let _ = run(full[..len].to_vec());
 		}
 	});
 }
@@ -33,20 +35,11 @@ fn attack_truncation_at_every_offset_never_panics() {
 #[test]
 fn attack_self_referential_offset_is_refused() {
 	new_test_ext().execute_with(|| {
-		let mut input = encode_private_transfer(
-			&[0x01u8; 72],
-			canon(0xBB),
-			&[canon(1)],
-			&[canon(2)],
-			&[vec![0x01u8; 180]],
-			0,
-			0,
-			1,
-		);
-		// Point the proof offset at slot 0 of the head (offset 0 → itself).
-		input[4..36].copy_from_slice(&[0u8; 32]);
-		let mut h = MockHandle::new(input);
-		let _ = ShieldedPoolPrecompile::<Test>::execute(&mut h);
+		let mut input = base();
+		// Point the memo offset at slot 0 of the head: its length word is the
+		// asset id, zero, so the memo decodes empty and is refused.
+		input[4 + 64..4 + 96].copy_from_slice(&[0u8; 32]);
+		expect_error(run(input));
 	});
 }
 
@@ -55,20 +48,10 @@ fn attack_self_referential_offset_is_refused() {
 #[test]
 fn attack_max_u256_offsets_are_refused_not_truncated() {
 	new_test_ext().execute_with(|| {
-		for slot in [0usize, 64, 96, 128, 256] {
-			let mut input = encode_private_transfer(
-				&[0x01u8; 72],
-				canon(0xBB),
-				&[canon(1)],
-				&[canon(2)],
-				&[vec![0x01u8; 180]],
-				0,
-				0,
-				1,
-			);
+		for slot in [64usize, 96] {
+			let mut input = base();
 			input[4 + slot..4 + slot + 32].copy_from_slice(&[0xFFu8; 32]);
-			let mut h = MockHandle::new(input);
-			expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
+			expect_error(run(input));
 		}
 	});
 }
@@ -79,73 +62,25 @@ fn attack_max_u256_offsets_are_refused_not_truncated() {
 #[test]
 fn attack_offset_above_u32_that_looks_benign_is_refused() {
 	new_test_ext().execute_with(|| {
-		let mut input = encode_private_transfer(
-			&[0x01u8; 72],
-			canon(0xBB),
-			&[canon(1)],
-			&[canon(2)],
-			&[vec![0x01u8; 180]],
-			0,
-			0,
-			1,
-		);
-		// 2^32 + 288 — low 32 bits read as 288, a perfectly plausible offset.
-		let sneaky = U256::from(1u64 << 32) + U256::from(288u64);
-		let word = sneaky.to_big_endian();
-		input[4..36].copy_from_slice(&word);
-		let mut h = MockHandle::new(input);
-		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
-	});
-}
-
-/// A declared array count of ~1e9 must be refused BEFORE Vec::with_capacity
-/// reserves for it — otherwise one call OOMs the node.
-#[test]
-fn attack_huge_array_count_does_not_allocate() {
-	new_test_ext().execute_with(|| {
-		let mut input = encode_private_transfer(
-			&[0x01u8; 72],
-			canon(0xBB),
-			&[canon(1)],
-			&[canon(2)],
-			&[vec![0x01u8; 180]],
-			0,
-			0,
-			1,
-		);
-		// Find the nullifiers array offset and overwrite its count word.
-		let off = U256::from_big_endian(&input[4 + 64..4 + 96]).as_usize();
-		let count_at = 4 + off;
-		if count_at + 32 <= input.len() {
-			let huge = U256::from(1u64 << 30).to_big_endian();
-			input[count_at..count_at + 32].copy_from_slice(&huge);
+		for slot in [64usize, 96] {
+			let mut input = base();
+			let valid = U256::from_big_endian(&input[4 + slot..4 + slot + 32]);
+			let sneaky = U256::from(1u64 << 32) + valid;
+			input[4 + slot..4 + slot + 32].copy_from_slice(&sneaky.to_big_endian());
+			expect_error(run(input));
 		}
-		let mut h = MockHandle::new(input);
-		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
 	});
 }
 
-/// A fee word of u256::MAX must not panic converting to u128 — it must be
-/// rejected as an overflow.
+/// A length word near usize::MAX must be refused before anything is copied.
 #[test]
-fn attack_max_fee_word_is_refused_not_panicking() {
+fn attack_huge_length_does_not_allocate() {
 	new_test_ext().execute_with(|| {
-		let mut input = encode_private_transfer(
-			&[0x01u8; 72],
-			canon(0xBB),
-			&[canon(1)],
-			&[canon(2)],
-			&[vec![0x01u8; 180]],
-			0,
-			0,
-			1,
-		);
-		input[4 + 192..4 + 224].copy_from_slice(&[0xFFu8; 32]);
-		let mut h = MockHandle::new(input);
-		expect_error_msg(
-			ShieldedPoolPrecompile::<Test>::execute(&mut h),
-			"fee overflow",
-		);
+		let mut input = base();
+		let off = U256::from_big_endian(&input[4 + 96..4 + 128]).as_usize();
+		let len_at = 4 + off;
+		input[len_at..len_at + 32].copy_from_slice(&U256::from(1u64 << 30).to_big_endian());
+		expect_error(run(input));
 	});
 }
 
@@ -154,22 +89,12 @@ fn attack_max_fee_word_is_refused_not_panicking() {
 #[test]
 fn attack_oversized_u32_slots_are_refused_not_truncated() {
 	new_test_ext().execute_with(|| {
-		for slot in [160usize, 224] {
-			let mut input = encode_private_transfer(
-				&[0x01u8; 72],
-				canon(0xBB),
-				&[canon(1)],
-				&[canon(2)],
-				&[vec![0x01u8; 180]],
-				0,
-				0,
-				1,
-			);
+		for slot in [0usize, 128] {
+			let mut input = base();
 			// 2^32 exactly: truncates to 0 if the decoder uses low_u32.
 			let word = U256::from(1u64 << 32).to_big_endian();
 			input[4 + slot..4 + slot + 32].copy_from_slice(&word);
-			let mut h = MockHandle::new(input);
-			expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
+			expect_error_msg(run(input), "uint32 slot exceeds u32");
 		}
 	});
 }
@@ -179,16 +104,7 @@ fn attack_oversized_u32_slots_are_refused_not_truncated() {
 #[test]
 fn attack_byte_fuzz_never_panics() {
 	new_test_ext().execute_with(|| {
-		let base = encode_private_transfer(
-			&[0x01u8; 72],
-			canon(0xBB),
-			&[canon(1)],
-			&[canon(2)],
-			&[vec![0x01u8; 180]],
-			0,
-			0,
-			1,
-		);
+		let base = base();
 		let mut seed: u64 = 0x2545F4914F6CDD1D;
 		for _ in 0..3000 {
 			let mut input = base.clone();
@@ -207,9 +123,8 @@ fn attack_byte_fuzz_never_panics() {
 					.wrapping_add(1442695040888963407);
 				input[pos] = (seed >> 40) as u8;
 			}
-			let mut h = MockHandle::new(input);
 			// Only requirement: no panic.
-			let _ = ShieldedPoolPrecompile::<Test>::execute(&mut h);
+			let _ = run(input);
 		}
 	});
 }
@@ -219,16 +134,7 @@ fn attack_byte_fuzz_never_panics() {
 #[test]
 fn attack_truncated_fuzz_never_panics() {
 	new_test_ext().execute_with(|| {
-		let base = encode_private_transfer(
-			&[0x01u8; 72],
-			canon(0xBB),
-			&[canon(1)],
-			&[canon(2)],
-			&[vec![0x01u8; 180]],
-			0,
-			0,
-			1,
-		);
+		let base = base();
 		let mut seed: u64 = 0x9E3779B97F4A7C15;
 		for _ in 0..2000 {
 			seed = seed
@@ -243,8 +149,7 @@ fn attack_truncated_fuzz_never_panics() {
 				let pos = (seed >> 33) as usize % input.len();
 				input[pos] = (seed >> 40) as u8;
 			}
-			let mut h = MockHandle::new(input);
-			let _ = ShieldedPoolPrecompile::<Test>::execute(&mut h);
+			let _ = run(input);
 		}
 	});
 }

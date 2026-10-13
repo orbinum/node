@@ -5,9 +5,9 @@
 //! validators from drifting apart and makes a rejection diagnosable from a log
 //! line alone.
 //!
-//! Codes are part of the observable interface: a wallet or relayer may branch on
-//! them, so **never reuse a number for a different meaning** — retire it and add
-//! a new one instead.
+//! Codes are part of the observable interface: a wallet may branch on them, so
+//! **never reuse a number for a different meaning** — retire it and add a new one
+//! instead.
 
 use sp_runtime::transaction_validity::InvalidTransaction;
 

@@ -10,8 +10,13 @@
 //! - **Shield**: Deposit public tokens into the private pool
 //! - **Private Transfer**: Transfer privately within the pool using ZK proofs
 //! - **Unshield**: Withdraw tokens from the pool to a public account
-//! - **Relay fees**: Relayers commit to spends (`commit_relay`) and claim the
-//!   fees credited to them (`claim_relay_fees`)
+//! - **Spend fees**: Each spend's fee is credited to the block author, which
+//!   claims it with `claim_fees`
+//!
+//! Spends (`private_transfer`, `unshield`) are unsigned only: the ZK proof is
+//! their authorization, and no account is linked to them. Their fee stays in the
+//! pool, recorded as pending for the validator that authored the block, until
+//! that validator claims it.
 //!
 //! ## Architecture
 //!
@@ -46,15 +51,18 @@
 //!
 //! // Transfer privately
 //! ShieldedPool::private_transfer(
-//!     origin, proof, merkle_root, nullifiers, commitments, encrypted_memos,
+//!     RuntimeOrigin::none(), proof, merkle_root, nullifiers, commitments, encrypted_memos,
 //!     asset_id, fee, circuit_version,
 //! )?;
 //!
 //! // Withdraw from the pool
 //! ShieldedPool::unshield(
-//!     origin, proof, merkle_root, nullifier, asset_id, amount, recipient, fee,
+//!     RuntimeOrigin::none(), proof, merkle_root, nullifier, asset_id, amount, recipient, fee,
 //!     change_commitment, change_encrypted_memo, circuit_version,
 //! )?;
+//!
+//! // Collect the spend fees credited to a validator
+//! ShieldedPool::claim_fees(RuntimeOrigin::signed(validator), asset_id, amount)?;
 //! ```
 
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -65,7 +73,6 @@ pub mod genesis;
 pub mod helpers;
 pub mod merkle;
 pub mod operations;
-pub mod origin;
 pub mod storage;
 pub mod types;
 pub mod validate_unsigned;
@@ -80,7 +87,6 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
-pub use origin::{RelayCaller, ensure_relay_caller, ensure_spend_origin};
 pub use pallet::*;
 pub use types::{
 	AssetId, AssetMetadata, Commitment, DEFAULT_TREE_DEPTH, DefaultMerklePath,
@@ -89,39 +95,6 @@ pub use types::{
 	SubtreeRoots,
 };
 pub use weights::WeightInfo;
-
-use frame_support::pallet_prelude::{Decode, DecodeWithMemTracking, Encode, MaxEncodedLen};
-use scale_info::TypeInfo;
-
-/// Who submitted a call through the EVM precompile, as established by the
-/// dispatch path itself.
-///
-/// An origin cannot be forged — the EVM executor sets it from the transaction
-/// signature. It identifies the relayer for `commit_relay` and the claimant for
-/// `claim_relay_fees`. It does NOT decide who a spend's fee is credited to:
-/// that is the relay commit, since a spend can be copied and resubmitted by
-/// anyone.
-#[derive(
-	PartialEq,
-	Eq,
-	Clone,
-	Debug,
-	Encode,
-	Decode,
-	DecodeWithMemTracking,
-	TypeInfo,
-	MaxEncodedLen
-)]
-pub enum RawOrigin {
-	/// Submitted through the EVM precompile by this address, which signed the
-	/// transaction and paid its gas.
-	///
-	/// The only variant: an unrelayed submission arrives as `frame_system`'s
-	/// `None` origin, so there is nothing for this enum to say about it. A second
-	/// variant meaning "nobody" would be constructible by anyone able to build an
-	/// origin, and would then be indistinguishable from the real thing.
-	Relayed(sp_core::H160),
-}
 
 #[frame_support::pallet]
 #[allow(clippy::too_many_arguments)]
@@ -168,43 +141,26 @@ pub mod pallet {
 	/// a sealed 1 M-node tree in roughly 2 048 blocks (~3.4 hours at 6 s).
 	pub(crate) const PRUNED_NODES_PER_BLOCK: u32 = 512;
 
-	/// Most relay commits a single `commit_relay` call carries. Only bounds the
-	/// call's size; the per-block quota is
-	/// `pallet_relayer::Config::MaxCommitsPerRelayerPerBlock`.
-	pub const MAX_RELAY_COMMITS_PER_CALL: u32 = 64;
-
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
 
-	#[pallet::origin]
-	pub type Origin = RawOrigin;
-
 	/// Configuration trait for the pallet
 	#[pallet::config]
-	pub trait Config:
-		frame_system::Config<
-			RuntimeEvent: From<Event<Self>>,
-			// Spends and relayer calls read the precompile's `Relayed` origin, so
-			// the outer origin must convert back to this pallet's own variant.
-			RuntimeOrigin: Into<Result<Origin, <Self as frame_system::Config>::RuntimeOrigin>>,
-		>
-	{
+	pub trait Config: frame_system::Config<RuntimeEvent: From<Event<Self>>> {
 		/// The currency mechanism
 		type Currency: Currency<Self::AccountId> + ReservableCurrency<Self::AccountId>;
 
 		/// ZK proof verifier (domain port)
 		type ZkVerifier: ZkVerifierPort;
 
-		/// Relay configuration, relay commits, fee accounting and block-author lookup.
-		///
-		/// In production: `pallet_relayer::Pallet<Runtime>`.
-		/// In tests: a lightweight mock struct in `mock.rs`.
-		type Relayer: pallet_relayer::RelayerInterface<AccountId = Self::AccountId>;
+		/// The validator account that authored the current block; spend fees are
+		/// credited to it. `None` fails any spend with a non-zero fee.
+		type BlockAuthor: Get<Option<Self::AccountId>>;
 
-		/// The account an EVM address controls. Relay fees claimed by an EVM
-		/// relayer are paid there. Must match the runtime's EVM address mapping.
-		type EvmAccount: sp_runtime::traits::Convert<sp_core::H160, Self::AccountId>;
+		/// Floor on a spend's fee, in planck. Changed by runtime upgrade.
+		#[pallet::constant]
+		type MinSpendFee: Get<u128>;
 
 		/// The pallet's ID, used for deriving the pool account
 		#[pallet::constant]
@@ -441,6 +397,22 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type TotalCommitmentsInserted<T> = StorageValue<_, u64, ValueQuery>;
 
+	/// Spend fees credited to a validator and not yet claimed:
+	/// `(validator, asset_id) -> planck`.
+	///
+	/// The tokens stay in the pool (and in `PoolBalancePerAsset`) until
+	/// `claim_fees` pays them out.
+	#[pallet::storage]
+	pub type PendingFees<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat,
+		T::AccountId,
+		Blake2_128Concat,
+		u32,  // asset_id
+		u128, // planck
+		ValueQuery,
+	>;
+
 	/// Total number of nullifiers ever spent (notes consumed).
 	///
 	/// Monotonically increasing counter. Incremented once per
@@ -556,7 +528,8 @@ pub mod pallet {
 
 		/// Ledger-solvency invariant: the tracked native-asset pool balance must
 		/// equal the pool account's physical free balance. Fees stay physical in
-		/// the pool until `claim_relay_fees` pays them out, so both move together.
+		/// the pool until `claim_fees` pays them out, so both move together, and
+		/// the pending fees never exceed the ledger that backs them.
 		/// Only the native asset (0) is backed by `Currency`; other assets live in
 		/// external backends — TODO: extend when a per-asset balance reader exists.
 		#[cfg(feature = "try-runtime")]
@@ -568,6 +541,15 @@ pub mod pallet {
 				tracked == physical,
 				sp_runtime::TryRuntimeError::Other(
 					"shielded-pool native ledger drifted from physical pool balance"
+				)
+			);
+			let pending = PendingFees::<T>::iter()
+				.filter(|(_, asset_id, _)| *asset_id == 0)
+				.fold(0u128, |sum, (_, _, amount)| sum.saturating_add(amount));
+			frame_support::ensure!(
+				pending <= sp_runtime::SaturatedConversion::saturated_into::<u128>(tracked),
+				sp_runtime::TryRuntimeError::Other(
+					"shielded-pool pending fees exceed the native pool ledger"
 				)
 			);
 
@@ -694,14 +676,22 @@ pub mod pallet {
 			asset_id: u32,
 		},
 
-		/// A relayer claimed its pending relay fees out of the pool.
-		RelayFeesClaimed {
-			/// Account whose pending fees were spent
-			who: T::AccountId,
-			/// Account that received them
-			to: T::AccountId,
+		/// A validator claimed its pending spend fees out of the pool.
+		FeesClaimed {
+			/// Validator whose pending fees were paid to it
+			validator: T::AccountId,
 			asset_id: u32,
-			amount: BalanceOf<T>,
+			/// Planck paid out
+			amount: u128,
+		},
+
+		/// A spend's fee was credited to the block author's pending fees.
+		FeeCredited {
+			/// Validator that authored the block
+			validator: T::AccountId,
+			asset_id: u32,
+			/// Planck credited
+			amount: u128,
 		},
 	}
 
@@ -738,14 +728,14 @@ pub mod pallet {
 		AssetNotVerified,
 		/// Recipient address is zero (burn address)
 		InvalidRecipient,
-		/// Gasless fee is below the required minimum
+		/// The spend's fee is below `MinSpendFee`
 		FeeTooLow,
 		/// A public value is not a canonical field element
 		InvalidPublicSignals,
-		/// The caller has no registered relay address.
-		RelayerNotRegistered,
-		/// A non-zero fee could not be attributed to any recipient (no relay
-		/// commit and no block author). The fee tokens would otherwise be stranded.
+		/// The claim exceeds the caller's pending fees for the asset.
+		InsufficientPendingFees,
+		/// A non-zero fee could not be credited: the block has no known author.
+		/// The fee tokens would otherwise be stranded.
 		FeeRecipientUnavailable,
 		/// Batch operation submitted with no operations.
 		EmptyBatch,
@@ -853,11 +843,10 @@ pub mod pallet {
 		/// This spends existing notes (via nullifiers) and creates new notes
 		/// (via commitments). A ZK proof verifies the transfer is valid without
 		/// revealing amounts or participants. The fee is embedded in the ZK proof
-		/// (input_sum == output_sum + fee) and credited to the relayer that
-		/// committed to this transfer (see `commit_relay`), else the block author.
+		/// (input_sum == output_sum + fee) and credited to the block author.
 		///
 		/// # Arguments
-		/// * `origin` - Unsigned, signed, or the precompile's relayed origin
+		/// * `origin` - Unsigned only; signed and Root fail with `BadOrigin`
 		/// * `proof` - The ZK proof of valid transfer
 		/// * `merkle_roots` - The root each input is proven against, in input order.
 		///   Equal unless the notes come from different trees (circuit v3); a
@@ -866,7 +855,7 @@ pub mod pallet {
 		/// * `commitments` - Commitments for new notes being created
 		/// * `encrypted_memos` - Encrypted metadata for each new note
 		/// * `asset_id` - Asset being transferred (public input of the proof)
-		/// * `fee` - Gasless fee (must match proof's fee public input)
+		/// * `fee` - Spend fee, credited to the block author (must match the proof's fee public input)
 		/// * `circuit_version` - Version whose key the proof is verified against
 		///
 		/// # Errors
@@ -874,7 +863,8 @@ pub mod pallet {
 		/// * `UnknownMerkleRoot` - Any root is not a known one (active, recent or sealed)
 		/// * `NullifierAlreadyUsed` - Double-spend attempt
 		/// * `ProofVerificationFailed` - ZK proof verification failed
-		/// * `FeeTooLow` - Fee is below `T::Relayer::min_relay_fee()`
+		/// * `FeeTooLow` - Fee is below `T::MinSpendFee`
+		/// * `FeeRecipientUnavailable` - Non-zero fee and no block author
 		/// * `InvalidMemoSize` - Any encrypted memo is not exactly 180 bytes
 		/// * `MemoCommitmentMismatch` - Number of memos does not match number of commitments
 		#[pallet::call_index(1)]
@@ -893,7 +883,7 @@ pub mod pallet {
 			fee: BalanceOf<T>,
 			circuit_version: u32,
 		) -> DispatchResult {
-			ensure_spend_origin::<T, _>(origin)?;
+			ensure_none(origin)?;
 			use crate::operations::private_transfer::{PrivateTransferOperation, TransferRequest};
 			PrivateTransferOperation::execute::<T>(
 				&proof,
@@ -914,18 +904,17 @@ pub mod pallet {
 		/// This spends a private note and transfers the tokens to a public recipient.
 		/// A ZK proof verifies ownership of the note without revealing which note.
 		/// The fee is embedded in the ZK proof (note_value == amount + fee) and
-		/// credited to the relayer that committed to this unshield (see
-		/// `commit_relay`), else the block author.
+		/// credited to the block author.
 		///
 		/// # Arguments
-		/// * `origin` - Unsigned, signed, or the precompile's relayed origin
+		/// * `origin` - Unsigned only; signed and Root fail with `BadOrigin`
 		/// * `proof` - The ZK proof of valid withdrawal
 		/// * `merkle_root` - The Merkle root the proof was computed against
 		/// * `nullifier` - Nullifier for the note being spent
 		/// * `asset_id` - Asset being unshielded
 		/// * `amount` - Net amount to withdraw (recipient receives this)
 		/// * `recipient` - Public account to receive tokens
-		/// * `fee` - Gasless fee (must match proof's fee public input)
+		/// * `fee` - Spend fee, credited to the block author (must match the proof's fee public input)
 		/// * `change_commitment` - Commitment of the change note (empty [0u8; 32] for total unshield)
 		/// * `change_encrypted_memo` - Empty for a total unshield; exactly 180 bytes for a partial one
 		/// * `circuit_version` - Version whose key the proof is verified against
@@ -935,7 +924,8 @@ pub mod pallet {
 		/// * `NullifierAlreadyUsed` - Double-spend attempt
 		/// * `ProofVerificationFailed` - ZK proof verification failed
 		/// * `InsufficientPoolBalance` - Pool doesn't have enough tokens
-		/// * `FeeTooLow` - Fee is below `T::Relayer::min_relay_fee()`
+		/// * `FeeTooLow` - Fee is below `T::MinSpendFee`
+		/// * `FeeRecipientUnavailable` - Non-zero fee and no block author
 		/// * `InvalidMemoSize` - Memo present on a total unshield, or not exactly 180 bytes on a partial one
 		#[pallet::call_index(2)]
 		#[pallet::weight(T::WeightInfo::unshield().saturating_add(T::ZkVerifier::verification_weight()))]
@@ -959,7 +949,7 @@ pub mod pallet {
 			// verified against this version's VK (not merely the active one).
 			circuit_version: u32,
 		) -> DispatchResult {
-			ensure_spend_origin::<T, _>(origin)?;
+			ensure_none(origin)?;
 			use crate::operations::unshield::{UnshieldOperation, UnshieldRequest};
 			UnshieldOperation::execute::<T>(
 				&proof,
@@ -1064,58 +1054,32 @@ pub mod pallet {
 			crate::operations::assets::AssetOperation::unverify::<T>(asset_id)
 		}
 
-		/// Record relay commits for spends the caller is about to submit.
-		///
-		/// Each commit is `pallet_relayer::relay_commit_hash(op_hash, relayer)`,
-		/// with `op_hash` from `operations::fees::relay_op_hash`. A spend included
-		/// in a later block credits its fee to the relayer that committed to it,
-		/// whoever submits the spend. The caller must have a registered relay
-		/// address; commits expire after `pallet_relayer::Config::CommitTtl`.
-		///
-		/// # Errors
-		/// * `BadOrigin` - Unsigned or Root
-		/// * `EmptyBatch` - No commits
-		/// * `RelayerNotRegistered` - Signer has no registered relay address
-		/// * `pallet_relayer::Error::NotRegistered` - EVM caller is not registered
-		/// * `pallet_relayer::Error::TooManyCommits` - Per-block quota exhausted
-		#[pallet::call_index(18)]
-		#[pallet::weight(T::WeightInfo::commit_relay(commits.len() as u32))]
-		pub fn commit_relay(
-			origin: OriginFor<T>,
-			commits: BoundedVec<sp_core::H256, ConstU32<MAX_RELAY_COMMITS_PER_CALL>>,
-		) -> DispatchResult {
-			crate::operations::fees::FeeOperation::commit::<T>(
-				ensure_relay_caller::<T, _>(origin)?,
-				&commits,
-			)
-		}
+		// Call index 18 (`commit_relay`) is retired and must not be reused.
 
-		/// Pay the caller's pending relay fees out of the pool, publicly.
+		/// Pay `amount` of the caller's pending spend fees out of the pool to the
+		/// caller, publicly.
 		///
-		/// | Origin | Fees spent | Paid to |
-		/// |---|---|---|
-		/// | Signed(who) | `who`'s | mirror of `who`'s registered address, else `who` |
-		/// | `Relayed(addr)` (precompile) | those of the account registered to `addr` | mirror of `addr` |
-		///
-		/// Bounded by the claimant's own pending balance; no proof is needed
-		/// because no note is created.
+		/// Bounded by the caller's own `PendingFees`; no proof is needed because
+		/// no note is created.
 		///
 		/// # Errors
 		/// * `BadOrigin` - Unsigned or Root
-		/// * `RelayerNotRegistered` - EVM caller has no registration
-		/// * `InvalidAssetId` / `InvalidAmount` / `InsufficientPoolBalance`
-		/// * `pallet_relayer::Error::InsufficientPendingFees` - `amount` exceeds pending fees
+		/// * `InvalidAssetId` / `AssetNotVerified` / `AssetNotSupported` - Asset cannot move
+		/// * `InvalidAmount` - `amount` is zero
+		/// * `InsufficientPoolBalance` - The pool ledger holds less than `amount`
+		/// * `InsufficientPendingFees` - `amount` exceeds the caller's pending fees
+		///
+		/// # Events
+		/// * `FeesClaimed`
 		#[pallet::call_index(19)]
-		#[pallet::weight(T::WeightInfo::claim_relay_fees())]
-		pub fn claim_relay_fees(
+		#[pallet::weight(T::WeightInfo::claim_fees())]
+		pub fn claim_fees(
 			origin: OriginFor<T>,
 			asset_id: u32,
 			amount: BalanceOf<T>,
 		) -> DispatchResult {
-			use crate::operations::fees::FeeOperation;
-			let (claimant, to) =
-				FeeOperation::claimant_and_payee::<T>(ensure_relay_caller::<T, _>(origin)?)?;
-			FeeOperation::claim::<T>(claimant, to, asset_id, amount)
+			let who = ensure_signed(origin)?;
+			crate::operations::fees::FeeOperation::claim::<T>(who, asset_id, amount)
 		}
 	}
 

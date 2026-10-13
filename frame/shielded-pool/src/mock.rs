@@ -1,11 +1,7 @@
 //! Mock runtime for testing pallet-shielded-pool
 
 use crate as pallet_shielded_pool;
-use frame_support::{
-	PalletId, derive_impl, parameter_types,
-	traits::{ConstU32, ConstU64, ConstU128},
-};
-use frame_system::EnsureRoot;
+use frame_support::{PalletId, derive_impl, parameter_types, traits::ConstU128};
 use pallet_zk_verifier::{ShieldStatement, TransferStatement, UnshieldStatement, ZkVerifierPort};
 use sp_runtime::{AccountId32, BuildStorage, traits::IdentityLookup};
 
@@ -23,7 +19,6 @@ frame_support::construct_runtime!(
 		System: frame_system,
 		Balances: pallet_balances,
 		ZkVerifier: pallet_zk_verifier,
-		Relayer: pallet_relayer,
 		ShieldedPool: pallet_shielded_pool,
 	}
 );
@@ -144,42 +139,12 @@ impl ZkVerifierPort for MockZkVerifier {
 	}
 }
 
-/// `H160 ++ [0u8; 12]`, the runtime's EVM address mapping.
-pub struct MirrorAccount;
-
-impl sp_runtime::traits::Convert<sp_core::H160, AccountId> for MirrorAccount {
-	fn convert(address: sp_core::H160) -> AccountId {
-		let mut bytes = [0u8; 32];
-		bytes[..20].copy_from_slice(address.as_bytes());
-		AccountId::from(bytes)
-	}
-}
-
-/// Block-author provider for the real `pallet-relayer` in tests.
-///
-/// Returns `None` when the raw `b"mock:no_author"` flag is set (see
-/// `mock_clear_block_author`), otherwise `Some(acc(1))`.
-pub struct MockBlockAuthor;
-impl frame_support::traits::Get<Option<AccountId>> for MockBlockAuthor {
-	fn get() -> Option<AccountId> {
-		if sp_io::storage::get(b"mock:no_author").is_some() {
-			None
-		} else {
-			Some(acc(1))
-		}
-	}
-}
-
-impl pallet_relayer::Config for Test {
-	type BlockAuthor = MockBlockAuthor;
-	type DefaultMinRelayFee = ConstU128<0>;
-	type MaxMinRelayFee = ConstU128<{ u128::MAX }>;
-	type ManageOrigin = EnsureRoot<AccountId>;
-	type MaxAllowedSelectors = ConstU32<16>;
-	type ValidatorSet = ();
-	type CommitTtl = ConstU64<10>;
-	type MaxCommitsPerRelayerPerBlock = ConstU32<64>;
-	type WeightInfo = ();
+parameter_types! {
+	/// The block author spend fees are credited to; `None` models a block with
+	/// no known author.
+	pub static BlockAuthorAccount: Option<AccountId> = Some(acc(1));
+	/// Floor on a spend's fee. Zero unless a test raises it.
+	pub static MinSpendFee: u128 = 0;
 }
 
 impl pallet_shielded_pool::Config for Test {
@@ -192,52 +157,39 @@ impl pallet_shielded_pool::Config for Test {
 	type SealedTreePrunedBelowLevel = SealedTreePrunedBelowLevel;
 	type MaxLeavesPerTree = MaxLeavesPerTree;
 	type WeightInfo = ();
-	type Relayer = pallet_relayer::Pallet<Test>;
-	type EvmAccount = MirrorAccount;
+	type BlockAuthor = BlockAuthorAccount;
+	type MinSpendFee = MinSpendFee;
 }
 
-// ── Relayer test helpers ─────────────────────────────────────────────────────
-//
-// These drive the REAL `pallet-relayer` storage so `mock::Test` exercises the
-// same code path as the runtime.
+// ── Fee test helpers ─────────────────────────────────────────────────────────
 
-/// Read a pending-fee balance from `pallet-relayer`.
+/// Read a validator's pending fees.
 pub fn mock_pending_fees_get(who: AccountId, asset_id: u32) -> u128 {
-	pallet_relayer::PendingRelayerFees::<Test>::get(who, asset_id)
+	crate::PendingFees::<Test>::get(who, asset_id)
 }
 
-/// Write a pending-fee balance into `pallet-relayer`.
+/// Write a validator's pending fees.
 pub fn mock_pending_fees_set(who: AccountId, asset_id: u32, amount: u128) {
-	pallet_relayer::PendingRelayerFees::<Test>::insert(who, asset_id, amount);
+	crate::PendingFees::<Test>::insert(who, asset_id, amount);
 }
 
-/// Set the minimum relay fee in `pallet-relayer`.
-/// Defaults to 0 (`DefaultMinRelayFee = ConstU128<0>`); call this to raise the floor.
-pub fn mock_set_min_relay_fee(fee: u128) {
-	pallet_relayer::MinRelayFee::<Test>::put(fee);
+/// Raise the spend-fee floor (default 0).
+pub fn mock_set_min_spend_fee(fee: u128) {
+	MinSpendFee::set(fee);
 }
 
-/// Register an EVM address → account mapping so `resolve_relayer` returns `Some`.
-/// Writes directly into `pallet-relayer`'s registry for tests.
-pub fn mock_register_relayer(who: AccountId, addr: sp_core::H160) {
-	pallet_relayer::RelayerRegistry::<Test>::insert(addr, who.clone());
-	// Both indexes: fee crediting and EVM claims resolve H160 -> account, while
-	// signed relayer calls resolve account -> H160. `register_relayer` writes
-	// both, so a helper that wrote only one would let a test pass against state
-	// the runtime cannot produce.
-	pallet_relayer::RelayerByAccount::<Test>::insert(who, addr);
-}
-
-/// Force the relayer's `block_author()` to return `None` (default is `Some(acc(1))`),
-/// to test the no-fee-recipient path. Read by `MockBlockAuthor`.
+/// Make the block author unknown (default `Some(acc(1))`), to test the
+/// no-fee-recipient path.
 pub fn mock_clear_block_author() {
-	sp_io::storage::set(b"mock:no_author", &[1u8]);
+	BlockAuthorAccount::set(None);
 }
 
 /// Build genesis storage for testing
 pub fn new_test_ext() -> sp_io::TestExternalities {
 	VERIFIED.with(|v| v.borrow_mut().clear());
 	PROOF_VALID.with(|v| v.set(true));
+	BlockAuthorAccount::set(Some(acc(1)));
+	MinSpendFee::set(0);
 	let mut t = frame_system::GenesisConfig::<Test>::default()
 		.build_storage()
 		.unwrap();

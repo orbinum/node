@@ -19,56 +19,22 @@ use alloc::vec;
 
 #[benchmarks(
 	where
-		T: pallet_zk_verifier::Config + pallet_relayer::Config,
-		// The precompile's relayed origin is exercised directly.
-		<T as frame_system::Config>::RuntimeOrigin: From<crate::RawOrigin>,
+		T: pallet_zk_verifier::Config,
 )]
 mod benchmarks {
 	use super::*;
 	use crate::FrameEncryptedMemo;
-	use crate::pallet::{Assets, NextAssetId, PoolBalancePerAsset};
-	use pallet_relayer::RelayerInterface;
-	use sp_core::H160;
+	use crate::pallet::{Assets, NextAssetId, PendingFees, PoolBalancePerAsset};
 	use sp_std::vec::Vec;
 
-	/// Relayers the registry can hold at most: one per validator, the runtime's
-	/// `MaxValidators`.
-	const MAX_RELAYERS: u32 = 32;
-
-	fn setup_relayer<T: Config + pallet_relayer::Config>() -> H160 {
-		register_relayer::<T>(0)
-	}
-
-	fn relayer_address(i: u32) -> H160 {
-		H160::from_low_u64_be(0xAA00 + i as u64)
-	}
-
-	fn register_relayer<T: Config + pallet_relayer::Config>(i: u32) -> H160 {
-		let addr = relayer_address(i);
-		let relayer: T::AccountId = account("relayer", i, 0);
-		pallet_relayer::RelayerRegistry::<T>::insert(addr, relayer.clone());
-		pallet_relayer::RelayerByAccount::<T>::insert(relayer, addr);
-		addr
-	}
-
-	/// Worst case for fee attribution: a full registry, every relayer holding a
-	/// commit from an earlier block for the spend, so the lookup reads and
-	/// removes all of them. Returns the first relayer, which submits the spend.
-	fn commit_all_relayers<T: Config + pallet_relayer::Config>(op_hash: &[u8; 32]) -> H160 {
-		let recorded_at: frame_system::pallet_prelude::BlockNumberFor<T> = 1u32.into();
-		let commit = pallet_relayer::RelayCommit {
-			recorded_at,
-			expires_at: recorded_at + <T as pallet_relayer::Config>::CommitTtl::get(),
-		};
-		for i in 0..MAX_RELAYERS {
-			let addr = register_relayer::<T>(i);
-			pallet_relayer::RelayCommits::<T>::insert(
-				pallet_relayer::relay_commit_hash(op_hash, &addr),
-				commit,
-			);
-		}
-		frame_system::Pallet::<T>::set_block_number(2u32.into());
-		relayer_address(0)
+	/// A spend with a fee credits the block author, so the benchmarked block
+	/// must have one: the runtime's `BlockAuthor` has to return `Some` under
+	/// `runtime-benchmarks`.
+	fn ensure_block_author<T: Config>() {
+		assert!(
+			T::BlockAuthor::get().is_some(),
+			"spend benchmarks need `BlockAuthor` to return an account"
+		);
 	}
 
 	fn setup_benchmark_env<T: Config>() -> (T::AccountId, u32) {
@@ -102,14 +68,14 @@ mod benchmarks {
 		(caller, asset_id)
 	}
 
-	/// A value large enough to survive a relay fee being deducted from it.
+	/// A value large enough to survive a spend fee being deducted from it.
 	///
-	/// `unshield` pays the relayer out of `amount`, so a flat literal breaks the
-	/// moment a runtime's `min_relay_fee` exceeds it — the production fee is
-	/// 1e15 planck, which dwarfs any hand-picked constant. Deriving it from the
-	/// configured fee keeps the benchmarks working across every runtime.
+	/// A flat literal breaks the moment a runtime's `MinSpendFee` exceeds it —
+	/// the production floor is 1e15 planck, which dwarfs any hand-picked
+	/// constant. Deriving it from the configured fee keeps the benchmarks
+	/// working across every runtime.
 	fn bench_amount<T: Config>() -> BalanceOf<T> {
-		let fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
+		let fee: BalanceOf<T> = T::MinSpendFee::get().saturated_into();
 		let scaled = fee * 1_000u32.into();
 		let floor: BalanceOf<T> = 1_000_000u32.into();
 		if scaled > floor { scaled } else { floor }
@@ -206,23 +172,13 @@ mod benchmarks {
 			vec![memo(), memo()].try_into().unwrap();
 
 		let asset_id = 0u32;
-		// Must be >= T::Relayer::min_relay_fee() to pass the FeeTooLow check.
-		let fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
-		let op_hash = crate::operations::private_transfer::TransferRequest::<T> {
-			merkle_roots,
-			nullifiers: nullifiers.clone(),
-			commitments: commitments.clone(),
-			memos: encrypted_memos.clone(),
-			asset_id,
-			fee,
-			circuit_version: 1,
-		}
-		.op_hash();
-		let relayer = commit_all_relayers::<T>(&op_hash);
+		// Non-zero, so the fee is credited, and >= MinSpendFee to pass FeeTooLow.
+		let fee: BalanceOf<T> = T::MinSpendFee::get().max(1).saturated_into();
+		ensure_block_author::<T>();
 
 		#[extrinsic_call]
 		private_transfer(
-			crate::RawOrigin::Relayed(relayer),
+			RawOrigin::None,
 			proof,
 			merkle_roots,
 			nullifiers,
@@ -253,26 +209,13 @@ mod benchmarks {
 		let proof: Proof = vec![0u8; 128].try_into().unwrap();
 		let nullifier = Nullifier(canonical_bytes(4));
 
-		// Must be >= T::Relayer::min_relay_fee() to pass the FeeTooLow check.
-		let fee: BalanceOf<T> = T::Relayer::min_relay_fee().saturated_into();
-		let op_hash = crate::operations::unshield::UnshieldRequest::<T> {
-			merkle_root,
-			nullifier,
-			asset_id,
-			amount,
-			recipient: recipient.clone(),
-			fee,
-			change_commitment: Hash::default(),
-			change_memo: Default::default(),
-			circuit_version: 1,
-		}
-		.op_hash()
-		.expect("benchmark recipient is 32 bytes");
-		let relayer = commit_all_relayers::<T>(&op_hash);
+		// Non-zero, so the fee is credited, and >= MinSpendFee to pass FeeTooLow.
+		let fee: BalanceOf<T> = T::MinSpendFee::get().max(1).saturated_into();
+		ensure_block_author::<T>();
 
 		#[extrinsic_call]
 		unshield(
-			crate::RawOrigin::Relayed(relayer),
+			RawOrigin::None,
 			proof,
 			merkle_root,
 			nullifier,
@@ -319,31 +262,14 @@ mod benchmarks {
 		unverify_asset(RawOrigin::Root, asset_id);
 	}
 
+	/// Worst case: the validator's account does not exist yet, so the payout
+	/// creates it.
 	#[benchmark]
-	fn commit_relay(n: Linear<1, { crate::pallet::MAX_RELAY_COMMITS_PER_CALL }>) {
-		let relayer = setup_relayer::<T>();
-		let commits: BoundedVec<
-			sp_core::H256,
-			ConstU32<{ crate::pallet::MAX_RELAY_COMMITS_PER_CALL }>,
-		> = (0..n)
-			.map(|i| sp_core::H256::from_low_u64_be(i as u64 + 1))
-			.collect::<Vec<_>>()
-			.try_into()
-			.unwrap();
-
-		#[extrinsic_call]
-		commit_relay(crate::RawOrigin::Relayed(relayer), commits);
-	}
-
-	/// Worst case: registered claimant, so the destination is its EVM mirror —
-	/// an account that does not exist yet.
-	#[benchmark]
-	fn claim_relay_fees() {
+	fn claim_fees() {
 		let (_caller, asset_id) = setup_benchmark_env::<T>();
 		let amount: BalanceOf<T> = bench_amount::<T>();
-		let claimant: T::AccountId = account("relayer", 0, 0);
-		setup_relayer::<T>();
-		T::Relayer::accumulate_relay_fee(&claimant, asset_id, amount.saturated_into());
+		let validator: T::AccountId = account("validator", 0, 0);
+		PendingFees::<T>::insert(&validator, asset_id, amount.saturated_into::<u128>());
 		PoolBalancePerAsset::<T>::insert(asset_id, amount * 2u32.into());
 		let _ = <T::Currency as Currency<T::AccountId>>::make_free_balance_be(
 			&Pallet::<T>::pool_account_id(),
@@ -351,7 +277,7 @@ mod benchmarks {
 		);
 
 		#[extrinsic_call]
-		claim_relay_fees(RawOrigin::Signed(claimant), asset_id, amount);
+		claim_fees(RawOrigin::Signed(validator), asset_id, amount);
 	}
 
 	/// Cost of one sweep that probes `n` sealed-tree nodes.

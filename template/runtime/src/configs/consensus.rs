@@ -75,32 +75,11 @@ impl pallet_validator_set::ValidatorPrerequisites<AccountId> for ValidatorPrereq
 	}
 }
 
-/// Clears the EVM relay binding of an account that leaves the validator set.
-///
-/// Registering a relay address requires an active validator, so the binding must
-/// not outlive the membership that authorised it.
-pub struct RelayerCleanup;
-
-impl pallet_validator_set::OnValidatorRemoved<AccountId> for RelayerCleanup {
-	fn on_validator_removed(who: &AccountId) {
-		pallet_relayer::Pallet::<Runtime>::clear_relayer(who);
-	}
-
-	#[cfg(feature = "runtime-benchmarks")]
-	fn setup_removal_state(who: &AccountId) {
-		// Give `remove_validator` a binding to tear down, so its benchmark
-		// measures the two cleanup writes instead of the empty branch.
-		let evm_address = sp_core::H160::repeat_byte(0x99);
-		pallet_relayer::RelayerRegistry::<Runtime>::insert(evm_address, who.clone());
-		pallet_relayer::RelayerByAccount::<Runtime>::insert(who.clone(), evm_address);
-	}
-}
-
 impl pallet_validator_set::Config for Runtime {
 	type AddRemoveOrigin = frame_system::EnsureRoot<AccountId>;
 	type MaxValidators = ConstU32<32>;
 	type Prerequisites = ValidatorPrerequisiteChecker;
-	type OnValidatorRemoved = RelayerCleanup;
+	type OnValidatorRemoved = ();
 	type FindAuthor = ValidatorAuthor;
 	type QuorumWindow = Period;
 	type WeightInfo = pallet_validator_set::weights::SubstrateWeight<Runtime>;

@@ -12,12 +12,12 @@
 //!
 //! Split by responsibility:
 //! - [`guard`] — the checked arithmetic and `usize` conversion every decoder relies on.
-//! - [`scalar`] — fixed-width types (`uint32`, `uint256`, `bytes32`).
-//! - [`dynamic`] — offset/length-driven types (`bytes`, `bytes32[]`, `bytes[]`).
+//! - [`scalar`] — fixed-width types (`uint32`, `bytes32`).
+//! - [`dynamic`] — offset/length-driven types (`bytes`).
 
 mod dynamic;
 mod guard;
 mod scalar;
 
-pub use dynamic::{decode_bytes32_array_at_slot, decode_bytes_array_at_slot, decode_bytes_at_slot};
-pub use scalar::{read_bytes32, read_u256, read_u32};
+pub use dynamic::decode_bytes_at_slot;
+pub use scalar::{read_bytes32, read_u32};

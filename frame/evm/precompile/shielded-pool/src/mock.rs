@@ -1,7 +1,7 @@
 //! Test mock for `pallet-evm-precompile-shielded-pool`.
 
 use fp_evm::{ExitError, ExitReason, Transfer};
-use frame_support::{derive_impl, parameter_types, traits::Get, weights::Weight, PalletId};
+use frame_support::{derive_impl, parameter_types, weights::Weight, PalletId};
 use pallet_evm::{
 	AddressMapping, Context, EnsureAddressNever, EnsureAddressRoot, FeeCalculator, PrecompileHandle,
 };
@@ -169,111 +169,8 @@ fn non_empty(proof: &[u8]) -> Result<bool, sp_runtime::DispatchError> {
 	Ok(true)
 }
 
-/// The pallet's EVM mirror account: the same mapping as [`H160ToAccountId32Mapping`].
-pub struct MirrorAccount;
-
-impl sp_runtime::traits::Convert<H160, AccountId32> for MirrorAccount {
-	fn convert(address: H160) -> AccountId32 {
-		H160ToAccountId32Mapping::into_account_id(address)
-	}
-}
-
-pub struct MockBlockAuthor;
-impl frame_support::traits::Get<Option<AccountId32>> for MockBlockAuthor {
-	fn get() -> Option<AccountId32> {
-		Some(AccountId32::from([1u8; 32]))
-	}
-}
-
-pub struct MockRelayer;
-
-/// The one relay address registered in the mock.
-pub fn registered_relayer() -> H160 {
-	H160::repeat_byte(0x77)
-}
-
-/// The validator account [`registered_relayer`] is registered to.
-pub fn registered_relayer_account() -> AccountId32 {
-	AccountId32::from([0x77u8; 32])
-}
-
-std::thread_local! {
-	/// Pending relay fees of `registered_relayer_account()`.
-	static PENDING_RELAY_FEES: std::cell::Cell<u128> = const { std::cell::Cell::new(0) };
-	/// Commits recorded through `record_relay_commits`, for assertions.
-	static RECORDED_COMMITS: std::cell::RefCell<Vec<sp_core::H256>> =
-		const { std::cell::RefCell::new(Vec::new()) };
-}
-
-pub fn set_pending_relay_fees(amount: u128) {
-	PENDING_RELAY_FEES.with(|c| c.set(amount));
-}
-
-pub fn pending_relay_fees() -> u128 {
-	PENDING_RELAY_FEES.with(|c| c.get())
-}
-
-pub fn recorded_commits() -> Vec<sp_core::H256> {
-	RECORDED_COMMITS.with(|c| c.borrow().clone())
-}
-
-impl pallet_relayer::RelayerInterface for MockRelayer {
-	type AccountId = AccountId32;
-
-	fn resolve_relayer(evm_address: &sp_core::H160) -> Option<AccountId32> {
-		(*evm_address == registered_relayer()).then(registered_relayer_account)
-	}
-
-	fn min_relay_fee() -> u128 {
-		0
-	}
-
-	fn allowed_selectors() -> sp_std::vec::Vec<[u8; 4]> {
-		sp_std::vec![]
-	}
-
-	fn block_author() -> Option<AccountId32> {
-		MockBlockAuthor::get()
-	}
-
-	fn accumulate_relay_fee(_author: &AccountId32, _asset_id: u32, _amount: u128) {}
-
-	fn pending_relay_fees(_who: &AccountId32, _asset_id: u32) -> u128 {
-		pending_relay_fees()
-	}
-
-	fn consume_relay_fee(
-		who: &AccountId32,
-		_asset_id: u32,
-		amount: u128,
-	) -> frame_support::dispatch::DispatchResult {
-		if *who != registered_relayer_account() || pending_relay_fees() < amount {
-			return Err(sp_runtime::DispatchError::Other(
-				"insufficient pending fees",
-			));
-		}
-		PENDING_RELAY_FEES.with(|c| c.set(c.get() - amount));
-		Ok(())
-	}
-
-	fn registered_evm_address(who: &AccountId32) -> Option<sp_core::H160> {
-		(*who == registered_relayer_account()).then(registered_relayer)
-	}
-
-	fn record_relay_commits(
-		relayer: &sp_core::H160,
-		commits: &[sp_core::H256],
-	) -> frame_support::dispatch::DispatchResult {
-		if *relayer != registered_relayer() {
-			return Err(sp_runtime::DispatchError::Other("not registered"));
-		}
-		RECORDED_COMMITS.with(|c| c.borrow_mut().extend_from_slice(commits));
-		Ok(())
-	}
-
-	fn take_committed_relayer(_op_hash: &[u8; 32]) -> Option<AccountId32> {
-		None
-	}
+parameter_types! {
+	pub BlockAuthor: Option<AccountId32> = Some(AccountId32::from([1u8; 32]));
 }
 
 impl pallet_shielded_pool::Config for Test {
@@ -286,8 +183,8 @@ impl pallet_shielded_pool::Config for Test {
 	type SealedTreePrunedBelowLevel = SealedTreePrunedBelowLevel;
 	type MaxLeavesPerTree = MaxLeavesPerTree;
 	type WeightInfo = ();
-	type Relayer = MockRelayer;
-	type EvmAccount = MirrorAccount;
+	type BlockAuthor = BlockAuthor;
+	type MinSpendFee = frame_support::traits::ConstU128<0>;
 }
 
 /// The EVM caller of every `MockHandle`.
@@ -310,9 +207,6 @@ pub fn precompile_account() -> AccountId32 {
 }
 
 pub fn new_test_ext() -> sp_io::TestExternalities {
-	// Thread-locals outlive externalities; reset so tests do not leak into each other.
-	set_pending_relay_fees(0);
-	RECORDED_COMMITS.with(|c| c.borrow_mut().clear());
 	let mut t = frame_system::GenesisConfig::<Test>::default()
 		.build_storage()
 		.unwrap();

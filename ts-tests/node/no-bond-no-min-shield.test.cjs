@@ -178,31 +178,6 @@ function freshCommitment() {
     assert.strictEqual(after.reserved.toBigInt(), 0n, 'addValidator reserved funds');
   });
 
-  await test('registerRelayer rejects an account outside the validator set', async () => {
-    const poor = keyring.addFromUri('//PoorValidator');
-    // The set gate is checked before the signature, so a dummy proof suffices
-    // to show a non-validator gets no further.
-    await assert.rejects(
-      () =>
-        submit(
-          api.tx.relayer.registerRelayer('0x' + '11'.repeat(20), '0x' + '00'.repeat(65)),
-          poor,
-        ),
-      (e) => e.message === 'relayer.NotValidator',
-      'a non-validator must not be able to claim an EVM relay address',
-    );
-  });
-
-  await test('registerRelayer takes an ownership proof', async () => {
-    // Two arguments: without the signature an approved validator could claim a
-    // rival's public relay address and divert its fees.
-    assert.strictEqual(
-      api.tx.relayer.registerRelayer.meta.args.length,
-      2,
-      'registerRelayer must take (evmAddress, signature)',
-    );
-  });
-
   await test('no account on chain holds a reserved validator bond', async () => {
     const entries = await api.query.system.account.entries();
     const reserved = entries.filter(([, v]) => v.data.reserved.toBigInt() > 0n);

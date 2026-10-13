@@ -10,8 +10,6 @@
 //! 2. `AddRemoveOrigin` (sudo / governance) calls
 //!    [`add_validator`][Pallet::add_validator] with the operator's `AccountId`.
 //!    The account joins the approved set and produces blocks from the next session.
-//! 3. Once approved, the operator may register an EVM relay address via
-//!    `relayer.register_relayer` (gated on membership of the approved set).
 //!
 //! ## Leaving
 //!
@@ -30,7 +28,7 @@
 //! - `add_validator` requires the account to have session keys already registered:
 //!   an approved account without keys would occupy a slot without authoring blocks.
 //! - Leaving the set (by either path) notifies [`Config::OnValidatorRemoved`] so
-//!   dependent state, such as the EVM relay binding, is cleaned up.
+//!   state that depends on membership can be cleaned up.
 //!
 //! ## Minimum author version
 //!

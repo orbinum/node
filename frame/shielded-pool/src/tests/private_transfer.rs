@@ -1,9 +1,9 @@
-//! `PrivateTransferOperation`: validation, settlement, the ledger and relay-fee
-//! routing, plus an adversarial battery against its non-cryptographic checks.
+//! `PrivateTransferOperation`: validation, settlement, the ledger and fee
+//! crediting, plus an adversarial battery against its non-cryptographic checks.
 
 use super::{
-	KNOWN_ROOT, canonical_bytes, commit, commitment, commitments_of, evm, fund_pool, memo,
-	nullifier, nullifiers_of, proof, short_memo,
+	KNOWN_ROOT, canonical_bytes, commitment, commitments_of, fund_pool, memo, nullifier,
+	nullifiers_of, proof, short_memo,
 };
 use crate::{
 	mock::{System, Test, acc, new_test_ext},
@@ -13,7 +13,6 @@ use crate::{
 	types::{Commitment, EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE, Nullifier},
 };
 use frame_support::{BoundedVec, assert_err, assert_noop, assert_ok, pallet_prelude::ConstU32};
-use pallet_relayer::RelayerInterface as _;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -483,7 +482,7 @@ fn execute_accumulates_fee_to_block_author_when_nonzero() {
 			},
 		));
 
-		// MockRelayer block_author = Some(1)
+		// The mock's block author is acc(1).
 		let pending = crate::mock::mock_pending_fees_get(acc(1), 0u32);
 		assert_eq!(pending, fee);
 	});
@@ -714,64 +713,7 @@ fn transfer_preserves_pool_ledger() {
 	});
 }
 
-// ── relay-fee attribution (relay commits) ────────────────────────────────────
-
-/// The relayer that committed to the transfer in an earlier block receives
-/// its fee; without a commit the block author does.
-#[test]
-fn transfer_fee_follows_the_relay_commit() {
-	new_test_ext().execute_with(|| {
-		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-		let relayer = evm(0xAA);
-		crate::mock::mock_register_relayer(acc(7), relayer);
-
-		let nullifiers = one_input(0x70);
-		let commitments = two_outputs(0x71);
-		let op_hash = TransferRequest::<Test> {
-			merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
-			nullifiers: nullifiers.clone(),
-			commitments: commitments.clone(),
-			memos: memos_of(2),
-			asset_id: 0,
-			fee: 30,
-			circuit_version: 1,
-		}
-		.op_hash();
-		commit(relayer, &op_hash);
-		System::set_block_number(2);
-
-		assert_ok!(PrivateTransferOperation::execute::<Test>(
-			&proof(),
-			TransferRequest {
-				merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
-				nullifiers,
-				commitments,
-				memos: memos_of(2),
-				asset_id: 0u32,
-				fee: 30u128,
-				circuit_version: 1,
-			},
-		));
-		assert_eq!(crate::mock::mock_pending_fees_get(acc(7), 0u32), 30);
-
-		// Uncommitted transfer → block author.
-		assert_ok!(PrivateTransferOperation::execute::<Test>(
-			&proof(),
-			TransferRequest {
-				merkle_roots: [KNOWN_ROOT, KNOWN_ROOT],
-				nullifiers: one_input(0x72),
-				commitments: two_outputs(0x73),
-				memos: memos_of(2),
-				asset_id: 0u32,
-				fee: 20u128,
-				circuit_version: 1,
-			},
-		));
-		assert_eq!(crate::mock::mock_pending_fees_get(acc(1), 0u32), 20);
-	});
-}
-
-/// A non-zero fee with no resolvable recipient errors, mirroring unshield.
+/// A non-zero fee with no block author errors, mirroring unshield.
 #[test]
 fn transfer_nonzero_fee_without_recipient_errors() {
 	new_test_ext().execute_with(|| {
@@ -1163,16 +1105,14 @@ fn attack_zero_commitment_is_refused() {
 	});
 }
 
-/// A fee below the relay minimum must be refused BEFORE any state changes —
+/// A fee below `MinSpendFee` must be refused BEFORE any state changes —
 /// otherwise the pool subsidizes the spam it is meant to price out.
 #[test]
 fn attack_fee_below_minimum_is_refused_without_spending_the_nullifier() {
 	new_test_ext().execute_with(|| {
 		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-		let min = <Test as Config>::Relayer::min_relay_fee();
-		if min == 0 {
-			return; // mock has no minimum; nothing to prove here
-		}
+		crate::mock::mock_set_min_spend_fee(100);
+		let min = <<Test as Config>::MinSpendFee as frame_support::traits::Get<u128>>::get();
 
 		let n = nullifier(0xC9);
 		assert_err!(
@@ -1289,7 +1229,7 @@ fn attack_memo_contents_never_gate_admission() {
 	});
 }
 
-// ── the statement handed to the verifier, and copies of a relayed transfer ───
+// ── the statement handed to the verifier, and the extrinsic's origin ─────────
 
 fn request(seeds: [u8; 2]) -> TransferRequest<Test> {
 	TransferRequest {
@@ -1317,37 +1257,42 @@ fn transfer_call(req: &TransferRequest<Test>) -> crate::Call<Test> {
 }
 
 #[test]
-fn a_copied_transfer_still_credits_the_committed_relayer() {
+fn an_unsigned_transfer_credits_the_block_author() {
 	use frame_support::traits::UnfilteredDispatchable;
 	new_test_ext().execute_with(|| {
 		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-		let (honest, copier) = (evm(0xAA), evm(0xBB));
-		crate::mock::mock_register_relayer(acc(7), honest);
-		crate::mock::mock_register_relayer(acc(8), copier);
+		crate::mock::BlockAuthorAccount::set(Some(acc(7)));
 		let req = request([0xC4, 0xD4]);
-		commit(honest, &req.op_hash());
-		System::set_block_number(2);
 
-		assert_ok!(
-			transfer_call(&req).dispatch_bypass_filter(crate::RawOrigin::Relayed(copier).into())
-		);
+		assert_ok!(transfer_call(&req).dispatch_bypass_filter(crate::mock::RuntimeOrigin::none()));
 		assert_eq!(crate::mock::mock_pending_fees_get(acc(7), 0), 30);
-		assert_eq!(crate::mock::mock_pending_fees_get(acc(8), 0), 0);
+		System::assert_has_event(
+			PalletEvent::FeeCredited {
+				validator: acc(7),
+				asset_id: 0,
+				amount: 30,
+			}
+			.into(),
+		);
 	});
 }
 
+/// Signed and Root submissions are refused: a spend is unsigned only.
 #[test]
-fn a_same_block_commit_does_not_capture_the_transfer_fee() {
+fn a_signed_or_root_transfer_is_refused() {
+	use frame_support::traits::UnfilteredDispatchable;
 	new_test_ext().execute_with(|| {
 		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
-		let relayer = evm(0xBB);
-		crate::mock::mock_register_relayer(acc(8), relayer);
 		let req = request([0xC8, 0xD8]);
-		commit(relayer, &req.op_hash());
-
-		assert_ok!(PrivateTransferOperation::execute::<Test>(&proof(), req));
-		assert_eq!(crate::mock::mock_pending_fees_get(acc(8), 0), 0);
-		assert_eq!(crate::mock::mock_pending_fees_get(acc(1), 0), 30);
+		for origin in [
+			crate::mock::RuntimeOrigin::signed(acc(2)),
+			crate::mock::RuntimeOrigin::root(),
+		] {
+			assert_noop!(
+				transfer_call(&req).dispatch_bypass_filter(origin),
+				sp_runtime::traits::BadOrigin
+			);
+		}
 	});
 }
 

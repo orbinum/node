@@ -28,7 +28,7 @@ Orbinum combines the transparency benefits of blockchain technology with advance
 
 Orbinum is built using Substrate's FRAME framework and implements Clean Architecture principles across all components:
 
-- **Pallets**: Modular runtime components (`pallet-shielded-pool`, `pallet-zk-verifier`, `pallet-relayer`)
+- **Pallets**: Modular runtime components (`pallet-shielded-pool`, `pallet-zk-verifier`, `pallet-validator-set`)
 - **Primitives**: Core cryptographic libraries (`zk-core`, `zk-verifier`)
 - **Client**: RPC layer and blockchain infrastructure
 - **Circuits**: Circom zero-knowledge circuits (`transfer`, `unshield`)

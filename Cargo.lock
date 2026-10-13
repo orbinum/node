@@ -5577,9 +5577,6 @@ dependencies = [
  "libsecp256k1",
  "log",
  "pallet-evm",
- "pallet-evm-precompile-shielded-pool",
- "pallet-relayer-runtime-api",
- "pallet-shielded-pool-runtime-api",
  "parity-scale-codec",
  "prometheus",
  "rand 0.9.5",
@@ -9911,7 +9908,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orbinum-node"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "clap",
@@ -9933,18 +9930,13 @@ dependencies = [
  "frame-system",
  "frame-system-rpc-runtime-api",
  "futures",
- "hex",
  "jsonrpsee",
- "libsecp256k1",
  "log",
  "orbinum-runtime",
  "orbinum-zk-core",
  "orbinum-zk-verifier",
  "pallet-ismp-rpc",
  "pallet-ismp-runtime-api",
- "pallet-relayer",
- "pallet-relayer-rpc",
- "pallet-relayer-runtime-api",
  "pallet-shielded-pool-runtime-api",
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc",
@@ -9981,7 +9973,6 @@ dependencies = [
  "sp-core",
  "sp-inherents",
  "sp-io",
- "sp-keystore",
  "sp-offchain",
  "sp-runtime",
  "sp-session",
@@ -9996,7 +9987,7 @@ dependencies = [
 
 [[package]]
 name = "orbinum-runtime"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "ethereum",
@@ -10037,8 +10028,6 @@ dependencies = [
  "pallet-ismp",
  "pallet-ismp-messaging",
  "pallet-ismp-runtime-api",
- "pallet-relayer",
- "pallet-relayer-runtime-api",
  "pallet-session",
  "pallet-shielded-pool",
  "pallet-shielded-pool-runtime-api",
@@ -11343,14 +11332,13 @@ dependencies = [
 
 [[package]]
 name = "pallet-evm-precompile-shielded-pool"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "fp-evm",
  "frame-support",
  "frame-system",
  "pallet-balances",
  "pallet-evm",
- "pallet-relayer",
  "pallet-shielded-pool",
  "pallet-timestamp",
  "pallet-zk-verifier",
@@ -12121,49 +12109,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallet-relayer"
-version = "0.6.0"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "libsecp256k1",
- "pallet-validator-set",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
-name = "pallet-relayer-rpc"
-version = "0.1.0"
-dependencies = [
- "hex",
- "jsonrpsee",
- "pallet-relayer-runtime-api",
- "serde",
- "sp-api",
- "sp-blockchain",
- "sp-core",
- "sp-runtime",
-]
-
-[[package]]
-name = "pallet-relayer-runtime-api"
-version = "0.2.0"
-dependencies = [
- "parity-scale-codec",
- "scale-info",
- "sp-api",
- "sp-core",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
 name = "pallet-remark"
 version = "49.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12412,7 +12357,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-shielded-pool"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.5.0",
@@ -12423,7 +12368,6 @@ dependencies = [
  "orbinum-zk-core",
  "orbinum-zk-verifier",
  "pallet-balances",
- "pallet-relayer",
  "pallet-zk-verifier",
  "parity-scale-codec",
  "scale-info",
@@ -12435,15 +12379,12 @@ dependencies = [
 
 [[package]]
 name = "pallet-shielded-pool-runtime-api"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "pallet-shielded-pool",
- "parity-scale-codec",
- "scale-info",
  "sp-api",
  "sp-core",
  "sp-runtime",
- "sp-std",
 ]
 
 [[package]]
@@ -12802,7 +12743,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-validator-set"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "frame-benchmarking",

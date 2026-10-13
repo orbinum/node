@@ -37,7 +37,7 @@ use frame_support::weights::constants::RocksDbWeight as RuntimeDbWeight;
 use frame_support::{
 	genesis_builder_helper::build_state,
 	parameter_types,
-	traits::{ConstBool, ConstU32, ConstU64, ConstU8, FindAuthor, OnFinalize, OnTimestampSet},
+	traits::{ConstBool, ConstU32, ConstU64, ConstU8, OnFinalize, OnTimestampSet},
 	weights::{constants::WEIGHT_REF_TIME_PER_MILLIS, IdentityFee, Weight},
 	PalletId,
 };
@@ -49,10 +49,7 @@ use scale_codec::{Decode, Encode};
 use sp_api::impl_runtime_apis;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_consensus_grandpa::{AuthorityId as GrandpaId, AuthorityList as GrandpaAuthorityList};
-use sp_core::{
-	crypto::{ByteArray, KeyTypeId},
-	ConstU128, OpaqueMetadata, H160, H256, U256,
-};
+use sp_core::{crypto::KeyTypeId, ConstU128, OpaqueMetadata, H160, H256, U256};
 use sp_genesis_builder::PresetId;
 use sp_runtime::{
 	generic, impl_opaque_keys,
@@ -61,7 +58,7 @@ use sp_runtime::{
 		NumberFor, OpaqueKeys, PostDispatchInfoOf, UniqueSaturatedInto,
 	},
 	transaction_validity::{TransactionSource, TransactionValidity, TransactionValidityError},
-	ApplyExtrinsicResult, ConsensusEngineId, ExtrinsicInclusionMode, Perbill, Permill,
+	ApplyExtrinsicResult, ExtrinsicInclusionMode, Perbill, Permill,
 };
 use sp_version::RuntimeVersion;
 
@@ -120,7 +117,11 @@ pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 
 /// Runs on upgrade, oldest first. Drop an entry once every live chain has passed its
 /// version: a migration that can no longer run could be re-armed by mistake.
-pub type Migrations = (migrations::MoveAuraKeyRelayFees,);
+pub type Migrations = (
+	migrations::RelayerFeesToPool,
+	migrations::RemoveRelayerPallet,
+	migrations::MoveStrandedEvmTips,
+);
 
 pub type Executive = frame_executive::Executive<
 	Runtime,
@@ -164,7 +165,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_version: 19,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
-	transaction_version: 6,
+	transaction_version: 7,
 	system_version: 1,
 };
 
@@ -308,8 +309,7 @@ mod runtime {
 	#[runtime::pallet_index(15)]
 	pub type Authorship = pallet_authorship;
 
-	#[runtime::pallet_index(16)]
-	pub type Relayer = pallet_relayer;
+	// Index 16 is retired (`pallet_relayer`, removed in spec 19). Do not reassign.
 
 	#[runtime::pallet_index(17)]
 	pub type ValidatorSet = pallet_validator_set;
@@ -423,7 +423,6 @@ mod benches {
 		[pallet_evm_precompile_sha3fips, EVMPrecompileSha3FIPSBench::<Runtime>]
 		[pallet_zk_verifier, ZkVerifier]
 		[pallet_shielded_pool, ShieldedPool]
-		[pallet_relayer, Relayer]
 		[pallet_validator_set, ValidatorSet]
 		[ismp_grandpa, IsmpGrandpa]
 		[pallet_ismp_messaging, IsmpMessaging]
@@ -926,7 +925,7 @@ impl_runtime_apis! {
 	}
 
 	// ShieldedPool Runtime API implementation
-	#[api_version(4)]
+	#[api_version(5)]
 	impl pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi<Block> for Runtime {
 		fn get_merkle_tree_info() -> (pallet_shielded_pool::Hash, u32, u32) {
 			ShieldedPool::get_merkle_tree_info()
@@ -958,38 +957,6 @@ impl_runtime_apis! {
 			ShieldedPool::get_subtree_roots(tree_id, start, count)
 		}
 
-		fn relay_config() -> pallet_shielded_pool_runtime_api::RelayConfig {
-			use pallet_relayer::RelayerInterface;
-			let min_fee_planck = pallet_relayer::Pallet::<Runtime>::min_relay_fee();
-			// Fallback selectors for day-0 operation: when the chain launches the
-			// AllowedSelectors storage is empty, so we return the canonical defaults
-			// (unshield + privateTransfer) derived from keccak256(sig)[0..4].
-			// Once governance calls `set_allowed_selectors`, the stored list takes
-			// precedence and these hardcoded values are never reached again.
-			let allowed_selectors = {
-				let stored = pallet_relayer::Pallet::<Runtime>::allowed_selectors();
-				if stored.is_empty() {
-					// Taken from the precompile itself rather than copied: a
-					// literal here that drifts from the decoder fails silently,
-					// since a wrong selector is simply "unsupported".
-					sp_std::vec![
-						pallet_evm_precompile_shielded_pool::selectors::UNSHIELD,
-						pallet_evm_precompile_shielded_pool::selectors::PRIVATE_TRANSFER,
-					]
-				} else {
-					stored
-				}
-			};
-			pallet_shielded_pool_runtime_api::RelayConfig { min_fee_planck, allowed_selectors }
-		}
-
-		fn relay_commit_hash(calldata: Vec<u8>, relayer: [u8; 20]) -> Option<[u8; 32]> {
-			// Same decoder the precompile runs and same hash the extrinsic computes,
-			// so the commit a node records is the one the spend will look up.
-			let call = pallet_evm_precompile_shielded_pool::decode_relayable_call::<Runtime>(&calldata)?;
-			let op_hash = pallet_shielded_pool::operations::fees::relay_op_hash::<Runtime>(&call)?;
-			Some(pallet_relayer::relay_commit_hash(&op_hash, &sp_core::H160(relayer)).0)
-		}
 	}
 
 	impl pallet_zk_verifier_runtime_api::ZkVerifierRuntimeApi<Block> for Runtime {
@@ -1068,44 +1035,6 @@ impl_runtime_apis! {
 
 		fn hyperbridge_slot_duration() -> u64 {
 			configs::ismp::network::HYPERBRIDGE_SLOT_DURATION_MS
-		}
-	}
-
-	impl pallet_relayer_runtime_api::RelayerRuntimeApi<Block> for Runtime {
-		fn is_relayer(account: sp_runtime::AccountId32) -> bool {
-			pallet_relayer::RelayerByAccount::<Runtime>::contains_key(&account)
-		}
-
-		fn pending_fees(account: sp_runtime::AccountId32, asset_id: u32) -> u128 {
-			pallet_relayer::PendingRelayerFees::<Runtime>::get(&account, asset_id)
-		}
-
-		fn registered_evm_address(account: sp_runtime::AccountId32) -> Option<[u8; 20]> {
-			pallet_relayer::RelayerByAccount::<Runtime>::get(&account).map(|h| h.0)
-		}
-
-		fn get_active_relayers() -> sp_std::vec::Vec<([u8; 20], sp_runtime::AccountId32)> {
-			// Capped: this iterates a map with no inherent bound, and a runtime
-			// API runs inside the caller's block/RPC budget. Registration is
-			// gated on the validator set, so the live count cannot exceed
-			// `MaxValidators` — the cap is headroom against a future path that
-			// registers without that gate, not against today's storage.
-			const MAX_RELAYERS_RETURNED: usize = 256;
-			pallet_relayer::RelayerRegistry::<Runtime>::iter()
-				.take(MAX_RELAYERS_RETURNED)
-				.map(|(h160, account)| (h160.0, account))
-				.collect()
-		}
-
-		fn is_relayer_evm(evm_address: [u8; 20]) -> bool {
-			pallet_relayer::RelayerRegistry::<Runtime>::contains_key(
-				sp_core::H160::from(evm_address),
-			)
-		}
-
-		fn relay_commit_block(commit: [u8; 32]) -> Option<u32> {
-			pallet_relayer::RelayCommits::<Runtime>::get(sp_core::H256(commit))
-				.map(|c| c.recorded_at)
 		}
 	}
 

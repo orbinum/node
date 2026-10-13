@@ -180,7 +180,7 @@ pub mod pallet {
 	///
 	/// Adjustable rather than constant because the right price tracks what ORB is worth,
 	/// and a constant in the WASM cannot: correcting it would otherwise cost a build and a
-	/// `setCode`. Same reasoning, and the same shape, as `pallet_relayer`'s `MinRelayFee`.
+	/// `setCode`.
 	#[pallet::storage]
 	pub type MessageFee<T: Config> =
 		StorageValue<_, <T as pallet_ismp::Config>::Balance, ValueQuery, DefaultMessageFeeValue<T>>;

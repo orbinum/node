@@ -1,8 +1,7 @@
-//! `UnshieldOperation`: validation, settlement, the ledger and relay-fee routing.
+//! `UnshieldOperation`: validation, settlement, the ledger and fee crediting.
 
 use super::{
-	KNOWN_ROOT, canonical_bytes, commit, evm, fund_pool, memo, nullifier, proof, register_asset,
-	setup_asset,
+	KNOWN_ROOT, canonical_bytes, fund_pool, memo, nullifier, proof, register_asset, setup_asset,
 };
 use crate::{
 	mock::{System, Test, acc, new_test_ext},
@@ -368,7 +367,7 @@ fn execute_emits_unshielded_event() {
 }
 
 #[test]
-fn execute_accumulates_relay_fee_to_block_author() {
+fn execute_credits_the_fee_to_the_block_author() {
 	new_test_ext().execute_with(|| {
 		let asset_id = setup_asset();
 		let amount = 500u128;
@@ -391,9 +390,16 @@ fn execute_accumulates_relay_fee_to_block_author() {
 			},
 		));
 
-		// MockRelayer block_author returns Some(1); fee should be accumulated there
-		let pending = crate::mock::mock_pending_fees_get(acc(1), asset_id);
-		assert_eq!(pending, fee);
+		// The mock's block author is acc(1).
+		assert_eq!(crate::mock::mock_pending_fees_get(acc(1), asset_id), fee);
+		System::assert_has_event(
+			PalletEvent::FeeCredited {
+				validator: acc(1),
+				asset_id,
+				amount: fee,
+			}
+			.into(),
+		);
 	});
 }
 
@@ -566,7 +572,7 @@ fn is_merkle_root_known_returns_correct_values() {
 
 // ── ledger-solvency invariant ────────────────────────────────────────────────
 // PoolBalancePerAsset[a] == Currency::free_balance(pool) for the native asset.
-// A spend's fee stays in the pool until the relayer claims it, so the tracked
+// A spend's fee stays in the pool until the validator claims it, so the tracked
 // and physical balances always move together.
 
 fn pool_physical() -> u128 {
@@ -661,7 +667,7 @@ fn unshield_guard_requires_amount_plus_fee() {
 }
 
 /// The full fee lifecycle keeps ledger == physical at every step:
-/// shield → unshield(with fee) → claim_relay_fees (fee paid out publicly).
+/// shield → unshield(with fee) → claim_fees (fee paid out publicly).
 #[test]
 fn fee_lifecycle_preserves_ledger_invariant() {
 	use crate::operations::{
@@ -713,44 +719,18 @@ fn fee_lifecycle_preserves_ledger_invariant() {
 		assert_eq!(crate::mock::mock_pending_fees_get(acc(1), asset_id), 50);
 
 		// Step 3: claim the 50 fee publicly. Ledger and physical both −50.
-		assert_ok!(FeeOperation::claim::<Test>(
-			acc(1),
-			acc(3),
-			asset_id,
-			50u128
-		));
+		assert_ok!(FeeOperation::claim::<Test>(acc(1), asset_id, 50u128));
 		assert_eq!(tracked(asset_id), 250);
 		assert_eq!(tracked(asset_id), pool_physical());
 		assert_eq!(crate::mock::mock_pending_fees_get(acc(1), asset_id), 0);
 	});
 }
 
-// ── relay-fee attribution (relay commits) ────────────────────────────────────
-// The fee follows the relay commit, never the submitter: a copy of a spend
-// submitted by anyone still credits the relayer that committed to it.
-
-fn block_author() -> sp_runtime::AccountId32 {
-	acc(1)
-}
+// ── fee crediting through the extrinsic ──────────────────────────────────────
+// The fee goes to the block author; the spend itself names no account.
 
 const AMOUNT: u128 = 500;
 const FEE: u128 = 50;
-
-fn spend_hash(seed: u8, asset_id: u32) -> [u8; 32] {
-	UnshieldRequest::<Test> {
-		merkle_root: KNOWN_ROOT,
-		nullifier: nullifier(seed),
-		asset_id,
-		amount: AMOUNT,
-		recipient: acc(2),
-		fee: FEE,
-		change_commitment: [0u8; 32],
-		change_memo: EncryptedMemo::default(),
-		circuit_version: 1,
-	}
-	.op_hash()
-	.unwrap()
-}
 
 fn unshield_call(seed: u8, asset_id: u32) -> crate::Call<Test> {
 	crate::Call::<Test>::unshield {
@@ -774,134 +754,42 @@ fn setup_spend() -> u32 {
 	asset_id
 }
 
-/// The relayer that committed in an earlier block receives the fee.
 #[test]
-fn unshield_fee_lands_at_the_committed_relayer() {
-	new_test_ext().execute_with(|| {
-		let asset_id = setup_spend();
-		crate::mock::mock_register_relayer(acc(7), evm(0xAA));
-		commit(evm(0xAA), &spend_hash(0x51, asset_id));
-		System::set_block_number(2);
-
-		assert_ok!(UnshieldOperation::execute::<Test>(
-			&proof(),
-			UnshieldRequest {
-				merkle_root: KNOWN_ROOT,
-				nullifier: nullifier(0x51),
-				asset_id,
-				amount: AMOUNT,
-				recipient: acc(2),
-				fee: FEE,
-				change_commitment: [0u8; 32],
-				change_memo: EncryptedMemo::default(),
-				circuit_version: 1,
-			},
-		));
-
-		assert_eq!(crate::mock::mock_pending_fees_get(acc(7), asset_id), FEE);
-		assert_eq!(
-			crate::mock::mock_pending_fees_get(block_author(), asset_id),
-			0
-		);
-	});
-}
-
-/// Another relayer copies the spend and submits it under its own key:
-/// the fee still goes to the relayer that committed.
-#[test]
-fn a_copied_spend_still_credits_the_committed_relayer() {
+fn an_unsigned_unshield_credits_the_block_author() {
 	use frame_support::traits::UnfilteredDispatchable;
 	new_test_ext().execute_with(|| {
 		let asset_id = setup_spend();
-		crate::mock::mock_register_relayer(acc(7), evm(0xAA));
-		crate::mock::mock_register_relayer(acc(8), evm(0xBB));
-		commit(evm(0xAA), &spend_hash(0x52, asset_id));
-		System::set_block_number(2);
+		crate::mock::BlockAuthorAccount::set(Some(acc(7)));
 
 		assert_ok!(
-			unshield_call(0x52, asset_id)
-				.dispatch_bypass_filter(crate::RawOrigin::Relayed(evm(0xBB)).into())
+			unshield_call(0x51, asset_id)
+				.dispatch_bypass_filter(crate::mock::RuntimeOrigin::none())
 		);
 
 		assert_eq!(crate::mock::mock_pending_fees_get(acc(7), asset_id), FEE);
-		assert_eq!(crate::mock::mock_pending_fees_get(acc(8), asset_id), 0);
+		assert_eq!(crate::mock::mock_pending_fees_get(acc(1), asset_id), 0);
 	});
 }
 
-/// A commit placed in the same block as the spend is ignored, so an
-/// author cannot commit after seeing a spend and include both.
+/// Signed and Root submissions are refused: a spend is unsigned only.
 #[test]
-fn a_same_block_commit_does_not_capture_the_fee() {
+fn a_signed_or_root_unshield_is_refused() {
 	use frame_support::traits::UnfilteredDispatchable;
 	new_test_ext().execute_with(|| {
 		let asset_id = setup_spend();
-		crate::mock::mock_register_relayer(acc(8), evm(0xBB));
-		commit(evm(0xBB), &spend_hash(0x53, asset_id));
-
-		assert_ok!(
-			unshield_call(0x53, asset_id)
-				.dispatch_bypass_filter(crate::RawOrigin::Relayed(evm(0xBB)).into())
-		);
-
-		assert_eq!(crate::mock::mock_pending_fees_get(acc(8), asset_id), 0);
-		assert_eq!(
-			crate::mock::mock_pending_fees_get(block_author(), asset_id),
-			FEE
-		);
+		for origin in [
+			crate::mock::RuntimeOrigin::signed(acc(2)),
+			crate::mock::RuntimeOrigin::root(),
+		] {
+			assert_noop!(
+				unshield_call(0x52, asset_id).dispatch_bypass_filter(origin),
+				sp_runtime::traits::BadOrigin
+			);
+		}
 	});
 }
 
-/// With no commit, the fee goes to the block author, whoever submits.
-#[test]
-fn an_uncommitted_spend_pays_the_block_author() {
-	use frame_support::traits::UnfilteredDispatchable;
-	new_test_ext().execute_with(|| {
-		let asset_id = setup_spend();
-		crate::mock::mock_register_relayer(acc(8), evm(0xBB));
-
-		assert_ok!(
-			unshield_call(0x54, asset_id)
-				.dispatch_bypass_filter(crate::RawOrigin::Relayed(evm(0xBB)).into())
-		);
-
-		assert_eq!(crate::mock::mock_pending_fees_get(acc(8), asset_id), 0);
-		assert_eq!(
-			crate::mock::mock_pending_fees_get(block_author(), asset_id),
-			FEE
-		);
-	});
-}
-
-/// A commit covers one exact spend: a different spend of the same note
-/// (here, another fee) is not credited to it.
-#[test]
-fn a_commit_does_not_cover_a_different_spend_of_the_same_note() {
-	new_test_ext().execute_with(|| {
-		let asset_id = setup_spend();
-		crate::mock::mock_register_relayer(acc(7), evm(0xAA));
-		commit(evm(0xAA), &spend_hash(0x55, asset_id));
-		System::set_block_number(2);
-
-		assert_ok!(UnshieldOperation::execute::<Test>(
-			&proof(),
-			UnshieldRequest {
-				merkle_root: KNOWN_ROOT,
-				nullifier: nullifier(0x55),
-				asset_id,
-				amount: AMOUNT - 10,
-				recipient: acc(2),
-				fee: FEE + 10,
-				change_commitment: [0u8; 32],
-				change_memo: EncryptedMemo::default(),
-				circuit_version: 1,
-			},
-		));
-
-		assert_eq!(crate::mock::mock_pending_fees_get(acc(7), asset_id), 0);
-	});
-}
-
-/// A non-zero fee with no resolvable recipient (no relayer, no block author)
+/// A non-zero fee with no block author
 /// errors instead of stranding the fee tokens in the pool.
 #[test]
 fn unshield_nonzero_fee_without_recipient_errors() {

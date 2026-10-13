@@ -1,6 +1,6 @@
 //! Bounds- and overflow-checked arithmetic over attacker-chosen calldata.
 //!
-//! Offsets, lengths and counts all come from calldata, so every `+`/`*` on them
+//! Offsets and lengths come from calldata, so every `+` on them
 //! is checked: release builds do not enable `overflow-checks`, and a wrapped sum
 //! passes the very bounds check meant to reject it. This module is the only place
 //! that arithmetic lives, and the only place that reads a 256-bit word as a `usize`.
@@ -17,15 +17,6 @@ pub(super) fn checked_add(
 	what: &'static str,
 ) -> Result<usize, PrecompileFailure> {
 	a.checked_add(b).ok_or_else(|| revert(what))
-}
-
-/// Checked `a * b`, mapping overflow to an ABI error labelled `what`.
-pub(super) fn checked_mul(
-	a: usize,
-	b: usize,
-	what: &'static str,
-) -> Result<usize, PrecompileFailure> {
-	a.checked_mul(b).ok_or_else(|| revert(what))
 }
 
 /// The range `start..start + span`, verified to fit inside a buffer of `params_len`

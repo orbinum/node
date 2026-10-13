@@ -12,7 +12,6 @@ use frame_support::{
 	pallet_prelude::*,
 	traits::{Currency, ExistenceRequirement},
 };
-use pallet_relayer::RelayerInterface as _;
 use pallet_zk_verifier::{UnshieldStatement, ZkVerifierPort as _};
 use sp_runtime::{SaturatedConversion, traits::Zero};
 
@@ -26,7 +25,7 @@ pub struct UnshieldRequest<T: Config> {
 	/// Net amount the recipient receives.
 	pub amount: BalanceOf<T>,
 	pub recipient: T::AccountId,
-	/// Relay fee, paid on top of `amount` from the spent note.
+	/// Spend fee, paid on top of `amount` from the spent note.
 	pub fee: BalanceOf<T>,
 	/// Zero for a total unshield.
 	pub change_commitment: [u8; 32],
@@ -54,14 +53,6 @@ impl<T: Config> UnshieldRequest<T> {
 			memo_digest: statement::memo_digest(core::slice::from_ref(&self.change_memo)),
 		})
 	}
-
-	/// The identity a relayer commits to (see [`fees::unshield_op_hash`]).
-	pub fn op_hash(&self) -> Result<[u8; 32], Error<T>> {
-		Ok(fees::unshield_op_hash(
-			&self.statement()?,
-			self.circuit_version,
-		))
-	}
 }
 
 pub struct UnshieldOperation;
@@ -76,8 +67,7 @@ impl UnshieldOperation {
 
 		let change_leaf_index = Self::settle(&req)?;
 		if !req.fee.is_zero() {
-			let op_hash = fees::unshield_op_hash(&statement, req.circuit_version);
-			fees::credit_relay_fee::<T>(&op_hash, req.asset_id, req.fee.saturated_into())?;
+			fees::credit_fee::<T>(req.asset_id, req.fee.saturated_into())?;
 		}
 
 		let has_change = req.has_change();
@@ -97,7 +87,7 @@ impl UnshieldOperation {
 	/// verified; it maps each error to a rejection code.
 	pub(crate) fn validate<T: Config>(req: &UnshieldRequest<T>) -> Result<(), Error<T>> {
 		ensure!(
-			req.fee >= T::Relayer::min_relay_fee().saturated_into(),
+			req.fee >= T::MinSpendFee::get().saturated_into(),
 			Error::<T>::FeeTooLow
 		);
 		ensure!(
@@ -161,7 +151,7 @@ impl UnshieldOperation {
 			ExistenceRequirement::AllowDeath,
 		)?;
 		// Only `amount` leaves the pool: the fee stays as backing for the
-		// relayer's pending fee until it is claimed. Sound only because
+		// block author's pending fee until it is claimed. Sound only because
 		// `validate` required a balance of `amount + fee`.
 		PoolBalanceRepository::decrease_balance::<T>(req.asset_id, req.amount);
 
