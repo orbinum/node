@@ -10,7 +10,7 @@
 //! Step 2 IS the dispatchable's validation, so admission can never reject less
 //! than execution. Its checks run cheapest first — shape, fee floor, root,
 //! nullifiers, memos, then the rest — and each failure maps to the rejection a
-//! wallet or relayer can act on (see [`admission_error`]).
+//! wallet can act on (see [`admission_error`]).
 
 use super::{
 	TX_LONGEVITY,

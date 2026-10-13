@@ -1,6 +1,6 @@
 [package]
 name = "pallet-shielded-pool"
-version = "0.24.0"
+version = "0.25.0"
 description = "Shielded pool pallet for private transactions using ZK proofs"
 authors = ["Orbinum Team"]
 license = "GPL-3.0-or-later"
@@ -33,7 +33,6 @@ frame-system = { version = "48.0.0", default-features = false }
 # Local dependencies
 orbinum-zk-core = { path = "../../primitives/zk-core", default-features = false }
 orbinum-zk-verifier = { path = "../../primitives/zk-verifier", default-features = false }
-pallet-relayer = { path = "../relayer", default-features = false }
 pallet-zk-verifier = { path = "../zk-verifier", default-features = false }
 
 # Arkworks dependencies (required for Poseidon hashing)
@@ -61,7 +60,6 @@ std = [
 	"frame-support/std",
 	"frame-system/std",
 	"frame-benchmarking?/std",
-	"pallet-relayer/std",
 	"orbinum-zk-verifier/std",
 	"orbinum-zk-core/std",
 	"pallet-zk-verifier/std",
@@ -75,12 +73,10 @@ runtime-benchmarks = [
 	"frame-benchmarking/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
-	"pallet-relayer/runtime-benchmarks",
 	"pallet-zk-verifier/runtime-benchmarks",
 ]
 skip-proof-verification = ["pallet-zk-verifier/skip-proof-verification"]
 try-runtime = [
 	"frame-support/try-runtime",
 	"frame-system/try-runtime",
-	"pallet-relayer/try-runtime",
 ]

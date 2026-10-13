@@ -1,6 +1,6 @@
-//! Dynamic ABI decoders: `bytes`, `bytes32[]`, `bytes[]`.
+//! Dynamic ABI decoder: `bytes`.
 //!
-//! Each reads an offset pointer from the head, then a length/count word at that
+//! Reads an offset pointer from the head, then a length word at that
 //! offset, then the data region — every step bounds-checked through [`super::guard`].
 
 use alloc::vec::Vec;
@@ -8,8 +8,7 @@ use alloc::vec::Vec;
 use fp_evm::PrecompileFailure;
 use sp_core::U256;
 
-use super::guard::{checked_add, checked_mul, checked_range, word_to_usize};
-use crate::revert;
+use super::guard::{checked_add, checked_range, word_to_usize};
 
 /// Decodes a dynamic `bytes` value.
 ///
@@ -25,81 +24,6 @@ pub fn decode_bytes_at_slot(
 	let data_start = checked_add(offset, 32, "bytes offset overflows")?;
 	let range = checked_range(data_start, length, params.len(), "bytes data")?;
 	Ok(params[range].to_vec())
-}
-
-/// Decodes a `bytes32[]` of at most `max_count` items whose offset pointer lives
-/// at `slot_start` in `params`.
-pub fn decode_bytes32_array_at_slot(
-	params: &[u8],
-	slot_start: usize,
-	max_count: usize,
-) -> Result<Vec<[u8; 32]>, PrecompileFailure> {
-	let offset = read_offset(params, slot_start)?;
-	let count = read_length(params, offset)?;
-	if count > max_count {
-		return Err(revert("bytes32[] has too many items"));
-	}
-	let data_start = checked_add(offset, 32, "bytes32[] offset overflows")?;
-	// `count * 32` is the whole span. Bounds-checking it here rejects an oversized
-	// array before `with_capacity` reserves for a count that comes from calldata.
-	let span = checked_mul(count, 32, "bytes32[] count overflows")?;
-	let range = checked_range(data_start, span, params.len(), "bytes32[]")?;
-	let data_start = range.start;
-	let mut items = Vec::with_capacity(count);
-	for i in 0..count {
-		let s = data_start + i * 32; // bounded by the checked span above
-		let elem: [u8; 32] = params[s..s + 32]
-			.try_into()
-			.map_err(|_| revert("bytes32[] element copy failed"))?;
-		items.push(elem);
-	}
-	Ok(items)
-}
-
-/// Decodes a `bytes[]` of at most `max_count` items of at most `max_len` bytes
-/// each, whose offset pointer lives at `slot_start` in `params`.
-///
-/// Both bounds are checked before anything is copied. Element pointers may all
-/// point at the same data, so without them `count × length` bytes — quadratic in
-/// the calldata — would be allocated before any gas is charged.
-pub fn decode_bytes_array_at_slot(
-	params: &[u8],
-	slot_start: usize,
-	max_count: usize,
-	max_len: usize,
-) -> Result<Vec<Vec<u8>>, PrecompileFailure> {
-	let array_offset = read_offset(params, slot_start)?;
-	let count = read_length(params, array_offset)?;
-	if count > max_count {
-		return Err(revert("bytes[] has too many items"));
-	}
-	// Each element has a relative offset pointer from the start of the array-data
-	// region (= array_offset + 32, right after the length word).
-	let data_base = checked_add(array_offset, 32, "bytes[] offset overflows")?;
-
-	// Each element needs a 32-byte pointer. Bounds-checking the pointer table here
-	// keeps a declared count of 2^30 from reserving gigabytes in `with_capacity`
-	// on input that could never decode.
-	let pointers = checked_mul(count, 32, "bytes[] count overflows")?;
-	checked_range(data_base, pointers, params.len(), "bytes[] pointer table")?;
-
-	let mut result = Vec::with_capacity(count);
-	for i in 0..count {
-		let rel_offset_pos = data_base + i * 32; // bounded by the pointer table above
-		let rel_offset = word_to_usize(
-			U256::from_big_endian(&params[rel_offset_pos..rel_offset_pos + 32]),
-			"bytes[] element offset does not fit in usize",
-		)?;
-		let abs_offset = checked_add(data_base, rel_offset, "bytes[] element offset overflows")?;
-		let elem_len = read_length(params, abs_offset)?;
-		if elem_len > max_len {
-			return Err(revert("bytes[] item is too long"));
-		}
-		let elem_start = checked_add(abs_offset, 32, "bytes[] element start overflows")?;
-		let range = checked_range(elem_start, elem_len, params.len(), "bytes[] element data")?;
-		result.push(params[range].to_vec());
-	}
-	Ok(result)
 }
 
 /// Reads an ABI offset from a 32-byte slot at `slot_start` in `params`.
@@ -178,29 +102,6 @@ mod tests {
 		assert!(decode_bytes_at_slot(&params, 0).is_err());
 	}
 
-	/// `count * 32` wraps the same way. 2^59 elements multiplies past usize on a
-	/// 64-bit host and lands back inside the buffer.
-	#[test]
-	fn an_element_count_that_would_wrap_is_refused() {
-		let mut params = word(U256::from(32u64)).to_vec();
-		params.extend_from_slice(&word(U256::from(1u64 << 59)));
-		params.resize(256, 0);
-
-		assert!(decode_bytes32_array_at_slot(&params, 0, usize::MAX).is_err());
-	}
-
-	/// An element count far past what the buffer can hold must be refused
-	/// *before* `Vec::with_capacity` reserves for it.
-	#[test]
-	fn an_element_count_larger_than_the_buffer_is_refused_early() {
-		let mut params = word(U256::from(32u64)).to_vec();
-		params.extend_from_slice(&word(U256::from(1u64 << 30))); // ~1e9 elements
-		params.resize(256, 0);
-
-		assert!(decode_bytes_array_at_slot(&params, 0, usize::MAX, usize::MAX).is_err());
-		assert!(decode_bytes32_array_at_slot(&params, 0, usize::MAX).is_err());
-	}
-
 	// ─── Well-formed input still decodes ─────────────────────────────────────
 
 	/// The guards must not reject real calldata, or they trade one bug for a
@@ -214,32 +115,5 @@ mod tests {
 		params.resize(96, 0); // pad to a 32-byte boundary
 
 		assert_eq!(decode_bytes_at_slot(&params, 0).unwrap(), payload.to_vec());
-	}
-
-	#[test]
-	fn a_well_formed_bytes32_array_still_decodes() {
-		let mut params = word(U256::from(32u64)).to_vec(); // offset
-		params.extend_from_slice(&word(U256::from(2u64))); // count
-		params.extend_from_slice(&[0x11u8; 32]);
-		params.extend_from_slice(&[0x22u8; 32]);
-
-		let out = decode_bytes32_array_at_slot(&params, 0, usize::MAX).unwrap();
-		assert_eq!(out, alloc::vec![[0x11u8; 32], [0x22u8; 32]]);
-	}
-
-	/// An empty dynamic array is valid ABI and must survive the count checks.
-	#[test]
-	fn an_empty_array_still_decodes() {
-		let mut params = word(U256::from(32u64)).to_vec();
-		params.extend_from_slice(&word(U256::zero()));
-
-		assert!(decode_bytes32_array_at_slot(&params, 0, usize::MAX)
-			.unwrap()
-			.is_empty());
-		assert!(
-			decode_bytes_array_at_slot(&params, 0, usize::MAX, usize::MAX)
-				.unwrap()
-				.is_empty()
-		);
 	}
 }

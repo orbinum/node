@@ -10,7 +10,6 @@ use crate::{
 use frame_support::{
 	BoundedVec, CloneNoBound, DebugNoBound, EqNoBound, PartialEqNoBound, pallet_prelude::*,
 };
-use pallet_relayer::RelayerInterface as _;
 use pallet_zk_verifier::{TransferStatement, ZkVerifierPort as _};
 use sp_runtime::{SaturatedConversion, traits::Zero};
 
@@ -46,11 +45,6 @@ impl<T: Config> TransferRequest<T> {
 			fee: self.fee.saturated_into(),
 			memo_digest: statement::memo_digest(&self.memos),
 		}
-	}
-
-	/// The identity a relayer commits to (see [`fees::transfer_op_hash`]).
-	pub fn op_hash(&self) -> [u8; 32] {
-		fees::transfer_op_hash(&self.statement(), self.circuit_version)
 	}
 
 	/// The inputs that spend a real note: every nullifier but the zero dummy.
@@ -90,8 +84,7 @@ impl PrivateTransferOperation {
 
 		let leaf_indices = Self::settle(&req)?;
 		if !req.fee.is_zero() {
-			let op_hash = fees::transfer_op_hash(&statement, req.circuit_version);
-			fees::credit_relay_fee::<T>(&op_hash, req.asset_id, req.fee.saturated_into())?;
+			fees::credit_fee::<T>(req.asset_id, req.fee.saturated_into())?;
 		}
 
 		Pallet::<T>::deposit_event(Event::NullifiersSpent {
@@ -115,7 +108,7 @@ impl PrivateTransferOperation {
 			Error::<T>::TooManyInputsOrOutputs
 		);
 		ensure!(
-			req.fee >= T::Relayer::min_relay_fee().saturated_into(),
+			req.fee >= T::MinSpendFee::get().saturated_into(),
 			Error::<T>::FeeTooLow
 		);
 		req.ensure_roots()?;

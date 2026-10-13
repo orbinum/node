@@ -1,16 +1,13 @@
 //! Dispatch helpers for the shielded-pool precompile.
 //!
-//! Two dispatch modes mirror the pallet's extrinsic origin checks. They differ
-//! only in the origin they build; everything else — converting the pallet call to
-//! a runtime call, charging gas from its weight, mapping the dispatch result to a
-//! precompile outcome — is shared here and reached through [`record_and_dispatch`].
-//!
-//! - [`origin::from_self`] — the precompile's own address as signed origin.
-//! - [`origin::relayed`] — carries the EVM caller as the relaying address.
+//! [`origin::from_self`] builds the origin (the precompile's own address,
+//! signed); converting the pallet call to a runtime call, charging gas from its
+//! weight and mapping the dispatch result to a precompile outcome live here, in
+//! [`record_and_dispatch`].
 
 mod origin;
 
-pub use origin::{from_self, relayed};
+pub use origin::from_self;
 
 use alloc::format;
 
@@ -25,8 +22,7 @@ use crate::revert;
 type RuntimeOriginOf<T> = <<T as frame_system::Config>::RuntimeCall as Dispatchable>::RuntimeOrigin;
 
 /// Converts the pallet call to a runtime call, charges its gas, dispatches it with
-/// the origin from `build_origin`, and maps the result to a precompile outcome. Each
-/// mode in [`origin`] just builds its origin and hands it here — the rest is shared.
+/// the origin from `build_origin`, and maps the result to a precompile outcome.
 fn record_and_dispatch<T>(
 	handle: &mut impl PrecompileHandle,
 	call: pallet_shielded_pool::Call<T>,

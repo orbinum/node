@@ -17,9 +17,8 @@ use private_transfer::TransferRequest;
 use sp_std::vec::Vec;
 use unshield::UnshieldRequest;
 
-/// A spend call, unpacked. Built by everything that reads a spend from its call
-/// rather than its arguments — pool admission and relay commits — so they all
-/// see the same request the extrinsic executes.
+/// A spend call, unpacked. Pool admission builds it from the call, so it sees
+/// the same request the extrinsic executes.
 pub enum SpendRequest<T: Config> {
 	Transfer(TransferRequest<T>),
 	Unshield(UnshieldRequest<T>),

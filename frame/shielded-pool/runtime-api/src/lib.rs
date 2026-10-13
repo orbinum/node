@@ -2,31 +2,8 @@
 
 use pallet_shielded_pool::{DefaultMerklePath, Hash, SubtreeRoots};
 
-/// Configuration exposed by the runtime for the node-native EVM relay.
-///
-/// Returned by `ShieldedPoolRuntimeApi::relay_config()`. The relay reads this on every
-/// call instead of using hardcoded constants — when governance or a forkless upgrade
-/// changes the minimum relay fee or the accepted selectors, the running node picks
-/// up the new values automatically without recompilation.
-#[derive(
-	parity_scale_codec::Encode,
-	parity_scale_codec::Decode,
-	scale_info::TypeInfo,
-	Debug,
-	Clone,
-	PartialEq
-)]
-pub struct RelayConfig {
-	/// Minimum fee (in native token planck / wei) that must be embedded in the calldata.
-	/// Corresponds to `pallet_relayer`'s `min_relay_fee()` in the runtime.
-	pub min_fee_planck: u128,
-	/// ABI selectors of operations the runtime currently accepts via unsigned dispatch.
-	/// The relay uses this to validate the calldata selector whitelist.
-	pub allowed_selectors: sp_std::vec::Vec<[u8; 4]>,
-}
-
 sp_api::decl_runtime_apis! {
-	#[api_version(3)]
+	#[api_version(5)]
 	pub trait ShieldedPoolRuntimeApi {
 		/// Get the Merkle tree information (root, size, depth)
 		fn get_merkle_tree_info() -> (Hash, u32, u32);
@@ -47,24 +24,9 @@ sp_api::decl_runtime_apis! {
 		/// for the active tree. None if the leaf does not exist.
 		fn get_root_for_leaf(leaf_index: u32) -> Option<(Hash, u32)>;
 
-		/// Return relay configuration sourced from the runtime.
-		///
-		/// Called by the node-native EVM relay on every `relay_shielded_call` to obtain
-		/// the current minimum relay fee and the set of accepted selectors. This ensures
-		/// that forkless runtime upgrades are reflected immediately without restarting
-		/// or recompiling the node.
-		fn relay_config() -> RelayConfig;
-
-		/// The relay commit `relayer` must record (`commit_relay`) before relaying
-		/// `calldata`, decoded exactly as the precompile will decode it. `None` for
-		/// calldata that is not a relayable spend.
-		#[api_version(3)]
-		fn relay_commit_hash(calldata: sp_std::vec::Vec<u8>, relayer: [u8; 20]) -> Option<[u8; 32]>;
-
 		/// Up to `count` level-6 subtree roots of `tree_id` from `start`, with the
 		/// root the tree anchors to, read from one state, so a wallet can build
 		/// its own Merkle paths. None for a tree that does not exist yet.
-		#[api_version(4)]
 		fn get_subtree_roots(tree_id: u32, start: u32, count: u32) -> Option<SubtreeRoots>;
 	}
 }

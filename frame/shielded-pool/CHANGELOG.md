@@ -4,6 +4,36 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-13
+
+**Breaking** — the relayer layer is gone. Requires the matching runtime and
+`pallet-evm-precompile-shielded-pool`.
+
+### Changed
+
+- `private_transfer` and `unshield` accept only unsigned origins; signed and
+  Root fail with `BadOrigin`.
+- A spend's fee is credited to the block author's `PendingFees` (new storage,
+  same layout as `pallet_relayer::PendingRelayerFees`) with a `FeeCredited`
+  event.
+- `claim_relay_fees` (call index 19) is now `claim_fees(asset_id, amount)`:
+  signed only, pays the caller's own pending fees to the caller. Event
+  `RelayFeesClaimed` is replaced in place by `FeesClaimed`; error
+  `RelayerNotRegistered` by `InsufficientPendingFees`.
+- `Config`: `Relayer` and `EvmAccount` are replaced by `BlockAuthor` and the
+  constant `MinSpendFee` (the fee floor, formerly `pallet_relayer`'s
+  `MinRelayFee`).
+- `ShieldedPoolRuntimeApi` v5: `relay_config`, `RelayConfig` and
+  `relay_commit_hash` are removed.
+- `try_state` checks that native pending fees never exceed the pool ledger.
+
+### Removed
+
+- `commit_relay` (call index 18, retired), the `Relayed` origin
+  (`RawOrigin`/`Origin`), `ensure_spend_origin`, `ensure_relay_caller`,
+  `RelayCaller`, `MAX_RELAY_COMMITS_PER_CALL`, the relay op hashes and the
+  `pallet-relayer` dependency.
+
 ## [0.24.0] - 2026-10-09
 
 ### Added

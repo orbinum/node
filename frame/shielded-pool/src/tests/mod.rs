@@ -1,18 +1,14 @@
 //! Unit tests for the pallet's extrinsics and operations, one file per concern,
 //! and the fixtures they share.
 //!
-//! - [`origin`] — which origins may spend and call the relayer extrinsics
-//! - [`unshield`] — `UnshieldOperation`: validation, settlement, fee routing
+//! - [`unshield`] — `UnshieldOperation`: validation, settlement, fee crediting
 //! - [`private_transfer`] — `PrivateTransferOperation`: the same for transfers
-//! - [`fees`] — relay op hashes, fee crediting and `claim_relay_fees`
-//! - [`commit_relay`] — the `commit_relay` extrinsic
+//! - [`fees`] — fee crediting to the block author and `claim_fees`
 //!
 //! Lower-level modules (merkle, storage, validate_unsigned, …) keep their tests
 //! next to their code and use the fixtures below too.
 
-mod commit_relay;
 mod fees;
-mod origin;
 mod private_transfer;
 mod unshield;
 
@@ -22,9 +18,7 @@ use crate::{
 	storage::PoolBalanceRepository,
 	types::{Commitment, EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE, Nullifier},
 };
-use frame_support::{BoundedVec, assert_ok, pallet_prelude::ConstU32, traits::Currency};
-use pallet_relayer::RelayerInterface as _;
-use sp_core::H160;
+use frame_support::{BoundedVec, pallet_prelude::ConstU32, traits::Currency};
 
 /// A root the tests register as known before spending against it.
 pub(crate) const KNOWN_ROOT: [u8; 32] = [0xAA; 32];
@@ -107,10 +101,6 @@ pub(crate) fn field_twin(x: [u8; 32]) -> [u8; 32] {
 	out
 }
 
-pub(crate) fn evm(byte: u8) -> H160 {
-	H160::repeat_byte(byte)
-}
-
 /// Register an asset without verifying it, returning its id.
 pub(crate) fn register_asset() -> u32 {
 	let name = BoundedVec::try_from(b"Orbinum".to_vec()).unwrap();
@@ -127,12 +117,4 @@ pub(crate) fn setup_asset() -> u32 {
 pub(crate) fn fund_pool(asset_id: u32, amount: u128) {
 	Balances::make_free_balance_be(&crate::Pallet::<Test>::pool_account_id(), amount);
 	PoolBalanceRepository::set_asset_balance::<Test>(asset_id, amount);
-}
-
-/// Record `relayer`'s relay commit for `op_hash`, as `commit_relay` would.
-pub(crate) fn commit(relayer: H160, op_hash: &[u8; 32]) {
-	assert_ok!(pallet_relayer::Pallet::<Test>::record_relay_commits(
-		&relayer,
-		&[pallet_relayer::relay_commit_hash(op_hash, &relayer)],
-	));
 }

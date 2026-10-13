@@ -4,6 +4,23 @@ All notable changes to `pallet-evm-precompile-shielded-pool` will be documented 
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-13
+
+**Breaking** — only `shield` remains. Requires the matching
+`pallet-shielded-pool`.
+
+### Removed
+
+- `privateTransfer` (`0x63d0b9a0`), `unshield` (`0x4e505348`), `commitRelay`
+  (`0xc9b235ff`) and `claimRelayFees` (`0x2a3274dd`) revert with
+  `retired in spec 19: submit spends unsigned via Substrate`. Spends are
+  unsigned Substrate extrinsics and fees are claimed with `claim_fees`.
+- `decode_relayable_call`, `selectors`, `MAX_RELAY_COMMITS_PER_CALL`,
+  `MAX_SPEND_INPUTS`, the relayed dispatch and the `pallet-relayer`
+  dev-dependency.
+- The runtime no longer needs `RuntimeOrigin: From<pallet_shielded_pool::Origin>`
+  or `AccountId: From<[u8; 32]>` for the precompile.
+
 ## [0.9.0] - 2026-10-08
 
 ### Changed

@@ -6,6 +6,10 @@
 //! WORST CASE MAP SIZE: `1000000`
 //! HOSTNAME: `ubuntu-32gb-fsn1-1`, CPU: `AMD EPYC-Genoa Processor`
 //! EXECUTION: , WASM-EXECUTION: Compiled, CHAIN: Some("dev"), DB CACHE: 1024
+//!
+//! Spec 19, by hand until re-benchmarked: `private_transfer`, `unshield` and
+//! `claim_fees` drop the removed relayer storage and add the block-author lookup;
+//! their time and proof-size terms still include the relayer scan, so they over-estimate.
 
 // Executed Command:
 // ./target/release/orbinum-node
@@ -48,8 +52,7 @@ pub trait WeightInfo {
 	fn register_asset() -> Weight;
 	fn verify_asset() -> Weight;
 	fn unverify_asset() -> Weight;
-	fn commit_relay(n: u32, ) -> Weight;
-	fn claim_relay_fees() -> Weight;
+	fn claim_fees() -> Weight;
 	fn prune_sealed_nodes(n: u32, ) -> Weight;
 }
 
@@ -160,8 +163,6 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().writes((6_u64).saturating_mul(n.into())))
 			.saturating_add(Weight::from_parts(0, 2475).saturating_mul(n.into()))
 	}
-	/// Storage: `Relayer::MinRelayFee` (r:1 w:0)
-	/// Proof: `Relayer::MinRelayFee` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `Measured`)
 	/// Storage: `ShieldedPool::PoseidonRoot` (r:1 w:1)
 	/// Proof: `ShieldedPool::PoseidonRoot` (`max_values`: Some(1), `max_size`: Some(32), added: 527, mode: `Measured`)
 	/// Storage: `ShieldedPool::HistoricPoseidonRoots` (r:3 w:2)
@@ -194,12 +195,12 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `Measured`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	/// Storage: `Relayer::RelayerRegistry` (r:33 w:0)
-	/// Proof: `Relayer::RelayerRegistry` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `Measured`)
-	/// Storage: `Relayer::RelayCommits` (r:32 w:32)
-	/// Proof: `Relayer::RelayCommits` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `Measured`)
-	/// Storage: `Relayer::PendingRelayerFees` (r:1 w:1)
-	/// Proof: `Relayer::PendingRelayerFees` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `Measured`)
+	/// Storage: `ShieldedPool::PendingFees` (r:1 w:1)
+	/// Proof: `ShieldedPool::PendingFees` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `Measured`)
+	/// Storage: `Authorship::Author` (r:1 w:1)
+	/// Storage: `System::Digest` (r:1 w:0)
+	/// Storage: `Aura::Authorities` (r:1 w:0)
+	/// Storage: `Session::Validators` (r:1 w:0)
 	/// Storage: `ShieldedPool::MerkleNodes` (r:0 w:19)
 	/// Proof: `ShieldedPool::MerkleNodes` (`max_values`: None, `max_size`: Some(65), added: 2540, mode: `Measured`)
 	/// Storage: `ShieldedPool::CommitmentMemos` (r:0 w:2)
@@ -212,11 +213,9 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		//  Estimated: `88323`
 		// Minimum execution time: 1_789_349_000 picoseconds.
 		Weight::from_parts(1_838_779_000, 88323)
-			.saturating_add(T::DbWeight::get().reads(87_u64))
-			.saturating_add(T::DbWeight::get().writes(73_u64))
+			.saturating_add(T::DbWeight::get().reads(25_u64))
+			.saturating_add(T::DbWeight::get().writes(42_u64))
 	}
-	/// Storage: `Relayer::MinRelayFee` (r:1 w:0)
-	/// Proof: `Relayer::MinRelayFee` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `Measured`)
 	/// Storage: `ShieldedPool::PoseidonRoot` (r:1 w:0)
 	/// Proof: `ShieldedPool::PoseidonRoot` (`max_values`: Some(1), `max_size`: Some(32), added: 527, mode: `Measured`)
 	/// Storage: `ShieldedPool::HistoricPoseidonRoots` (r:1 w:0)
@@ -241,20 +240,20 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
 	/// Storage: `ShieldedPool::TotalNullifiersSpent` (r:1 w:1)
 	/// Proof: `ShieldedPool::TotalNullifiersSpent` (`max_values`: Some(1), `max_size`: Some(8), added: 503, mode: `Measured`)
-	/// Storage: `Relayer::RelayerRegistry` (r:33 w:0)
-	/// Proof: `Relayer::RelayerRegistry` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `Measured`)
-	/// Storage: `Relayer::RelayCommits` (r:32 w:32)
-	/// Proof: `Relayer::RelayCommits` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `Measured`)
-	/// Storage: `Relayer::PendingRelayerFees` (r:1 w:1)
-	/// Proof: `Relayer::PendingRelayerFees` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `Measured`)
+	/// Storage: `ShieldedPool::PendingFees` (r:1 w:1)
+	/// Proof: `ShieldedPool::PendingFees` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `Measured`)
+	/// Storage: `Authorship::Author` (r:1 w:1)
+	/// Storage: `System::Digest` (r:1 w:0)
+	/// Storage: `Aura::Authorities` (r:1 w:0)
+	/// Storage: `Session::Validators` (r:1 w:0)
 	fn unshield() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `5372`
 		//  Estimated: `88037`
 		// Minimum execution time: 369_480_000 picoseconds.
 		Weight::from_parts(389_860_000, 88037)
-			.saturating_add(T::DbWeight::get().reads(80_u64))
-			.saturating_add(T::DbWeight::get().writes(40_u64))
+			.saturating_add(T::DbWeight::get().reads(18_u64))
+			.saturating_add(T::DbWeight::get().writes(9_u64))
 	}
 	/// Storage: `ShieldedPool::NextAssetId` (r:1 w:1)
 	/// Proof: `ShieldedPool::NextAssetId` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `Measured`)
@@ -315,43 +314,12 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(5_u64))
 			.saturating_add(T::DbWeight::get().writes(3_u64))
 	}
-	/// Storage: `Relayer::RelayerRegistry` (r:1 w:0)
-	/// Proof: `Relayer::RelayerRegistry` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `Measured`)
-	/// Storage: `System::Number` (r:1 w:0)
-	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `Measured`)
-	/// Storage: `Relayer::RelayCommits` (r:64 w:64)
-	/// Proof: `Relayer::RelayCommits` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `Measured`)
-	/// Storage: `Relayer::CommitsByRelayer` (r:1 w:1)
-	/// Proof: `Relayer::CommitsByRelayer` (`max_values`: None, `max_size`: Some(2110), added: 4585, mode: `Measured`)
-	/// Storage: `System::ExecutionPhase` (r:1 w:0)
-	/// Proof: `System::ExecutionPhase` (`max_values`: Some(1), `max_size`: Some(5), added: 500, mode: `Measured`)
-	/// Storage: `System::EventCount` (r:1 w:1)
-	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `Measured`)
-	/// Storage: `System::Events` (r:1 w:1)
-	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	/// The range of component `n` is `[1, 64]`.
-	fn commit_relay(n: u32, ) -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `223`
-		//  Estimated: `3688 + n * (2475 ±0)`
-		// Minimum execution time: 18_830_000 picoseconds.
-		Weight::from_parts(9_672_340, 3688)
-			// Standard Error: 2_426
-			.saturating_add(Weight::from_parts(4_300_644, 0).saturating_mul(n.into()))
-			.saturating_add(T::DbWeight::get().reads(6_u64))
-			.saturating_add(T::DbWeight::get().reads((1_u64).saturating_mul(n.into())))
-			.saturating_add(T::DbWeight::get().writes(3_u64))
-			.saturating_add(T::DbWeight::get().writes((1_u64).saturating_mul(n.into())))
-			.saturating_add(Weight::from_parts(0, 2475).saturating_mul(n.into()))
-	}
-	/// Storage: `Relayer::RelayerByAccount` (r:1 w:0)
-	/// Proof: `Relayer::RelayerByAccount` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `Measured`)
 	/// Storage: `ShieldedPool::Assets` (r:1 w:0)
 	/// Proof: `ShieldedPool::Assets` (`max_values`: None, `max_size`: Some(166), added: 2641, mode: `Measured`)
 	/// Storage: `ShieldedPool::PoolBalancePerAsset` (r:1 w:1)
 	/// Proof: `ShieldedPool::PoolBalancePerAsset` (`max_values`: None, `max_size`: Some(36), added: 2511, mode: `Measured`)
-	/// Storage: `Relayer::PendingRelayerFees` (r:1 w:1)
-	/// Proof: `Relayer::PendingRelayerFees` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `Measured`)
+	/// Storage: `ShieldedPool::PendingFees` (r:1 w:1)
+	/// Proof: `ShieldedPool::PendingFees` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `Measured`)
 	/// Storage: `System::Number` (r:1 w:0)
 	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `Measured`)
 	/// Storage: `System::ExecutionPhase` (r:1 w:0)
@@ -364,13 +332,13 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `Balances::TotalIssuance` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `Measured`)
 	/// Storage: `System::Account` (r:2 w:2)
 	/// Proof: `System::Account` (`max_values`: None, `max_size`: Some(128), added: 2603, mode: `Measured`)
-	fn claim_relay_fees() -> Weight {
+	fn claim_fees() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `1050`
 		//  Estimated: `6990`
 		// Minimum execution time: 80_530_000 picoseconds.
 		Weight::from_parts(84_920_000, 6990)
-			.saturating_add(T::DbWeight::get().reads(11_u64))
+			.saturating_add(T::DbWeight::get().reads(10_u64))
 			.saturating_add(T::DbWeight::get().writes(6_u64))
 	}
 	/// Storage: `ShieldedPool::MerkleTreeSize` (r:1 w:0)
@@ -504,8 +472,6 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().writes((6_u64).saturating_mul(n.into())))
 			.saturating_add(Weight::from_parts(0, 2475).saturating_mul(n.into()))
 	}
-	/// Storage: `Relayer::MinRelayFee` (r:1 w:0)
-	/// Proof: `Relayer::MinRelayFee` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `Measured`)
 	/// Storage: `ShieldedPool::PoseidonRoot` (r:1 w:1)
 	/// Proof: `ShieldedPool::PoseidonRoot` (`max_values`: Some(1), `max_size`: Some(32), added: 527, mode: `Measured`)
 	/// Storage: `ShieldedPool::HistoricPoseidonRoots` (r:3 w:2)
@@ -538,12 +504,12 @@ impl WeightInfo for () {
 	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `Measured`)
 	/// Storage: `System::Events` (r:1 w:1)
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	/// Storage: `Relayer::RelayerRegistry` (r:33 w:0)
-	/// Proof: `Relayer::RelayerRegistry` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `Measured`)
-	/// Storage: `Relayer::RelayCommits` (r:32 w:32)
-	/// Proof: `Relayer::RelayCommits` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `Measured`)
-	/// Storage: `Relayer::PendingRelayerFees` (r:1 w:1)
-	/// Proof: `Relayer::PendingRelayerFees` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `Measured`)
+	/// Storage: `ShieldedPool::PendingFees` (r:1 w:1)
+	/// Proof: `ShieldedPool::PendingFees` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `Measured`)
+	/// Storage: `Authorship::Author` (r:1 w:1)
+	/// Storage: `System::Digest` (r:1 w:0)
+	/// Storage: `Aura::Authorities` (r:1 w:0)
+	/// Storage: `Session::Validators` (r:1 w:0)
 	/// Storage: `ShieldedPool::MerkleNodes` (r:0 w:19)
 	/// Proof: `ShieldedPool::MerkleNodes` (`max_values`: None, `max_size`: Some(65), added: 2540, mode: `Measured`)
 	/// Storage: `ShieldedPool::CommitmentMemos` (r:0 w:2)
@@ -556,11 +522,9 @@ impl WeightInfo for () {
 		//  Estimated: `88323`
 		// Minimum execution time: 1_789_349_000 picoseconds.
 		Weight::from_parts(1_838_779_000, 88323)
-			.saturating_add(RocksDbWeight::get().reads(87_u64))
-			.saturating_add(RocksDbWeight::get().writes(73_u64))
+			.saturating_add(RocksDbWeight::get().reads(25_u64))
+			.saturating_add(RocksDbWeight::get().writes(42_u64))
 	}
-	/// Storage: `Relayer::MinRelayFee` (r:1 w:0)
-	/// Proof: `Relayer::MinRelayFee` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `Measured`)
 	/// Storage: `ShieldedPool::PoseidonRoot` (r:1 w:0)
 	/// Proof: `ShieldedPool::PoseidonRoot` (`max_values`: Some(1), `max_size`: Some(32), added: 527, mode: `Measured`)
 	/// Storage: `ShieldedPool::HistoricPoseidonRoots` (r:1 w:0)
@@ -585,20 +549,20 @@ impl WeightInfo for () {
 	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
 	/// Storage: `ShieldedPool::TotalNullifiersSpent` (r:1 w:1)
 	/// Proof: `ShieldedPool::TotalNullifiersSpent` (`max_values`: Some(1), `max_size`: Some(8), added: 503, mode: `Measured`)
-	/// Storage: `Relayer::RelayerRegistry` (r:33 w:0)
-	/// Proof: `Relayer::RelayerRegistry` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `Measured`)
-	/// Storage: `Relayer::RelayCommits` (r:32 w:32)
-	/// Proof: `Relayer::RelayCommits` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `Measured`)
-	/// Storage: `Relayer::PendingRelayerFees` (r:1 w:1)
-	/// Proof: `Relayer::PendingRelayerFees` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `Measured`)
+	/// Storage: `ShieldedPool::PendingFees` (r:1 w:1)
+	/// Proof: `ShieldedPool::PendingFees` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `Measured`)
+	/// Storage: `Authorship::Author` (r:1 w:1)
+	/// Storage: `System::Digest` (r:1 w:0)
+	/// Storage: `Aura::Authorities` (r:1 w:0)
+	/// Storage: `Session::Validators` (r:1 w:0)
 	fn unshield() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `5372`
 		//  Estimated: `88037`
 		// Minimum execution time: 369_480_000 picoseconds.
 		Weight::from_parts(389_860_000, 88037)
-			.saturating_add(RocksDbWeight::get().reads(80_u64))
-			.saturating_add(RocksDbWeight::get().writes(40_u64))
+			.saturating_add(RocksDbWeight::get().reads(18_u64))
+			.saturating_add(RocksDbWeight::get().writes(9_u64))
 	}
 	/// Storage: `ShieldedPool::NextAssetId` (r:1 w:1)
 	/// Proof: `ShieldedPool::NextAssetId` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `Measured`)
@@ -659,43 +623,12 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(5_u64))
 			.saturating_add(RocksDbWeight::get().writes(3_u64))
 	}
-	/// Storage: `Relayer::RelayerRegistry` (r:1 w:0)
-	/// Proof: `Relayer::RelayerRegistry` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `Measured`)
-	/// Storage: `System::Number` (r:1 w:0)
-	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `Measured`)
-	/// Storage: `Relayer::RelayCommits` (r:64 w:64)
-	/// Proof: `Relayer::RelayCommits` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `Measured`)
-	/// Storage: `Relayer::CommitsByRelayer` (r:1 w:1)
-	/// Proof: `Relayer::CommitsByRelayer` (`max_values`: None, `max_size`: Some(2110), added: 4585, mode: `Measured`)
-	/// Storage: `System::ExecutionPhase` (r:1 w:0)
-	/// Proof: `System::ExecutionPhase` (`max_values`: Some(1), `max_size`: Some(5), added: 500, mode: `Measured`)
-	/// Storage: `System::EventCount` (r:1 w:1)
-	/// Proof: `System::EventCount` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `Measured`)
-	/// Storage: `System::Events` (r:1 w:1)
-	/// Proof: `System::Events` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
-	/// The range of component `n` is `[1, 64]`.
-	fn commit_relay(n: u32, ) -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `223`
-		//  Estimated: `3688 + n * (2475 ±0)`
-		// Minimum execution time: 18_830_000 picoseconds.
-		Weight::from_parts(9_672_340, 3688)
-			// Standard Error: 2_426
-			.saturating_add(Weight::from_parts(4_300_644, 0).saturating_mul(n.into()))
-			.saturating_add(RocksDbWeight::get().reads(6_u64))
-			.saturating_add(RocksDbWeight::get().reads((1_u64).saturating_mul(n.into())))
-			.saturating_add(RocksDbWeight::get().writes(3_u64))
-			.saturating_add(RocksDbWeight::get().writes((1_u64).saturating_mul(n.into())))
-			.saturating_add(Weight::from_parts(0, 2475).saturating_mul(n.into()))
-	}
-	/// Storage: `Relayer::RelayerByAccount` (r:1 w:0)
-	/// Proof: `Relayer::RelayerByAccount` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `Measured`)
 	/// Storage: `ShieldedPool::Assets` (r:1 w:0)
 	/// Proof: `ShieldedPool::Assets` (`max_values`: None, `max_size`: Some(166), added: 2641, mode: `Measured`)
 	/// Storage: `ShieldedPool::PoolBalancePerAsset` (r:1 w:1)
 	/// Proof: `ShieldedPool::PoolBalancePerAsset` (`max_values`: None, `max_size`: Some(36), added: 2511, mode: `Measured`)
-	/// Storage: `Relayer::PendingRelayerFees` (r:1 w:1)
-	/// Proof: `Relayer::PendingRelayerFees` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `Measured`)
+	/// Storage: `ShieldedPool::PendingFees` (r:1 w:1)
+	/// Proof: `ShieldedPool::PendingFees` (`max_values`: None, `max_size`: Some(84), added: 2559, mode: `Measured`)
 	/// Storage: `System::Number` (r:1 w:0)
 	/// Proof: `System::Number` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `Measured`)
 	/// Storage: `System::ExecutionPhase` (r:1 w:0)
@@ -708,13 +641,13 @@ impl WeightInfo for () {
 	/// Proof: `Balances::TotalIssuance` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `Measured`)
 	/// Storage: `System::Account` (r:2 w:2)
 	/// Proof: `System::Account` (`max_values`: None, `max_size`: Some(128), added: 2603, mode: `Measured`)
-	fn claim_relay_fees() -> Weight {
+	fn claim_fees() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `1050`
 		//  Estimated: `6990`
 		// Minimum execution time: 80_530_000 picoseconds.
 		Weight::from_parts(84_920_000, 6990)
-			.saturating_add(RocksDbWeight::get().reads(11_u64))
+			.saturating_add(RocksDbWeight::get().reads(10_u64))
 			.saturating_add(RocksDbWeight::get().writes(6_u64))
 	}
 	/// Storage: `ShieldedPool::MerkleTreeSize` (r:1 w:0)

@@ -14,14 +14,11 @@
 //! amount, a burn address, a memo without which a note could never be spent —
 //! rather than leaving it to the pallet.
 //!
-//! The helpers below are the steps several decoders share. Each takes the
-//! revert messages of its caller, so every rejection still names its function.
+//! The helpers below are the decoding steps a call shares with the ABI layer.
+//! Each takes the revert messages of its caller, so every rejection still names
+//! its function.
 
-pub mod claim_relay_fees;
-pub mod commit_relay;
-pub mod private_transfer;
 pub mod shield;
-pub mod unshield;
 
 use fp_evm::PrecompileFailure;
 use pallet_shielded_pool::{BalanceOf, Proof};

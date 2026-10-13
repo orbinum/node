@@ -1,4 +1,4 @@
-//! Fixed-width ABI decoders: `uint32`, `uint256` and `bytes32`.
+//! Fixed-width ABI decoders: `uint32` and `bytes32`.
 
 use fp_evm::PrecompileFailure;
 use sp_core::U256;
@@ -20,12 +20,6 @@ pub fn read_u32(params: &[u8], slot_start: usize) -> Result<u32, PrecompileFailu
 		return Err(revert("uint32 slot exceeds u32"));
 	}
 	Ok(word.low_u32())
-}
-
-/// Reads the `uint256` at `params[slot_start..slot_start+32]`.
-pub fn read_u256(params: &[u8], slot_start: usize) -> Result<U256, PrecompileFailure> {
-	let range = checked_range(slot_start, 32, params.len(), "uint256 slot")?;
-	Ok(U256::from_big_endian(&params[range]))
 }
 
 /// Reads the 32-byte value at `params[slot_start..slot_start+32]` verbatim.
