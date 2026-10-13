@@ -130,8 +130,9 @@ fn record_stats<T: Config>(circuit_id: CircuitId, version: u32, result: bool) {
 	});
 }
 
-/// The pairing, under a key in prepared form: [`verify_prepared`], the same
-/// function the node's `bn254_groth16_verify` host function runs.
+/// The pairing, under a key in prepared form: [`verify_prepared`], natively
+/// through the node's `bn254_groth16_verify` host function under
+/// `groth16-native`, in Wasm otherwise.
 ///
 /// Always `true` in **test** builds, whose keys deserialize but carry no real
 /// proofs. Benchmarks run the full pairing, so weights include it.
@@ -144,7 +145,16 @@ fn do_verify(prepared: &[u8], proof: &[u8], inputs: &[[u8; 32]]) -> bool {
 		true
 	}
 
-	#[cfg(not(test))]
+	#[cfg(all(not(test), feature = "groth16-native"))]
+	{
+		orbinum_zk_verifier::host_interface::groth_16_host_interface::bn254_groth16_verify(
+			prepared,
+			proof,
+			&inputs.concat(),
+		)
+	}
+
+	#[cfg(all(not(test), not(feature = "groth16-native")))]
 	{
 		orbinum_zk_verifier::verify_prepared(prepared, proof, &inputs.concat())
 	}

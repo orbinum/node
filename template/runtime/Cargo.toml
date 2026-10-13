@@ -102,7 +102,7 @@ sp-maybe-compressed-blob = "11.1.0"
 grandpa-verifier-primitives = { workspace = true, features = ["std"] }
 
 [features]
-default = ["std", "with-rocksdb-weights", "poseidon-native-runtime"]
+default = ["std", "with-rocksdb-weights", "poseidon-native-runtime", "groth16-native-runtime"]
 with-rocksdb-weights = []
 with-paritydb-weights = []
 
@@ -115,6 +115,9 @@ hyperbridge-testnet = []
 
 poseidon-native-runtime = [
 	"pallet-shielded-pool/poseidon-native",
+]
+groth16-native-runtime = [
+	"pallet-zk-verifier/groth16-native",
 ]
 
 std = [

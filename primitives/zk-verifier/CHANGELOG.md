@@ -6,6 +6,14 @@ All notable changes to this crate are documented here.
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-10-13
+
+### Changed
+
+- `bn254_groth16_verify` drops `register_only` (`#[version(1)]`): runtimes can
+  import it. Symbol and behaviour unchanged; nodes from 0.4.0 already register
+  it.
+
 ## [3.2.0] - 2026-10-09
 
 ### Added

@@ -6,6 +6,14 @@ All notable changes to this pallet are documented here.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-13
+
+### Added
+
+- Feature `groth16-native`: the pairing runs through the node's
+  `bn254_groth16_verify` host function instead of in Wasm. Same function, same
+  results; off by default.
+
 ## [0.17.1] - 2026-10-09
 
 ### Changed

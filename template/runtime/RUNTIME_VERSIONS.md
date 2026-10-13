@@ -28,7 +28,8 @@ every EVM priority tip goes to the validator that authored the block.
 `transaction_version` moves: pallet index 16 and `shielded_pool` call 18 are
 gone, and call 19 is renamed. Ships with `orbinum-runtime` / `orbinum-node`
 0.5.0, `pallet-shielded-pool` 0.25.0, `pallet-shielded-pool-runtime-api` 0.4.0,
-`pallet-evm-precompile-shielded-pool` 0.10.0 and `pallet-validator-set` 0.4.1.
+`pallet-evm-precompile-shielded-pool` 0.10.0, `pallet-validator-set` 0.4.1,
+`pallet-zk-verifier` 0.18.0 and `orbinum-zk-verifier` 3.3.0.
 
 #### 1 · Block author is the session validator
 
@@ -60,6 +61,15 @@ Aura keys.
 A transaction's priority tip goes to the block author's validator account
 (`TipToValidator`); `block.coinbase` is the zero address. It used to be bytes
 4..24 of the Aura key, whose mapped account no key controls.
+
+#### 4 · Groth16 host function
+
+The runtime imports `bn254_groth16_verify` (`groth16-native-runtime`): proof
+verification runs natively instead of in Wasm (`verify_proof` 2.43 → 0.61 ms).
+Same function on both paths, so results do not change. Nodes register it since
+0.4.0; an older node cannot instantiate this runtime and stops importing, so
+every node (validators, RPC, archive) must run ≥ 0.4.0 before `setCode`.
+Weights are unchanged (measured in Wasm, so they overcharge).
 
 #### Migrations
 

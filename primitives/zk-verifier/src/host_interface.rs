@@ -3,10 +3,8 @@
 //!
 //! - **Frozen.** Executed blocks call version 1 and syncing nodes re-run them:
 //!   any observable change is a new `#[version(N)]`, and version 1 stays.
-//! - **`register_only`.** A node without the function cannot instantiate a
-//!   runtime that imports it, so nodes register it first and no runtime calls
-//!   it yet. A later runtime drops the flag once every node runs a release
-//!   with it (minimum author version for authors; RPC and archive by hand).
+//! - **Imported from spec 19.** Registered `register_only` since node 0.4.0;
+//!   a node without it cannot instantiate a runtime that imports it.
 
 use alloc::vec::Vec;
 use sp_runtime_interface::{pass_by::PassFatPointerAndRead, runtime_interface};
@@ -16,7 +14,7 @@ use sp_runtime_interface::{pass_by::PassFatPointerAndRead, runtime_interface};
 pub trait Groth16HostInterface {
 	/// [`crate::verify_prepared`], natively. It must never panic: natively a
 	/// panic takes the node down instead of trapping the runtime.
-	#[version(1, register_only)]
+	#[version(1)]
 	fn bn254_groth16_verify(
 		prepared_vk: PassFatPointerAndRead<&[u8]>,
 		proof: PassFatPointerAndRead<&[u8]>,
