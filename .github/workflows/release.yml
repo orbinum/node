@@ -3,9 +3,9 @@ name: Release
 # One `vX.Y.Z` tag per release, built once per network: the hyperbridge coprocessor
 # is a compile-time feature, so each network gets its own binary.
 #
-#   - Tag push → testnet: image `X.Y.Z-testnet` + `testnet-latest`, GitHub pre-release.
+#   - Tag push → testnet: image `X.Y.Z-testnet` + `testnet-latest`, GitHub release.
 #   - Dispatch with environment=mainnet → mainnet build of the same tag: image `X.Y.Z`
-#     + `latest`, and the release becomes final. environment=testnet rebuilds testnet.
+#     + `latest`, attached to the same release. environment=testnet rebuilds testnet.
 #
 # Builds and publishes only; the on-chain runtime upgrade is runtime-upgrade.yml.
 on:
@@ -48,8 +48,6 @@ jobs:
       environment: ${{ steps.meta.outputs.environment }}
       # `X.Y.Z-testnet` or `X.Y.Z`: the two builds differ, so they never share a tag.
       image_tag: ${{ steps.meta.outputs.image_tag }}
-      # Testnet builds are pre-releases; the mainnet build makes the release final.
-      is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -73,12 +71,10 @@ jobs:
             echo "::error::version must be X.Y.Z, got '$VERSION'"; exit 1
           fi
           IMAGE_TAG="$VERSION"; [[ "$ENV" == "testnet" ]] && IMAGE_TAG="$VERSION-testnet"
-          IS_PRE=$([[ "$ENV" == "testnet" ]] && echo true || echo false)
           {
             echo "version=$VERSION"
             echo "environment=$ENV"
             echo "image_tag=$IMAGE_TAG"
-            echo "is_prerelease=$IS_PRE"
           } >> "$GITHUB_OUTPUT"
 
       # Runs on promotions too: a tag that failed its testnet run still exists.
@@ -291,8 +287,9 @@ jobs:
           done
 
   # ── 4. GitHub Release ──────────────────────────────────────────────────────
-  # The tag push creates it (testnet assets, pre-release); the mainnet promotion adds its
-  # assets to the same release and makes it final.
+  # The tag push creates it (testnet assets, a full release, not a pre-release); the mainnet
+  # promotion adds its assets to the same release. `make_latest` stays at the action's
+  # default (newest semver), so promoting an older version never steals "Latest".
   github-release:
     name: GitHub Release
     runs-on: ubuntu-latest
@@ -349,7 +346,6 @@ jobs:
           name: "Orbinum ${{ needs.metadata.outputs.version }}"
           # The mainnet run replaces the body; the testnet assets stay attached.
           body_path: release_notes.md
-          prerelease: ${{ needs.metadata.outputs.is_prerelease == 'true' }}
           files: |
             orbinum-node-linux-x86_64-${{ needs.metadata.outputs.image_tag }}
             orbinum-runtime-${{ needs.metadata.outputs.image_tag }}.wasm

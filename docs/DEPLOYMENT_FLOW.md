@@ -89,7 +89,7 @@ metadata → build → docker-publish → github-release
   and `--version`, so this is what makes "which release runs on that node" readable.
 - Builds the binary and the runtime WASM with the `hyperbridge-testnet` feature.
 - Publishes the Docker image as `X.Y.Z-testnet` and `testnet-latest`.
-- Creates the GitHub Release (pre-release) with the WASM + binary attached.
+- Creates the GitHub Release (full release, not pre-release) with the WASM + binary attached.
 - **Does NOT touch the chain.** No setCode. Pushing a tag is safe — it only produces
   artifacts (and Watchtower picks up the new image).
 
@@ -105,8 +105,7 @@ flavour.
 | `version` | The release, e.g. `0.2.0` (git tag `v0.2.0`). Must be `X.Y.Z` |
 
 A mainnet dispatch builds `v<version>` without the testnet feature, publishes `X.Y.Z` +
-`latest`, attaches the mainnet assets to the existing GitHub Release and clears its
-pre-release flag. It fails unless the tag is GPG-signed, matches the crate version,
+`latest`, attaches the mainnet assets to the existing GitHub Release. It fails unless the tag is GPG-signed, matches the crate version,
 and `X.Y.Z-testnet` was published. `docker-publish` waits for the `mainnet`
 environment reviewer, since pushing `latest` is the fleet rollout. The build, the
 image's final stage and the release notes all come from the tag, not from `main`.
@@ -265,8 +264,8 @@ release anything. The tag must equal `version` in `template/node/Cargo.toml` or 
 
 | Run | Flavour | Docker tags | GitHub Release |
 |-----|---------|-------------|----------------|
-| Tag push `v0.2.0` | testnet | `0.2.0-testnet`, `testnet-latest` | `Orbinum 0.2.0`, pre-release, testnet assets |
-| Dispatch `mainnet` on `0.2.0` | mainnet | `0.2.0`, `latest` | same release, pre-release cleared, mainnet assets added |
+| Tag push `v0.2.0` | testnet | `0.2.0-testnet`, `testnet-latest` | `Orbinum 0.2.0`, release, testnet assets |
+| Dispatch `mainnet` on `0.2.0` | mainnet | `0.2.0`, `latest` | same release, mainnet assets added |
 
 Three versions live in the repo; only two matter:
 
