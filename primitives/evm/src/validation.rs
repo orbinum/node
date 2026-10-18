@@ -44,6 +44,7 @@ pub struct CheckEvmTransactionConfig<'config> {
 	pub base_fee: U256,
 	pub chain_id: u64,
 	pub is_transactional: bool,
+	pub allow_unprotected_txs: bool,
 }
 
 #[derive(Debug)]
@@ -137,10 +138,16 @@ impl<'config, E: From<TransactionValidationError>> CheckEvmTransaction<'config, 
 
 	pub fn with_chain_id(&self) -> Result<&Self, E> {
 		// Chain id matches the one in the signature.
-		if let Some(chain_id) = self.transaction.chain_id {
-			if chain_id != self.config.chain_id {
-				return Err(TransactionValidationError::InvalidChainId.into());
+		match self.transaction.chain_id {
+			Some(chain_id) => {
+				if chain_id != self.config.chain_id {
+					return Err(TransactionValidationError::InvalidChainId.into());
+				}
 			}
+			None if self.config.is_transactional && !self.config.allow_unprotected_txs => {
+				return Err(TransactionValidationError::InvalidChainId.into())
+			}
+			None => {}
 		}
 		Ok(self)
 	}
@@ -353,6 +360,7 @@ mod tests {
 		pub blockchain_base_fee: U256,
 		pub blockchain_chain_id: u64,
 		pub is_transactional: bool,
+		pub allow_unprotected_txs: bool,
 		pub chain_id: Option<u64>,
 		pub nonce: U256,
 		pub gas_limit: U256,
@@ -371,6 +379,7 @@ mod tests {
 				blockchain_base_fee: U256::from(1_000_000_000u128),
 				blockchain_chain_id: 42u64,
 				is_transactional: true,
+				allow_unprotected_txs: false,
 				chain_id: Some(42u64),
 				nonce: U256::zero(),
 				gas_limit: U256::from(21_000u64),
@@ -390,6 +399,7 @@ mod tests {
 			blockchain_base_fee,
 			blockchain_chain_id,
 			is_transactional,
+			allow_unprotected_txs,
 			chain_id,
 			nonce,
 			gas_limit,
@@ -407,6 +417,7 @@ mod tests {
 				base_fee: blockchain_base_fee,
 				chain_id: blockchain_chain_id,
 				is_transactional,
+				allow_unprotected_txs,
 			},
 			CheckEvmTransactionInput {
 				chain_id,
@@ -474,6 +485,18 @@ mod tests {
 	fn transaction_invalid_chain_id<'config>() -> CheckEvmTransaction<'config, TestError> {
 		test_env(TestCase {
 			chain_id: Some(555u64),
+			..Default::default()
+		})
+	}
+
+	fn transaction_without_chain_id<'config>(
+		is_transactional: bool,
+		allow_unprotected_txs: bool,
+	) -> CheckEvmTransaction<'config, TestError> {
+		test_env(TestCase {
+			is_transactional,
+			allow_unprotected_txs,
+			chain_id: None,
 			..Default::default()
 		})
 	}
@@ -705,6 +728,28 @@ mod tests {
 		assert_eq!(res.unwrap_err(), TestError::InvalidChainId);
 	}
 
+	#[test]
+	fn validate_chain_id_none_transactional_fails_by_default() {
+		let test = transaction_without_chain_id(true, false);
+		let res = test.with_chain_id();
+		assert!(res.is_err());
+		assert_eq!(res.unwrap_err(), TestError::InvalidChainId);
+	}
+
+	#[test]
+	fn validate_chain_id_none_transactional_succeeds_when_allowed() {
+		let test = transaction_without_chain_id(true, true);
+		let res = test.with_chain_id();
+		assert!(res.is_ok());
+	}
+
+	#[test]
+	fn validate_chain_id_none_non_transactional_succeeds() {
+		let test = transaction_without_chain_id(false, false);
+		let res = test.with_chain_id();
+		assert!(res.is_ok());
+	}
+
 	// Valid max fee per gas succeeds.
 	#[test]
 	fn validate_base_fee_succeeds() {
@@ -925,6 +970,7 @@ mod tests {
 				base_fee: U256::from(1_000_000_000u128),
 				chain_id: 42u64,
 				is_transactional: true,
+				allow_unprotected_txs: false,
 			},
 			CheckEvmTransactionInput {
 				chain_id: Some(42u64),
@@ -962,6 +1008,7 @@ mod tests {
 				base_fee: U256::from(1_000_000_000u128),
 				chain_id: 42u64,
 				is_transactional: true,
+				allow_unprotected_txs: false,
 			},
 			CheckEvmTransactionInput {
 				chain_id: Some(42u64),
@@ -999,6 +1046,7 @@ mod tests {
 				base_fee: U256::from(1_000_000_000u128),
 				chain_id: 42u64,
 				is_transactional: true,
+				allow_unprotected_txs: false,
 			},
 			CheckEvmTransactionInput {
 				chain_id: Some(42u64),
@@ -1031,6 +1079,7 @@ mod tests {
 				base_fee: U256::from(1_000_000_000u128),
 				chain_id: 42u64,
 				is_transactional: true,
+				allow_unprotected_txs: false,
 			},
 			CheckEvmTransactionInput {
 				chain_id: Some(42u64),

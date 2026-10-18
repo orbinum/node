@@ -96,6 +96,8 @@ impl pallet_ethereum::Config for Runtime {
 	type StateRoot = pallet_ethereum::IntermediateStateRoot<Self::Version>;
 	type PostLogContent = PostBlockAndTxnHashes;
 	type ExtraDataLength = ConstU32<30>;
+	// Pre-EIP-155 legacy transactions carry no chain id and replay across chains.
+	type AllowUnprotectedTxs = frame_support::traits::ConstBool<false>;
 }
 
 parameter_types! {
