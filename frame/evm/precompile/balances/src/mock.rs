@@ -170,6 +170,16 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 pub(crate) struct MockHandle {
 	pub input: Vec<u8>,
 	pub context: Context,
+	/// The precompile's own address. Equal to `context.address` on a direct call;
+	/// differs under DELEGATECALL / CALLCODE.
+	pub code_address: H160,
+	pub is_static: bool,
+	/// Gas recorded with `record_cost`.
+	pub gas_used: u64,
+	/// Proof size recorded with `record_external_cost`.
+	pub proof_size: u64,
+	/// Storage growth recorded with `record_external_cost`.
+	pub storage_growth: u64,
 }
 
 impl MockHandle {
@@ -181,6 +191,11 @@ impl MockHandle {
 				caller: caller(),
 				apparent_value: U256::zero(),
 			},
+			code_address: H160::zero(),
+			is_static: false,
+			gas_used: 0,
+			proof_size: 0,
+			storage_growth: 0,
 		}
 	}
 }
@@ -198,16 +213,19 @@ impl PrecompileHandle for MockHandle {
 		unimplemented!()
 	}
 
-	fn record_cost(&mut self, _: u64) -> Result<(), ExitError> {
+	fn record_cost(&mut self, cost: u64) -> Result<(), ExitError> {
+		self.gas_used += cost;
 		Ok(())
 	}
 
 	fn record_external_cost(
 		&mut self,
 		_ref_time: Option<u64>,
-		_proof_size: Option<u64>,
-		_storage_growth: Option<u64>,
+		proof_size: Option<u64>,
+		storage_growth: Option<u64>,
 	) -> Result<(), ExitError> {
+		self.proof_size += proof_size.unwrap_or(0);
+		self.storage_growth += storage_growth.unwrap_or(0);
 		Ok(())
 	}
 
@@ -222,7 +240,7 @@ impl PrecompileHandle for MockHandle {
 	}
 
 	fn code_address(&self) -> H160 {
-		H160::zero()
+		self.code_address
 	}
 
 	fn input(&self) -> &[u8] {
@@ -238,7 +256,7 @@ impl PrecompileHandle for MockHandle {
 	}
 
 	fn is_static(&self) -> bool {
-		false
+		self.is_static
 	}
 
 	fn gas_limit(&self) -> Option<u64> {
