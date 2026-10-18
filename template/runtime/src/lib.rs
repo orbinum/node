@@ -117,11 +117,7 @@ pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 
 /// Runs on upgrade, oldest first. Drop an entry once every live chain has passed its
 /// version: a migration that can no longer run could be re-armed by mistake.
-pub type Migrations = (
-	migrations::RelayerFeesToPool,
-	migrations::RemoveRelayerPallet,
-	migrations::MoveStrandedEvmTips,
-);
+pub type Migrations = (migrations::PrecompileCode,);
 
 pub type Executive = frame_executive::Executive<
 	Runtime,
@@ -162,7 +158,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: Cow::Borrowed("orbinum"),
 	impl_name: Cow::Borrowed("orbinum"),
 	authoring_version: 1,
-	spec_version: 19,
+	spec_version: 20,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 7,
