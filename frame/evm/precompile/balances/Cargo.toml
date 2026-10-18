@@ -1,6 +1,6 @@
 [package]
 name = "pallet-evm-precompile-balances"
-version = "0.1.0"
+version = "0.2.0"
 authors = { workspace = true }
 edition = "2021"
 description = "EVM Precompile for native Balances transfers to arbitrary AccountId32 destinations."
@@ -20,6 +20,7 @@ pallet-balances = { workspace = true }
 # Frontier EVM
 fp-evm = { workspace = true }
 pallet-evm = { workspace = true }
+precompile-utils = { workspace = true }
 
 [dev-dependencies]
 frame-system = { workspace = true, features = ["default"] }
@@ -42,4 +43,5 @@ std = [
 	"fp-evm/std",
 	"pallet-evm/std",
 	"pallet-balances/std",
+	"precompile-utils/std",
 ]

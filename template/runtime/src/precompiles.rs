@@ -44,7 +44,8 @@ where
 		+ pallet_balances::Config,
 	<R as frame_system::Config>::RuntimeCall: sp_runtime::traits::Dispatchable<PostInfo = frame_support::dispatch::PostDispatchInfo>
 		+ frame_support::dispatch::GetDispatchInfo
-		+ From<pallet_shielded_pool::Call<R>>,
+		+ From<pallet_shielded_pool::Call<R>>
+		+ From<pallet_balances::Call<R>>,
 	<<R as frame_system::Config>::RuntimeCall as sp_runtime::traits::Dispatchable>::RuntimeOrigin:
 		From<Option<<R as frame_system::Config>::AccountId>>,
 	<<R as frame_system::Config>::RuntimeCall as sp_runtime::traits::Dispatchable>::PostInfo:
@@ -53,10 +54,6 @@ where
 	pallet_evm::AccountIdOf<R>: Into<<R as frame_system::Config>::AccountId>,
 	pallet_shielded_pool::BalanceOf<R>: TryFrom<u128>,
 	<R as pallet_balances::Config>::Balance: TryFrom<u128>,
-	pallet_balances::Pallet<R>: frame_support::traits::fungible::Mutate<
-		<R as frame_system::Config>::AccountId,
-		Balance = <R as pallet_balances::Config>::Balance,
-	>,
 {
 	fn execute(&self, handle: &mut impl PrecompileHandle) -> Option<PrecompileResult> {
 		match handle.code_address() {

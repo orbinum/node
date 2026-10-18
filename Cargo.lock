@@ -11179,7 +11179,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-evm-precompile-balances"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fp-evm",
  "frame-support",
@@ -11188,6 +11188,7 @@ dependencies = [
  "pallet-evm",
  "pallet-timestamp",
  "parity-scale-codec",
+ "precompile-utils",
  "scale-info",
  "sp-core",
  "sp-io",

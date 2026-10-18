@@ -20,6 +20,18 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
+### Next spec — pending
+
+Not yet versioned: needs a `spec_version` bump (transaction version unchanged)
+before `setCode`.
+
+- **Balances precompile (`0x…0802`)** refuses static calls, delegated calls
+  (DELEGATECALL, CALLCODE) and calls carrying value. Under DELEGATECALL the
+  debited `context.caller` was the user who called the delegating contract, so
+  any contract could move its caller's ORB. Calls are charged the transfer's
+  dispatch weight up front, failing ones included, instead of a flat 5,000 gas,
+  and every failure reverts with an `Error(string)` reason.
+
 ### spec 19 — tx 7 — [Unreleased]
 
 A validator is its account and session keys, nothing else: the EVM relayer layer
