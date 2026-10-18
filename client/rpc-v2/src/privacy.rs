@@ -4,13 +4,19 @@
 //! - `privacy_getMerkleRoot`              — current Merkle root as hex
 //! - `privacy_getMerkleProof`             — sibling path for a leaf index
 //! - `privacy_getMerkleProofByCommitment` — sibling path for a commitment
+//! - `privacy_getSubtreeRoots`            — a tree's level-6 subtree roots
 //! - `privacy_getNullifierStatus`         — whether a nullifier has been spent
 //! - `privacy_getPoolStats`               — aggregate pool statistics
 //!
-//! The two proof endpoints run on blocking threads and at most
-//! `MAX_CONCURRENT_PROOFS` at once: a sealed tree's path is rebuilt from
-//! leaves, and inline on the connection task a few of them would stall every
-//! other RPC.
+//! Every endpoint reads the best block, not the finalized one: a wallet builds
+//! a path for a note that landed a block ago, and the root it proves against
+//! stays valid for the retention window whichever fork imports the spend.
+//!
+//! The two proof endpoints and `privacy_getSubtreeRoots` run on blocking
+//! threads, at most `proof_slots` (half the cores) at once; the rest queue, up
+//! to `MAX_QUEUED_PROOFS` for at most `MAX_PROOF_WAIT`, and are refused as busy
+//! past that. A sealed tree's path is rebuilt from leaves, and inline on the
+//! connection task a few of them would stall every other RPC.
 
 use jsonrpsee::{
 	core::RpcResult,
@@ -232,7 +238,7 @@ impl<C, B, BE> PrivacyRpc<C, B, BE> {
 ///
 /// A request takes a free slot, or waits for one behind at most `max_queued`
 /// others and for at most `max_wait`; it is refused only when the queue is full
-/// or the wait runs out. Both proof RPCs are `blocking`, so each waits on its own
+/// or the wait runs out. Every gated RPC is `blocking`, so each waits on its own
 /// thread. A slot is freed when its permit drops, even if the proof panics.
 struct ProofGate {
 	state: Mutex<GateState>,

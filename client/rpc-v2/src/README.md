@@ -43,9 +43,9 @@ io.merge(ChainRpc::new(client.clone()).into_rpc())?;
 
 ### `chain_isValidator`
 
-Returns `true` if the given SS58-encoded account is an active Aura block author.
+Returns `true` if the given SS58-encoded account validates the current session. A validator is its account, not its Aura key: an operator may register its session keys from that account.
 
-Reads `pallet_aura::Authorities` directly from storage — no runtime API call is made. Intended for UIs that need to gate actions on validator eligibility without waiting for an extrinsic to fail.
+Reads `pallet_session::Validators` at the best block directly from storage — no runtime API call is made. Intended for UIs that need to gate actions on validator eligibility without waiting for an extrinsic to fail.
 
 **Parameters**
 
@@ -63,11 +63,11 @@ Reads `pallet_aura::Authorities` directly from storage — no runtime API call i
 { "jsonrpc": "2.0", "result": true, "id": 1 }
 ```
 
-**Storage read:** `Twox128("Aura") ++ Twox128("Authorities")` → SCALE `Vec<[u8; 32]>`
+**Storage read:** `Twox128("Session") ++ Twox128("Validators")` → SCALE `Vec<AccountId32>`, which must decode exactly
 
 **Errors**
 - `InvalidParams` — invalid SS58 address
-- `InternalError` — storage decode failure
+- `InternalError` — the stored value does not decode exactly (truncated or trailing bytes)
 
 ---
 
@@ -240,11 +240,11 @@ All endpoints query pallet storage directly using `sc_client_api::StorageProvide
 - No runtime upgrade required to add or change these endpoints.
 - Keys are built with the standard Substrate hasher layout:
 
-### `chain.rs` — `pallet_aura`
+### `chain.rs` — `pallet_session`
 
 | Storage item | Key layout |
 |---|---|
-| `Authorities` | `Twox128("Aura") ++ Twox128("Authorities")` |
+| `Validators` | `Twox128("Session") ++ Twox128("Validators")` |
 
 ### `privacy.rs` — `pallet_shielded_pool`
 
