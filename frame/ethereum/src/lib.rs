@@ -209,6 +209,8 @@ pub mod pallet {
 		type PostLogContent: Get<PostLogContent>;
 		/// The maximum length of the extra data in the Executed event.
 		type ExtraDataLength: Get<u32>;
+		/// Whether transactional ethereum calls accept legacy transactions without EIP-155 chain id.
+		type AllowUnprotectedTxs: Get<bool>;
 	}
 
 	pub mod config_preludes {
@@ -225,6 +227,7 @@ pub mod pallet {
 
 		parameter_types! {
 			pub const PostBlockAndTxnHashes: PostLogContent = PostLogContent::BlockAndTxnHashes;
+			pub const AllowUnprotectedTxs: bool = false;
 		}
 
 		#[register_default_impl(TestDefaultConfig)]
@@ -232,6 +235,7 @@ pub mod pallet {
 			type StateRoot = IntermediateStateRoot<Self::Version>;
 			type PostLogContent = PostBlockAndTxnHashes;
 			type ExtraDataLength = ConstU32<30>;
+			type AllowUnprotectedTxs = AllowUnprotectedTxs;
 		}
 	}
 
@@ -241,7 +245,10 @@ pub mod pallet {
 			<Pallet<T>>::store_block(
 				match fp_consensus::find_pre_log(&frame_system::Pallet::<T>::digest()) {
 					Ok(_) => None,
-					Err(_) => Some(T::PostLogContent::get()),
+					Err(fp_consensus::FindLogError::NotFound) => Some(T::PostLogContent::get()),
+					Err(fp_consensus::FindLogError::MultipleLogs) => {
+						panic!("multiple pre-runtime Frontier logs; block is invalid")
+					}
 				},
 				U256::from(UniqueSaturatedInto::<u128>::unique_saturated_into(
 					frame_system::Pallet::<T>::block_number(),
@@ -263,23 +270,31 @@ pub mod pallet {
 		fn on_initialize(_: BlockNumberFor<T>) -> Weight {
 			let mut weight = T::SystemWeightInfo::kill_storage(1);
 
-			// If the digest contain an existing ethereum block(encoded as PreLog), If contains,
-			// execute the imported block firstly and disable transact dispatch function.
-			if let Ok(log) = fp_consensus::find_pre_log(&frame_system::Pallet::<T>::digest()) {
-				let PreLog::Block(block) = log;
+			// If the digest contains an existing ethereum block (encoded as PreLog),
+			// execute the imported block first and disable transact dispatch function.
+			match fp_consensus::find_pre_log(&frame_system::Pallet::<T>::digest()) {
+				Ok(log) => {
+					let PreLog::Block(block) = log;
 
-				for transaction in block.transactions {
-					let source = Self::recover_signer(&transaction).expect(
-						"pre-block transaction signature invalid; the block cannot be built",
-					);
+					for transaction in block.transactions {
+						let source = Self::recover_signer(&transaction).expect(
+							"pre-block transaction signature invalid; the block cannot be built",
+						);
 
-					Self::validate_transaction_in_block(source, &transaction).expect(
-						"pre-block transaction verification failed; the block cannot be built",
-					);
-					let (r, _) = Self::apply_validated_transaction(source, transaction, None)
-						.expect("pre-block apply transaction failed; the block cannot be built");
+						Self::validate_transaction_in_block(source, &transaction).expect(
+							"pre-block transaction verification failed; the block cannot be built",
+						);
+						let (r, _) = Self::apply_validated_transaction(source, transaction, None)
+							.expect(
+								"pre-block apply transaction failed; the block cannot be built",
+							);
 
-					weight = weight.saturating_add(r.actual_weight.unwrap_or_default());
+						weight = weight.saturating_add(r.actual_weight.unwrap_or_default());
+					}
+				}
+				Err(fp_consensus::FindLogError::NotFound) => {}
+				Err(fp_consensus::FindLogError::MultipleLogs) => {
+					panic!("multiple pre-runtime Frontier logs; block is invalid")
 				}
 			}
 			// Account for `on_finalize` weight:
@@ -547,9 +562,11 @@ impl<T: Config> Pallet<T> {
 			CheckEvmTransactionConfig {
 				evm_config: T::config(),
 				block_gas_limit: T::BlockGasLimit::get(),
+				transaction_gas_limit: T::TransactionGasLimit::get(),
 				base_fee,
 				chain_id: T::ChainId::get(),
 				is_transactional: true,
+				allow_unprotected_txs: T::AllowUnprotectedTxs::get(),
 			},
 			transaction_data.clone().into(),
 			weight_limit,
@@ -996,9 +1013,11 @@ impl<T: Config> Pallet<T> {
 			CheckEvmTransactionConfig {
 				evm_config: T::config(),
 				block_gas_limit: T::BlockGasLimit::get(),
+				transaction_gas_limit: T::TransactionGasLimit::get(),
 				base_fee,
 				chain_id: T::ChainId::get(),
 				is_transactional: true,
+				allow_unprotected_txs: T::AllowUnprotectedTxs::get(),
 			},
 			transaction_data.into(),
 			weight_limit,
@@ -1121,9 +1140,11 @@ impl From<TransactionValidationError> for InvalidTransactionWrapper {
 			TransactionValidationError::GasLimitTooLow => InvalidTransactionWrapper(
 				InvalidTransaction::Custom(TransactionValidationError::GasLimitTooLow as u8),
 			),
-			TransactionValidationError::GasLimitTooHigh => InvalidTransactionWrapper(
-				InvalidTransaction::Custom(TransactionValidationError::GasLimitTooHigh as u8),
-			),
+			TransactionValidationError::GasLimitExceedsBlockLimit => {
+				InvalidTransactionWrapper(InvalidTransaction::Custom(
+					TransactionValidationError::GasLimitExceedsBlockLimit as u8,
+				))
+			}
 			TransactionValidationError::PriorityFeeTooHigh => InvalidTransactionWrapper(
 				InvalidTransaction::Custom(TransactionValidationError::PriorityFeeTooHigh as u8),
 			),
@@ -1156,6 +1177,11 @@ impl From<TransactionValidationError> for InvalidTransactionWrapper {
 			TransactionValidationError::AuthorizationListTooLarge => {
 				InvalidTransactionWrapper(InvalidTransaction::Custom(
 					TransactionValidationError::AuthorizationListTooLarge as u8,
+				))
+			}
+			TransactionValidationError::TransactionGasLimitExceedsCap => {
+				InvalidTransactionWrapper(InvalidTransaction::Custom(
+					TransactionValidationError::TransactionGasLimitExceedsCap as u8,
 				))
 			}
 			TransactionValidationError::UnknownError => InvalidTransactionWrapper(

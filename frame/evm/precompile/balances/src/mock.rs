@@ -115,6 +115,7 @@ impl pallet_evm::Config for Test {
 	type FindAuthor = ();
 	type GasLimitPovSizeRatio = ();
 	type GasLimitStorageGrowthRatio = ();
+	type TransactionGasLimit = ();
 	type Timestamp = Timestamp;
 	type CreateInnerOriginFilter = ();
 	type CreateOriginFilter = ();

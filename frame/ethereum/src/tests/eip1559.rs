@@ -18,7 +18,7 @@
 //! Consensus extension module tests for BABE consensus.
 
 use super::*;
-use evm::{ExitReason, ExitRevert, ExitSucceed};
+use evm::{ExitError, ExitReason, ExitRevert, ExitSucceed};
 use fp_ethereum::{TransactionData, ValidatedTransaction};
 use frame_support::{dispatch::DispatchClass, traits::Get, weights::Weight};
 use pallet_evm::{AddressMapping, GasWeightMapping};
@@ -51,12 +51,16 @@ fn transaction_with_max_extrinsic_gas_limit_should_success_pre_dispatch() {
 	let max_extrinsic_gas =
 		<Test as pallet_evm::Config>::GasWeightMapping::weight_to_gas(max_extrinsic);
 
+	// The effective max gas is the minimum of max_extrinsic_gas and the configured cap.
+	let transaction_gas_limit = TransactionGasLimit::get().unwrap_or_else(U256::max_value);
+	let effective_max_gas = U256::from(max_extrinsic_gas).min(transaction_gas_limit);
+
 	ext.execute_with(|| {
 		let transaction = EIP1559UnsignedTransaction {
 			nonce: U256::zero(),
 			max_priority_fee_per_gas: U256::from(1),
 			max_fee_per_gas: U256::from(1),
-			gas_limit: U256::from(max_extrinsic_gas),
+			gas_limit: effective_max_gas,
 			action: ethereum::TransactionAction::Call(bob.address),
 			value: U256::from(1),
 			input: Default::default(),
@@ -574,6 +578,8 @@ fn proof_size_weight_limit_validation_works() {
 	let alice = &pairs[0];
 
 	ext.execute_with(|| {
+		System::set_block_number(1);
+
 		let mut tx = EIP1559UnsignedTransaction {
 			nonce: U256::from(2),
 			max_priority_fee_per_gas: U256::zero(),
@@ -593,11 +599,21 @@ fn proof_size_weight_limit_validation_works() {
 		// Gas limit cannot afford the extra byte and thus is expected to exhaust.
 		tx.input = vec![0u8; (weight_limit.proof_size() + 1) as usize];
 		let tx = tx.sign(&alice.private_key, None);
+		let transaction_hash = tx.hash();
 
-		// Execute
-		assert!(
-			Ethereum::transact(RawOrigin::EthereumTransaction(alice.address).into(), tx,).is_err()
-		);
+		// Execute - transaction is applied but execution fails with OutOfGas
+		assert_ok!(Ethereum::apply_validated_transaction(
+			alice.address,
+			tx,
+			None
+		));
+		System::assert_last_event(RuntimeEvent::Ethereum(Event::Executed {
+			from: alice.address,
+			to: alice.address,
+			transaction_hash,
+			exit_reason: ExitReason::Error(ExitError::OutOfGas),
+			extra_data: vec![],
+		}));
 	});
 }
 

@@ -41,9 +41,11 @@ pub struct CheckEvmTransactionInput {
 pub struct CheckEvmTransactionConfig<'config> {
 	pub evm_config: &'config evm::Config,
 	pub block_gas_limit: U256,
+	pub transaction_gas_limit: Option<U256>,
 	pub base_fee: U256,
 	pub chain_id: u64,
 	pub is_transactional: bool,
+	pub allow_unprotected_txs: bool,
 }
 
 #[derive(Debug)]
@@ -61,8 +63,8 @@ pub struct CheckEvmTransaction<'config, E: From<TransactionValidationError>> {
 pub enum TransactionValidationError {
 	/// The transaction gas limit is too low
 	GasLimitTooLow,
-	/// The transaction gas limit is too hign
-	GasLimitTooHigh,
+	/// The transaction gas limit exceeds the block gas limit
+	GasLimitExceedsBlockLimit,
 	/// The transaction gas price is too low
 	GasPriceTooLow,
 	/// The transaction priority fee is too high
@@ -101,6 +103,11 @@ pub enum TransactionValidationError {
 	/// Unknown error
 	#[num_enum(default)]
 	UnknownError,
+	/// EIP-7825: Transaction gas limit exceeds per-transaction cap
+	///
+	/// The transaction gas limit exceeds the configured per-transaction cap.
+	/// This cap is independent of the block gas limit and applies to all transactions.
+	TransactionGasLimitExceedsCap,
 }
 
 impl<'config, E: From<TransactionValidationError>> CheckEvmTransaction<'config, E> {
@@ -137,10 +144,16 @@ impl<'config, E: From<TransactionValidationError>> CheckEvmTransaction<'config, 
 
 	pub fn with_chain_id(&self) -> Result<&Self, E> {
 		// Chain id matches the one in the signature.
-		if let Some(chain_id) = self.transaction.chain_id {
-			if chain_id != self.config.chain_id {
-				return Err(TransactionValidationError::InvalidChainId.into());
+		match self.transaction.chain_id {
+			Some(chain_id) => {
+				if chain_id != self.config.chain_id {
+					return Err(TransactionValidationError::InvalidChainId.into());
+				}
 			}
+			None if self.config.is_transactional && !self.config.allow_unprotected_txs => {
+				return Err(TransactionValidationError::InvalidChainId.into())
+			}
+			None => {}
 		}
 		Ok(self)
 	}
@@ -258,7 +271,14 @@ impl<'config, E: From<TransactionValidationError>> CheckEvmTransaction<'config, 
 
 			// Transaction gas limit is within the upper bound block gas limit.
 			if self.transaction.gas_limit > self.config.block_gas_limit {
-				return Err(TransactionValidationError::GasLimitTooHigh.into());
+				return Err(TransactionValidationError::GasLimitExceedsBlockLimit.into());
+			}
+
+			// Transaction gas limit is within the configured per-transaction cap.
+			if let Some(transaction_gas_limit) = self.config.transaction_gas_limit {
+				if self.transaction.gas_limit > transaction_gas_limit {
+					return Err(TransactionValidationError::TransactionGasLimitExceedsCap.into());
+				}
 			}
 		}
 
@@ -304,11 +324,12 @@ impl<'config, E: From<TransactionValidationError>> CheckEvmTransaction<'config, 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::MAX_TRANSACTION_GAS_LIMIT;
 
 	#[derive(Debug, PartialEq)]
 	pub enum TestError {
 		GasLimitTooLow,
-		GasLimitTooHigh,
+		GasLimitExceedsBlockLimit,
 		GasPriceTooLow,
 		PriorityFeeTooHigh,
 		BalanceTooLow,
@@ -319,6 +340,7 @@ mod tests {
 		InvalidSignature,
 		EmptyAuthorizationList,
 		AuthorizationListTooLarge,
+		TransactionGasLimitExceedsCap,
 		UnknownError,
 	}
 
@@ -328,7 +350,9 @@ mod tests {
 		fn from(e: TransactionValidationError) -> Self {
 			match e {
 				TransactionValidationError::GasLimitTooLow => TestError::GasLimitTooLow,
-				TransactionValidationError::GasLimitTooHigh => TestError::GasLimitTooHigh,
+				TransactionValidationError::GasLimitExceedsBlockLimit => {
+					TestError::GasLimitExceedsBlockLimit
+				}
 				TransactionValidationError::GasPriceTooLow => TestError::GasPriceTooLow,
 				TransactionValidationError::PriorityFeeTooHigh => TestError::PriorityFeeTooHigh,
 				TransactionValidationError::BalanceTooLow => TestError::BalanceTooLow,
@@ -343,6 +367,9 @@ mod tests {
 				TransactionValidationError::AuthorizationListTooLarge => {
 					TestError::AuthorizationListTooLarge
 				}
+				TransactionValidationError::TransactionGasLimitExceedsCap => {
+					TestError::TransactionGasLimitExceedsCap
+				}
 				TransactionValidationError::UnknownError => TestError::UnknownError,
 			}
 		}
@@ -350,9 +377,11 @@ mod tests {
 
 	struct TestCase {
 		pub blockchain_gas_limit: U256,
+		pub transaction_gas_limit: Option<U256>,
 		pub blockchain_base_fee: U256,
 		pub blockchain_chain_id: u64,
 		pub is_transactional: bool,
+		pub allow_unprotected_txs: bool,
 		pub chain_id: Option<u64>,
 		pub nonce: U256,
 		pub gas_limit: U256,
@@ -368,9 +397,11 @@ mod tests {
 		fn default() -> Self {
 			TestCase {
 				blockchain_gas_limit: U256::max_value(),
+				transaction_gas_limit: Some(MAX_TRANSACTION_GAS_LIMIT),
 				blockchain_base_fee: U256::from(1_000_000_000u128),
 				blockchain_chain_id: 42u64,
 				is_transactional: true,
+				allow_unprotected_txs: false,
 				chain_id: Some(42u64),
 				nonce: U256::zero(),
 				gas_limit: U256::from(21_000u64),
@@ -387,9 +418,11 @@ mod tests {
 	fn test_env<'config>(input: TestCase) -> CheckEvmTransaction<'config, TestError> {
 		let TestCase {
 			blockchain_gas_limit,
+			transaction_gas_limit,
 			blockchain_base_fee,
 			blockchain_chain_id,
 			is_transactional,
+			allow_unprotected_txs,
 			chain_id,
 			nonce,
 			gas_limit,
@@ -404,9 +437,11 @@ mod tests {
 			CheckEvmTransactionConfig {
 				evm_config: &PECTRA_CONFIG,
 				block_gas_limit: blockchain_gas_limit,
+				transaction_gas_limit,
 				base_fee: blockchain_base_fee,
 				chain_id: blockchain_chain_id,
 				is_transactional,
+				allow_unprotected_txs,
 			},
 			CheckEvmTransactionInput {
 				chain_id,
@@ -474,6 +509,18 @@ mod tests {
 	fn transaction_invalid_chain_id<'config>() -> CheckEvmTransaction<'config, TestError> {
 		test_env(TestCase {
 			chain_id: Some(555u64),
+			..Default::default()
+		})
+	}
+
+	fn transaction_without_chain_id<'config>(
+		is_transactional: bool,
+		allow_unprotected_txs: bool,
+	) -> CheckEvmTransaction<'config, TestError> {
+		test_env(TestCase {
+			is_transactional,
+			allow_unprotected_txs,
+			chain_id: None,
 			..Default::default()
 		})
 	}
@@ -681,11 +728,11 @@ mod tests {
 		// Pool
 		let res = test.validate_in_pool_for(&who);
 		assert!(res.is_err());
-		assert_eq!(res.unwrap_err(), TestError::GasLimitTooHigh);
+		assert_eq!(res.unwrap_err(), TestError::GasLimitExceedsBlockLimit);
 		// Block
 		let res = test.validate_in_block_for(&who);
 		assert!(res.is_err());
-		assert_eq!(res.unwrap_err(), TestError::GasLimitTooHigh);
+		assert_eq!(res.unwrap_err(), TestError::GasLimitExceedsBlockLimit);
 	}
 
 	// Valid chain id succeeds.
@@ -703,6 +750,28 @@ mod tests {
 		let res = test.with_chain_id();
 		assert!(res.is_err());
 		assert_eq!(res.unwrap_err(), TestError::InvalidChainId);
+	}
+
+	#[test]
+	fn validate_chain_id_none_transactional_fails_by_default() {
+		let test = transaction_without_chain_id(true, false);
+		let res = test.with_chain_id();
+		assert!(res.is_err());
+		assert_eq!(res.unwrap_err(), TestError::InvalidChainId);
+	}
+
+	#[test]
+	fn validate_chain_id_none_transactional_succeeds_when_allowed() {
+		let test = transaction_without_chain_id(true, true);
+		let res = test.with_chain_id();
+		assert!(res.is_ok());
+	}
+
+	#[test]
+	fn validate_chain_id_none_non_transactional_succeeds() {
+		let test = transaction_without_chain_id(false, false);
+		let res = test.with_chain_id();
+		assert!(res.is_ok());
 	}
 
 	// Valid max fee per gas succeeds.
@@ -922,9 +991,11 @@ mod tests {
 			CheckEvmTransactionConfig {
 				evm_config: &PECTRA_CONFIG,
 				block_gas_limit: U256::from(1_000_000u64),
+				transaction_gas_limit: Some(MAX_TRANSACTION_GAS_LIMIT),
 				base_fee: U256::from(1_000_000_000u128),
 				chain_id: 42u64,
 				is_transactional: true,
+				allow_unprotected_txs: false,
 			},
 			CheckEvmTransactionInput {
 				chain_id: Some(42u64),
@@ -959,9 +1030,11 @@ mod tests {
 			CheckEvmTransactionConfig {
 				evm_config: &PECTRA_CONFIG,
 				block_gas_limit: U256::from(1_000_000u64),
+				transaction_gas_limit: Some(MAX_TRANSACTION_GAS_LIMIT),
 				base_fee: U256::from(1_000_000_000u128),
 				chain_id: 42u64,
 				is_transactional: true,
+				allow_unprotected_txs: false,
 			},
 			CheckEvmTransactionInput {
 				chain_id: Some(42u64),
@@ -996,9 +1069,11 @@ mod tests {
 			CheckEvmTransactionConfig {
 				evm_config: &PECTRA_CONFIG,
 				block_gas_limit: U256::from(1_000_000u64),
+				transaction_gas_limit: Some(MAX_TRANSACTION_GAS_LIMIT),
 				base_fee: U256::from(1_000_000_000u128),
 				chain_id: 42u64,
 				is_transactional: true,
+				allow_unprotected_txs: false,
 			},
 			CheckEvmTransactionInput {
 				chain_id: Some(42u64),
@@ -1028,9 +1103,11 @@ mod tests {
 			CheckEvmTransactionConfig {
 				evm_config: &PECTRA_CONFIG,
 				block_gas_limit: U256::from(1_000_000u64),
+				transaction_gas_limit: Some(MAX_TRANSACTION_GAS_LIMIT),
 				base_fee: U256::from(1_000_000_000u128),
 				chain_id: 42u64,
 				is_transactional: true,
+				allow_unprotected_txs: false,
 			},
 			CheckEvmTransactionInput {
 				chain_id: Some(42u64),
@@ -1050,6 +1127,193 @@ mod tests {
 		);
 
 		let res = validator.with_eip7702_authorization_list(false); // Not EIP-7702
+		assert!(res.is_ok());
+	}
+
+	// EIP-7825 Transaction Gas Limit Cap tests
+	#[test]
+	fn validate_eip7825_gas_limit_at_cap_succeeds() {
+		// Transaction at exactly the cap should pass
+		let validator = CheckEvmTransaction::<TestError>::new(
+			CheckEvmTransactionConfig {
+				evm_config: &crate::EVM_CONFIG,
+				block_gas_limit: U256::from(30_000_000u64),
+				transaction_gas_limit: Some(MAX_TRANSACTION_GAS_LIMIT),
+				base_fee: U256::from(1_000_000_000u128),
+				chain_id: 42u64,
+				is_transactional: true,
+				allow_unprotected_txs: false,
+			},
+			CheckEvmTransactionInput {
+				chain_id: Some(42u64),
+				to: Some(H160::default()),
+				input: vec![],
+				nonce: U256::zero(),
+				gas_limit: MAX_TRANSACTION_GAS_LIMIT, // Exactly at cap
+				gas_price: None,
+				max_fee_per_gas: Some(U256::from(1_000_000_000u128)),
+				max_priority_fee_per_gas: Some(U256::from(1_000_000_000u128)),
+				value: U256::zero(),
+				access_list: vec![],
+				authorization_list: vec![],
+			},
+			None,
+			None,
+		);
+
+		let res = validator.validate_common();
+		assert!(res.is_ok());
+	}
+
+	#[test]
+	fn validate_eip7825_gas_limit_exceeds_cap_by_one_fails() {
+		// Transaction exceeding cap by 1 gas should fail
+		let validator = CheckEvmTransaction::<TestError>::new(
+			CheckEvmTransactionConfig {
+				evm_config: &crate::EVM_CONFIG,
+				block_gas_limit: U256::from(30_000_000u64),
+				transaction_gas_limit: Some(MAX_TRANSACTION_GAS_LIMIT),
+				base_fee: U256::from(1_000_000_000u128),
+				chain_id: 42u64,
+				is_transactional: true,
+				allow_unprotected_txs: false,
+			},
+			CheckEvmTransactionInput {
+				chain_id: Some(42u64),
+				to: Some(H160::default()),
+				input: vec![],
+				nonce: U256::zero(),
+				gas_limit: MAX_TRANSACTION_GAS_LIMIT + 1, // 1 over cap
+				gas_price: None,
+				max_fee_per_gas: Some(U256::from(1_000_000_000u128)),
+				max_priority_fee_per_gas: Some(U256::from(1_000_000_000u128)),
+				value: U256::zero(),
+				access_list: vec![],
+				authorization_list: vec![],
+			},
+			None,
+			None,
+		);
+
+		let res = validator.validate_common();
+		assert!(res.is_err());
+		assert_eq!(res.unwrap_err(), TestError::TransactionGasLimitExceedsCap);
+	}
+
+	#[test]
+	fn validate_transaction_gas_limit_cap_none_allows_above_eip7825_cap() {
+		let validator = test_env(TestCase {
+			blockchain_gas_limit: U256::from(30_000_000u64),
+			transaction_gas_limit: None,
+			gas_limit: MAX_TRANSACTION_GAS_LIMIT + 1,
+			..Default::default()
+		});
+
+		let res = validator.validate_common();
+		assert!(res.is_ok());
+	}
+
+	#[test]
+	fn validate_eip7825_standard_transfer_gas_limit_succeeds() {
+		// Transaction well under cap should pass
+		let validator = CheckEvmTransaction::<TestError>::new(
+			CheckEvmTransactionConfig {
+				evm_config: &crate::EVM_CONFIG,
+				block_gas_limit: U256::from(30_000_000u64),
+				transaction_gas_limit: Some(MAX_TRANSACTION_GAS_LIMIT),
+				base_fee: U256::from(1_000_000_000u128),
+				chain_id: 42u64,
+				is_transactional: true,
+				allow_unprotected_txs: false,
+			},
+			CheckEvmTransactionInput {
+				chain_id: Some(42u64),
+				to: Some(H160::default()),
+				input: vec![],
+				nonce: U256::zero(),
+				gas_limit: U256::from(21_000u64), // Standard transfer gas
+				gas_price: None,
+				max_fee_per_gas: Some(U256::from(1_000_000_000u128)),
+				max_priority_fee_per_gas: Some(U256::from(1_000_000_000u128)),
+				value: U256::zero(),
+				access_list: vec![],
+				authorization_list: vec![],
+			},
+			None,
+			None,
+		);
+
+		let res = validator.validate_common();
+		assert!(res.is_ok());
+	}
+
+	#[test]
+	fn validate_eip7825_gas_limit_well_over_cap_fails() {
+		// Transaction well over cap should fail
+		let validator = CheckEvmTransaction::<TestError>::new(
+			CheckEvmTransactionConfig {
+				evm_config: &crate::EVM_CONFIG,
+				block_gas_limit: U256::from(50_000_000u64),
+				transaction_gas_limit: Some(MAX_TRANSACTION_GAS_LIMIT),
+				base_fee: U256::from(1_000_000_000u128),
+				chain_id: 42u64,
+				is_transactional: true,
+				allow_unprotected_txs: false,
+			},
+			CheckEvmTransactionInput {
+				chain_id: Some(42u64),
+				to: Some(H160::default()),
+				input: vec![],
+				nonce: U256::zero(),
+				gas_limit: U256::from(30_000_000u64), // Nearly double the cap
+				gas_price: None,
+				max_fee_per_gas: Some(U256::from(1_000_000_000u128)),
+				max_priority_fee_per_gas: Some(U256::from(1_000_000_000u128)),
+				value: U256::zero(),
+				access_list: vec![],
+				authorization_list: vec![],
+			},
+			None,
+			None,
+		);
+
+		let res = validator.validate_common();
+		assert!(res.is_err());
+		assert_eq!(res.unwrap_err(), TestError::TransactionGasLimitExceedsCap);
+	}
+
+	#[test]
+	fn validate_eip7825_non_transactional_exceeds_cap_succeeds() {
+		// Non-transactional calls (eth_call) exceeding cap should succeed
+		// This allows dry-running expensive transactions for gas estimation
+		let validator = CheckEvmTransaction::<TestError>::new(
+			CheckEvmTransactionConfig {
+				evm_config: &crate::EVM_CONFIG,
+				block_gas_limit: U256::from(50_000_000u64),
+				transaction_gas_limit: Some(MAX_TRANSACTION_GAS_LIMIT),
+				base_fee: U256::from(1_000_000_000u128),
+				chain_id: 42u64,
+				is_transactional: false, // Non-transactional (dry-run)
+				allow_unprotected_txs: false,
+			},
+			CheckEvmTransactionInput {
+				chain_id: Some(42u64),
+				to: Some(H160::default()),
+				input: vec![],
+				nonce: U256::zero(),
+				gas_limit: U256::from(30_000_000u64), // Exceeds cap but should pass
+				gas_price: None,
+				max_fee_per_gas: Some(U256::from(1_000_000_000u128)),
+				max_priority_fee_per_gas: Some(U256::from(1_000_000_000u128)),
+				value: U256::zero(),
+				access_list: vec![],
+				authorization_list: vec![],
+			},
+			None,
+			None,
+		);
+
+		let res = validator.validate_common();
 		assert!(res.is_ok());
 	}
 }

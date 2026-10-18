@@ -24,7 +24,9 @@ The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 
 EVM precompiles: the Balances precompile only runs as a direct call and meters
 by weight, and every Orbinum precompile address holds code, so Solidity
-high-level calls reach them. `transaction_version` is unchanged. Ships with
+high-level calls reach them. EVM transaction validation and the modexp
+precompile follow upstream Frontier (polkadot-evm/frontier, changes after
+#1790). `transaction_version` is unchanged. Ships with
 `pallet-evm-precompile-balances` 0.2.0.
 
 - **Balances precompile (`0x…0802`)** refuses static calls, delegated calls
@@ -42,6 +44,24 @@ high-level calls reach them. `transaction_version` is unchanged. Ships with
   migrations (`RelayerFeesToPool`, `RemoveRelayerPallet`, `MoveStrandedEvmTips`)
   ran on testnet with spec 19 and are removed, with their tests, so no later
   upgrade runs them again.
+- **Unprotected transactions.** The runtime refuses legacy transactions
+  without an EIP-155 chain id (`AllowUnprotectedTxs = false`, Frontier #1815).
+  Only the RPC refused them, so an extrinsic submitted directly could replay a
+  transaction signed for another chain.
+- **Transaction gas cap.** A transaction may ask for at most 2^24 gas
+  (`TransactionGasLimit`, EIP-7825); above that it is invalid in the pool. The
+  block limit stays 75M gas.
+- **Modexp (`0x05`).** A base, exponent or modulus longer than 1024 bytes
+  still fails, and now consumes all the call's gas (EIP-7823). Pricing follows
+  EIP-7883: the minimum goes from 200 to 500 gas, the division by 3 is dropped,
+  complexity is 16 up to 32 bytes and twice words² above that, and each
+  exponent byte past the first 32 counts 16 instead of 8.
+- **Failed weight conversion.** When the gas limit cannot be converted to a
+  weight limit, the EVM transaction ends as `OutOfGas` and charges its full gas
+  limit, instead of failing the dispatch (Frontier #1813).
+- **Digest check.** `pallet_ethereum::on_finalize` panics on a block with
+  more than one Frontier pre-runtime log, so the block is invalid. Before, it
+  treated that block as having no log (Frontier #1809).
 
 ### spec 19 — tx 7 — 2026-10-13 (`v0.5.0`)
 

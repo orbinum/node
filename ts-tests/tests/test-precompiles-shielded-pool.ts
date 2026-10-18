@@ -202,13 +202,11 @@ describeWithFrontier("Frontier RPC (Precompile: ShieldedPool – routing)", (con
 describeWithFrontier("Frontier RPC (Precompile: ShieldedPool – used_addresses)", (context) => {
 	// ── 7. Precompile address appears in the set of known precompiles ─────────
 	it("should include 0x0801 in the precompile address list via eth_getCode", async () => {
-		// Precompile addresses return empty bytecode (0x) when queried with eth_getCode.
-		// This is a standard Frontier property: EOAs also return 0x, but what matters
-		// is that calls succeed (tested above). Here we just confirm the address is
-		// reachable and not confused with a contract deployment.
+		// Orbinum precompiles hold the stub `PUSH1 0 PUSH1 0 REVERT`, which never runs.
+		// Without code at the address, a Solidity high-level call to a function that
+		// returns nothing reverts at its code-size check before reaching the precompile.
 		const code = await context.web3.eth.getCode(SHIELDED_POOL_PRECOMPILE);
-		// Frontier precompiles typically return "0x" for code.
-		assert.equal(code, "0x", "precompile address should report empty bytecode");
+		assert.equal(code, "0x60006000fd", "precompile address should hold the revert stub");
 	});
 
 	// ── 8. Smoke-test: ABI-encoded data roundtrips correctly ─────────────────

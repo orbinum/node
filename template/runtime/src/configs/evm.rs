@@ -60,6 +60,8 @@ parameter_types! {
 	pub const GasLimitStorageGrowthRatio: u64 = BLOCK_GAS_LIMIT.saturating_div(MAX_STORAGE_GROWTH);
 	pub PrecompilesValue: FrontierPrecompiles<Runtime> = FrontierPrecompiles::<_>::new();
 	pub WeightPerGas: Weight = Weight::from_parts(weight_per_gas(BLOCK_GAS_LIMIT, NORMAL_DISPATCH_RATIO, WEIGHT_MILLISECS_PER_BLOCK), 0);
+	// EIP-7825 (Osaka) per-transaction cap of 2^24 gas.
+	pub TransactionGasLimit: Option<U256> = Some(fp_evm::MAX_TRANSACTION_GAS_LIMIT);
 }
 
 impl pallet_evm::Config for Runtime {
@@ -82,6 +84,7 @@ impl pallet_evm::Config for Runtime {
 	type FindAuthor = ();
 	type GasLimitPovSizeRatio = GasLimitPovSizeRatio;
 	type GasLimitStorageGrowthRatio = GasLimitStorageGrowthRatio;
+	type TransactionGasLimit = TransactionGasLimit;
 	type Timestamp = Timestamp;
 	type CreateOriginFilter = ();
 	type CreateInnerOriginFilter = ();
@@ -96,6 +99,8 @@ impl pallet_ethereum::Config for Runtime {
 	type StateRoot = pallet_ethereum::IntermediateStateRoot<Self::Version>;
 	type PostLogContent = PostBlockAndTxnHashes;
 	type ExtraDataLength = ConstU32<30>;
+	// Pre-EIP-155 legacy transactions carry no chain id and replay across chains.
+	type AllowUnprotectedTxs = frame_support::traits::ConstBool<false>;
 }
 
 parameter_types! {

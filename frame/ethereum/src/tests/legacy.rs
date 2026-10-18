@@ -18,7 +18,7 @@
 //! Consensus extension module tests for BABE consensus.
 
 use super::*;
-use evm::{ExitReason, ExitRevert, ExitSucceed};
+use evm::{ExitError, ExitReason, ExitRevert, ExitSucceed};
 use fp_ethereum::{TransactionData, ValidatedTransaction};
 use frame_support::{
 	dispatch::{DispatchClass, GetDispatchInfo, Pays, PostDispatchInfo},
@@ -206,6 +206,54 @@ fn transaction_with_invalid_chain_id_should_fail_in_block() {
 				fp_evm::TransactionValidationError::InvalidChainId as u8,
 			))
 		);
+	});
+}
+
+#[test]
+fn unprotected_transaction_should_fail_when_not_allowed() {
+	let (pairs, mut ext) = new_test_ext(1);
+	let alice = &pairs[0];
+
+	ext.execute_with(|| {
+		AllowUnprotectedTxs::set(false);
+		let transaction =
+			legacy_erc20_creation_unsigned_transaction().sign_without_chain_id(&alice.private_key);
+
+		let call = crate::Call::<Test>::transact { transaction };
+		let source = call.check_self_contained().unwrap().unwrap();
+		let extrinsic = CheckedExtrinsic::<_, _, SignedExtra, _> {
+			signed: fp_self_contained::CheckedSignature::SelfContained(source),
+			function: RuntimeCall::Ethereum(call),
+		};
+		let dispatch_info = extrinsic.get_dispatch_info();
+		assert_err!(
+			extrinsic.apply::<Test>(&dispatch_info, 0),
+			TransactionValidityError::Invalid(InvalidTransaction::Custom(
+				fp_evm::TransactionValidationError::InvalidChainId as u8,
+			))
+		);
+	});
+}
+
+#[test]
+fn unprotected_transaction_should_succeed_when_allowed() {
+	let (pairs, mut ext) = new_test_ext(1);
+	let alice = &pairs[0];
+
+	ext.execute_with(|| {
+		AllowUnprotectedTxs::set(true);
+		let transaction =
+			legacy_erc20_creation_unsigned_transaction().sign_without_chain_id(&alice.private_key);
+
+		let call = crate::Call::<Test>::transact { transaction };
+		let source = call.check_self_contained().unwrap().unwrap();
+		let extrinsic = CheckedExtrinsic::<_, _, SignedExtra, _> {
+			signed: fp_self_contained::CheckedSignature::SelfContained(source),
+			function: RuntimeCall::Ethereum(call),
+		};
+		let dispatch_info = extrinsic.get_dispatch_info();
+		assert_ok!(extrinsic.apply::<Test>(&dispatch_info, 0));
+		AllowUnprotectedTxs::set(false);
 	});
 }
 
@@ -645,6 +693,8 @@ fn proof_size_weight_limit_validation_works() {
 	let alice = &pairs[0];
 
 	ext.execute_with(|| {
+		System::set_block_number(1);
+
 		let mut tx = LegacyUnsignedTransaction {
 			nonce: U256::from(2),
 			gas_price: U256::from(1),
@@ -663,11 +713,21 @@ fn proof_size_weight_limit_validation_works() {
 		// Gas limit cannot afford the extra byte and thus is expected to exhaust.
 		tx.input = vec![0u8; (weight_limit.proof_size() + 1) as usize];
 		let tx = tx.sign(&alice.private_key);
+		let transaction_hash = tx.hash();
 
-		// Execute
-		assert!(
-			Ethereum::transact(RawOrigin::EthereumTransaction(alice.address).into(), tx,).is_err()
-		);
+		// Execute - transaction is applied but execution fails with OutOfGas
+		assert_ok!(Ethereum::apply_validated_transaction(
+			alice.address,
+			tx,
+			None
+		));
+		System::assert_last_event(RuntimeEvent::Ethereum(Event::Executed {
+			from: alice.address,
+			to: alice.address,
+			transaction_hash,
+			exit_reason: ExitReason::Error(ExitError::OutOfGas),
+			extra_data: vec![],
+		}));
 	});
 }
 

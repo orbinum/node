@@ -178,6 +178,11 @@ pub mod pallet {
 		/// The block gas limit. Can be a simple constant, or an adjustment algorithm in another pallet.
 		type BlockGasLimit: Get<U256>;
 
+		/// Optional maximum gas limit for a single transaction.
+		///
+		/// Set to `None` to rely only on the block gas limit and weight/proof-size constraints.
+		type TransactionGasLimit: Get<Option<U256>>;
+
 		/// EVM execution runner.
 		#[pallet::no_default]
 		type Runner: Runner<Self>;
@@ -235,6 +240,7 @@ pub mod pallet {
 
 		parameter_types! {
 			pub BlockGasLimit: U256 = U256::from(BLOCK_GAS_LIMIT);
+			pub TransactionGasLimit: Option<U256> = Some(fp_evm::MAX_TRANSACTION_GAS_LIMIT);
 			pub const ChainId: u64 = 42;
 			pub const GasLimitPovSizeRatio: u64 = BLOCK_GAS_LIMIT.saturating_div(MAX_POV_SIZE);
 			pub const GasLimitStorageGrowthRatio: u64 = BLOCK_GAS_LIMIT.saturating_div(MAX_STORAGE_GROWTH);
@@ -253,6 +259,7 @@ pub mod pallet {
 			type PrecompilesValue = ();
 			type ChainId = ChainId;
 			type BlockGasLimit = BlockGasLimit;
+			type TransactionGasLimit = TransactionGasLimit;
 			type OnChargeTransaction = ();
 			type OnCreate = ();
 			type FindAuthor = FindAuthorTruncated;
@@ -599,8 +606,8 @@ pub mod pallet {
 		InvalidNonce,
 		/// Gas limit is too low.
 		GasLimitTooLow,
-		/// Gas limit is too high.
-		GasLimitTooHigh,
+		/// Gas limit exceeds block gas limit.
+		GasLimitExceedsBlockLimit,
 		/// The chain id is invalid.
 		InvalidChainId,
 		/// the signature is invalid.
@@ -613,13 +620,17 @@ pub mod pallet {
 		Undefined,
 		/// Address not allowed to deploy contracts either via CREATE or CALL(CREATE).
 		CreateOriginNotAllowed,
+		/// EIP-7825: Transaction gas limit exceeds protocol cap (2^24).
+		TransactionGasLimitExceedsCap,
 	}
 
 	impl<T> From<TransactionValidationError> for Error<T> {
 		fn from(validation_error: TransactionValidationError) -> Self {
 			match validation_error {
 				TransactionValidationError::GasLimitTooLow => Error::<T>::GasLimitTooLow,
-				TransactionValidationError::GasLimitTooHigh => Error::<T>::GasLimitTooHigh,
+				TransactionValidationError::GasLimitExceedsBlockLimit => {
+					Error::<T>::GasLimitExceedsBlockLimit
+				}
 				TransactionValidationError::BalanceTooLow => Error::<T>::BalanceLow,
 				TransactionValidationError::TxNonceTooLow => Error::<T>::InvalidNonce,
 				TransactionValidationError::TxNonceTooHigh => Error::<T>::InvalidNonce,
@@ -630,6 +641,9 @@ pub mod pallet {
 				TransactionValidationError::InvalidSignature => Error::<T>::InvalidSignature,
 				TransactionValidationError::EmptyAuthorizationList => Error::<T>::Undefined,
 				TransactionValidationError::AuthorizationListTooLarge => Error::<T>::Undefined,
+				TransactionValidationError::TransactionGasLimitExceedsCap => {
+					Error::<T>::TransactionGasLimitExceedsCap
+				}
 				TransactionValidationError::UnknownError => Error::<T>::Undefined,
 			}
 		}
