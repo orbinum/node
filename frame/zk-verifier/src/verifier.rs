@@ -114,11 +114,12 @@ fn resolve_key<T: Config>(
 	Ok((key, resolved))
 }
 
-/// Count a verification outcome in `VerificationStats`, failures too.
+/// Count a verification outcome in `VerificationStats`.
 ///
-/// `verify_proof` returns `Err` on failure, so its write reverts; the port
-/// returns `Ok(false)`, so its write persists — on purpose: invalid proofs
-/// reaching the pool stay observable.
+/// A failure is counted here but never reaches a block: `verify_proof` returns
+/// `Err`, and the pool turns the port's `Ok(false)` into
+/// `ProofVerificationFailed`, so either way the dispatch reverts this write.
+/// Invalid spends are also refused at pool admission, before any block.
 fn record_stats<T: Config>(circuit_id: CircuitId, version: u32, result: bool) {
 	VerificationStats::<T>::mutate(circuit_id, version, |s| {
 		s.total_verifications = s.total_verifications.saturating_add(1);
