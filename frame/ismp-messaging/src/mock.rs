@@ -17,6 +17,7 @@
 use crate as pallet_ismp_messaging;
 use frame_support::{PalletId, derive_impl, parameter_types, traits::ConstU32};
 use ismp::{host::StateMachine, module::IsmpModule, router::IsmpRouter};
+use scale_codec::Encode;
 use sp_runtime::{BuildStorage, traits::IdentityLookup};
 
 pub type AccountId = u64;
@@ -181,9 +182,14 @@ impl pallet_ismp_messaging::Config for Test {
 	type WeightInfo = ();
 }
 
-/// Test externalities with block number 1, so events are collected.
+/// Wall-clock time every test starts at, in milliseconds. Zero would be read as
+/// "still at genesis" by `pallet_timestamp`, which logs an error on each read.
+pub const GENESIS_MS: u64 = 1_788_000_000_000;
+
+/// Test externalities with block number 1, so events are collected, and the clock
+/// at [`GENESIS_MS`].
 pub fn new_test_ext() -> sp_io::TestExternalities {
-	let t = RuntimeGenesisConfig {
+	let mut t = RuntimeGenesisConfig {
 		balances: pallet_balances::GenesisConfig {
 			// Enough for the worst case of ANY shape, not merely for the flat fee: the
 			// dearest message here costs `MESSAGE_FEE + MESSAGE_BYTE_FEE × 24,576` = 246,760,
@@ -197,6 +203,10 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 	}
 	.build_storage()
 	.unwrap();
+	t.top.insert(
+		pallet_timestamp::Now::<Test>::hashed_key().to_vec(),
+		GENESIS_MS.encode(),
+	);
 	let mut ext = sp_io::TestExternalities::new(t);
 	ext.execute_with(|| System::set_block_number(1));
 	ext
