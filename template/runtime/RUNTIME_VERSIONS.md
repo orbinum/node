@@ -20,10 +20,12 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
-### Next spec — pending
+### spec 20 — tx 7 — [Unreleased]
 
-Not yet versioned: needs a `spec_version` bump (transaction version unchanged)
-before `setCode`.
+EVM precompiles: the Balances precompile only runs as a direct call and meters
+by weight, and every Orbinum precompile address holds code, so Solidity
+high-level calls reach them. `transaction_version` is unchanged. Ships with
+`pallet-evm-precompile-balances` 0.2.0.
 
 - **Balances precompile (`0x…0802`)** refuses static calls, delegated calls
   (DELEGATECALL, CALLCODE) and calls carrying value. Under DELEGATECALL the
@@ -31,8 +33,17 @@ before `setCode`.
   any contract could move its caller's ORB. Calls are charged the transfer's
   dispatch weight up front, failing ones included, instead of a flat 5,000 gas,
   and every failure reverts with an `Error(string)` reason.
+- **Precompile code.** `0x0400`–`0x0403`, `0x0801` and `0x0802` hold the stub
+  `0x60006000fd` (`PUSH1 0 PUSH1 0 REVERT`), which never runs: with no code at
+  those addresses, a Solidity high-level call to a function returning nothing
+  reverted at its code-size check before reaching the precompile. Genesis sets
+  it; `migrations::PrecompileCode` sets it on a live chain (idempotent).
+- **Migrations.** `Migrations` holds only `PrecompileCode`. The spec 19
+  migrations (`RelayerFeesToPool`, `RemoveRelayerPallet`, `MoveStrandedEvmTips`)
+  ran on testnet with spec 19 and are removed, with their tests, so no later
+  upgrade runs them again.
 
-### spec 19 — tx 7 — [Unreleased]
+### spec 19 — tx 7 — 2026-10-13 (`v0.5.0`)
 
 A validator is its account and session keys, nothing else: the EVM relayer layer
 is removed. Private spends are submitted only unsigned, and every spend's fee and

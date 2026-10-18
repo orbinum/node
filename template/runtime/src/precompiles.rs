@@ -11,6 +11,14 @@ use pallet_evm_precompile_sha3fips::Sha3FIPS256;
 use pallet_evm_precompile_shielded_pool::ShieldedPoolPrecompile;
 use pallet_evm_precompile_simple::{ECRecover, ECRecoverPublicKey, Identity, Ripemd160, Sha256};
 
+/// Code stored at each Orbinum precompile address: `PUSH1 0 PUSH1 0 REVERT`.
+///
+/// Never executed, since the precompile runs instead. It gives the address a
+/// non-zero code size, which Solidity checks before a high-level call to a
+/// function that returns nothing; with no code such a call reverts before it
+/// reaches the precompile.
+pub const PRECOMPILE_CODE: [u8; 5] = [0x60, 0x00, 0x60, 0x00, 0xfd];
+
 pub struct FrontierPrecompiles<R>(PhantomData<R>);
 
 impl<R> FrontierPrecompiles<R>
@@ -34,6 +42,14 @@ where
 			hash(2049),
 			hash(2050),
 		]
+	}
+
+	/// The precompiles that carry [`PRECOMPILE_CODE`]: every one past the
+	/// Ethereum range, which keeps no code as on Ethereum.
+	pub fn addresses_with_code() -> impl Iterator<Item = H160> {
+		Self::used_addresses()
+			.into_iter()
+			.filter(|address| address.to_low_u64_be() >= 1024)
 	}
 }
 impl<R> PrecompileSet for FrontierPrecompiles<R>

@@ -62,6 +62,19 @@ pub(super) fn build_genesis(
 				code: vec![0x00],
 			},
 		);
+		for address in
+			crate::precompiles::FrontierPrecompiles::<crate::Runtime>::addresses_with_code()
+		{
+			map.insert(
+				address,
+				fp_evm::GenesisAccount {
+					nonce: U256::zero(),
+					balance: U256::zero(),
+					storage: Default::default(),
+					code: crate::precompiles::PRECOMPILE_CODE.to_vec(),
+				},
+			);
+		}
 		map
 	};
 
