@@ -2,9 +2,11 @@
 
 mod accounts;
 mod block_author;
+mod ed25519_text;
 mod host_functions;
 mod metadata_hash;
 mod precompile_code;
+mod signature_hardening;
 mod weights;
 
 use sp_io::TestExternalities;

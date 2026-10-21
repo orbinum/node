@@ -26,7 +26,9 @@ EVM precompiles: the Balances precompile only runs as a direct call and meters
 by weight, and every Orbinum precompile address holds code, so Solidity
 high-level calls reach them. EVM transaction validation and the modexp
 precompile follow upstream Frontier (polkadot-evm/frontier, changes after
-#1790). `transaction_version` is unchanged. Ships with
+#1790). Ed25519 keys sign only text that names an Orbinum transaction:
+raw `Ed25519` (`0x00`) never verifies, and Solana wallets and Substrate extensions
+sign through the new `Ed25519Text` (`0x03`) and `Ed25519WrappedText` (`0x04`). `transaction_version` is unchanged. Ships with
 `pallet-evm-precompile-balances` 0.2.0.
 
 - **Balances precompile (`0x…0802`)** refuses static calls, delegated calls
@@ -62,6 +64,44 @@ precompile follow upstream Frontier (polkadot-evm/frontier, changes after
 - **Digest check.** `pallet_ethereum::on_finalize` panics on a block with
   more than one Frontier pre-runtime log, so the block is invalid. Before, it
   treated that block as having no log (Frontier #1809).
+- **`OrbinumSignature::Ed25519Text` (`0x03`).** Ed25519 over the UTF-8 text
+  `"Orbinum transaction\nchain: 0x{genesis}\npayload: 0x{blake2_256(msg)}"`
+  (lowercase hex), where `msg` is what `Verify::verify` receives: the signing
+  payload, or its blake2_256 above 256 bytes. Phantom refuses binary input to
+  `solana:signMessage` and MetaMask rewrites it, so Solana accounts sign
+  extrinsics through this variant; the account is the raw ed25519 key.
+- **`OrbinumSignature::Ed25519WrappedText` (`0x04`).** The same text inside
+  `<Bytes>…</Bytes>`: what a Substrate extension's `signRaw` signs for it
+  (polkadot-js `u8aWrapBytes`), so ed25519 accounts in polkadot-js, Talisman or
+  SubWallet keep signing.
+- **Raw `Ed25519` (`0x00`) refused.** The variant stays at index 0 but never
+  verifies: polkadot-api builds no extrinsic for a signature enum without
+  `Ed25519`, `Sr25519` and `Ecdsa`, so removing it would break every client,
+  sr25519 accounts included. Solana wallets sign arbitrary bytes through `signMessage` (Backpack,
+  Solflare, Trust and Talisman sign a 32-byte binary "nonce"), and the account
+  cannot opt out of a variant, so a site that had a user sign a payload's
+  blake2_256 as a login nonce could submit it as that user's `0x00`
+  transaction. Every ed25519 signature must now cover text that says "Orbinum
+  transaction". **Clients:** an ed25519 account signs with `signRaw` of the
+  text and tags the result `0x04` (extension) or `0x03` (`signMessage`); plain
+  `signPayload` gives `0x00` and is refused (`BadProof`). Every index keeps
+  its encoding (`#[codec(index)]`), and no call encoding changes, so
+  `transaction_version` is unchanged.
+- **Signature hardening.** Every `OrbinumSignature` variant refuses what the
+  host primitive would accept as a forgery or an alias:
+  - **Ed25519Text / Ed25519WrappedText:** small-order keys (all encodings, either sign
+    bit). Under ZIP-215, `R = identity, s = 0` verifies any message for them.
+    The account `0x0100…00` (EVM address `0x01` followed by zeros) is such a key,
+    so before this anyone could sign as it.
+  - **Sr25519:** the identity key (`0x00…00`), under which `R = 0, s = 0`
+    verifies any message. `CheckNonZeroSender` already kept it out of
+    extrinsics.
+  - **Ecdsa:** only `s ≤ n/2` and a raw recovery id (`0`–`3`). The host also
+    recovers the same key from `(r, n − s)` with the other id and from `v + 27`,
+    so one signed extrinsic had up to four valid encodings and hashes. `sp_core`,
+    polkadot-js and noble already sign this way.
+  - The module is split by responsibility under `src/orbinum_signature/`
+    (`signer`, `ed25519`, `sr25519`, `ecdsa`, `text`).
 
 ### spec 19 — tx 7 — 2026-10-13 (`v0.5.0`)
 
