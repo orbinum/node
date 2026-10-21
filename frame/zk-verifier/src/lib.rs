@@ -153,6 +153,20 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type DeniedVkHashes<T: Config> = StorageMap<_, Identity, [u8; 32], (), OptionQuery>;
 
+	/// `blake2_256` of the key a removed version held. That version can hold only the
+	/// same key again, so a client that cached what it means is never served another
+	/// key under it. Append-only: nothing clears it, `purge_circuit` included.
+	#[pallet::storage]
+	pub type RemovedVkHashes<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat,
+		CircuitId,
+		Blake2_128Concat,
+		u32,
+		[u8; 32],
+		OptionQuery,
+	>;
+
 	// ── Genesis ───────────────────────────────────────────────────────────────
 
 	#[pallet::genesis_config]
@@ -282,6 +296,8 @@ pub mod pallet {
 		DeniedVerificationKey,
 		/// `deny_version`: the key's hash is already denied.
 		KeyAlreadyDenied,
+		/// The version was removed while holding another key; it can hold only that one.
+		VersionReused,
 	}
 
 	// ── Extrinsics ────────────────────────────────────────────────────────────
@@ -302,7 +318,8 @@ pub mod pallet {
 		/// semantics: any other change takes a new circuit id, and a superseded
 		/// version is retired with `retire_version`.
 		#[pallet::call_index(0)]
-		#[pallet::weight(T::WeightInfo::register_verification_key())]
+		#[pallet::weight(T::WeightInfo::register_verification_key()
+			.saturating_add(T::DbWeight::get().reads(1)))]
 		pub fn register_verification_key(
 			origin: OriginFor<T>,
 			circuit_id: CircuitId,
@@ -340,7 +357,8 @@ pub mod pallet {
 
 		/// Remove a version and all its data (Root only); never the active one.
 		#[pallet::call_index(2)]
-		#[pallet::weight(T::WeightInfo::remove_verification_key())]
+		#[pallet::weight(T::WeightInfo::remove_verification_key()
+			.saturating_add(T::DbWeight::get().reads_writes(1, 1)))]
 		pub fn remove_verification_key(
 			origin: OriginFor<T>,
 			circuit_id: CircuitId,
@@ -356,6 +374,9 @@ pub mod pallet {
 				.ok_or(Error::<T>::ActiveVersionNotSet)?;
 			ensure!(active != version, Error::<T>::CannotRemoveActiveVersion);
 
+			if let Some(hash) = VkHashes::<T>::get(circuit_id, version) {
+				RemovedVkHashes::<T>::insert(circuit_id, version, hash);
+			}
 			Self::remove_vk(circuit_id, version);
 			Self::deposit_event(Event::VerificationKeyRemoved {
 				circuit_id,
@@ -408,7 +429,8 @@ pub mod pallet {
 
 		/// Atomically register (and optionally activate) up to 10 VKs (Root only).
 		#[pallet::call_index(4)]
-		#[pallet::weight(T::WeightInfo::batch_register_verification_keys(entries.len() as u32))]
+		#[pallet::weight(T::WeightInfo::batch_register_verification_keys(entries.len() as u32)
+			.saturating_add(T::DbWeight::get().reads(entries.len() as u64)))]
 		pub fn batch_register_verification_keys(
 			origin: OriginFor<T>,
 			entries: BoundedVec<VkEntry, ConstU32<10>>,
@@ -610,6 +632,12 @@ pub mod pallet {
 			ensure!(
 				!VerificationKeys::<T>::contains_key(circuit_id, version),
 				Error::<T>::CircuitAlreadyExists
+			);
+			// Nor reuse a removed version for another key.
+			ensure!(
+				RemovedVkHashes::<T>::get(circuit_id, version)
+					.is_none_or(|h| h == sp_io::hashing::blake2_256(&key_data)),
+				Error::<T>::VersionReused
 			);
 			Self::store_vk(circuit_id, version, key_data)?;
 			Self::deposit_event(Event::VerificationKeyRegistered {

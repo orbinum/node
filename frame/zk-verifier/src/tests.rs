@@ -7,8 +7,8 @@ use crate::{
 		new_test_ext, real_vk,
 	},
 	pallet::{
-		ActiveCircuitVersion, DeniedVkHashes, Event, PreparedKeys, RetiredVersions,
-		VerificationKeys, VerificationStats, VkHashes,
+		ActiveCircuitVersion, DeniedVkHashes, Event, PreparedKeys, RemovedVkHashes,
+		RetiredVersions, VerificationKeys, VerificationStats, VkHashes,
 	},
 	types::VkEntry,
 };
@@ -1717,25 +1717,78 @@ fn entries_of(circuit_id: CircuitId) -> usize {
 		+ usize::from(ActiveCircuitVersion::<Test>::contains_key(circuit_id))
 }
 
-/// A version removed and registered again with another key verifies under the
-/// new key's prepared form, never a stale one.
+/// Register `first` as transfer v2 next to an active v3, then remove v2.
+fn remove_transfer_v2(first: VkBytes) {
+	assert_ok!(register(CircuitId::TRANSFER, 2, first));
+	assert_ok!(register(CircuitId::TRANSFER, 3, memo_bound_transfer_key()));
+	activate(CircuitId::TRANSFER, 3);
+	assert_ok!(ZkVerifier::remove_verification_key(
+		root().into(),
+		CircuitId::TRANSFER,
+		2
+	));
+}
+
+/// A removed version cannot take another key: a client that cached what v2 means
+/// would be served a different circuit under the same number.
 #[test]
-fn a_reregistered_version_gets_the_new_keys_prepared_form() {
+fn a_removed_version_cannot_hold_another_key() {
 	new_test_ext().execute_with(|| {
 		let (first, second) = (memo_bound_transfer_key(), other_transfer_key());
 		assert_ne!(first, second);
-		assert_ok!(register(CircuitId::TRANSFER, 2, first));
-		assert_ok!(register(CircuitId::TRANSFER, 3, memo_bound_transfer_key()));
-		activate(CircuitId::TRANSFER, 3);
+		remove_transfer_v2(first.clone());
+		assert_eq!(
+			RemovedVkHashes::<Test>::get(CircuitId::TRANSFER, 2),
+			Some(sp_io::hashing::blake2_256(&first))
+		);
+		assert_noop!(
+			register(CircuitId::TRANSFER, 2, second.clone()),
+			Error::<Test>::VersionReused
+		);
+		// Another version number is free.
+		assert_ok!(register(CircuitId::TRANSFER, 4, second));
+	});
+}
+
+/// The same key may come back under its old number, with a fresh prepared form.
+#[test]
+fn a_removed_version_takes_its_own_key_back() {
+	new_test_ext().execute_with(|| {
+		let first = memo_bound_transfer_key();
+		remove_transfer_v2(first.clone());
+		assert_ok!(register(CircuitId::TRANSFER, 2, first.clone()));
+		assert_eq!(
+			PreparedKeys::<Test>::get(CircuitId::TRANSFER, 2),
+			Some(ZkVerifier::prepare_vk(&first).unwrap())
+		);
+		// Removed again, it still remembers the same key.
 		assert_ok!(ZkVerifier::remove_verification_key(
 			root().into(),
 			CircuitId::TRANSFER,
 			2
 		));
-		assert_ok!(register(CircuitId::TRANSFER, 2, second.clone()));
-		assert_eq!(
-			PreparedKeys::<Test>::get(CircuitId::TRANSFER, 2),
-			Some(ZkVerifier::prepare_vk(&second).unwrap())
+		assert_noop!(
+			register(CircuitId::TRANSFER, 2, other_transfer_key()),
+			Error::<Test>::VersionReused
+		);
+	});
+}
+
+#[test]
+fn batch_register_refuses_a_reused_version() {
+	new_test_ext().execute_with(|| {
+		remove_transfer_v2(memo_bound_transfer_key());
+		let entries: BoundedVec<VkEntry, ConstU32<10>> = vec![VkEntry {
+			circuit_id: CircuitId::TRANSFER,
+			version: 2,
+			verification_key: other_transfer_key(),
+			set_active: false,
+		}]
+		.try_into()
+		.unwrap();
+		assert_noop!(
+			ZkVerifier::batch_register_verification_keys(root().into(), entries),
+			Error::<Test>::VersionReused
 		);
 	});
 }

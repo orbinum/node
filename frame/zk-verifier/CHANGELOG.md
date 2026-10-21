@@ -20,12 +20,19 @@ All notable changes to this pallet are documented here.
   already recorded is refused (`KeyAlreadyDenied`).
 - `GenesisConfig::denied_vk_hashes`: the record a new chain starts with, written before
   any genesis key.
+- `RemovedVkHashes`: `remove_verification_key` records the hash of the key the version
+  held, and that version can then only take the same key again (`VersionReused`
+  otherwise, also in `batch_register_verification_keys`). Before, removing a version
+  and registering it with another key changed its meaning for any client that cached
+  it. Append-only: `purge_circuit` does not clear it.
 
 ### Changed
 
 - `ZkVerifierPort::verification_weight` adds one storage read, the `VkHashes` lookup of
   the denied-key check.
 - `WeightInfo::deny_version`: estimated from `retire_version` until benchmarked.
+- `register_verification_key` and `batch_register_verification_keys` add one read per
+  key (`RemovedVkHashes`), `remove_verification_key` one read and one write.
 - Registration refuses a key without an independent `delta` (`delta = ±gamma` or
   `± G2`, a phase-2-less snarkjs key), with which anyone could forge proofs
   (`InvalidVerificationKey`, through `orbinum-zk-verifier`).
