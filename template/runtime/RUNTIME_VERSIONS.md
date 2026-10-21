@@ -28,8 +28,11 @@ high-level calls reach them. EVM transaction validation and the modexp
 precompile follow upstream Frontier (polkadot-evm/frontier, changes after
 #1790). Ed25519 keys sign only text that names an Orbinum transaction:
 raw `Ed25519` (`0x00`) never verifies, and Solana wallets and Substrate extensions
-sign through the new `Ed25519Text` (`0x03`) and `Ed25519WrappedText` (`0x04`). `transaction_version` is unchanged. Ships with
-`pallet-evm-precompile-balances` 0.2.0.
+sign through the new `Ed25519Text` (`0x03`) and `Ed25519WrappedText` (`0x04`).
+Circuit keys: unsound ones are recorded on chain and never verify again, a
+removed version keeps its key, and a key without phase 2 is refused.
+`transaction_version` is unchanged. Ships with `pallet-evm-precompile-balances`
+0.2.0, `pallet-zk-verifier` 0.19.0 and `orbinum-zk-verifier` 3.4.0.
 
 - **Balances precompile (`0x…0802`)** refuses static calls, delegated calls
   (DELEGATECALL, CALLCODE) and calls carrying value. Under DELEGATECALL the
@@ -102,6 +105,28 @@ sign through the new `Ed25519Text` (`0x03`) and `Ed25519WrappedText` (`0x04`). `
     polkadot-js and noble already sign this way.
   - The module is split by responsibility under `src/orbinum_signature/`
     (`signer`, `ed25519`, `sr25519`, `ecdsa`, `text`).
+- **Denied circuit keys.** `pallet_zk_verifier` keeps an on-chain, append-only
+  record of unsound keys (`DeniedVkHashes`), filled by `deny_version` (Root, call
+  index 8) or the chain spec (`denied_vk_hashes`, `0x…` hashes). A denied key is
+  refused on register, activate and unretire, and verifies nothing if stored; no
+  call removes an entry. Transfer and unshield v1/v2 let `k + i·l` spending-key
+  aliases give one note several nullifiers, and a spend chooses its circuit
+  version, so retiring them was the only guard: `unretire_version` checked arity
+  alone, and the same key could be registered again under another version.
+  **After the upgrade**, Root records them on testnet with `deny_version` for
+  `(1,1)`, `(1,2)`, `(2,1)` and `(2,2)`, all already retired.
+- **Removed versions keep their key.** `remove_verification_key` records the
+  key's hash (`RemovedVkHashes`), and the version can then take only that key
+  again (`VersionReused`). Before, a version could be removed and registered
+  with another key, changing its meaning for any client that cached it.
+- **Keys without phase 2 refused.** Registration refuses a key whose `delta` is
+  `±gamma` or `±` the G2 generator — what snarkjs leaves when phase 2 never ran.
+  With it `(α, β, −L(x))` verifies any statement from public key data alone: a
+  forged unshield drained the pool on a dev node before the check. Keys already
+  stored are not re-checked; the seven on testnet have an independent `delta`.
+- **Weights.** Every proof verification adds one read (the denied-key check);
+  `deny_version` is estimated from `retire_version`, and registration and
+  removal add the `RemovedVkHashes` read/write, until re-benchmarked.
 
 ### spec 19 — tx 7 — 2026-10-13 (`v0.5.0`)
 

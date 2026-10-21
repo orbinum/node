@@ -6,6 +6,8 @@ All notable changes to this crate are documented here.
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-10-21
+
 ### Added
 
 - Golden vectors for the frozen `bn254_groth16_verify` (version 1)

@@ -6,6 +6,8 @@ All notable changes to this pallet are documented here.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-21
+
 ### Added
 
 - `DeniedVkHashes`: an on-chain, append-only record of `blake2_256` hashes of keys

@@ -10075,7 +10075,7 @@ dependencies = [
 
 [[package]]
 name = "orbinum-zk-verifier"
-version = "3.3.1"
+version = "3.4.0"
 dependencies = [
  "ark-bn254",
  "ark-ec 0.5.0",
@@ -12930,7 +12930,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-zk-verifier"
-version = "0.18.1"
+version = "0.19.0"
 dependencies = [
  "ark-bn254",
  "ark-ec 0.5.0",
