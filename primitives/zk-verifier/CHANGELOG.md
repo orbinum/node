@@ -6,6 +6,16 @@ All notable changes to this crate are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Golden vectors for the frozen `bn254_groth16_verify` (version 1)
+  (`tests/host_function_v1.rs`): a production key (unshield v3), its prepared form as
+  stored on chain, and a real proof. They pin that the host function and
+  `verify_prepared` accept it, refuse tampered, non-canonical and malformed input, and
+  that preparing the key still gives the stored bytes, along with the constants
+  version 1 depends on. A failure means a change alters what version 1 answers: add a
+  `#[version(N)]` instead of updating the fixtures.
+
 ### Changed
 
 - `VerifyingKey::to_ark_vk` refuses a key whose `delta_g2` is `±gamma_g2` or `±` the G2
