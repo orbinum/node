@@ -1,6 +1,7 @@
 [package]
 name = "pallet-evm-precompile-simple"
-version = "2.0.0-dev"
+version = "2.0.1-dev"
+authors = { workspace = true }
 license = "Apache-2.0"
 description = "Simple precompiles for EVM pallet."
 edition = { workspace = true }

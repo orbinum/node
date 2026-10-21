@@ -485,7 +485,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-serde",
  "alloy-sol-types",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "serde",
  "serde_json",
  "serde_with",
@@ -622,7 +622,7 @@ checksum = "e8597d36d546e1dab822345ad563243ec3920e199322cb554ce56c8ef1a1e2e7"
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "reqwest",
  "serde_json",
  "tower 0.5.3",
@@ -2144,7 +2144,7 @@ dependencies = [
  "bitflags 2.13.1",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "regex",
@@ -5226,7 +5226,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7659,7 +7659,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -10062,7 +10062,7 @@ dependencies = [
 
 [[package]]
 name = "orbinum-zk-core"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.5.0",
@@ -10075,7 +10075,7 @@ dependencies = [
 
 [[package]]
 name = "orbinum-zk-verifier"
-version = "3.3.0"
+version = "3.3.1"
 dependencies = [
  "ark-bn254",
  "ark-ec 0.5.0",
@@ -11354,7 +11354,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-evm-precompile-simple"
-version = "2.0.0-dev"
+version = "2.0.1-dev"
 dependencies = [
  "fp-evm",
  "pallet-evm-test-vector-support",
@@ -12358,7 +12358,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-shielded-pool"
-version = "0.25.0"
+version = "0.25.1"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.5.0",
@@ -12380,7 +12380,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-shielded-pool-runtime-api"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "pallet-shielded-pool",
  "sp-api",
@@ -12930,7 +12930,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-zk-verifier"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "ark-bn254",
  "ark-ec 0.5.0",
@@ -15724,7 +15724,7 @@ dependencies = [
  "once_cell",
  "socket2 0.6.5",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -16658,7 +16658,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -16671,7 +16671,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -16730,7 +16730,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 0.26.11",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -16751,7 +16751,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.10",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -20966,10 +20966,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -22670,7 +22670,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

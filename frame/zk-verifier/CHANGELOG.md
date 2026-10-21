@@ -6,6 +6,13 @@ All notable changes to this pallet are documented here.
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-21
+
+### Changed
+
+- `authors` is inherited from the workspace (`Orbinum Technologies
+  <contact@orbinum.net>`). No code change.
+
 ## [0.18.0] - 2026-10-13
 
 ### Added

@@ -4,6 +4,17 @@ All notable changes to this crate are documented here.
 
 ---
 
+## [Unreleased]
+
+## [1.1.2] — 2026-10-21
+
+### Changed
+
+- `authors` is inherited from the workspace (`Orbinum Technologies
+  <contact@orbinum.net>`). No code change.
+
+---
+
 ## [1.1.1] — 2026-09-29
 
 ### Changed

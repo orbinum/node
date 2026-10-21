@@ -1,8 +1,8 @@
 [package]
 name = "pallet-zk-verifier"
-version = "0.18.0"
+version = "0.18.1"
 description = "Zero-Knowledge proof verification pallet for Orbinum"
-authors = ["Orbinum Team"]
+authors = { workspace = true }
 license = "GPL-3.0-or-later"
 edition = "2024"
 repository = "https://github.com/orbinum/node"

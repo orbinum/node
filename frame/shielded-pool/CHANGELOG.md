@@ -4,6 +4,13 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-10-21
+
+### Changed
+
+- `authors` is inherited from the workspace (`Orbinum Technologies
+  <contact@orbinum.net>`). No code change.
+
 ## [0.25.0] - 2026-10-13
 
 **Breaking** — the relayer layer is gone. Requires the matching runtime and
