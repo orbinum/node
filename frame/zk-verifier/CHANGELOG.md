@@ -26,6 +26,9 @@ All notable changes to this pallet are documented here.
 - `ZkVerifierPort::verification_weight` adds one storage read, the `VkHashes` lookup of
   the denied-key check.
 - `WeightInfo::deny_version`: estimated from `retire_version` until benchmarked.
+- Registration refuses a key without an independent `delta` (`delta = ±gamma` or
+  `± G2`, a phase-2-less snarkjs key), with which anyone could forge proofs
+  (`InvalidVerificationKey`, through `orbinum-zk-verifier`).
 
 ## [0.18.1] - 2026-10-21
 

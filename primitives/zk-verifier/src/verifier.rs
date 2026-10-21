@@ -58,7 +58,7 @@ mod tests {
 	use super::*;
 	use crate::{BASE_VERIFICATION_COST, PER_INPUT_COST};
 	use ark_bn254::{Bn254, Fr as Bn254Fr, G1Affine, G2Affine};
-	use ark_ec::AffineRepr;
+	use ark_ec::{AffineRepr, CurveGroup};
 	use ark_ff::{BigInteger, PrimeField};
 	use ark_groth16::VerifyingKey as ArkVerifyingKey;
 	use ark_serialize::CanonicalSerialize;
@@ -92,7 +92,7 @@ mod tests {
 			alpha_g1: G1Affine::generator(),
 			beta_g2: G2Affine::generator(),
 			gamma_g2: G2Affine::generator(),
-			delta_g2: G2Affine::generator(),
+			delta_g2: (G2Affine::generator() + G2Affine::generator()).into_affine(),
 			gamma_abc_g1: (0..=expected_inputs)
 				.map(|_| G1Affine::generator())
 				.collect(),

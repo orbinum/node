@@ -239,7 +239,7 @@ fn register_vk_accepts_a_memo_bound_rotation_at_the_same_arity() {
 #[test]
 fn register_vk_rejects_a_point_at_infinity() {
 	use ark_bn254::{Bn254, G1Affine, G2Affine};
-	use ark_ec::AffineRepr;
+	use ark_ec::{AffineRepr, CurveGroup};
 	new_test_ext().execute_with(|| {
 		let mut abc: Vec<G1Affine> = (0..=TRANSFER_PUBLIC_INPUTS)
 			.map(|_| G1Affine::generator())
@@ -249,7 +249,7 @@ fn register_vk_rejects_a_point_at_infinity() {
 			alpha_g1: G1Affine::generator(),
 			beta_g2: G2Affine::generator(),
 			gamma_g2: G2Affine::generator(),
-			delta_g2: G2Affine::generator(),
+			delta_g2: (G2Affine::generator() + G2Affine::generator()).into_affine(),
 			gamma_abc_g1: abc,
 		};
 		let bytes = orbinum_zk_verifier::VerifyingKey::from_ark_vk(&vk)
@@ -259,6 +259,34 @@ fn register_vk_rejects_a_point_at_infinity() {
 			register(CircuitId::TRANSFER, 1, bytes.try_into().unwrap()),
 			Error::<Test>::InvalidVerificationKey
 		);
+	});
+}
+
+/// A key whose `delta` is `gamma` (snarkjs without phase 2) lets anyone forge proofs.
+#[test]
+fn register_vk_rejects_a_key_without_phase_2() {
+	use ark_bn254::{Bn254, G1Affine, G2Affine};
+	use ark_ec::AffineRepr;
+	new_test_ext().execute_with(|| {
+		let vk = ark_groth16::VerifyingKey::<Bn254> {
+			alpha_g1: G1Affine::generator(),
+			beta_g2: G2Affine::generator(),
+			gamma_g2: G2Affine::generator(),
+			delta_g2: G2Affine::generator(),
+			gamma_abc_g1: vec![
+				G1Affine::generator();
+				TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS + 1
+			],
+		};
+		let bytes = orbinum_zk_verifier::VerifyingKey::from_ark_vk(&vk)
+			.unwrap()
+			.bytes;
+		assert_noop!(
+			register(CircuitId::TRANSFER, 2, bytes.try_into().unwrap()),
+			Error::<Test>::InvalidVerificationKey
+		);
+		// The same key with an independent delta registers.
+		assert_ok!(register(CircuitId::TRANSFER, 2, vk_bytes()));
 	});
 }
 
@@ -1671,7 +1699,7 @@ fn other_transfer_key() -> VkBytes {
 		alpha_g1: (g + g).into_affine(),
 		beta_g2: G2Affine::generator(),
 		gamma_g2: G2Affine::generator(),
-		delta_g2: G2Affine::generator(),
+		delta_g2: (G2Affine::generator() + G2Affine::generator()).into_affine(),
 		gamma_abc_g1: vec![g; TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS + 1],
 	};
 	orbinum_zk_verifier::VerifyingKey::from_ark_vk(&vk)

@@ -155,7 +155,7 @@ mod tests {
 	use super::{layout::*, *};
 	use alloc::vec;
 	use ark_bn254::{G1Affine, G2Affine};
-	use ark_ec::AffineRepr;
+	use ark_ec::{AffineRepr, CurveGroup};
 	use ark_groth16::VerifyingKey as ArkVK;
 
 	/// A genuine key of `arity` inputs, as registration stores it.
@@ -164,7 +164,7 @@ mod tests {
 			alpha_g1: G1Affine::generator(),
 			beta_g2: G2Affine::generator(),
 			gamma_g2: G2Affine::generator(),
-			delta_g2: G2Affine::generator(),
+			delta_g2: (G2Affine::generator() + G2Affine::generator()).into_affine(),
 			gamma_abc_g1: (0..=arity).map(|_| G1Affine::generator()).collect(),
 		};
 		VerifyingKey::from_ark_vk(&vk).expect("serializes")

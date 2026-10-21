@@ -41,7 +41,7 @@ mod benchmarks {
 	/// relies on `skip-proof-verification` to record weight despite the failed pairing.
 	fn synthetic_vk(arity: usize) -> Vec<u8> {
 		use ark_bn254::{Bn254, G1Affine, G2Affine};
-		use ark_ec::AffineRepr;
+		use ark_ec::{AffineRepr, CurveGroup};
 		use ark_groth16::VerifyingKey as ArkVk;
 		use orbinum_zk_verifier::VerifyingKey;
 
@@ -49,7 +49,7 @@ mod benchmarks {
 			alpha_g1: G1Affine::generator(),
 			beta_g2: G2Affine::generator(),
 			gamma_g2: G2Affine::generator(),
-			delta_g2: G2Affine::generator(),
+			delta_g2: (G2Affine::generator() + G2Affine::generator()).into_affine(),
 			gamma_abc_g1: (0..=arity).map(|_| G1Affine::generator()).collect(),
 		};
 		VerifyingKey::from_ark_vk(&vk)
