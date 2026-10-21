@@ -7,8 +7,8 @@ use crate::{
 		new_test_ext, real_vk,
 	},
 	pallet::{
-		ActiveCircuitVersion, Event, PreparedKeys, RetiredVersions, VerificationKeys,
-		VerificationStats, VkHashes,
+		ActiveCircuitVersion, DeniedVkHashes, Event, PreparedKeys, RemovedVkHashes,
+		RetiredVersions, VerificationKeys, VerificationStats, VkHashes,
 	},
 	types::VkEntry,
 };
@@ -239,7 +239,7 @@ fn register_vk_accepts_a_memo_bound_rotation_at_the_same_arity() {
 #[test]
 fn register_vk_rejects_a_point_at_infinity() {
 	use ark_bn254::{Bn254, G1Affine, G2Affine};
-	use ark_ec::AffineRepr;
+	use ark_ec::{AffineRepr, CurveGroup};
 	new_test_ext().execute_with(|| {
 		let mut abc: Vec<G1Affine> = (0..=TRANSFER_PUBLIC_INPUTS)
 			.map(|_| G1Affine::generator())
@@ -249,7 +249,7 @@ fn register_vk_rejects_a_point_at_infinity() {
 			alpha_g1: G1Affine::generator(),
 			beta_g2: G2Affine::generator(),
 			gamma_g2: G2Affine::generator(),
-			delta_g2: G2Affine::generator(),
+			delta_g2: (G2Affine::generator() + G2Affine::generator()).into_affine(),
 			gamma_abc_g1: abc,
 		};
 		let bytes = orbinum_zk_verifier::VerifyingKey::from_ark_vk(&vk)
@@ -259,6 +259,34 @@ fn register_vk_rejects_a_point_at_infinity() {
 			register(CircuitId::TRANSFER, 1, bytes.try_into().unwrap()),
 			Error::<Test>::InvalidVerificationKey
 		);
+	});
+}
+
+/// A key whose `delta` is `gamma` (snarkjs without phase 2) lets anyone forge proofs.
+#[test]
+fn register_vk_rejects_a_key_without_phase_2() {
+	use ark_bn254::{Bn254, G1Affine, G2Affine};
+	use ark_ec::AffineRepr;
+	new_test_ext().execute_with(|| {
+		let vk = ark_groth16::VerifyingKey::<Bn254> {
+			alpha_g1: G1Affine::generator(),
+			beta_g2: G2Affine::generator(),
+			gamma_g2: G2Affine::generator(),
+			delta_g2: G2Affine::generator(),
+			gamma_abc_g1: vec![
+				G1Affine::generator();
+				TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS + 1
+			],
+		};
+		let bytes = orbinum_zk_verifier::VerifyingKey::from_ark_vk(&vk)
+			.unwrap()
+			.bytes;
+		assert_noop!(
+			register(CircuitId::TRANSFER, 2, bytes.try_into().unwrap()),
+			Error::<Test>::InvalidVerificationKey
+		);
+		// The same key with an independent delta registers.
+		assert_ok!(register(CircuitId::TRANSFER, 2, vk_bytes()));
 	});
 }
 
@@ -1496,7 +1524,7 @@ fn genesis_registers_vk_at_version_1_and_activates_it() {
 			CircuitId::TRANSFER,
 			real_vk(TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS).into_inner(),
 		)],
-		_phantom: Default::default(),
+		..Default::default()
 	}
 	.build_storage()
 	.unwrap();
@@ -1530,7 +1558,7 @@ fn genesis_multiple_circuits_are_all_registered() {
 				real_vk(UNSHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS).into_inner(),
 			),
 		],
-		_phantom: Default::default(),
+		..Default::default()
 	}
 	.build_storage()
 	.unwrap();
@@ -1565,7 +1593,7 @@ fn genesis_multiple_circuits_are_all_registered() {
 fn genesis_rejects_a_key_that_only_passes_the_length_check() {
 	let _ = pallet::GenesisConfig::<Test> {
 		verification_keys: vec![(CircuitId::TRANSFER, vec![0xCCu8; 300])],
-		_phantom: Default::default(),
+		..Default::default()
 	}
 	.build_storage();
 }
@@ -1580,7 +1608,7 @@ fn genesis_rejects_a_valid_key_with_the_wrong_arity() {
 			CircuitId::TRANSFER,
 			real_vk(TRANSFER_PUBLIC_INPUTS + 3).into_inner(),
 		)],
-		_phantom: Default::default(),
+		..Default::default()
 	}
 	.build_storage();
 }
@@ -1589,7 +1617,7 @@ fn genesis_rejects_a_valid_key_with_the_wrong_arity() {
 fn genesis_with(circuit_id: CircuitId, arity: usize) {
 	let _ = pallet::GenesisConfig::<Test> {
 		verification_keys: vec![(circuit_id, real_vk(arity).into_inner())],
-		_phantom: Default::default(),
+		..Default::default()
 	}
 	.build_storage();
 }
@@ -1671,7 +1699,7 @@ fn other_transfer_key() -> VkBytes {
 		alpha_g1: (g + g).into_affine(),
 		beta_g2: G2Affine::generator(),
 		gamma_g2: G2Affine::generator(),
-		delta_g2: G2Affine::generator(),
+		delta_g2: (G2Affine::generator() + G2Affine::generator()).into_affine(),
 		gamma_abc_g1: vec![g; TRANSFER_PUBLIC_INPUTS + MEMO_HASH_INPUTS + 1],
 	};
 	orbinum_zk_verifier::VerifyingKey::from_ark_vk(&vk)
@@ -1689,25 +1717,78 @@ fn entries_of(circuit_id: CircuitId) -> usize {
 		+ usize::from(ActiveCircuitVersion::<Test>::contains_key(circuit_id))
 }
 
-/// A version removed and registered again with another key verifies under the
-/// new key's prepared form, never a stale one.
+/// Register `first` as transfer v2 next to an active v3, then remove v2.
+fn remove_transfer_v2(first: VkBytes) {
+	assert_ok!(register(CircuitId::TRANSFER, 2, first));
+	assert_ok!(register(CircuitId::TRANSFER, 3, memo_bound_transfer_key()));
+	activate(CircuitId::TRANSFER, 3);
+	assert_ok!(ZkVerifier::remove_verification_key(
+		root().into(),
+		CircuitId::TRANSFER,
+		2
+	));
+}
+
+/// A removed version cannot take another key: a client that cached what v2 means
+/// would be served a different circuit under the same number.
 #[test]
-fn a_reregistered_version_gets_the_new_keys_prepared_form() {
+fn a_removed_version_cannot_hold_another_key() {
 	new_test_ext().execute_with(|| {
 		let (first, second) = (memo_bound_transfer_key(), other_transfer_key());
 		assert_ne!(first, second);
-		assert_ok!(register(CircuitId::TRANSFER, 2, first));
-		assert_ok!(register(CircuitId::TRANSFER, 3, memo_bound_transfer_key()));
-		activate(CircuitId::TRANSFER, 3);
+		remove_transfer_v2(first.clone());
+		assert_eq!(
+			RemovedVkHashes::<Test>::get(CircuitId::TRANSFER, 2),
+			Some(sp_io::hashing::blake2_256(&first))
+		);
+		assert_noop!(
+			register(CircuitId::TRANSFER, 2, second.clone()),
+			Error::<Test>::VersionReused
+		);
+		// Another version number is free.
+		assert_ok!(register(CircuitId::TRANSFER, 4, second));
+	});
+}
+
+/// The same key may come back under its old number, with a fresh prepared form.
+#[test]
+fn a_removed_version_takes_its_own_key_back() {
+	new_test_ext().execute_with(|| {
+		let first = memo_bound_transfer_key();
+		remove_transfer_v2(first.clone());
+		assert_ok!(register(CircuitId::TRANSFER, 2, first.clone()));
+		assert_eq!(
+			PreparedKeys::<Test>::get(CircuitId::TRANSFER, 2),
+			Some(ZkVerifier::prepare_vk(&first).unwrap())
+		);
+		// Removed again, it still remembers the same key.
 		assert_ok!(ZkVerifier::remove_verification_key(
 			root().into(),
 			CircuitId::TRANSFER,
 			2
 		));
-		assert_ok!(register(CircuitId::TRANSFER, 2, second.clone()));
-		assert_eq!(
-			PreparedKeys::<Test>::get(CircuitId::TRANSFER, 2),
-			Some(ZkVerifier::prepare_vk(&second).unwrap())
+		assert_noop!(
+			register(CircuitId::TRANSFER, 2, other_transfer_key()),
+			Error::<Test>::VersionReused
+		);
+	});
+}
+
+#[test]
+fn batch_register_refuses_a_reused_version() {
+	new_test_ext().execute_with(|| {
+		remove_transfer_v2(memo_bound_transfer_key());
+		let entries: BoundedVec<VkEntry, ConstU32<10>> = vec![VkEntry {
+			circuit_id: CircuitId::TRANSFER,
+			version: 2,
+			verification_key: other_transfer_key(),
+			set_active: false,
+		}]
+		.try_into()
+		.unwrap();
+		assert_noop!(
+			ZkVerifier::batch_register_verification_keys(root().into(), entries),
+			Error::<Test>::VersionReused
 		);
 	});
 }
@@ -1927,4 +2008,263 @@ mod migration_to_v2 {
 			assert_eq!(ZkVerifier::on_chain_storage_version(), 2);
 		});
 	}
+}
+
+// ── Denied keys ───────────────────────────────────────────────────────────────
+
+/// Store `key` for `(circuit_id, version)` with its hash, as a registration would.
+fn insert_with_hash(circuit_id: CircuitId, version: u32, key: VkBytes) {
+	crate::mock::insert_key(circuit_id, version, key.clone());
+	VkHashes::<Test>::insert(circuit_id, version, sp_io::hashing::blake2_256(&key));
+}
+
+fn deny_hash_of(key: &VkBytes) {
+	DeniedVkHashes::<Test>::insert(sp_io::hashing::blake2_256(key), ());
+}
+
+#[test]
+fn deny_version_retires_and_records_the_hash() {
+	new_test_ext().execute_with(|| {
+		let key = crate::mock::denied_vk();
+		insert_with_hash(CircuitId::UNSHIELD, 2, key.clone());
+		insert_vk(
+			CircuitId::UNSHIELD,
+			3,
+			UNSHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
+		);
+		activate(CircuitId::UNSHIELD, 3);
+
+		assert_ok!(ZkVerifier::deny_version(
+			root().into(),
+			CircuitId::UNSHIELD,
+			2
+		));
+		let vk_hash = sp_io::hashing::blake2_256(&key);
+		assert!(DeniedVkHashes::<Test>::contains_key(vk_hash));
+		assert!(RetiredVersions::<Test>::contains_key(
+			CircuitId::UNSHIELD,
+			2
+		));
+		frame_system::Pallet::<Test>::assert_last_event(
+			Event::VerificationKeyDenied {
+				circuit_id: CircuitId::UNSHIELD,
+				version: 2,
+				vk_hash,
+			}
+			.into(),
+		);
+	});
+}
+
+#[test]
+fn deny_version_requires_root() {
+	new_test_ext().execute_with(|| {
+		insert_with_hash(CircuitId::UNSHIELD, 2, crate::mock::denied_vk());
+		assert_noop!(
+			ZkVerifier::deny_version(signed().into(), CircuitId::UNSHIELD, 2),
+			sp_runtime::DispatchError::BadOrigin
+		);
+	});
+}
+
+#[test]
+fn deny_version_refuses_the_active_version_and_a_missing_one() {
+	new_test_ext().execute_with(|| {
+		insert_with_hash(CircuitId::UNSHIELD, 3, crate::mock::denied_vk());
+		activate(CircuitId::UNSHIELD, 3);
+		assert_noop!(
+			ZkVerifier::deny_version(root().into(), CircuitId::UNSHIELD, 3),
+			Error::<Test>::CannotRetireActiveVersion
+		);
+		assert_noop!(
+			ZkVerifier::deny_version(root().into(), CircuitId::UNSHIELD, 9),
+			Error::<Test>::VerificationKeyNotFound
+		);
+	});
+}
+
+#[test]
+fn a_denied_key_cannot_be_denied_twice() {
+	new_test_ext().execute_with(|| {
+		insert_with_hash(CircuitId::UNSHIELD, 2, crate::mock::denied_vk());
+		insert_with_hash(CircuitId::UNSHIELD, 4, crate::mock::denied_vk());
+		assert_ok!(ZkVerifier::deny_version(
+			root().into(),
+			CircuitId::UNSHIELD,
+			2
+		));
+		// The same key under another version is the same record.
+		assert_noop!(
+			ZkVerifier::deny_version(root().into(), CircuitId::UNSHIELD, 4),
+			Error::<Test>::KeyAlreadyDenied
+		);
+	});
+}
+
+#[test]
+fn register_refuses_a_denied_key() {
+	new_test_ext().execute_with(|| {
+		deny_hash_of(&crate::mock::denied_vk());
+		assert_noop!(
+			register(CircuitId::UNSHIELD, 2, crate::mock::denied_vk()),
+			Error::<Test>::DeniedVerificationKey
+		);
+		// Under any id or version: the hash decides, not the slot.
+		assert_noop!(
+			register(CircuitId::UNSHIELD, 9, crate::mock::denied_vk()),
+			Error::<Test>::DeniedVerificationKey
+		);
+	});
+}
+
+#[test]
+fn batch_register_refuses_a_denied_key() {
+	new_test_ext().execute_with(|| {
+		deny_hash_of(&crate::mock::denied_vk());
+		let entries: BoundedVec<VkEntry, ConstU32<10>> = vec![VkEntry {
+			circuit_id: CircuitId::UNSHIELD,
+			version: 2,
+			verification_key: crate::mock::denied_vk(),
+			set_active: true,
+		}]
+		.try_into()
+		.unwrap();
+		assert_noop!(
+			ZkVerifier::batch_register_verification_keys(root().into(), entries),
+			Error::<Test>::DeniedVerificationKey
+		);
+	});
+}
+
+#[test]
+fn unretire_refuses_a_denied_key() {
+	new_test_ext().execute_with(|| {
+		insert_with_hash(CircuitId::UNSHIELD, 2, crate::mock::denied_vk());
+		insert_vk(
+			CircuitId::UNSHIELD,
+			3,
+			UNSHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
+		);
+		activate(CircuitId::UNSHIELD, 3);
+		assert_ok!(ZkVerifier::deny_version(
+			root().into(),
+			CircuitId::UNSHIELD,
+			2
+		));
+		assert_noop!(
+			ZkVerifier::unretire_version(root().into(), CircuitId::UNSHIELD, 2),
+			Error::<Test>::DeniedVerificationKey
+		);
+	});
+}
+
+#[test]
+fn set_active_refuses_a_denied_key() {
+	new_test_ext().execute_with(|| {
+		insert_with_hash(CircuitId::UNSHIELD, 2, crate::mock::denied_vk());
+		deny_hash_of(&crate::mock::denied_vk());
+		assert_noop!(
+			ZkVerifier::set_active_version(root().into(), CircuitId::UNSHIELD, 2),
+			Error::<Test>::DeniedVerificationKey
+		);
+	});
+}
+
+/// The record outlives the key: removing the version, or purging, does not let the
+/// same key back in.
+#[test]
+fn the_denial_survives_removing_the_version() {
+	new_test_ext().execute_with(|| {
+		let key = crate::mock::denied_vk();
+		insert_with_hash(CircuitId::UNSHIELD, 2, key.clone());
+		insert_vk(
+			CircuitId::UNSHIELD,
+			3,
+			UNSHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS,
+		);
+		activate(CircuitId::UNSHIELD, 3);
+		assert_ok!(ZkVerifier::deny_version(
+			root().into(),
+			CircuitId::UNSHIELD,
+			2
+		));
+		assert_ok!(ZkVerifier::remove_verification_key(
+			root().into(),
+			CircuitId::UNSHIELD,
+			2
+		));
+		assert!(DeniedVkHashes::<Test>::contains_key(
+			sp_io::hashing::blake2_256(&key)
+		));
+		assert_noop!(
+			register(CircuitId::UNSHIELD, 2, key),
+			Error::<Test>::DeniedVerificationKey
+		);
+	});
+}
+
+/// A denied key already in storage verifies nothing, even active and never retired.
+#[test]
+fn a_stored_denied_key_verifies_nothing() {
+	use crate::port::ZkVerifierPort;
+	new_test_ext().execute_with(|| {
+		insert_with_hash(CircuitId::UNSHIELD, 2, crate::mock::denied_vk());
+		deny_hash_of(&crate::mock::denied_vk());
+		activate(CircuitId::UNSHIELD, 2);
+		assert!(!<ZkVerifier as ZkVerifierPort>::is_supported_version(
+			CircuitId::UNSHIELD.0,
+			2
+		));
+		assert_err!(
+			ZkVerifier::verify_proof(
+				signed().into(),
+				CircuitId::UNSHIELD,
+				proof_bytes(),
+				one_public_input()
+			),
+			Error::<Test>::UnsupportedCircuitVersion
+		);
+
+		// The same slot with an admitted key is supported: the hash decides.
+		insert_with_hash(
+			CircuitId::UNSHIELD,
+			2,
+			real_vk(UNSHIELD_PUBLIC_INPUTS + MEMO_HASH_INPUTS),
+		);
+		assert!(<ZkVerifier as ZkVerifierPort>::is_supported_version(
+			CircuitId::UNSHIELD.0,
+			2
+		));
+	});
+}
+
+#[test]
+fn genesis_records_denied_hashes_before_any_key() {
+	let key = crate::mock::denied_vk();
+	let storage = crate::mock::RuntimeGenesisConfig {
+		zk_verifier: crate::GenesisConfig {
+			denied_vk_hashes: vec![sp_core::H256(sp_io::hashing::blake2_256(&key))],
+			..Default::default()
+		},
+		..Default::default()
+	}
+	.build_storage()
+	.unwrap();
+	TestExternalities::new(storage).execute_with(|| {
+		frame_system::Pallet::<Test>::set_block_number(1);
+		assert_noop!(
+			register(CircuitId::UNSHIELD, 2, key),
+			Error::<Test>::DeniedVerificationKey
+		);
+	});
+}
+
+/// A chain spec writes the hashes as `0x…` strings, like every other hash in it.
+#[test]
+fn genesis_denied_hashes_read_as_hex_strings() {
+	let config: crate::GenesisConfig<Test> = serde_json::from_str(
+		r#"{"verificationKeys":[],"deniedVkHashes":["0x8eb9dbb295ce10498fbe7088a4b0f327a675094d657170725d02770711634525"]}"#,
+	)
+	.unwrap();
+	assert_eq!(config.denied_vk_hashes[0].0[..4], [0x8e, 0xb9, 0xdb, 0xb2]);
 }

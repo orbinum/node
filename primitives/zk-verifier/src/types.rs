@@ -147,6 +147,11 @@ impl VerifyingKey {
 	/// declaring 2^25 points would ask for gigabytes. Points at infinity are
 	/// refused too — an identity `gamma_abc` entry would leave its public input
 	/// out of the verification equation entirely.
+	///
+	/// So is a `delta` that is `±gamma` or `±` the G2 generator — what snarkjs leaves
+	/// when the circuit's phase 2 never ran. With `delta = ±gamma` the check reduces to
+	/// `e(A,B) = e(α,β)·e(L(x) ± C, γ)`, which `(α, β, ∓L(x))` satisfies for any
+	/// statement from public data alone.
 	pub fn to_ark_vk(&self) -> Result<ArkVK<Bn254>, VerifierError> {
 		use ark_ec::AffineRepr;
 		// alpha (G1) + beta, gamma, delta (G2), compressed; then the u64 length
@@ -177,6 +182,11 @@ impl VerifyingKey {
 			|| vk.delta_g2.is_zero()
 			|| vk.gamma_abc_g1.iter().any(|p| p.is_zero());
 		if identity {
+			return Err(VerifierError::InvalidVerifyingKey);
+		}
+		let g2 = ark_bn254::G2Affine::generator();
+		let degenerate = [vk.gamma_g2, -vk.gamma_g2, g2, -g2].contains(&vk.delta_g2);
+		if degenerate {
 			return Err(VerifierError::InvalidVerifyingKey);
 		}
 		Ok(vk)
@@ -287,12 +297,12 @@ mod tests {
 	/// the guard exists.
 	fn vk_bytes(arity: usize, tweak: impl FnOnce(&mut ArkVK<Bn254>)) -> Vec<u8> {
 		use ark_bn254::{G1Affine, G2Affine};
-		use ark_ec::AffineRepr;
+		use ark_ec::{AffineRepr, CurveGroup};
 		let mut vk = ArkVK::<Bn254> {
 			alpha_g1: G1Affine::generator(),
 			beta_g2: G2Affine::generator(),
 			gamma_g2: G2Affine::generator(),
-			delta_g2: G2Affine::generator(),
+			delta_g2: (G2Affine::generator() + G2Affine::generator()).into_affine(),
 			gamma_abc_g1: (0..=arity).map(|_| G1Affine::generator()).collect(),
 		};
 		tweak(&mut vk);
@@ -444,6 +454,73 @@ mod tests {
 		assert!(VerifyingKey::new(zero_input).to_ark_vk().is_err());
 		let zero_delta = vk_bytes(3, |vk| vk.delta_g2 = G2Affine::zero());
 		assert!(VerifyingKey::new(zero_delta).to_ark_vk().is_err());
+	}
+
+	/// A `delta` tied to `gamma` (or the generator, snarkjs's phase-2-less default).
+	#[test]
+	fn to_ark_vk_refuses_a_delta_tied_to_gamma() {
+		use ark_bn254::G2Affine;
+		use ark_ec::{AffineRepr, CurveGroup};
+		let g2 = G2Affine::generator();
+		let three = (g2 + g2 + g2).into_affine();
+		for (name, key) in [
+			("delta = gamma", vk_bytes(3, |vk| vk.delta_g2 = vk.gamma_g2)),
+			(
+				"delta = -gamma",
+				vk_bytes(3, |vk| vk.delta_g2 = -vk.gamma_g2),
+			),
+			("delta = G2", vk_bytes(3, |vk| vk.delta_g2 = g2)),
+			("delta = -G2", vk_bytes(3, |vk| vk.delta_g2 = -g2)),
+			// gamma moved off the generator: still refused when delta follows it.
+			(
+				"delta = gamma = 3·G2",
+				vk_bytes(3, |vk| {
+					vk.gamma_g2 = three;
+					vk.delta_g2 = three;
+				}),
+			),
+		] {
+			assert!(
+				VerifyingKey::new(key).to_ark_vk().is_err(),
+				"{name} accepted"
+			);
+		}
+		assert!(VerifyingKey::new(well_formed_vk(3)).to_ark_vk().is_ok());
+	}
+
+	/// With `delta = gamma`, `(A, B, C) = (α, β, −L(x))` satisfies the pairing check for
+	/// any statement. arkworks accepts it; the key is refused before it gets there.
+	#[test]
+	fn a_phase2_less_key_cannot_forge_a_proof() {
+		use ark_bn254::{G1Projective, G2Affine};
+		use ark_ec::{AffineRepr, CurveGroup};
+		use ark_groth16::{prepare_verifying_key, Groth16};
+
+		let g2 = G2Affine::generator();
+		let key = vk_bytes(3, |vk| vk.delta_g2 = g2);
+		let vk = ArkVK::<Bn254>::deserialize_compressed(&key[..]).unwrap();
+		let inputs: Vec<Bn254Fr> = (1..=3u64).map(Bn254Fr::from).collect();
+		let mut l = G1Projective::from(vk.gamma_abc_g1[0]);
+		for (x, p) in inputs.iter().zip(vk.gamma_abc_g1.iter().skip(1)) {
+			l += *p * x;
+		}
+		let forged = ArkProof::<Bn254> {
+			a: vk.alpha_g1,
+			b: vk.beta_g2,
+			c: (-l).into_affine(),
+		};
+		assert!(
+			Groth16::<Bn254>::verify_proof(&prepare_verifying_key(&vk), &forged, &inputs).unwrap(),
+			"the forgery must hold against the bare key, or this test proves nothing"
+		);
+
+		let proof = Proof::from_ark_proof(&forged).unwrap();
+		let public = PublicInputs::from_field_elements(&inputs);
+		assert!(
+			crate::Groth16Verifier::verify(&VerifyingKey::new(key.clone()), &public, &proof)
+				.is_err()
+		);
+		assert!(VerifyingKey::new(key).prepared_bytes().is_err());
 	}
 
 	#[test]

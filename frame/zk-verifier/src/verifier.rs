@@ -8,7 +8,7 @@
 use crate::{
 	Error, Pallet,
 	keys::StoredKey,
-	pallet::{ActiveCircuitVersion, Config, RetiredVersions, VerificationStats},
+	pallet::{ActiveCircuitVersion, Config, RetiredVersions, VerificationStats, VkHashes},
 	types::CircuitId,
 };
 use alloc::vec::Vec;
@@ -103,7 +103,9 @@ fn resolve_key<T: Config>(
 		.or_else(|| ActiveCircuitVersion::<T>::get(circuit_id))
 		.ok_or(Error::<T>::CircuitNotFound)?;
 	frame_support::ensure!(
-		!RetiredVersions::<T>::contains_key(circuit_id, resolved),
+		!RetiredVersions::<T>::contains_key(circuit_id, resolved)
+			&& !VkHashes::<T>::get(circuit_id, resolved)
+				.is_some_and(|h| Pallet::<T>::is_denied(&h)),
 		Error::<T>::UnsupportedCircuitVersion
 	);
 	let key = Pallet::<T>::load_vk(circuit_id, resolved).ok_or(if version.is_some() {

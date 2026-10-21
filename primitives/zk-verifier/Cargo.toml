@@ -1,6 +1,6 @@
 [package]
 name = "orbinum-zk-verifier"
-version = "3.3.1"
+version = "3.4.0"
 authors = { workspace = true }
 edition = "2021"
 publish = false
