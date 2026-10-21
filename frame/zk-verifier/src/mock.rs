@@ -65,6 +65,32 @@ pub fn real_vk(arity: usize) -> VkBytes {
 		.expect("serialized VK fits in MAX_VK_BYTES")
 }
 
+/// A well-formed key of `arity` inputs, distinct from [`real_vk`].
+pub fn denied_vk_of(arity: usize) -> VkBytes {
+	use ark_bn254::{Bn254, G1Affine, G2Affine};
+	use ark_ec::{AffineRepr, CurveGroup};
+	use ark_groth16::VerifyingKey as ArkVk;
+
+	let vk = ArkVk::<Bn254> {
+		alpha_g1: (G1Affine::generator() + G1Affine::generator() + G1Affine::generator())
+			.into_affine(),
+		beta_g2: G2Affine::generator(),
+		gamma_g2: G2Affine::generator(),
+		delta_g2: G2Affine::generator(),
+		gamma_abc_g1: (0..=arity).map(|_| G1Affine::generator()).collect(),
+	};
+	orbinum_zk_verifier::VerifyingKey::from_ark_vk(&vk)
+		.unwrap()
+		.bytes
+		.try_into()
+		.expect("serialized VK fits in MAX_VK_BYTES")
+}
+
+/// A well-formed unshield-shaped (8-input) key the tests deny.
+pub fn denied_vk() -> VkBytes {
+	denied_vk_of(8)
+}
+
 /// Store `key_data` for `(circuit_id, version)` directly, skipping registration checks.
 pub fn insert_key(circuit_id: CircuitId, version: u32, key_data: VkBytes) {
 	VerificationKeys::<Test>::insert(

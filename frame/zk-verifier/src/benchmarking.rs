@@ -208,6 +208,22 @@ mod benchmarks {
 		assert!(!RetiredVersions::<T>::contains_key(circuit_id, retired));
 	}
 
+	#[benchmark]
+	fn deny_version() {
+		let circuit_id = CircuitId::TRANSFER;
+		let active = 1u32;
+		let target = 2u32;
+
+		insert_sample_vk::<T>(circuit_id, active);
+		insert_sample_vk::<T>(circuit_id, target);
+		ActiveCircuitVersion::<T>::insert(circuit_id, active);
+
+		#[extrinsic_call]
+		_(RawOrigin::Root, circuit_id, target);
+
+		assert!(RetiredVersions::<T>::contains_key(circuit_id, target));
+	}
+
 	/// Uses circuit id 99 rather than the retired 5: the extrinsic only accepts
 	/// ids the runtime does not implement, and 99 stays unknown even if 5 is
 	/// ever reassigned.

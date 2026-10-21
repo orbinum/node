@@ -6,6 +6,27 @@ All notable changes to this pallet are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- `DeniedVkHashes`: an on-chain, append-only record of `blake2_256` hashes of keys
+  found unsound. A denied key is refused by `register_verification_key`,
+  `batch_register_verification_keys`, `set_active_version` and `unretire_version`
+  (`DeniedVerificationKey`), and a stored one verifies nothing, active or not
+  (`UnsupportedCircuitVersion`; `is_supported_version` is false). No call removes an
+  entry, `remove_verification_key` and `purge_circuit` included, so a Root mistake —
+  unretiring, re-registering under another version — cannot bring the key back.
+- `deny_version(circuit_id, version)` (Root, call index 8): retires the version and
+  records its key's hash (`VerificationKeyDenied`). Never the active version; a hash
+  already recorded is refused (`KeyAlreadyDenied`).
+- `GenesisConfig::denied_vk_hashes`: the record a new chain starts with, written before
+  any genesis key.
+
+### Changed
+
+- `ZkVerifierPort::verification_weight` adds one storage read, the `VkHashes` lookup of
+  the denied-key check.
+- `WeightInfo::deny_version`: estimated from `retire_version` until benchmarked.
+
 ## [0.18.1] - 2026-10-21
 
 ### Changed

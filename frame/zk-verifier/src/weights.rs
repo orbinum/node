@@ -49,6 +49,7 @@ pub trait WeightInfo {
 	fn unretire_version() -> Weight;
 	fn purge_circuit(v: u32, ) -> Weight;
 	fn batch_register_verification_keys(n: u32, ) -> Weight;
+	fn deny_version() -> Weight;
 }
 
 /// Weights for pallet_zk_verifier using the Substrate node and recommended hardware.
@@ -260,6 +261,11 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().writes((3_u64).saturating_mul(n.into())))
 			.saturating_add(Weight::from_parts(0, 4950).saturating_mul(n.into()))
 	}
+	/// Not benchmarked yet: `retire_version` plus the key read and the `DeniedVkHashes`
+	/// read and write.
+	fn deny_version() -> Weight {
+		Self::retire_version().saturating_add(T::DbWeight::get().reads_writes(2, 1))
+	}
 }
 
 // For backwards compatibility and tests
@@ -469,5 +475,10 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().writes(2_u64))
 			.saturating_add(RocksDbWeight::get().writes((3_u64).saturating_mul(n.into())))
 			.saturating_add(Weight::from_parts(0, 4950).saturating_mul(n.into()))
+	}
+	/// Not benchmarked yet: `retire_version` plus the key read and the `DeniedVkHashes`
+	/// read and write.
+	fn deny_version() -> Weight {
+		Self::retire_version().saturating_add(RocksDbWeight::get().reads_writes(2, 1))
 	}
 }

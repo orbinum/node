@@ -146,6 +146,13 @@ pub mod pallet {
 		ValueQuery,
 	>;
 
+	/// `blake2_256` of every key denied on this chain (`deny_version`, genesis): the
+	/// record of circuits found unsound. Such a key is refused on register, activate
+	/// and unretire, and verifies nothing if stored. Append-only: no call removes an
+	/// entry, `remove_verification_key` and `purge_circuit` included.
+	#[pallet::storage]
+	pub type DeniedVkHashes<T: Config> = StorageMap<_, Identity, [u8; 32], (), OptionQuery>;
+
 	// ── Genesis ───────────────────────────────────────────────────────────────
 
 	#[pallet::genesis_config]
@@ -153,6 +160,8 @@ pub mod pallet {
 	pub struct GenesisConfig<T: Config> {
 		/// One key per circuit, registered as version 1 and activated.
 		pub verification_keys: Vec<(CircuitId, Vec<u8>)>,
+		/// `DeniedVkHashes` a new chain starts with, recorded before any key.
+		pub denied_vk_hashes: Vec<sp_core::H256>,
 		#[serde(skip)]
 		pub _phantom: PhantomData<T>,
 	}
@@ -160,6 +169,9 @@ pub mod pallet {
 	#[pallet::genesis_build]
 	impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
 		fn build(&self) {
+			for hash in &self.denied_vk_hashes {
+				DeniedVkHashes::<T>::insert(hash.0, ());
+			}
 			for (circuit_id, vk_bytes) in &self.verification_keys {
 				let key_data: VkBytes = vk_bytes
 					.clone()
@@ -218,6 +230,12 @@ pub mod pallet {
 		BatchVerificationKeysRegistered { count: u32 },
 		/// Every version of a retired circuit was purged from storage.
 		CircuitPurged { circuit_id: CircuitId, removed: u32 },
+		/// A version was retired for good and its key's hash recorded as denied.
+		VerificationKeyDenied {
+			circuit_id: CircuitId,
+			version: u32,
+			vk_hash: [u8; 32],
+		},
 	}
 
 	// ── Errors ────────────────────────────────────────────────────────────────
@@ -260,6 +278,10 @@ pub mod pallet {
 		// Purge
 		CircuitStillInUse,
 		CircuitHasNoStorage,
+		/// The key's hash is in `DeniedVkHashes`.
+		DeniedVerificationKey,
+		/// `deny_version`: the key's hash is already denied.
+		KeyAlreadyDenied,
 	}
 
 	// ── Extrinsics ────────────────────────────────────────────────────────────
@@ -310,7 +332,7 @@ pub mod pallet {
 				!RetiredVersions::<T>::contains_key(circuit_id, version),
 				Error::<T>::UnsupportedCircuitVersion
 			);
-			Self::ensure_vk_arity(circuit_id, &info.key_data)?;
+			Self::ensure_vk_admitted(circuit_id, &info.key_data)?;
 
 			Self::activate(circuit_id, version);
 			Ok(())
@@ -457,11 +479,45 @@ pub mod pallet {
 			);
 			let info = VerificationKeys::<T>::get(circuit_id, version)
 				.ok_or(Error::<T>::VerificationKeyNotFound)?;
-			Self::ensure_vk_arity(circuit_id, &info.key_data)?;
+			Self::ensure_vk_admitted(circuit_id, &info.key_data)?;
 			RetiredVersions::<T>::remove(circuit_id, version);
 			Self::deposit_event(Event::VersionUnretired {
 				circuit_id,
 				version,
+			});
+			Ok(())
+		}
+
+		/// Deny a version for good (Root only): it is retired and its key's hash joins
+		/// `DeniedVkHashes`, so that key cannot be registered, activated, unretired or
+		/// verified again under any circuit or version. Never the active one, and no call
+		/// undoes it.
+		#[pallet::call_index(8)]
+		#[pallet::weight(T::WeightInfo::deny_version())]
+		pub fn deny_version(
+			origin: OriginFor<T>,
+			circuit_id: CircuitId,
+			version: u32,
+		) -> DispatchResult {
+			ensure_root(origin)?;
+			let info = VerificationKeys::<T>::get(circuit_id, version)
+				.ok_or(Error::<T>::VerificationKeyNotFound)?;
+			ensure!(
+				ActiveCircuitVersion::<T>::get(circuit_id) != Some(version),
+				Error::<T>::CannotRetireActiveVersion
+			);
+			let vk_hash = sp_io::hashing::blake2_256(&info.key_data);
+			ensure!(
+				!DeniedVkHashes::<T>::contains_key(vk_hash),
+				Error::<T>::KeyAlreadyDenied
+			);
+
+			DeniedVkHashes::<T>::insert(vk_hash, ());
+			RetiredVersions::<T>::insert(circuit_id, version, ());
+			Self::deposit_event(Event::VerificationKeyDenied {
+				circuit_id,
+				version,
+				vk_hash,
 			});
 			Ok(())
 		}
@@ -549,7 +605,7 @@ pub mod pallet {
 			set_active: bool,
 		) -> DispatchResult {
 			ensure!(!key_data.is_empty(), Error::<T>::EmptyVerificationKey);
-			Self::ensure_vk_arity(circuit_id, &key_data)?;
+			Self::ensure_vk_admitted(circuit_id, &key_data)?;
 			// Never overwrite: a replaced key would silently change what verifies.
 			ensure!(
 				!VerificationKeys::<T>::contains_key(circuit_id, version),
@@ -575,11 +631,20 @@ pub mod pallet {
 			});
 		}
 
-		/// The rule every stored key is held to: it deserializes as a BN254 Groth16
-		/// key and its arity gives an admitted layout
+		/// Whether `hash` is in `DeniedVkHashes`.
+		pub(crate) fn is_denied(hash: &[u8; 32]) -> bool {
+			DeniedVkHashes::<T>::contains_key(hash)
+		}
+
+		/// The rule every stored key is held to: it is not denied, it deserializes as
+		/// a BN254 Groth16 key, and its arity gives an admitted layout
 		/// ([`verifier::admitted_layout`]). Ids outside the known table are only
 		/// checked to deserialize.
-		fn ensure_vk_arity(circuit_id: CircuitId, key_data: &[u8]) -> DispatchResult {
+		fn ensure_vk_admitted(circuit_id: CircuitId, key_data: &[u8]) -> DispatchResult {
+			ensure!(
+				!Self::is_denied(&sp_io::hashing::blake2_256(key_data)),
+				Error::<T>::DeniedVerificationKey
+			);
 			let arity = orbinum_zk_verifier::VerifyingKey::new(key_data.to_vec())
 				.num_public_inputs()
 				.map_err(|_| Error::<T>::InvalidVerificationKey)?;

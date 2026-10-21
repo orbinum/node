@@ -7,7 +7,7 @@
 
 use crate::{
 	Pallet, encoding,
-	pallet::{Config, Error, RetiredVersions, VerificationKeys},
+	pallet::{Config, Error, RetiredVersions, VerificationKeys, VkHashes},
 	types::CircuitId,
 	verifier,
 };
@@ -165,11 +165,15 @@ impl<T: Config> ZkVerifierPort for Pallet<T> {
 		let cid = CircuitId(circuit_id);
 		VerificationKeys::<T>::contains_key(cid, version)
 			&& !RetiredVersions::<T>::contains_key(cid, version)
+			&& !VkHashes::<T>::get(cid, version).is_some_and(|h| Pallet::<T>::is_denied(&h))
 	}
 
 	fn verification_weight() -> frame_support::weights::Weight {
 		use crate::weights::WeightInfo;
+		use frame_support::traits::Get;
+		// Plus the `VkHashes` read of the denied-key check.
 		T::WeightInfo::verify_proof(MAX_SPEND_PUBLIC_INPUTS)
+			.saturating_add(T::DbWeight::get().reads(1))
 	}
 }
 
@@ -528,9 +532,16 @@ mod tests {
 	fn verification_weight_covers_the_largest_spend_layout() {
 		use crate::weights::WeightInfo;
 		assert_eq!(MAX_SPEND_PUBLIC_INPUTS, 9);
+		use frame_support::traits::Get;
 		assert_eq!(
 			<Pallet<Test> as ZkVerifierPort>::verification_weight(),
 			<Test as crate::Config>::WeightInfo::verify_proof(MAX_SPEND_PUBLIC_INPUTS)
+				.saturating_add(
+					<<Test as frame_system::Config>::DbWeight as Get<
+						frame_support::weights::RuntimeDbWeight,
+					>>::get()
+					.reads(1)
+				)
 		);
 	}
 }
