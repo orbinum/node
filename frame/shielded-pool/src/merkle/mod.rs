@@ -1018,6 +1018,51 @@ mod tests {
 		});
 	}
 
+	/// An active root older than the window, replaced by an insert, stays
+	/// spendable for a full window from its replacement: a wallet that proved
+	/// against it is not refused by the next insert.
+	#[test]
+	fn a_replaced_root_counts_its_window_from_its_replacement() {
+		new_test_ext().execute_with(|| {
+			let start = System::block_number();
+			MerkleTreeService::insert_leaf::<Test>(Commitment::new([0x11u8; 32])).unwrap();
+			let old = MerkleRepository::get_poseidon_root::<Test>();
+
+			// Active for longer than a window, then replaced.
+			let replaced_at = start + retention() * 3;
+			System::set_block_number(replaced_at);
+			MerkleTreeService::insert_leaf::<Test>(Commitment::new([0x22u8; 32])).unwrap();
+			assert_ne!(MerkleRepository::get_poseidon_root::<Test>(), old);
+			assert!(
+				MerkleTreeService::is_known_root::<Test>(&old),
+				"replaced root refused right after the insert"
+			);
+
+			System::set_block_number(replaced_at + retention());
+			assert!(MerkleTreeService::is_known_root::<Test>(&old));
+			System::set_block_number(replaced_at + retention() + 1);
+			assert!(!MerkleTreeService::is_known_root::<Test>(&old));
+		});
+	}
+
+	/// Inserts in the same block refresh the outgoing root once: the roots made
+	/// within the block already carry a full window.
+	#[test]
+	fn replacing_a_root_from_the_same_block_queues_nothing_extra() {
+		new_test_ext().execute_with(|| {
+			System::set_block_number(System::block_number() + 1);
+			let before = MerkleRepository::historic_roots_queued::<Test>();
+			for i in 1..=5u8 {
+				MerkleTreeService::insert_leaf::<Test>(Commitment::new([i; 32])).unwrap();
+			}
+			// The genesis root, refreshed once, plus one slot per new root.
+			assert_eq!(
+				MerkleRepository::historic_roots_queued::<Test>(),
+				before + 1 + 5
+			);
+		});
+	}
+
 	/// A root stays spendable for the whole retention window and stops being
 	/// accepted once it has elapsed.
 	#[test]

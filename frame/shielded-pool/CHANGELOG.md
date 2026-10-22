@@ -4,6 +4,14 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- A root replaced by a leaf insert stays spendable for `RootRetentionBlocks`
+  from its replacement, not from its creation. The active root never expires,
+  so a wallet may prove against one older than the window; the next insert
+  used to refuse that spend at once with `UnknownMerkleRoot`. Costs at most one
+  extra historic-root slot per block.
+
 ## [0.25.1] - 2026-10-21
 
 ### Changed
