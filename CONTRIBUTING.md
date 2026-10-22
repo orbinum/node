@@ -23,38 +23,55 @@ We appreciate your interest. We will notify you when we open contributions.
 ## Getting Started
 
 ### Requirements
-- **Rust 1.75+** (specified in `rust-toolchain.toml`)
+- **Rust**, pinned to 1.88.0 by `rust-toolchain.toml`. You do not need to install
+  a version yourself: rustup reads the pin and fetches that toolchain, the
+  `wasm32v1-none` target, and the components the build needs. `make setup` does
+  this explicitly.
+- **System packages** for the Substrate build. On Debian or Ubuntu:
+  ```bash
+  sudo apt-get install build-essential clang libclang-dev protobuf-compiler
+  ```
+  These are the same packages CI installs; the build fails without them, and
+  `protobuf-compiler` in particular fails late.
 - **Git**
-- **Node.js 16+** (for circuit compilation and tests)
+- **Node.js 16+** (for the TypeScript integration tests under `ts-tests/`)
+- Roughly 40 GB of free disk for a full workspace build
 - Basic knowledge of Rust, Substrate, and blockchain development
 
 ### Setting up your Environment
 
-1. **Fork the repository**
+1. **Fork the repository and clone your fork**
    ```bash
-   git clone https://github.com/your-username/orbinum-node.git
-   cd orbinum-node
+   git clone https://github.com/your-username/node.git
+   cd node
+   git remote add upstream https://github.com/orbinum/node.git
    ```
 
-2. **Install dependencies**
+2. **Install the pinned toolchain**
    ```bash
-   cargo build --release
+   make setup
    ```
 
-3. **Setup development environment**
+3. **Set up the development environment**
    ```bash
    ./scripts/setup-dev.sh
    ```
 
-4. **Run tests**
+4. **Build**
    ```bash
-   cargo test --workspace
+   make build-release
    ```
 
-5. **Verify format and lints**
+5. **Run tests and lints**
    ```bash
-   make check
+   make test-release
+   make clippy-release
+   make fmt-check
    ```
+
+   `make help` lists the rest. Prefer the Makefile targets over bare cargo
+   commands: they carry the feature flags and profile CI uses, so a green run
+   locally means a green run in CI.
 
 ## Contribution Workflow
 
