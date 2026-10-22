@@ -4,6 +4,8 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 
 ## [Unreleased]
 
+## [0.25.2] - 2026-10-21
+
 ### Fixed
 
 - A root replaced by a leaf insert stays spendable for `RootRetentionBlocks`
