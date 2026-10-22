@@ -81,11 +81,22 @@ impl pallet_balances::Config for Runtime {
 	type DoneSlashHandler = ();
 }
 
+parameter_types! {
+	/// Fee per unit of `ref_time`: what the same weight costs as EVM gas at the
+	/// default base fee (1 gwei / 20_000 weight per gas = 50_000 wei). A
+	/// Substrate extrinsic costs what the equivalent EVM transaction does,
+	/// instead of 1 wei per unit, which made accounts and blocks nearly free.
+	pub WeightFee: Balance = (DefaultBaseFeePerGas::get()
+		/ U256::from(WeightPerGas::get().ref_time())).low_u128();
+	/// Fee per encoded byte: EVM calldata's 16 gas per non-zero byte.
+	pub LengthFee: Balance = (DefaultBaseFeePerGas::get() * U256::from(16)).low_u128();
+}
+
 impl pallet_transaction_payment::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type OnChargeTransaction = FungibleAdapter<Balances, ()>;
-	type WeightToFee = IdentityFee<Balance>;
-	type LengthToFee = IdentityFee<Balance>;
+	type WeightToFee = ConstantMultiplier<Balance, WeightFee>;
+	type LengthToFee = ConstantMultiplier<Balance, LengthFee>;
 	/// Parameterized slow adjusting fee updated based on
 	/// <https://research.web3.foundation/Polkadot/overview/token-economics#2-slow-adjusting-mechanism>
 	type FeeMultiplierUpdate = SlowAdjustingFeeUpdate<Runtime>;
