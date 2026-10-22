@@ -38,7 +38,7 @@ use frame_support::{
 	genesis_builder_helper::build_state,
 	parameter_types,
 	traits::{ConstBool, ConstU32, ConstU64, ConstU8, OnFinalize, OnTimestampSet},
-	weights::{constants::WEIGHT_REF_TIME_PER_MILLIS, IdentityFee, Weight},
+	weights::{constants::WEIGHT_REF_TIME_PER_MILLIS, ConstantMultiplier, Weight},
 	PalletId,
 };
 use pallet_ethereum::{Call::transact, PostLogContent, Transaction as EthereumTransaction};

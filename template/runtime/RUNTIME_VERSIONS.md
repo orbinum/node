@@ -32,7 +32,8 @@ sign through the new `Ed25519Text` (`0x03`) and `Ed25519WrappedText` (`0x04`).
 Circuit keys: unsound ones are recorded on chain and never verify again, a
 removed version keeps its key, and a key without phase 2 is refused.
 Shielded pool: a replaced root stays spendable for a full window, and spends
-creating the same note are exclusive in the pool.
+creating the same note are exclusive in the pool. Substrate fees price weight
+and bytes like EVM gas.
 `transaction_version` is unchanged. Ships with `pallet-evm-precompile-balances`
 0.2.0, `pallet-zk-verifier` 0.19.0, `orbinum-zk-verifier` 3.4.0 and
 `pallet-shielded-pool` 0.25.2.
@@ -140,6 +141,17 @@ creating the same note are exclusive in the pool.
   change note each `provide` a pool tag, besides the spent nullifiers: two
   spends creating the same note can no longer both sit in the pool and
   propagate when only one can execute.
+- **Substrate fees aligned with EVM gas.** `WeightToFee` was `IdentityFee`,
+  1 wei per unit of `ref_time`, so a transfer cost about 3e-10 ORB: a million
+  new accounts cost 0.0003 ORB and filling every block for a day about 0.03 ORB.
+  A unit of `ref_time` now costs the default base fee over `WeightPerGas`
+  (1 gwei / 20_000 = 50_000 wei) and a byte 16 gas (16 gwei), so an extrinsic
+  costs what the same weight costs as EVM gas: a transfer about 1.6e-5 ORB, as
+  over EVM. `ExistentialDeposit` stays 0: above it, an EVM account emptied by a
+  Substrate transfer is reaped, its nonce returns to 0 and its earlier signed
+  transactions can be replayed, and the shielded pool's account could burn the
+  remainder backing pending fees. Unsigned spends (`MinSpendFee`) and Root calls
+  are unchanged.
 
 ### spec 19 — tx 7 — 2026-10-13 (`v0.5.0`)
 
