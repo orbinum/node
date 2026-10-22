@@ -1,46 +1,85 @@
 # Overview
 
-Frontier is the suite that provides an Ethereum compatibility layer for Substrate. It has two components that can be activated separately:
+Orbinum is a Substrate-based network that pairs a zero-knowledge shielded pool
+with a full Ethereum compatibility layer. The transparent side behaves like any
+EVM chain; the private side holds value as cryptographic commitments that reveal
+neither amounts nor participants.
 
-- Pallet EVM:
-  This is the pallet that enables functionality of running EVM contracts.
-  Existing EVM code can be used from there, using addresses and values mapped directly to Substrate.
-- Pallet Ethereum with Ethereum compatible RPC methods:
-  The pallet, combined with the RPC module, enables Ethereum block emulation, validates Ethereum-encoded transactions,
-  and allows existing dapps to be deployed on a Substrate blockchain with minimal modifications.
+## The two domains
 
-## EVM execution only
+Value moves between a public domain and a private one:
 
-In many situations, a Substrate blockchain may only want to include EVM execution capabilities.
-In this way, it functions similarly to `pallet-contracts`, integrates with Substrate better and is less intrusive.
-The module, and its EVM execution capabilities, can be added or removed at any moment via forkless upgrades.
-With EVM execution only, Substrate uses its account model fully and signs transactions on behalf of EVM accounts.
+- **Public.** An `AccountId` with a visible balance, usable from Solidity
+  contracts and standard Ethereum tooling.
+- **Private.** A note, represented on-chain only by a Poseidon commitment
+  `Poseidon4(value, asset_id, owner_pubkey, blinding)` inserted as a leaf in a
+  Merkle tree. Nothing about the note is visible beyond the commitment itself.
 
-In this model, however, Ethereum RPCs are not available, and dapps must rewrite their frontend using the Substrate API.
-If this is the intended way of usage, take a look at the [`pallet-evm`](https://github.com/polkadot-evm/frontier/tree/master/frame/evm) documentation.
+Three operations connect them:
 
-## Post-block generation
+| Operation | Direction | What it reveals |
+|---|---|---|
+| `shield` | public to private | depositor and amount |
+| `private_transfer` | private to private | the asset and the relay fee |
+| `unshield` | private to public | recipient and amount |
 
-On other situations, a full emulation of Ethereum may be desired so that Ethereum RPCs become available.
-In this model, a full Ethereum block is emulated within the Substrate runtime, and is generated post-block for the consumption rest of the APIs.
-In addition to Substrate account signing, traditional Ethereum transactions are also processed and validated.
+Spending a note publishes its nullifier, `Poseidon2(commitment, spending_key)`.
+The chain records nullifiers in a set and rejects repeats, which prevents
+double-spending without linking the nullifier back to the commitment it came
+from.
 
-If this is the intended way of usage, take a look at the [`pallet-ethereum`](https://github.com/polkadot-evm/frontier/tree/master/frame/ethereum) documentation.
+## Proofs
 
-## Pre-block feeding
+Every private operation carries a Groth16 proof over BN254, verified in the
+runtime by `pallet-zk-verifier`. The circuits are written in Circom and live in
+[orbinum/circuits](https://github.com/orbinum/circuits); the runtime stores only
+their verification keys, versioned per circuit and rotatable by governance.
 
-An Ethereum-based blockchain can use the pre-block feeding strategy to migrate to Substrate.
-In the post-block generation model, the Ethereum block is generated *after* runtime execution.
-In the pre-block feeding model, the Ethereum block is fed in *before* runtime execution.
+A transfer proof establishes, without revealing the notes involved, that:
 
-A blockchain can first use pre-block feeding with empty extrinsic requirement.
-In this way, because no other external information is fed, combined with a suitable consensus engine, one Ethereum block will have an exact corresponding Substrate block.
-This is called the [wrapper block](https://corepaper.org/substrate/wrapper/) strategy, and it allows Frontier to function as a normal Ethereum client.
+- each input commitment is a member of a known Merkle root
+- the spender owns each input note, via an EdDSA signature over the commitment
+- each published nullifier matches its input note
+- each output commitment is correctly formed
+- value is conserved: `sum(inputs) == sum(outputs) + fee`
+- every note in the transaction uses the same asset
 
-With a sufficient number of the network running a Frontier node, the blockchain can then initiate a hard fork, allowing extrinsic to be added in.
-From there on, the blockchain is migrated to Substrate and can enjoy Substrate-specific features like on-chain governance and forkless upgrade.
+## Gasless submission
 
-A complete in-storage pre-block feeding requires using Substrate's child storage.
-It can also be implemented using the stateless client strategy to eliminate that need.
+`private_transfer` and `unshield` are unsigned extrinsics. A signature would
+identify the sender, so instead the proof itself authorises the operation and
+the fee is deducted from the note value inside the circuit. A relayer submits
+the transaction, pays gas, and accrues the fee as a credit it can later claim as
+a shielded note of its own.
 
-Pre-block feeding is still work-in-progress.
+Relayers can be reached through the shielded-pool EVM precompile, which takes
+the caller's address as the fee recipient, or through a node running the
+built-in relay RPC.
+
+## Note recovery
+
+Because a commitment hides its own contents, a wallet cannot tell which notes
+belong to it by looking at the chain. Each commitment therefore carries an
+encrypted memo holding the note's preimage, encrypted with ChaCha20-Poly1305
+under a key derived by BabyJubJub ECDH between the sender's ephemeral key and
+the recipient's incoming viewing key. A wallet scans memos and keeps the ones it
+can decrypt.
+
+## Components
+
+| Crate | Role |
+|---|---|
+| `pallet-shielded-pool` | Commitments, nullifiers, the Merkle forest, and the three operations |
+| `pallet-zk-verifier` | Versioned verification keys and Groth16 verification |
+| `pallet-relayer` | Relay configuration, the EVM-to-Substrate relayer registry, and fee accounting |
+| `pallet-validator-set` | Two-phase validator registration behind governance approval |
+| `orbinum-zk-core` | Poseidon hashing and field-element handling, shared by runtime and clients |
+| `orbinum-encrypted-memo` | Memo layout, key derivation, and memo encryption |
+
+## Relationship to Frontier
+
+The EVM pallets, the Ethereum RPC layer, and much of the client infrastructure
+are derived from [Frontier](https://github.com/polkadot-evm/frontier). Orbinum
+adds the privacy stack above and a precompile that bridges Solidity calls into
+the shielded pool. See the [attribution note](https://github.com/orbinum/node#attribution)
+in the repository README.

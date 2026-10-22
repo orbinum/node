@@ -2,14 +2,38 @@
 
 ## Supported versions
 
-Currently, only the latest master commit pin is supported. This will be extended back to releases as soon as we fix the Substrate release pipeline.
+Only the latest commit on `main` is supported. Support will be extended back to
+tagged releases once the release pipeline is stable.
 
-## Reporting vulnerabilities
+## Reporting a vulnerability
 
-For medium or high severity security vulnerabilities, please report them by email to security@bitarray.dev.
+Report suspected vulnerabilities privately by email to **security@orbinum.net**.
 
-For low severity security vulnerabilities, you can either follow the above reporting pipeline or open an issue in the Frontier repo directly. If you are unsure about the severity of the vulnerability you're reporting, please reach out to [Wei](mailto:wei@bitarray.dev).
+Please do not open a public issue, pull request, or discussion thread for a
+security report. Orbinum holds user funds in a shielded pool, so a public report
+is a disclosure.
 
-## Advisory announcements
+Useful things to include, as far as you have them:
 
-Due to the nature of open source, security vulnerability fixes are public. An announcement room at #frontier-security:matrix.org is available. The room is invite only and is only for ecosystem users who require immediate and urgent actions when an advisory is available. Please contact [Wei](mailto:wei@bitarray.dev) for invites.
+- the affected component and the commit you tested against
+- what an attacker gains, and what they need in order to get it
+- reproduction steps, or a proof-of-concept if you have one
+- whether you have shared the report with anyone else
+
+We will acknowledge receipt and let you know whether we are treating the report
+as a vulnerability. If you would like a coordinated disclosure date, say so and
+we will agree one with you.
+
+There is currently no bug bounty program. Reports are welcome regardless.
+
+## Scope
+
+This policy covers the Orbinum node and runtime in this repository, the
+zero-knowledge circuits in [orbinum/circuits](https://github.com/orbinum/circuits),
+and the client SDKs published under the [orbinum](https://github.com/orbinum)
+organization.
+
+Orbinum builds on [Frontier](https://github.com/polkadot-evm/frontier). A
+vulnerability in unmodified upstream Frontier or Polkadot SDK code should be
+reported to those projects. If you are unsure which applies, send it to us and
+we will route it.
