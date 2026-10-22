@@ -8,10 +8,12 @@ use scale_codec::Encode;
 use orbinum_runtime::{self as runtime, AccountId, Balance, BalancesCall, SystemCall};
 use sc_cli::Result;
 use sc_client_api::BlockBackend;
-use sp_core::{ecdsa, Pair};
+use sp_core::{sr25519, Pair};
 use sp_inherents::{InherentData, InherentDataProvider};
 use sp_runtime::{
-	generic::Era, traits::IdentifyAccount, MultiSigner, OpaqueExtrinsic, SaturatedConversion,
+	generic::Era,
+	traits::{IdentifyAccount, Verify},
+	OpaqueExtrinsic, SaturatedConversion,
 };
 
 use crate::service::Client;
@@ -40,7 +42,7 @@ impl frame_benchmarking_cli::ExtrinsicBuilder for RemarkBuilder {
 	}
 
 	fn build(&self, nonce: u32) -> std::result::Result<OpaqueExtrinsic, &'static str> {
-		let acc = ecdsa::Pair::from_string("//Bob", None).expect("static values are valid; qed");
+		let acc = sr25519::Pair::from_string("//Bob", None).expect("static values are valid; qed");
 		let extrinsic: OpaqueExtrinsic = create_benchmark_extrinsic(
 			self.client.as_ref(),
 			acc,
@@ -83,7 +85,7 @@ impl frame_benchmarking_cli::ExtrinsicBuilder for TransferKeepAliveBuilder {
 	}
 
 	fn build(&self, nonce: u32) -> std::result::Result<OpaqueExtrinsic, &'static str> {
-		let acc = ecdsa::Pair::from_string("//Bob", None).expect("static values are valid; qed");
+		let acc = sr25519::Pair::from_string("//Bob", None).expect("static values are valid; qed");
 		let extrinsic: OpaqueExtrinsic = create_benchmark_extrinsic(
 			self.client.as_ref(),
 			acc,
@@ -105,7 +107,7 @@ impl frame_benchmarking_cli::ExtrinsicBuilder for TransferKeepAliveBuilder {
 /// Note: Should only be used for benchmarking.
 pub fn create_benchmark_extrinsic(
 	client: &Client,
-	sender: ecdsa::Pair,
+	sender: sr25519::Pair,
 	call: runtime::RuntimeCall,
 	nonce: u32,
 ) -> runtime::UncheckedExtrinsic {
@@ -155,8 +157,8 @@ pub fn create_benchmark_extrinsic(
 
 	runtime::UncheckedExtrinsic::new_signed(
 		call,
-		MultiSigner::Ecdsa(sender.public()).into_account(),
-		runtime::Signature::Ecdsa(signature),
+		<runtime::Signature as Verify>::Signer::from(sender.public()).into_account(),
+		runtime::Signature::Sr25519(signature),
 		extra,
 	)
 }
