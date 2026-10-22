@@ -11,6 +11,9 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
   so a wallet may prove against one older than the window; the next insert
   used to refuse that spend at once with `UnknownMerkleRoot`. Costs at most one
   extra historic-root slot per block.
+- Pool admission tags each note a spend creates (transfer outputs, unshield
+  change) as well as each note it spends: two spends creating the same note
+  are mutually exclusive in the pool, since only one can execute.
 
 ## [0.25.1] - 2026-10-21
 

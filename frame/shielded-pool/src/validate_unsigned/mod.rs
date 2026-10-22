@@ -5,7 +5,9 @@
 //! would share the original's nullifier tag, outrank it on priority, replace it
 //! and then fail in the block — free, repeatable censorship — and junk spends
 //! would fill blocks for nothing. The price is node CPU per admission and
-//! revalidation; a peer that sends invalid proofs loses reputation for it.
+//! revalidation, paid by every node a spend reaches. An invalid proof costs the
+//! sending peer too little reputation to get it banned, so validators should
+//! take transactions only from their sentries (`--reserved-only`).
 //! Inside a block (`pre_dispatch`) only the cheap checks run: the dispatchable
 //! verifies the proof, and its weight covers one pairing.
 //!
@@ -41,6 +43,13 @@ pub(crate) const TX_LONGEVITY: u64 = 64;
 /// one can ever execute. Sharing the namespace makes pool admission mirror the
 /// chain: one note, one entry.
 pub(crate) const SPEND_TAG_PREFIX: &str = "ShieldedPoolSpend";
+
+/// Marks a tag as a note a spend creates, apart from the nullifiers it spends.
+///
+/// A commitment is inserted once, so two spends creating the same note are as
+/// exclusive as two spending the same one: only one can execute. Tagged as
+/// `(OUTPUT_TAG, commitment)`, which never encodes like a bare nullifier.
+pub(crate) const OUTPUT_TAG: &[u8] = b"output";
 
 #[cfg(test)]
 mod tests;

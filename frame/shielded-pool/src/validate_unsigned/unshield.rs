@@ -51,8 +51,7 @@ pub fn validate_unshield<T: Config>(
 	// ── 3. Proof ─────────────────────────────────────────────────────────────
 	// Without it, a copy of a pending spend with swapped memos or a higher fee
 	// would share the nullifier tag, outrank the original on priority, replace
-	// it, and then fail in the block — free, repeatable censorship. An invalid
-	// proof from a peer also costs that peer reputation.
+	// it, and then fail in the block — free, repeatable censorship.
 	if let Some(proof) = proof {
 		let valid = req.statement().is_ok_and(|statement| {
 			ensure_valid_proof::<T>(|| {
@@ -65,17 +64,20 @@ pub fn validate_unshield<T: Config>(
 		}
 	}
 
-	// ── 4. Pool tag: the nullifier alone (one note, one pool entry) ──────────
+	// ── 4. Pool tags: the nullifier, and the change note if any ──────────────
 	//
 	// Every copy of a spend is mutually exclusive in the pool, whatever else it
 	// changes; with the proof checked, only a valid one gets in. Mirrors
 	// `transfer.rs`.
-	ValidTransaction::with_tag_prefix(super::SPEND_TAG_PREFIX)
+	let mut builder = ValidTransaction::with_tag_prefix(super::SPEND_TAG_PREFIX)
 		.priority(req.fee.saturated_into())
 		.longevity(TX_LONGEVITY)
 		.and_provides(req.nullifier)
-		.propagate(true)
-		.build()
+		.propagate(true);
+	if req.has_change() {
+		builder = builder.and_provides((super::OUTPUT_TAG, req.change_commitment));
+	}
+	builder.build()
 }
 
 /// The pool rejection for a failed unshield check.
