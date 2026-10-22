@@ -52,8 +52,7 @@ pub fn validate_private_transfer<T: Config>(
 	// ── 3. Proof ─────────────────────────────────────────────────────────────
 	// Without it, a copy of a pending spend with swapped memos or a higher fee
 	// would share the nullifier tags, outrank the original on priority, replace
-	// it, and then fail in the block — free, repeatable censorship. An invalid
-	// proof from a peer also costs that peer reputation.
+	// it, and then fail in the block — free, repeatable censorship.
 	if let Some(proof) = proof {
 		let valid = ensure_valid_proof::<T>(|| {
 			T::ZkVerifier::verify_transfer_proof(proof, &req.statement(), Some(req.circuit_version))
@@ -90,6 +89,11 @@ pub fn validate_private_transfer<T: Config>(
 
 	for nullifier in req.real_nullifiers() {
 		builder = builder.and_provides(nullifier);
+	}
+	// Likewise one per output note: two spends creating the same note cannot
+	// both execute.
+	for commitment in req.commitments.iter() {
+		builder = builder.and_provides((super::OUTPUT_TAG, commitment));
 	}
 
 	builder.build()

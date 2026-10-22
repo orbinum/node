@@ -1,6 +1,6 @@
 [package]
 name = "pallet-shielded-pool"
-version = "0.25.1"
+version = "0.25.2"
 description = "Shielded pool pallet for private transactions using ZK proofs"
 authors = { workspace = true }
 license = "GPL-3.0-or-later"

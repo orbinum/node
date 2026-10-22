@@ -83,6 +83,7 @@ impl MerkleTreeService {
 		MerkleRepository::set_tree_size::<T>(index.saturating_add(1));
 		PoolStatsRepository::increment_commitments_inserted::<T>();
 		MerkleRepository::set_frontier::<T>(frontier);
+		Self::retire_active_root::<T>(old_poseidon_root);
 		MerkleRepository::set_poseidon_root::<T>(new_poseidon_root);
 		Self::add_poseidon_historic_root::<T>(new_poseidon_root);
 
@@ -123,6 +124,22 @@ impl MerkleTreeService {
 	}
 
 	// ── Historic roots ──────────────────────────────────────────────────────
+
+	/// Keep the root being replaced spendable for a full window from now.
+	///
+	/// The active root never expires, so a wallet may prove against one created
+	/// long ago; its window must count from when it stops being active, or the
+	/// next insert would refuse that spend at once. Only a root created in an
+	/// earlier block needs this, so it costs at most one slot per block.
+	fn retire_active_root<T: Config>(root: Hash) {
+		let expires_at =
+			frame_system::Pallet::<T>::block_number().saturating_add(T::RootRetentionBlocks::get());
+		let fresh = MerkleRepository::get_historic_root_expiry::<T>(&root)
+			.is_some_and(|expiry| expiry >= expires_at);
+		if !fresh {
+			Self::add_poseidon_historic_root::<T>(root);
+		}
+	}
 
 	/// Record a new root, dropping the ones whose retention window has passed.
 	///

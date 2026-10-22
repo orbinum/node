@@ -19,7 +19,8 @@ fn full_memo() -> EncryptedMemo {
 
 /// A well-formed transfer with the given public values: two canonical
 /// commitments with a full memo each, and a dummy second input when only one
-/// nullifier is given.
+/// nullifier is given. The outputs follow from the input notes, in any order,
+/// so unrelated spends never create the same note.
 fn transfer_request(
 	merkle_root: &Hash,
 	nullifiers: &BoundedVec<Nullifier, ConstU32<2>>,
@@ -30,10 +31,12 @@ fn transfer_request(
 	while nullifiers.len() < 2 {
 		nullifiers.try_push(Nullifier::new([0u8; 32])).unwrap();
 	}
+	let inputs = nullifiers.iter().fold(0u8, |x, n| x ^ n.0[0]);
 	let commitment = |i: u8| {
 		let mut bytes = [0u8; 32];
 		bytes[0] = i + 1;
 		bytes[1] = 0xC0;
+		bytes[2] = inputs;
 		Commitment::new(bytes)
 	};
 	TransferRequest {
@@ -676,15 +679,16 @@ fn attack_each_nullifier_contributes_an_independent_tag() {
 	new_test_ext().execute_with(|| {
 		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
 
+		// Plus one tag per output note, two in every transfer.
 		let one =
 			validate_private_transfer(&KNOWN_ROOT, &nullifiers_of(&[0x91]), &0u128, 1).unwrap();
-		assert_eq!(one.provides.len(), 1, "one real input → one tag");
+		assert_eq!(one.provides.len(), 1 + 2, "one real input → one tag");
 
 		let two = validate_private_transfer(&KNOWN_ROOT, &nullifiers_of(&[0x92, 0x93]), &0u128, 1)
 			.unwrap();
 		assert_eq!(
 			two.provides.len(),
-			2,
+			2 + 2,
 			"two real inputs → two independent tags"
 		);
 
@@ -693,7 +697,11 @@ fn attack_each_nullifier_contributes_an_independent_tag() {
 		padded.try_push(nullifier(0x94)).unwrap();
 		padded.try_push(Nullifier::new([0u8; 32])).unwrap();
 		let p = validate_private_transfer(&KNOWN_ROOT, &padded, &0u128, 1).unwrap();
-		assert_eq!(p.provides.len(), 1, "the dummy must not contribute a tag");
+		assert_eq!(
+			p.provides.len(),
+			1 + 2,
+			"the dummy must not contribute a tag"
+		);
 	});
 }
 
@@ -715,10 +723,88 @@ fn attack_transfer_and_unshield_of_the_same_note_are_mutually_exclusive() {
 			validate_private_transfer(&KNOWN_ROOT, &nullifiers_of(&[0x77]), &10u128, 1).unwrap();
 		let unshield = validate_unshield(&KNOWN_ROOT, &n, &0u32, &100u128, &10u128, 1).unwrap();
 
-		assert_eq!(
-			transfer.provides, unshield.provides,
+		assert!(
+			unshield
+				.provides
+				.iter()
+				.all(|t| transfer.provides.contains(t)),
 			"one note must back one pool entry, whichever operation spends it"
 		);
+	});
+}
+
+// ── one note created, one pool entry ─────────────────────────────────────────
+//
+// A commitment is inserted once, so two spends creating the same note cannot
+// both execute. Without a tag per output both would sit in the pool, propagate
+// and be revalidated, and the loser would fail in the block for free.
+
+/// Two transfers spending different notes into the same output note are
+/// mutually exclusive in the pool.
+#[test]
+fn transfers_creating_the_same_note_are_mutually_exclusive() {
+	new_test_ext().execute_with(|| {
+		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+		let first = transfer_request(&KNOWN_ROOT, &nullifiers_of(&[0xA1]), 0, 1);
+		let mut second = transfer_request(&KNOWN_ROOT, &nullifiers_of(&[0xA2]), 0, 1);
+		second.commitments[1] = first.commitments[0];
+
+		let a = super::validate_private_transfer(Some(&proof()), &first).unwrap();
+		let b = super::validate_private_transfer(Some(&proof()), &second).unwrap();
+		let shared: Vec<_> = a
+			.provides
+			.iter()
+			.filter(|t| b.provides.contains(t))
+			.collect();
+		assert_eq!(shared.len(), 1, "exactly the shared output note's tag");
+	});
+}
+
+/// A partial unshield's change note collides with a transfer creating the same
+/// note; a total unshield creates none and tags its nullifier alone.
+#[test]
+fn an_unshield_change_note_is_tagged_like_a_transfer_output() {
+	new_test_ext().execute_with(|| {
+		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+		PoolBalanceRepository::set_asset_balance::<Test>(0, 1_000);
+		let transfer = transfer_request(&KNOWN_ROOT, &nullifiers_of(&[0xB1]), 0, 1);
+		let total = unshield_request(&KNOWN_ROOT, &nullifier(0xB2), 0, 100, 0, 1);
+		let partial = UnshieldRequest {
+			change_commitment: transfer.commitments[0].0,
+			change_memo: full_memo(),
+			..total.clone()
+		};
+
+		let t = super::validate_private_transfer(Some(&proof()), &transfer).unwrap();
+		let total = super::validate_unshield(Some(&proof()), &total).unwrap();
+		let partial = super::validate_unshield(Some(&proof()), &partial).unwrap();
+		assert_eq!(total.provides.len(), 1);
+		assert_eq!(partial.provides.len(), 2);
+		assert!(partial.provides.iter().any(|tag| t.provides.contains(tag)));
+		assert!(!total.provides.iter().any(|tag| t.provides.contains(tag)));
+	});
+}
+
+/// An output tag never equals a nullifier tag, even for the same 32 bytes: a
+/// note created by one spend must not block an unrelated spend of a note.
+#[test]
+fn an_output_tag_never_collides_with_a_nullifier_tag() {
+	new_test_ext().execute_with(|| {
+		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+		PoolBalanceRepository::set_asset_balance::<Test>(0, 1_000);
+		let transfer = transfer_request(&KNOWN_ROOT, &nullifiers_of(&[0xC1]), 0, 1);
+		let unshield = unshield_request(
+			&KNOWN_ROOT,
+			&Nullifier::new(transfer.commitments[0].0),
+			0,
+			100,
+			0,
+			1,
+		);
+
+		let t = super::validate_private_transfer(Some(&proof()), &transfer).unwrap();
+		let u = super::validate_unshield(Some(&proof()), &unshield).unwrap();
+		assert!(!u.provides.iter().any(|tag| t.provides.contains(tag)));
 	});
 }
 

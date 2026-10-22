@@ -31,8 +31,11 @@ raw `Ed25519` (`0x00`) never verifies, and Solana wallets and Substrate extensio
 sign through the new `Ed25519Text` (`0x03`) and `Ed25519WrappedText` (`0x04`).
 Circuit keys: unsound ones are recorded on chain and never verify again, a
 removed version keeps its key, and a key without phase 2 is refused.
+Shielded pool: a replaced root stays spendable for a full window, and spends
+creating the same note are exclusive in the pool.
 `transaction_version` is unchanged. Ships with `pallet-evm-precompile-balances`
-0.2.0, `pallet-zk-verifier` 0.19.0 and `orbinum-zk-verifier` 3.4.0.
+0.2.0, `pallet-zk-verifier` 0.19.0, `orbinum-zk-verifier` 3.4.0 and
+`pallet-shielded-pool` 0.25.2.
 
 - **Balances precompile (`0x…0802`)** refuses static calls, delegated calls
   (DELEGATECALL, CALLCODE) and calls carrying value. Under DELEGATECALL the
@@ -127,6 +130,16 @@ removed version keeps its key, and a key without phase 2 is refused.
 - **Weights.** Every proof verification adds one read (the denied-key check);
   `deny_version` is estimated from `retire_version`, and registration and
   removal add the `RemovedVkHashes` read/write, until re-benchmarked.
+- **Replaced roots keep a full window.** A leaf insert records the root it
+  replaces with `RootRetentionBlocks` from now, not from when that root was
+  created. The active root never expires, so a wallet may prove against one
+  older than the window, and the next insert refused that spend at once
+  (`UnknownMerkleRoot`, pool code 1). At most one extra historic-root slot per
+  block, not yet in the benchmarked weights.
+- **Created notes tagged in the pool.** A transfer's outputs and an unshield's
+  change note each `provide` a pool tag, besides the spent nullifiers: two
+  spends creating the same note can no longer both sit in the pool and
+  propagate when only one can execute.
 
 ### spec 19 — tx 7 — 2026-10-13 (`v0.5.0`)
 
