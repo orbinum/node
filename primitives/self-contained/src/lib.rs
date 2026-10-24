@@ -19,10 +19,12 @@
 #![warn(unused_crate_dependencies)]
 
 mod checked_extrinsic;
+mod full_payload;
 mod unchecked_extrinsic;
 
 pub use crate::{
 	checked_extrinsic::{CheckedExtrinsic, CheckedSignature},
+	full_payload::VerifyFullPayload,
 	unchecked_extrinsic::UncheckedExtrinsic,
 };
 
