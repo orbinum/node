@@ -5,6 +5,7 @@ use crate::{
 	orbinum_signature::{text_message, wrapped_text_message, OrbinumSignature, OrbinumSigner},
 	AccountId, Runtime,
 };
+use fp_self_contained::VerifyFullPayload;
 use hex_literal::hex;
 use sp_core::{ecdsa, ed25519, sr25519, Pair, H256};
 use sp_runtime::traits::{IdentifyAccount, Verify};
@@ -66,11 +67,12 @@ fn ed25519_small_order_keys_are_refused() {
 			for k in [key, negated] {
 				let account = AccountId::from(k);
 				assert!(
-					!OrbinumSignature::Ed25519Text(forged).verify(MSG, &account),
+					!OrbinumSignature::Ed25519Text(forged).verify_full_payload(MSG, &account),
 					"Ed25519Text accepted {k:02x?}"
 				);
 				assert!(
-					!OrbinumSignature::Ed25519WrappedText(forged).verify(MSG, &account),
+					!OrbinumSignature::Ed25519WrappedText(forged)
+						.verify_full_payload(MSG, &account),
 					"Ed25519WrappedText accepted {k:02x?}"
 				);
 			}
@@ -91,8 +93,8 @@ fn ed25519_forgery_cannot_spend_from_the_evm_identity_account() {
 		);
 		frame_system::BlockHash::<Runtime>::insert(0u32, H256(GENESIS));
 		let forged = ed25519::Signature::from_raw(ED25519_FORGERY);
-		assert!(!OrbinumSignature::Ed25519Text(forged).verify(MSG, &account));
-		assert!(!OrbinumSignature::Ed25519WrappedText(forged).verify(MSG, &account));
+		assert!(!OrbinumSignature::Ed25519Text(forged).verify_full_payload(MSG, &account));
+		assert!(!OrbinumSignature::Ed25519WrappedText(forged).verify_full_payload(MSG, &account));
 	});
 }
 
@@ -104,9 +106,25 @@ fn ed25519_ordinary_key_still_verifies() {
 		let account = OrbinumSigner::from(pair.public()).into_account();
 		let text = pair.sign(&text_message(&GENESIS, MSG));
 		let wrapped = pair.sign(&wrapped_text_message(&GENESIS, MSG));
-		assert!(OrbinumSignature::Ed25519Text(text).verify(MSG, &account));
-		assert!(OrbinumSignature::Ed25519WrappedText(wrapped).verify(MSG, &account));
-		assert!(!OrbinumSignature::Ed25519Text(text).verify(&b"other"[..], &account));
+		assert!(OrbinumSignature::Ed25519Text(text).verify_full_payload(MSG, &account));
+		assert!(OrbinumSignature::Ed25519WrappedText(wrapped).verify_full_payload(MSG, &account));
+		assert!(!OrbinumSignature::Ed25519Text(text).verify_full_payload(&b"other"[..], &account));
+	});
+}
+
+/// Text signatures are checked over the whole payload only: through `Verify`, whose
+/// message may be a blake2_256, even a valid one is refused.
+#[test]
+fn text_signatures_never_verify_through_verify() {
+	with_ext(|| {
+		frame_system::BlockHash::<Runtime>::insert(0u32, H256(GENESIS));
+		let pair = ed25519::Pair::from_seed(&[3u8; 32]);
+		let account = OrbinumSigner::from(pair.public()).into_account();
+		let text = pair.sign(&text_message(&GENESIS, MSG));
+		let wrapped = pair.sign(&wrapped_text_message(&GENESIS, MSG));
+		assert!(OrbinumSignature::Ed25519Text(text).verify_full_payload(MSG, &account));
+		assert!(!OrbinumSignature::Ed25519Text(text).verify(MSG, &account));
+		assert!(!OrbinumSignature::Ed25519WrappedText(wrapped).verify(MSG, &account));
 	});
 }
 
@@ -125,8 +143,11 @@ fn a_blind_signature_over_the_payload_hash_authorizes_nothing() {
 			&payload_hash,
 			&pair.public()
 		));
-		assert!(!OrbinumSignature::Ed25519Text(blind).verify(&payload_hash[..], &account));
-		assert!(!OrbinumSignature::Ed25519WrappedText(blind).verify(&payload_hash[..], &account));
+		assert!(
+			!OrbinumSignature::Ed25519Text(blind).verify_full_payload(&payload_hash[..], &account)
+		);
+		assert!(!OrbinumSignature::Ed25519WrappedText(blind)
+			.verify_full_payload(&payload_hash[..], &account));
 		assert!(!OrbinumSignature::Ed25519(blind).verify(&payload_hash[..], &account));
 	});
 }

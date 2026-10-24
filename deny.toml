@@ -23,6 +23,11 @@ ignore = [
     # TLS of `wss` p2p dials, and peers are still authenticated by Noise and peer id.
     "RUSTSEC-2026-0381",
 
+    # crypto-bigint 0.5.5 (non-constant-time ops) — pinned by elliptic-curve 0.13 through
+    # k256 0.13 (alloy, from ismp-abi); fixed only in 0.7.6, which needs elliptic-curve
+    # 0.14. Here k256 hashes, recovers and verifies public data; no secret key is used.
+    "RUSTSEC-2026-0387",
+
     # Unmaintained — all transitive, no direct upgrade path
     "RUSTSEC-2025-0161",  # libsecp256k1 0.7.2 (from frontier fp-evm/pallet-evm)
     "RUSTSEC-2026-0119",  # hickory-proto 0.24.x (from libp2p-dns → sc-network)
