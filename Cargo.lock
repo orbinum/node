@@ -5943,7 +5943,7 @@ dependencies = [
 
 [[package]]
 name = "fp-self-contained"
-version = "1.0.0-dev"
+version = "2.0.0-dev"
 dependencies = [
  "frame-support",
  "parity-scale-codec",

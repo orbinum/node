@@ -71,11 +71,18 @@ and bytes like EVM gas.
 - **Digest check.** `pallet_ethereum::on_finalize` panics on a block with
   more than one Frontier pre-runtime log, so the block is invalid. Before, it
   treated that block as having no log (Frontier #1809).
-- **`OrbinumSignature::Ed25519Text` (`0x03`).** Ed25519 over the UTF-8 text
-  `"Orbinum transaction\nchain: 0x{genesis}\npayload: 0x{blake2_256(msg)}"`
-  (lowercase hex), where `msg` is what `Verify::verify` receives: the signing
-  payload, or its blake2_256 above 256 bytes. Phantom refuses binary input to
-  `solana:signMessage` and MetaMask rewrites it, so Solana accounts sign
+- **`OrbinumSignature::Ed25519Text` (`0x03`).** Ed25519 over a UTF-8 text the
+  runtime renders from the whole signing payload, at any size:
+  `Orbinum transaction`, `chain: 0x{genesis}`, `action: {Pallet}.{call}`, then
+  `to:` and `amount:` for balance transfers and ORB shields and fee claims, `tip:`
+  when not zero, and `payload: 0x{blake2_256(payload)}` (lowercase hex). The
+  runtime renders it again to verify, so a site cannot show one transaction and
+  get another signed: a text with another amount, recipient or tip is
+  `BadProof`. Large payloads (a shield's proof and memo) are not hashed first:
+  `fp-self-contained`'s `check` gives these signatures the whole payload
+  (`VerifyFullPayload`), and `Verify::verify`, whose message may be a hash,
+  refuses them. Other signatures keep Substrate's check. Phantom refuses binary
+  input to `solana:signMessage` and MetaMask rewrites it, so Solana accounts sign
   extrinsics through this variant; the account is the raw ed25519 key.
 - **`OrbinumSignature::Ed25519WrappedText` (`0x04`).** The same text inside
   `<Bytes>…</Bytes>`: what a Substrate extension's `signRaw` signs for it
