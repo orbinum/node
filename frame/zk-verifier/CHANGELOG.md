@@ -6,6 +6,28 @@ All notable changes to this pallet are documented here.
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-10-25
+
+### Changed
+
+- **Weights regenerated** on reference hardware (Hetzner, AMD EPYC-Genoa,
+  `--steps 50 --repeat 20`). `deny_version` is measured instead of estimated from
+  `retire_version`, and every call includes the spec 20 reads (`DeniedVkHashes`,
+  `RemovedVkHashes`). Base `ref_time`:
+
+  | Call | Before | Now |
+  |---|---|---|
+  | `verify_proof` | 10.37 + 0.05·n ms | 1.55 + 0.0001·n ms |
+  | `register_verification_key` | 2.36 ms | 9.58 ms |
+  | `batch_register_verification_keys` | 0.06 + 2.35·n ms | 9.54 + 8.14·n ms |
+  | `set_active_version` | 0.02 ms | 2.82 ms |
+  | `unretire_version` | 0.01 ms | 2.94 ms |
+  | `deny_version` | — | 0.04 ms |
+
+  `verify_proof` drops because proofs verify through the native Groth16 host
+  function since runtime spec 19; the previous weights predate it. Registration,
+  activation and unretire rise because they now prepare or re-check the key.
+
 ## [0.19.0] - 2026-10-21
 
 ### Added
