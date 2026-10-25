@@ -20,7 +20,7 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
-### spec 20 — tx 7 — [Unreleased]
+### spec 20 — tx 7 — 2026-10-25 (`v0.6.0`)
 
 EVM precompiles: the Balances precompile only runs as a direct call and meters
 by weight, and every Orbinum precompile address holds code, so Solidity
@@ -35,8 +35,9 @@ Shielded pool: a replaced root stays spendable for a full window, and spends
 creating the same note are exclusive in the pool. Substrate fees price weight
 and bytes like EVM gas.
 `transaction_version` is unchanged. Ships with `pallet-evm-precompile-balances`
-0.2.0, `pallet-zk-verifier` 0.19.0, `orbinum-zk-verifier` 3.4.0 and
-`pallet-shielded-pool` 0.25.2.
+0.2.0, `pallet-zk-verifier` 0.19.1, `orbinum-zk-verifier` 3.4.0,
+`pallet-shielded-pool` 0.25.3, `pallet-validator-set` 0.4.2 and
+`fp-self-contained` 2.0.0-dev, with weights measured on reference hardware.
 
 - **Balances precompile (`0x…0802`)** refuses static calls, delegated calls
   (DELEGATECALL, CALLCODE) and calls carrying value. Under DELEGATECALL the
