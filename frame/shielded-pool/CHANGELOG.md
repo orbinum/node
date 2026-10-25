@@ -4,6 +4,22 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 
 ## [Unreleased]
 
+## [0.25.3] - 2026-10-25
+
+### Changed
+
+- **Weights regenerated** on reference hardware (Hetzner, AMD EPYC-Genoa,
+  `--steps 50 --repeat 20`), including the historic-root slot a leaf insert can
+  now take. Base `ref_time`, proof verification excluded (added from
+  `pallet-zk-verifier`):
+
+  | Call | Before | Now |
+  |---|---|---|
+  | `shield` | 0.82 ms | 1.04 ms |
+  | `shield_batch` | 0.003 + 0.79·n ms | 1.02 + 0.91·n ms |
+  | `private_transfer` | 1.84 ms | 1.94 ms |
+  | `unshield` | 0.39 ms | 0.11 ms |
+
 ## [0.25.2] - 2026-10-21
 
 ### Fixed

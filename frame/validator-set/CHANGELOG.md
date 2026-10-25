@@ -9,6 +9,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.4.2] — 2026-10-25
+
+Weights only; ships with runtime spec 20.
+
+### Changed
+
+- **Weights regenerated** on reference hardware (Hetzner, AMD EPYC-Genoa,
+  `--steps 50 --repeat 20`), from the same run as the rest of the spec 20
+  weights. `set_min_author_version` goes from 0.03 ms to 0.15 ms base
+  `ref_time`; the other calls move within a few microseconds.
+
+---
+
 ## [0.4.1] — 2026-10-13
 
 Docs only; ships with runtime spec 19.
