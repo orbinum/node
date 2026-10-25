@@ -31,7 +31,9 @@ use sp_runtime::{
 	OpaqueExtrinsic,
 };
 
-use crate::{CheckedExtrinsic, CheckedSignature, SelfContainedCall};
+use crate::{
+	full_payload, CheckedExtrinsic, CheckedSignature, SelfContainedCall, VerifyFullPayload,
+};
 
 /// A extrinsic right from the external world. This is unchecked and so
 /// can contain a signature.
@@ -81,7 +83,7 @@ impl<Address, AccountId, Call, Signature, Extension, Lookup> Checkable<Lookup>
 where
 	Address: Member + MaybeDisplay,
 	Call: Encode + Member + SelfContainedCall,
-	Signature: Member + traits::Verify,
+	Signature: Member + traits::Verify + VerifyFullPayload<AccountId>,
 	<Signature as traits::Verify>::Signer: IdentifyAccount<AccountId = AccountId>,
 	Extension: Encode + TransactionExtension<Call>,
 	AccountId: Member + MaybeDisplay,
@@ -105,6 +107,10 @@ where
 				signed: CheckedSignature::SelfContained(signed_info),
 				function: self.0.function,
 			})
+		} else if matches!(&self.0.preamble, Preamble::Signed(_, sig, _) if sig.covers_full_payload())
+		{
+			// Substrate's check would hash a long payload before `Verify` sees it.
+			full_payload::check(self.0, lookup)
 		} else {
 			let checked = Checkable::<Lookup>::check(self.0, lookup)?;
 			Ok(CheckedExtrinsic {
