@@ -33,7 +33,7 @@ All notable changes to this crate are documented here.
 ### Changed
 
 - `authors` is inherited from the workspace (`Orbinum Technologies
-  <contact@orbinum.net>`). No code change.
+  <contact@orbinum.com>`). No code change.
 
 ## [3.3.0] - 2026-10-13
 

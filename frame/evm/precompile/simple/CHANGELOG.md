@@ -7,4 +7,4 @@
 ### Changed
 
 - `authors` is inherited from the workspace (`Orbinum Technologies
-  <contact@orbinum.net>`). No code change.
+  <contact@orbinum.com>`). No code change.

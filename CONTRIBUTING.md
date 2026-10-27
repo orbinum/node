@@ -12,7 +12,7 @@ Orbinum Network Node is in early development phase and the core team is working 
 
 **In the meantime, you can:**
 - Star the project to follow updates
-- Report critical security vulnerabilities to: security@orbinum.net
+- Report critical security vulnerabilities to: contact@orbinum.com
 - Participate in [GitHub Discussions](https://github.com/orbinum/node/discussions)
 - Review documentation and suggest minor improvements
 
@@ -211,7 +211,7 @@ We expect all participants to:
 ## Questions or Help
 
 - Create a Discussion on GitHub
-- Email: dev@orbinum.net
+- Email: contact@orbinum.com
 - Read README.md for more project information
 
 ---

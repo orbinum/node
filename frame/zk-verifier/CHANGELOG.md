@@ -66,7 +66,7 @@ All notable changes to this pallet are documented here.
 ### Changed
 
 - `authors` is inherited from the workspace (`Orbinum Technologies
-  <contact@orbinum.net>`). No code change.
+  <contact@orbinum.com>`). No code change.
 
 ## [0.18.0] - 2026-10-13
 

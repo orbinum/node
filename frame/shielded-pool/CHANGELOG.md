@@ -38,7 +38,7 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 ### Changed
 
 - `authors` is inherited from the workspace (`Orbinum Technologies
-  <contact@orbinum.net>`). No code change.
+  <contact@orbinum.com>`). No code change.
 
 ## [0.25.0] - 2026-10-13
 
