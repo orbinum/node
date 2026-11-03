@@ -176,28 +176,6 @@ frame-benchmarking-cli = { version = "58.0.0" }
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", version = "0.17.7", default-features = false }
 substrate-build-script-utils = { version = "11.0.3" }
 substrate-frame-rpc-system = { version = "53.0.0" }
-# Not published to crates.io (its 2.0.0 is git-only), so this one stays on git. It is
-# a [dev-dependencies] entry in client/{cli,db,rpc,mapping-sync} only — nothing in the
-# runtime or node binary depends on it.
-# Dev-dependency only, used by the vendored Frontier crates' own tests.
-#
-# It is NOT on crates.io (the published `0.0.0` is a yanked placeholder), so it can only
-# come from git — which drags the whole SDK in from git alongside the registry copy the
-# rest of the workspace uses. Cargo treats the two sources as different packages, so
-# every `sp-*`/`sc-*` type exists twice and those TEST TARGETS fail to typecheck:
-#
-#   the trait bound `Client<..>: HeaderBackend<_>` is not satisfied
-#   note: there are multiple different versions of crate `sp_blockchain`
-#
-# This affects ONLY `--all-targets` on fc-cli/fc-db/fc-rpc/fc-mapping-sync. The node,
-# the runtime and every pallet build and test clean, because the dep is dev-only.
-#
-# Redirecting the SDK through `[patch.crates-io]` was tried and rejected: the patch set
-# is not stable — each crate added reshuffles the resolution graph, and a set large
-# enough to fix these four ends up splitting `sp-arithmetic`/`sp-core` and breaking
-# crates that were previously fine, including our own. The real fix is upstream
-# publishing this crate, or dropping these vendored tests. Tracked in
-# MIGRACION_2606_TODO.md alongside the rest of the Frontier work.
 substrate-wasm-builder = { version = "34.0.0" }
 
 # Polkadot
@@ -270,29 +248,13 @@ pallet-shielded-pool-runtime-api = { path = "frame/shielded-pool/runtime-api", d
 pallet-validator-set = { path = "frame/validator-set", default-features = false }
 
 # ── ISMP / Hyperbridge ────────────────────────────────────────────────────────
-# Connects Orbinum to Polkadot via Hyperbridge WITHOUT becoming a parachain: the
-# GRANDPA consensus client lets Hyperbridge VERIFY our finality proofs rather than
-# take consensus over, so the sovereign validator set stays intact. `ismp-grandpa`
-# is the solochain client — NOT `ismp-parachain`, which is for chains that borrow
-# relay-chain consensus.
-#
-# These crates pin the crates.io `polkadot-sdk` umbrella by exact version
-# (`=2606.0.0` on this line), which is why every SDK dependency above is a registry
-# version rather than a git branch: a git/registry split duplicates `sp_io` and breaks
-# the wasm build. That exact pin is also why the node-side SDK crates sit one minor
-# behind `polkadot-sdk 2606.2.0` — the runtime API crates (`frame-support` 48,
-# `sp-runtime` 48, `sp-core` 43) are unchanged across that range, so the gap is
-# client-side only and clears when ISMP publishes against a newer umbrella.
 ismp = { version = "2606.1.0", default-features = false }
 ismp-grandpa = { version = "2606.0.0", default-features = false }
 pallet-ismp = { version = "2606.1.0", default-features = false }
 pallet-ismp-messaging = { path = "frame/ismp-messaging", default-features = false }
 pallet-ismp-rpc = { version = "2606.0.0" }
 pallet-ismp-runtime-api = { version = "2606.0.0", default-features = false }
-# Dev-only since the 2606 guard deletion: the consensus-binding tests decode
-# ConsensusState and FinalityProof to build their fixtures.
 grandpa-verifier-primitives = { version = "2606.0.0", default-features = false }
-# `IsmpRouter::module_for_id` returns `anyhow::Error`.
 anyhow = { version = "1.0", default-features = false }
 
 # Frontier / Orbinum pallets (continued)
@@ -318,7 +280,4 @@ codegen-units = 1
 
 # Patch Substrate dependencies for local development
 [patch.crates-io]
-# SDK crates are consumed from crates.io directly, so no source redirection is needed
-# here. (They used to come from git, which forced a large patch table to keep cargo
-# from seeing two copies of every SDK type.)
 orbinum-zk-core = { path = "primitives/zk-core" }
