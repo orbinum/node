@@ -23,6 +23,7 @@ members = [
 	"frame/evm-polkavm/uapi",
 	"frame/hotfix-sufficients",
 	"frame/ismp-messaging",
+	"frame/paged-election",
 	"frame/zk-verifier/runtime-api",
 	"frame/zk-verifier/rpc",
 	"client/api",
@@ -114,6 +115,7 @@ sc-keystore = { version = "42.0.0" }
 sc-network = { version = "0.58.0" }
 sc-network-common = { version = "0.55.0" }
 sc-network-sync = { version = "0.57.0" }
+sc-network-transactions = { version = "0.57.0" }
 sc-offchain = { version = "53.0.0" }
 sc-rpc = { version = "54.0.0" }
 sc-rpc-api = { version = "0.58.0" }
@@ -139,10 +141,12 @@ sp-inherents = { version = "43.0.0", default-features = false }
 sp-io = { version = "48.0.0", default-features = false }
 sp-keyring = { version = "48.0.0", default-features = false }
 sp-keystore = { version = "0.49.0", default-features = false }
+sp-npos-elections = { version = "43.0.0", default-features = false }
 sp-offchain = { version = "43.0.0", default-features = false }
 sp-runtime = { version = "48.0.0", default-features = false }
 sp-runtime-interface = { version = "37.0.0", default-features = false }
 sp-session = { version = "45.0.0", default-features = false }
+sp-staking = { version = "45.0.0", default-features = false }
 sp-state-machine = { version = "0.53.0", default-features = false }
 sp-std = { version = "14.0.0", default-features = false }
 sp-storage = { version = "25.0.0", default-features = false }
@@ -153,6 +157,7 @@ sp-version = { version = "46.0.0", default-features = false }
 sp-weights = { version = "36.0.0", default-features = false }
 # Substrate FRAME
 frame-benchmarking = { version = "49.0.0", default-features = false }
+frame-election-provider-support = { version = "48.0.0", default-features = false }
 frame-executive = { version = "48.0.0", default-features = false }
 frame-metadata-hash-extension = { version = "0.16.0", default-features = false }
 frame-support = { version = "48.0.0", default-features = false }
@@ -162,9 +167,19 @@ frame-system-rpc-runtime-api = { version = "43.0.0", default-features = false }
 frame-try-runtime = { version = "0.54.0", default-features = false }
 pallet-aura = { version = "48.0.0", default-features = false }
 pallet-authorship = { version = "48.0.0", default-features = false }
+pallet-bags-list = { version = "48.0.0", default-features = false }
 pallet-balances = { version = "50.0.0", default-features = false }
+pallet-delegated-staking = { version = "15.0.0", default-features = false }
 pallet-grandpa = { version = "49.0.0", default-features = false }
+pallet-nomination-pools = { version = "47.0.0", default-features = false }
+pallet-nomination-pools-benchmarking = { version = "47.0.0", default-features = false }
+pallet-nomination-pools-runtime-api = { version = "45.0.0", default-features = false }
+pallet-offences = { version = "47.0.0", default-features = false }
 pallet-session = { version = "49.0.0", default-features = false }
+pallet-staking-async = { version = "0.14.0", default-features = false }
+pallet-staking-async-ah-client = { version = "0.11.0", default-features = false }
+pallet-staking-async-rc-client = { version = "0.11.0", default-features = false }
+pallet-staking-async-runtime-api = { version = "0.8.0", default-features = false }
 pallet-sudo = { version = "49.0.0", default-features = false }
 pallet-timestamp = { version = "48.0.0", default-features = false }
 pallet-transaction-payment = { version = "49.0.0", default-features = false }
@@ -225,6 +240,7 @@ orbinum-zk-core = { path = "primitives/zk-core", default-features = false }
 orbinum-zk-verifier = { path = "primitives/zk-verifier", default-features = false }
 
 # Frontier FRAME
+pallet-auto-payout = { path = "frame/auto-payout", default-features = false }
 pallet-base-fee = { path = "frame/base-fee", default-features = false }
 pallet-dynamic-fee = { path = "frame/dynamic-fee", default-features = false }
 pallet-ethereum = { path = "frame/ethereum", default-features = false }
@@ -234,6 +250,8 @@ pallet-evm-polkavm = { path = "frame/evm-polkavm", default-features = false }
 pallet-evm-polkavm-proc-macro = { path = "frame/evm-polkavm/proc-macro" }
 pallet-evm-polkavm-uapi = { path = "frame/evm-polkavm/uapi", default-features = false }
 pallet-evm-precompile-balances = { path = "frame/evm/precompile/balances", default-features = false }
+pallet-evm-precompile-blake2 = { path = "frame/evm/precompile/blake2", default-features = false }
+pallet-evm-precompile-bn128 = { path = "frame/evm/precompile/bn128", default-features = false }
 pallet-evm-precompile-curve25519 = { path = "frame/evm/precompile/curve25519", default-features = false }
 pallet-evm-precompile-curve25519-benchmarking = { path = "frame/evm/precompile/curve25519/benchmarking", default-features = false }
 pallet-evm-precompile-modexp = { path = "frame/evm/precompile/modexp", default-features = false }
@@ -243,19 +261,20 @@ pallet-evm-precompile-shielded-pool = { path = "frame/evm/precompile/shielded-po
 pallet-evm-precompile-simple = { path = "frame/evm/precompile/simple", default-features = false }
 pallet-evm-test-vector-support = { path = "frame/evm/test-vector-support" }
 pallet-hotfix-sufficients = { path = "frame/hotfix-sufficients", default-features = false }
+pallet-paged-election = { path = "frame/paged-election", default-features = false }
 pallet-shielded-pool = { path = "frame/shielded-pool", default-features = false }
 pallet-shielded-pool-runtime-api = { path = "frame/shielded-pool/runtime-api", default-features = false }
 pallet-validator-set = { path = "frame/validator-set", default-features = false }
 
 # ── ISMP / Hyperbridge ────────────────────────────────────────────────────────
+anyhow = { version = "1.0", default-features = false }
+grandpa-verifier-primitives = { version = "2606.0.0", default-features = false }
 ismp = { version = "2606.1.0", default-features = false }
 ismp-grandpa = { version = "2606.0.0", default-features = false }
 pallet-ismp = { version = "2606.1.0", default-features = false }
 pallet-ismp-messaging = { path = "frame/ismp-messaging", default-features = false }
 pallet-ismp-rpc = { version = "2606.0.0" }
 pallet-ismp-runtime-api = { version = "2606.0.0", default-features = false }
-grandpa-verifier-primitives = { version = "2606.0.0", default-features = false }
-anyhow = { version = "1.0", default-features = false }
 
 # Frontier / Orbinum pallets (continued)
 pallet-zk-verifier = { path = "frame/zk-verifier", default-features = false }

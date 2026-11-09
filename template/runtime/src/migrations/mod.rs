@@ -1,8 +1,16 @@
 //! Runtime-level storage migrations, run by `Executive` on upgrade (`Migrations`).
 
+mod init_staking;
 mod precompile_code;
+#[cfg(test)]
+mod tests;
 
+pub use init_staking::InitStaking;
 pub use precompile_code::PrecompileCode;
+
+/// Runs on upgrade, oldest first. Drop an entry once every live chain has passed its
+/// version: a migration that can no longer run could be re-armed by mistake.
+pub type Migrations = (PrecompileCode, InitStaking);
 
 use crate::Runtime;
 use frame_support::weights::Weight;
