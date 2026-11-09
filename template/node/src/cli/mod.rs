@@ -1,12 +1,22 @@
-use crate::service::EthConfiguration;
+//! Command-line arguments.
+//!
+//! - `substrate_cli`: node identity and the chain spec ids `--chain` accepts.
+//! - `overrides`: settings the node enforces over the operator's flags.
 
-/// Available Sealing methods.
-#[derive(Copy, Clone, Debug, Default, clap::ValueEnum)]
+mod overrides;
+mod substrate_cli;
+
+pub use overrides::{apply_ismp_requirements, ensure_dev_only_flags};
+
+use crate::frontier::EthConfiguration;
+
+/// Available sealing methods.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum Sealing {
-	/// Seal using rpc method.
+	/// Seal on `engine_createBlock` RPC calls.
 	#[default]
 	Manual,
-	/// Seal when transaction is executed.
+	/// Seal a block whenever a transaction enters the pool.
 	Instant,
 }
 
@@ -19,7 +29,9 @@ pub struct Cli {
 	#[command(flatten)]
 	pub run: sc_cli::RunCmd,
 
-	/// Choose sealing method.
+	/// Seal blocks on demand instead of with Aura and GRANDPA. Development chains only:
+	/// the check reads the spec's `chainType`, so a custom JSON spec that says
+	/// `Development` passes it.
 	#[arg(long, value_enum, ignore_case = true)]
 	pub sealing: Option<Sealing>,
 
@@ -27,13 +39,19 @@ pub struct Cli {
 	#[arg(long)]
 	pub no_hardware_benchmarks: bool,
 
+	/// Most blocks one `ismp_queryEvents*` call may span: each re-executes the
+	/// runtime at every block of its range. A relayer catching up after a long
+	/// outage may need more on the node it reads from.
+	#[arg(long, default_value_t = 10_000, value_parser = clap::value_parser!(u32).range(1..))]
+	pub ismp_max_event_blocks: u32,
+
 	#[command(flatten)]
 	pub eth: EthConfiguration,
 }
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Subcommand {
-	/// Key management cli utilities
+	/// Key management CLI utilities.
 	#[command(subcommand)]
 	Key(sc_cli::KeySubcommand),
 
@@ -67,6 +85,17 @@ pub enum Subcommand {
 	#[cfg(not(feature = "runtime-benchmarks"))]
 	Benchmark,
 
-	/// Db meta columns information.
+	/// Frontier database meta columns information.
 	FrontierDb(fc_cli::FrontierDbCmd),
+}
+
+#[cfg(test)]
+mod tests {
+	use super::Cli;
+	use clap::CommandFactory;
+
+	#[test]
+	fn cli_definition_is_consistent() {
+		Cli::command().debug_assert();
+	}
 }

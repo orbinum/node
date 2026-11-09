@@ -1,85 +1,105 @@
-//! Chain specifications for Orbinum Node.
+//! Chain specifications.
 //!
-//! Each submodule covers one network environment:
-//! - [`dev`]     — single-validator development node (`--dev`)
-//! - [`local`]   — two-validator local testnet (Alice + Bob)
-//! - [`testnet`] — public Orbinum Testnet, chain ID 2700
-//! - [`mainnet`] — Orbinum Mainnet stub, chain ID 270 (not yet launched)
+//! - `dev`: single validator (Alice), optional manual seal (`--dev`).
+//! - `local`: three validators (Alice, Bob, Charlie) on one machine (`--chain local`).
+//! - `testnet`: the public Orbinum Testnet, EVM chain ID 2700.
+//! - `mainnet`: Orbinum Mainnet, EVM chain ID 270; refused until the runtime configures it.
+//!
+//! Genesis state comes from the runtime's presets (`template/runtime/src/genesis`); the
+//! dev and local specs patch in their validators.
 
 mod dev;
 mod local;
 mod mainnet;
 mod testnet;
+#[cfg(test)]
+mod tests;
 
 pub use dev::development_config;
 pub use local::local_testnet_config;
 pub use mainnet::orbinum_mainnet_config;
 pub use testnet::orbinum_testnet_config;
 
-use sc_chain_spec::Properties;
-pub(crate) use sp_consensus_aura::sr25519::AuthorityId as AuraId;
-pub(crate) use sp_consensus_grandpa::AuthorityId as GrandpaId;
-#[allow(unused_imports)]
-pub use sp_core::ecdsa;
+use sc_chain_spec::{ChainSpecBuilder, ChainType, Properties};
+use sp_consensus_aura::sr25519::AuthorityId as AuraId;
+use sp_consensus_grandpa::AuthorityId as GrandpaId;
 use sp_core::{Pair, Public};
-use sp_runtime::traits::{IdentifyAccount, Verify};
 
-use orbinum_runtime::{AccountId, SS58Prefix, Signature};
+use orbinum_runtime::{
+	opaque::SessionKeys, staking::params::TEST_MIN_VALIDATOR_BOND, AccountId, SS58Prefix,
+};
 
 pub type ChainSpec = sc_service::GenericChainSpec;
 
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
-/// Derives a public key from a well-known dev seed (e.g. `"Alice"`, `"Bob"`).
-pub fn get_from_seed<TPublic: Public>(seed: &str) -> <TPublic::Pair as Pair>::Public {
-	TPublic::Pair::from_string(&format!("//{seed}"), None)
-		.expect("static values are valid; qed")
-		.public()
+/// The runtime every spec starts from.
+fn wasm_binary() -> Result<&'static [u8], String> {
+	orbinum_runtime::WASM_BINARY.ok_or_else(|| {
+		"the runtime WASM is not built into this binary (built with SKIP_WASM_BUILD?)".into()
+	})
 }
 
-#[allow(dead_code)]
-type AccountPublic = <Signature as Verify>::Signer;
-
-/// Derives a Substrate `AccountId` from a well-known dev seed.
-#[allow(dead_code)]
-pub fn get_account_id_from_seed<TPublic: Public>(seed: &str) -> AccountId
-where
-	AccountPublic: From<<TPublic::Pair as Pair>::Public>,
-{
-	AccountPublic::from(get_from_seed::<TPublic>(seed)).into_account()
+/// A builder with the runtime, name, id, chain type and the properties every spec shares.
+fn base_builder(name: &str, id: &str, chain_type: ChainType) -> Result<ChainSpecBuilder, String> {
+	Ok(ChainSpec::builder(wasm_binary()?, Default::default())
+		.with_name(name)
+		.with_id(id)
+		.with_chain_type(chain_type)
+		.with_properties(properties()))
 }
 
-/// Derives an `(AuraId, GrandpaId)` pair from a well-known dev seed.
-pub fn authority_keys_from_seed(s: &str) -> (AuraId, GrandpaId) {
-	(get_from_seed::<AuraId>(s), get_from_seed::<GrandpaId>(s))
-}
-
-/// Constructs an `orbinum_runtime::opaque::SessionKeys` value from an Aura and GRANDPA key.
-///
-/// Used in chain-spec genesis patches to populate `session.keys`.
-pub(crate) fn session_keys(
-	aura: AuraId,
-	grandpa: GrandpaId,
-) -> orbinum_runtime::opaque::SessionKeys {
-	orbinum_runtime::opaque::SessionKeys { aura, grandpa }
-}
-
-/// Derives a validator's `AccountId` from their Aura (sr25519) public key.
-///
-/// The validator's on-chain identity IS their sr25519 key — the same 32 bytes
-/// serve as both `AccountId32` and `AuraId`.
-pub(crate) fn aura_to_account(aura: &AuraId) -> orbinum_runtime::AccountId {
-	let raw: [u8; 32] = <[u8; 32]>::try_from(aura.as_ref()).expect("AuraId is 32 bytes");
-	orbinum_runtime::AccountId::from(raw)
-}
-
-/// Common `Properties` shared by all Orbinum chain configurations.
-pub(crate) fn properties() -> Properties {
+/// Token symbol, decimals and SS58 prefix.
+fn properties() -> Properties {
 	let mut properties = Properties::new();
 	properties.insert("tokenSymbol".into(), "ORB".into());
 	properties.insert("tokenDecimals".into(), 18.into());
 	properties.insert("ss58Format".into(), SS58Prefix::get().into());
 	properties
+}
+
+/// Genesis patch that makes the validators of `seeds` (well-known dev keys) era 0's
+/// authorities: session keys, the validator-set allowlist, and staking at the test
+/// networks' minimum bond. Aura and GRANDPA authorities are left empty: pallet-session
+/// fills them.
+fn validators_patch(seeds: &[&str]) -> serde_json::Value {
+	let validators: Vec<(AccountId, SessionKeys)> = seeds
+		.iter()
+		.map(|seed| {
+			let aura = from_seed::<AuraId>(seed);
+			let grandpa = from_seed::<GrandpaId>(seed);
+			(aura_to_account(&aura), SessionKeys { aura, grandpa })
+		})
+		.collect();
+	let accounts: Vec<&AccountId> = validators.iter().map(|(account, _)| account).collect();
+	let keys: Vec<_> = validators
+		.iter()
+		.map(|(account, keys)| (account, account, keys))
+		.collect();
+	let stakers: Vec<_> = accounts
+		.iter()
+		.map(|account| serde_json::json!([account, TEST_MIN_VALIDATOR_BOND, "Validator"]))
+		.collect();
+
+	serde_json::json!({
+		"aura": { "authorities": [] },
+		"grandpa": { "authorities": [] },
+		"session": { "keys": keys },
+		"validatorSet": { "initialValidators": accounts },
+		"staking": {
+			"validatorCount": validators.len() as u32,
+			"stakers": stakers,
+		},
+	})
+}
+
+/// The public key of a well-known dev seed (e.g. `"Alice"`).
+fn from_seed<TPublic: Public>(seed: &str) -> <TPublic::Pair as Pair>::Public {
+	TPublic::Pair::from_string(&format!("//{seed}"), None)
+		.expect("static seed is valid")
+		.public()
+}
+
+/// A validator's account is its Aura (sr25519) key: the same 32 bytes.
+fn aura_to_account(aura: &AuraId) -> AccountId {
+	let raw = <[u8; 32]>::try_from(aura.as_ref()).expect("AuraId is 32 bytes");
+	AccountId::from(raw)
 }
