@@ -175,6 +175,9 @@ jobs:
             exit 1
           fi
 
+      - name: Refuse a WASM whose spec name is not `orbinum`
+        run: bash scripts/verify-spec-name.sh orbinum "$WASM"
+
       # From inside dist/, so `sha256sum -c` works wherever the files are downloaded.
       - name: Compute checksums
         run: |

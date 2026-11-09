@@ -135,7 +135,7 @@ const [,, wasmFile, rpcWs, sudoSeed] = process.argv;
     // tell the two apart.
     console.error(
       `[fatal] spec_version did not rise (${currentVersion} -> ${newVersion}). The runtime ` +
-      `was NOT upgraded: either spec_version was not bumped in template/runtime/src/lib.rs, ` +
+      `was NOT upgraded: either spec_version was not bumped in template/runtime/src/primitives/version.rs, ` +
       `or the WASM deployed is the one already on-chain.`,
     );
     await api2.disconnect();

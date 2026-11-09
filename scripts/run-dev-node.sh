@@ -10,6 +10,10 @@
 #   ./scripts/run-dev-node.sh --manual     # Enable manual seal (for testing)
 #   ./scripts/run-dev-node.sh --persist    # Use persistent storage
 #
+# LOCAL DEVELOPMENT ONLY. The node listens on every interface with
+# `--rpc-methods unsafe --rpc-cors all`: anyone who can reach port 9944 can
+# manage keys, the transaction pool, peers and, with --manual, seal blocks. Never
+# run this on a host reachable from an untrusted network.
 # =============================================================================
 
 set -euo pipefail

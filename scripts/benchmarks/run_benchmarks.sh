@@ -8,6 +8,7 @@
 #   ./scripts/benchmarks/run_benchmarks.sh                                  # every pallet
 #   ./scripts/benchmarks/run_benchmarks.sh --pallet pallet_ismp_messaging   # just one
 #   ./scripts/benchmarks/run_benchmarks.sh --group ismp                     # the ISMP set
+#   ./scripts/benchmarks/run_benchmarks.sh --group staking                  # staking, voter list, election, pools
 #   ./scripts/benchmarks/run_benchmarks.sh --steps 20 --repeat 5            # quicker, less precise
 #
 # Run this on the reference hardware: a Hetzner CPX62 (16 vCPU / 32 GB), which is where
@@ -76,12 +77,15 @@ echo "------------------------------------------------------"
 # kept out of release builds (an integrity_test panics if it reaches a live chain).
 FEATURES="runtime-benchmarks,skip-proof-verification,poseidon-native"
 NODE="./target/release/orbinum-node"
+# The runtime the node build compiled, with the same features; benchmarks build their
+# genesis from its `benchmark` preset (no minimum bonds, room for pools).
+RUNTIME_WASM="./target/release/wbuild/orbinum-runtime/orbinum_runtime.compact.compressed.wasm"
 TEMPLATE="./scripts/benchmarks/frame-weight-template.hbs"
 RUNTIME_WEIGHTS_DIR="./template/runtime/src/weights"
 SCRATCH_DIR="./target/benchmark-weights"
 
 # Every pallet registered in the runtime's `define_benchmarks!`, paired with where its
-# generated weights belong. Keep this list in sync with `template/runtime/src/lib.rs`:
+# generated weights belong. Keep this list in sync with `template/runtime/src/benchmarks/mod.rs`:
 # a pallet named here but absent there fails with "pallet not found", and one added
 # there but missing here silently never gets benchmarked.
 #
@@ -97,6 +101,16 @@ PALLETS=(
     # $RUNTIME_WEIGHTS_DIR is rewritten by `adopt_upstream_trait` to implement it.
     "pallet_ismp_messaging:./frame/ismp-messaging/src/weights.rs:ismp"
     "ismp_grandpa:./template/runtime/src/weights/ismp_grandpa.rs:ismp"
+    # Staking. Upstream traits too: the runtime uses each pallet's `SubstrateWeight`
+    # (Parity's reference machine) until a generated file is declared in
+    # `template/runtime/src/weights/mod.rs` and `configs/staking/staking.rs` points at it.
+    "pallet_staking_async:./template/runtime/src/weights/pallet_staking_async.rs:staking"
+    "pallet_bags_list:./template/runtime/src/weights/pallet_bags_list.rs:staking"
+    "pallet_nomination_pools:./template/runtime/src/weights/pallet_nomination_pools.rs:staking"
+    # Ours. The election prices every step with these; auto-payout only its
+    # governance calls, its hooks price pages with pallet_staking_async's weights.
+    "pallet_paged_election:./frame/paged-election/src/benchmarking/weights.rs:staking"
+    "pallet_auto_payout:./frame/auto-payout/src/benchmarking/weights.rs:staking"
     # Runtime pallets with no versioned weights destination in this repo.
     "pallet_balances:$SCRATCH_DIR/pallet-balances-weights.rs:aux"
     "pallet_timestamp:$SCRATCH_DIR/pallet-timestamp-weights.rs:aux"
@@ -170,7 +184,9 @@ run_bench() {
     # `if` itself, so a SIGKILLed run reads back as 0 and gets reported as a success.
     local rc=0
     "$NODE" benchmark pallet \
-        --chain dev \
+        --runtime "$RUNTIME_WASM" \
+        --genesis-builder=runtime \
+        --genesis-builder-preset=benchmark \
         --pallet "$pallet" \
         --extrinsic '*' \
         --steps "$STEPS" \
@@ -236,8 +252,8 @@ echo ""
 echo "[1/3] Building node with features: ${FEATURES}"
 cargo build --release --features "${FEATURES}"
 
-if [[ ! -f "$NODE" ]]; then
-    echo "Error: node binary not found at $NODE" >&2
+if [[ ! -f "$NODE" || ! -f "$RUNTIME_WASM" ]]; then
+    echo "Error: node binary or runtime WASM not found ($NODE, $RUNTIME_WASM)" >&2
     exit 1
 fi
 
@@ -269,6 +285,6 @@ if [[ ${#failed[@]} -gt 0 ]]; then
 fi
 
 echo "[3/3] All ${#selected[@]} benchmark(s) completed successfully"
-echo "Saved committed weights in frame/*/src/weights.rs and template/runtime/src/weights/"
+echo "Saved committed weights in frame/*/src/{,benchmarking/}weights.rs and template/runtime/src/weights/"
 echo "Saved auxiliary weights in $SCRATCH_DIR"
 echo "------------------------------------------------------"
