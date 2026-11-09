@@ -86,3 +86,9 @@ miner. Implements `ElectionProvider` for `pallet-staking-async`.
   arithmetic (`phragmen`), the `ElectionProvider` interface (`provider`), and
   the step loop and cost model in `mod.rs`; `benchmarking/` the benchmarks and
   `weights.rs`; `tests/` the mock runtime and the tests.
+
+### Weights
+
+- Measured on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-09),
+  replacing the provisional weights; the voter snapshot and page export are the
+  heaviest steps.

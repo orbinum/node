@@ -191,30 +191,33 @@ fn a_block_prunes_within_its_share() {
 	assert_eq!(share, EraPruningBlockShare::get() * max);
 	assert!(budget.all_lte(share), "{budget:?} over {share:?}");
 
-	// Room for one step: one step a block, never over it.
-	with_marked_eras(|| {
-		let mut n = System::block_number();
-		let mut blocks = 0;
-		while EraPruningState::<Runtime>::iter().next().is_some() {
-			n = next_light_block(n);
-			let used = EraPruning::on_idle(n, budget);
-			assert!(used.all_lte(budget), "block {n}: {used:?} over {budget:?}");
-			blocks += 1;
-			assert!(blocks < 100, "pruning never finishes");
-		}
-		// Each era takes several steps.
-		assert!(blocks >= 2 * 9, "{blocks} blocks");
-		assert!(!has_data(1) && !has_data(2));
-	});
+	// Blocks until both eras are pruned, each given `limit` and never over `cap`.
+	let prune_all = |limit: Weight, cap: Weight| {
+		with_marked_eras(|| {
+			let mut n = System::block_number();
+			let mut blocks = 0;
+			while EraPruningState::<Runtime>::iter().next().is_some() {
+				n = next_light_block(n);
+				let used = EraPruning::on_idle(n, limit);
+				assert!(used.all_lte(cap), "block {n}: {used:?} over {cap:?}");
+				blocks += 1;
+				assert!(blocks < 100, "pruning never finishes");
+			}
+			assert!(!has_data(1) && !has_data(2));
+			blocks
+		})
+	};
 
-	// A whole block: as many steps as fit the share.
-	with_marked_eras(|| {
-		let n = next_light_block(System::block_number());
-		let used = EraPruning::on_idle(n, max);
-		assert!(used.all_lte(share), "{used:?} over {share:?}");
-		assert!(EraPruningState::<Runtime>::iter().next().is_none());
-		assert!(!has_data(1) && !has_data(2));
-	});
+	// Room for one step: one step a block. Each era takes several steps.
+	let one_step = prune_all(budget, budget);
+	assert!(one_step >= 2 * 9, "{one_step} blocks");
+
+	// A whole block: as many steps as fit the share, never over it, so never slower.
+	let whole = prune_all(max, share);
+	assert!(
+		whole <= one_step,
+		"{whole} blocks with a whole block, {one_step} with one step"
+	);
 }
 
 fn failures(era: u32) -> usize {

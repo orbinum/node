@@ -48,7 +48,7 @@ parameter_types! {
 impl pallet_bags_list::Config<pallet_bags_list::Instance1> for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type ScoreProvider = Staking;
-	type WeightInfo = pallet_bags_list::weights::SubstrateWeight<Runtime>;
+	type WeightInfo = crate::weights::pallet_bags_list::SubstrateWeight<Runtime>;
 	type BagThresholds = BagThresholds;
 	/// Staked rewards change scores without touching the bond; re-bag a few
 	/// accounts per block so the snapshot's order stays close to stake.

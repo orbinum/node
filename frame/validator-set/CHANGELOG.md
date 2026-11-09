@@ -46,8 +46,7 @@ storage version 1. Ships with runtime spec 21.
   ends the candidacy of an account the runtime no longer admits
   (`Config::Candidacy`, as the runtime defines it: no keys, too little self-bond,
   not approved), through `OnValidatorRemoved`, so it stops holding a candidate
-  slot; `CandidacyEnded` event, `CandidacyAdmissible` error otherwise. Weight
-  estimated until the next benchmark run.
+  slot; `CandidacyEnded` event, `CandidacyAdmissible` error otherwise.
 - **`Pallet::admission()`**: the rules at the current block (mode, allowlist,
   bans, session keys), read once per election; `Contains` for one-off checks.
   It is the one answer to whether an account may validate.
@@ -85,8 +84,9 @@ storage version 1. Ships with runtime spec 21.
 
 ### Weights
 
-- `set_admission_mode`, `ban_validator` and `unban_validator` carry estimated
-  weights until the next benchmark run; `add_validator` counts its extra read.
+- Every call regenerated on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-09),
+  with the allowlist at its 256-entry cap: `remove_validator` and
+  `set_min_author_version` cost several times their 32-entry figures.
 
 ---
 

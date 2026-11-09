@@ -25,7 +25,7 @@ parameter_types! {
 
 impl pallet_nomination_pools::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = pallet_nomination_pools::weights::SubstrateWeight<Runtime>;
+	type WeightInfo = crate::weights::pallet_nomination_pools::SubstrateWeight<Runtime>;
 	type Currency = Balances;
 	type RuntimeFreezeReason = RuntimeFreezeReason;
 	type RewardCounter = FixedU128;

@@ -96,3 +96,8 @@ claim them. Ships with runtime spec 21.
   too for a validator without an exposure); `NotStash`, `NotController` and
   `InvalidPage` are validator-level; `AlreadyClaimed` is `AlreadyPaid`; anything
   else is page-level.
+
+### Weights
+
+- Governance calls measured on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-09);
+  pages are priced with staking's measured weights.

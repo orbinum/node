@@ -388,12 +388,16 @@ indexer 0.34.0 (see Clients).
 
 #### Weights and benchmarks
 
-- **Weights.** Upstream `SubstrateWeight` for the upstream pallets (pools,
-  timestamp and session included; GRANDPA keeps the pallet's default weights),
-  provisional weights for `pallet-paged-election` and estimated weights for the
-  new validator-set calls until the next benchmark run. The staking glue's
-  hand-counted weights (candidacy, admission, recovery, the clients' adapters)
-  are marked for the same run.
+- **Weights.** Measured on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-09) for
+  staking-async, bags list and nomination pools (runtime-local files in
+  `weights/`), `pallet-paged-election`, `pallet-auto-payout`,
+  `pallet-validator-set`, `pallet-zk-verifier`, `pallet-shielded-pool` and
+  `ismp-grandpa`. `pallet-ismp-messaging` keeps its hand-corrected weights
+  (polkadot-sdk#13066 corrupts a proof size on every regeneration). Timestamp and
+  session use upstream's `SubstrateWeight`; GRANDPA keeps the pallet's default
+  weights. Pruning now fits one or two steps in its 1 % block share (a step
+  writes up to 100 items). The staking glue's hand-counted weights (candidacy,
+  admission, recovery, the clients' adapters) stay hand-counted.
 - **Benchmark preset.** Upstream's staking and pool benchmarks run on a
   `benchmark` genesis preset (no minimum staking bonds, pool bonds of 10^-6 ORB
   to create and 10^-9 ORB to join, up to 16 pools, no commission ceiling, one

@@ -12,6 +12,7 @@ All notable changes to this pallet are documented here.
 
 ### Changed
 
+- **Weights regenerated** on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-09).
 - **`Config::AdminOrigin`** checks every key-management call
   (`register_verification_key`, `set_active_version`,
   `remove_verification_key`, `batch_register_verification_keys`,

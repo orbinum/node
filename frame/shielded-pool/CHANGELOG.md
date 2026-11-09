@@ -11,6 +11,7 @@ needs `pallet-zk-verifier` 0.20.0.
 
 ### Changed
 
+- **Weights regenerated** on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-09).
 - **The solvency `try_state` tolerates donations**: it checks the pool
   account's free balance covers the tracked native ledger, not that they are
   equal. Anyone can send the pool account funds, which made the check fail for

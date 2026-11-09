@@ -92,5 +92,5 @@ impl pallet_staking_async::Config for Runtime {
 	/// A pool member cannot also bond directly: one way of staking per account.
 	/// Validating is gated by admission.
 	type Filter = pallet_nomination_pools::AllPoolMembers<Runtime>;
-	type WeightInfo = pallet_staking_async::weights::SubstrateWeight<Runtime>;
+	type WeightInfo = crate::weights::pallet_staking_async::SubstrateWeight<Runtime>;
 }
