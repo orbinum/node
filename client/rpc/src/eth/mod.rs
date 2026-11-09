@@ -36,7 +36,10 @@ use std::{
 
 use ethereum::{BlockV3 as EthereumBlock, TransactionV3 as EthereumTransaction};
 use ethereum_types::{H160, H256, H64, U256, U64};
-use jsonrpsee::core::{async_trait, RpcResult};
+use jsonrpsee::{
+	core::{async_trait, RpcResult},
+	Extensions,
+};
 // Substrate
 use sc_client_api::backend::{Backend, StorageProvider};
 use sc_network_sync::SyncingService;
@@ -712,7 +715,8 @@ where
 		self.transaction_count(address, number_or_hash).await
 	}
 
-	async fn pending_transactions(&self) -> RpcResult<Vec<Transaction>> {
+	async fn pending_transactions(&self, ext: &Extensions) -> RpcResult<Vec<Transaction>> {
+		crate::check_if_safe(ext)?;
 		self.pending_transactions().await
 	}
 

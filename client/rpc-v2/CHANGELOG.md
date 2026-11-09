@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [2.0.2-dev] - 2026-11-08
+
+### Fixed
+
+- The privacy proof gate queues at most 16 requests (was 128). Each waiting
+  request holds a thread of the RPC's blocking pool, which has as many threads as
+  `--rpc-max-connections` (100 by default), not 512: a stream of sealed-tree
+  proofs could take all of it and stall `state_call` and the storage reads.
+
 ## [2.0.1-dev] - 2026-10-18
 
 ### Fixed

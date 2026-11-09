@@ -196,10 +196,12 @@ pub trait PrivacyApi {
 
 /// Merkle proofs a request may wait behind before it is refused as busy.
 ///
-/// Each waiting request holds a thread of the RPC's blocking pool (512 by
-/// default), so this stays well below it. Full, the queue drains in a fraction
-/// of a second; more than this at once is abuse, not load.
-const MAX_QUEUED_PROOFS: usize = 128;
+/// Each waiting request holds a thread of the RPC's blocking pool, which has as
+/// many threads as `--rpc-max-connections` (100 by default) and also serves
+/// `state_call` and the storage reads. Proofs running and waiting must leave
+/// most of it free. Full, the queue drains in a fraction of a second; more than
+/// this at once is abuse, not load.
+const MAX_QUEUED_PROOFS: usize = 16;
 
 /// The longest a request waits for a slot. A full queue drains far sooner, so
 /// running out of time means the node itself is saturated.
@@ -657,6 +659,14 @@ mod tests {
 			] {
 				assert_eq!(proof_slots(cores), slots, "{cores} cores");
 			}
+		}
+
+		#[test]
+		fn proofs_leave_most_of_the_default_blocking_pool_free() {
+			// `--rpc-max-connections`' default, the size of the blocking pool.
+			const DEFAULT_BLOCKING_THREADS: usize = 100;
+			let held = proof_slots(64) + MAX_QUEUED_PROOFS;
+			assert!(held <= DEFAULT_BLOCKING_THREADS / 2, "{held}");
 		}
 
 		#[test]

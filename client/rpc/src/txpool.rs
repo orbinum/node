@@ -20,7 +20,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use ethereum::TransactionV3 as EthereumTransaction;
 use ethereum_types::{H160, H256, U256};
-use jsonrpsee::core::RpcResult;
+use jsonrpsee::{core::RpcResult, Extensions};
 use serde::Serialize;
 // substrate
 use sc_transaction_pool_api::{InPoolTransaction, TransactionPool};
@@ -35,7 +35,7 @@ use fc_rpc_core::{
 };
 use fp_rpc::EthereumRuntimeRPCApi;
 
-use crate::{internal_err, public_key};
+use crate::{check_if_safe, internal_err, public_key};
 
 struct TxPoolTransactions {
 	ready: Vec<EthereumTransaction>,
@@ -151,11 +151,13 @@ where
 	C: HeaderBackend<B> + 'static,
 	P: TransactionPool<Block = B, Hash = B::Hash> + 'static,
 {
-	fn content(&self) -> RpcResult<TxPoolResult<TransactionMap<Transaction>>> {
+	fn content(&self, ext: &Extensions) -> RpcResult<TxPoolResult<TransactionMap<Transaction>>> {
+		check_if_safe(ext)?;
 		self.map_build::<Transaction>()
 	}
 
-	fn inspect(&self) -> RpcResult<TxPoolResult<TransactionMap<Summary>>> {
+	fn inspect(&self, ext: &Extensions) -> RpcResult<TxPoolResult<TransactionMap<Summary>>> {
+		check_if_safe(ext)?;
 		self.map_build::<Summary>()
 	}
 
