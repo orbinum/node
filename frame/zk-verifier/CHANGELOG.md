@@ -6,6 +6,21 @@ All notable changes to this pallet are documented here.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-08
+
+**Breaking** — `Config` gains `AdminOrigin`. Ships with runtime spec 21.
+
+### Changed
+
+- **`Config::AdminOrigin`** checks every key-management call
+  (`register_verification_key`, `set_active_version`,
+  `remove_verification_key`, `batch_register_verification_keys`,
+  `retire_version`, `unretire_version`, `deny_version`, `purge_circuit`),
+  which checked root in code. Set it to `EnsureRoot` to keep the old
+  behaviour; the runtime names it `CircuitAdmin`, so moving key management to
+  another origin is changing that alias. Benchmarks use the origin's
+  `try_successful_origin`.
+
 ## [0.19.1] - 2026-10-25
 
 ### Changed

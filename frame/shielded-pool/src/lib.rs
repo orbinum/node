@@ -214,6 +214,9 @@ pub mod pallet {
 		#[pallet::constant]
 		type SealedTreePrunedBelowLevel: Get<u8>;
 
+		/// Manages the asset registry: registers, verifies and unverifies assets.
+		type AdminOrigin: EnsureOrigin<Self::RuntimeOrigin>;
+
 		/// Weight information for extrinsics in this pallet
 		type WeightInfo: WeightInfo;
 	}
@@ -526,10 +529,13 @@ pub mod pallet {
 			);
 		}
 
-		/// Ledger-solvency invariant: the tracked native-asset pool balance must
-		/// equal the pool account's physical free balance. Fees stay physical in
-		/// the pool until `claim_fees` pays them out, so both move together, and
-		/// the pending fees never exceed the ledger that backs them.
+		/// Ledger-solvency invariant: the pool account's physical free balance
+		/// covers the tracked native-asset pool balance. Fees stay physical in the
+		/// pool until `claim_fees` pays them out, so both move together, and the
+		/// pending fees never exceed the ledger that backs them. Anyone can send
+		/// the pool account funds (a transfer, an EVM value transfer), so the
+		/// physical balance may exceed the ledger; that surplus is a donation no
+		/// note can spend.
 		/// Only the native asset (0) is backed by `Currency`; other assets live in
 		/// external backends — TODO: extend when a per-asset balance reader exists.
 		#[cfg(feature = "try-runtime")]
@@ -538,9 +544,9 @@ pub mod pallet {
 			let physical = T::Currency::free_balance(&pool);
 			let tracked = PoolBalancePerAsset::<T>::get(0u32);
 			frame_support::ensure!(
-				tracked == physical,
+				tracked <= physical,
 				sp_runtime::TryRuntimeError::Other(
-					"shielded-pool native ledger drifted from physical pool balance"
+					"shielded-pool native ledger exceeds the physical pool balance"
 				)
 			);
 			let pending = PendingFees::<T>::iter()
@@ -980,7 +986,7 @@ pub mod pallet {
 		/// * `contract_address` - Optional ERC20 contract address for bridged tokens
 		///
 		/// # Errors
-		/// * `BadOrigin` - Caller is not root
+		/// * `BadOrigin` - Caller is not `AdminOrigin`
 		///
 		/// # Events
 		/// * `AssetRegistered` - Asset was successfully registered
@@ -993,7 +999,7 @@ pub mod pallet {
 			decimals: u8,
 			contract_address: Option<[u8; 20]>,
 		) -> DispatchResult {
-			ensure_root(origin)?;
+			T::AdminOrigin::ensure_origin(origin)?;
 
 			let _asset_id = crate::operations::assets::AssetOperation::register::<T>(
 				name,
@@ -1015,7 +1021,7 @@ pub mod pallet {
 		/// * `asset_id` - The asset to verify
 		///
 		/// # Errors
-		/// * `BadOrigin` - Caller is not root
+		/// * `BadOrigin` - Caller is not `AdminOrigin`
 		/// * `InvalidAssetId` - Asset does not exist
 		///
 		/// # Events
@@ -1023,7 +1029,7 @@ pub mod pallet {
 		#[pallet::call_index(10)]
 		#[pallet::weight(T::WeightInfo::verify_asset())]
 		pub fn verify_asset(origin: OriginFor<T>, asset_id: u32) -> DispatchResult {
-			ensure_root(origin)?;
+			T::AdminOrigin::ensure_origin(origin)?;
 
 			crate::operations::assets::AssetOperation::verify::<T>(asset_id)
 		}
@@ -1041,7 +1047,7 @@ pub mod pallet {
 		/// * `asset_id` - The asset to unverify
 		///
 		/// # Errors
-		/// * `BadOrigin` - Caller is not root
+		/// * `BadOrigin` - Caller is not `AdminOrigin`
 		/// * `InvalidAssetId` - Asset does not exist
 		///
 		/// # Events
@@ -1049,7 +1055,7 @@ pub mod pallet {
 		#[pallet::call_index(11)]
 		#[pallet::weight(T::WeightInfo::unverify_asset())]
 		pub fn unverify_asset(origin: OriginFor<T>, asset_id: u32) -> DispatchResult {
-			ensure_root(origin)?;
+			T::AdminOrigin::ensure_origin(origin)?;
 
 			crate::operations::assets::AssetOperation::unverify::<T>(asset_id)
 		}

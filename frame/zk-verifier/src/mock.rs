@@ -31,6 +31,7 @@ parameter_types! {
 impl pallet_zk_verifier::Config for Test {
 	type MaxProofSize = MaxProofSize;
 	type MaxPublicInputs = MaxPublicInputs;
+	type AdminOrigin = frame_system::EnsureRoot<u64>;
 	type WeightInfo = crate::weights::SubstrateWeight<Test>;
 }
 

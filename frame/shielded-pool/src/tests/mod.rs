@@ -4,12 +4,15 @@
 //! - [`unshield`] — `UnshieldOperation`: validation, settlement, fee crediting
 //! - [`private_transfer`] — `PrivateTransferOperation`: the same for transfers
 //! - [`fees`] — fee crediting to the block author and `claim_fees`
+//! - `solvency` — the ledger-solvency `try_state` (try-runtime only)
 //!
 //! Lower-level modules (merkle, storage, validate_unsigned, …) keep their tests
 //! next to their code and use the fixtures below too.
 
 mod fees;
 mod private_transfer;
+#[cfg(feature = "try-runtime")]
+mod solvency;
 mod unshield;
 
 use crate::{

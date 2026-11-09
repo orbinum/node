@@ -182,6 +182,7 @@ impl pallet_shielded_pool::Config for Test {
 	type MaxHistoricRoots = MaxHistoricRoots;
 	type RootRetentionBlocks = RootRetentionBlocks;
 	type SealedTreePrunedBelowLevel = SealedTreePrunedBelowLevel;
+	type AdminOrigin = frame_system::EnsureRoot<AccountId32>;
 	type MaxLeavesPerTree = MaxLeavesPerTree;
 	type WeightInfo = ();
 	type BlockAuthor = BlockAuthor;

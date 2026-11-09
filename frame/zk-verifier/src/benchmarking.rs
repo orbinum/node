@@ -22,6 +22,12 @@ extern crate alloc;
 #[cfg(not(feature = "std"))]
 use alloc::vec;
 
+/// The origin the runtime's `AdminOrigin` accepts.
+fn admin<T: Config>() -> T::RuntimeOrigin {
+	<T::AdminOrigin as frame_support::traits::EnsureOrigin<T::RuntimeOrigin>>::try_successful_origin()
+		.expect("AdminOrigin has a successful origin to benchmark with")
+}
+
 #[benchmarks]
 mod benchmarks {
 	use super::*;
@@ -127,8 +133,9 @@ mod benchmarks {
 			.try_into()
 			.expect("benchmark vk bytes must fit bounded verification key size");
 
+		let origin = admin::<T>();
 		#[extrinsic_call]
-		_(RawOrigin::Root, circuit_id, version, bounded_vk);
+		_(origin as T::RuntimeOrigin, circuit_id, version, bounded_vk);
 
 		assert!(VerificationKeys::<T>::contains_key(circuit_id, version));
 	}
@@ -143,8 +150,9 @@ mod benchmarks {
 		insert_sample_vk::<T>(circuit_id, new_version);
 		ActiveCircuitVersion::<T>::insert(circuit_id, current_version);
 
+		let origin = admin::<T>();
 		#[extrinsic_call]
-		_(RawOrigin::Root, circuit_id, new_version);
+		_(origin as T::RuntimeOrigin, circuit_id, new_version);
 
 		assert_eq!(
 			ActiveCircuitVersion::<T>::get(circuit_id),
@@ -162,8 +170,9 @@ mod benchmarks {
 		insert_sample_vk::<T>(circuit_id, remove_version);
 		ActiveCircuitVersion::<T>::insert(circuit_id, active_version);
 
+		let origin = admin::<T>();
 		#[extrinsic_call]
-		_(RawOrigin::Root, circuit_id, remove_version);
+		_(origin as T::RuntimeOrigin, circuit_id, remove_version);
 
 		assert!(!VerificationKeys::<T>::contains_key(
 			circuit_id,
@@ -185,8 +194,9 @@ mod benchmarks {
 		insert_sample_vk::<T>(circuit_id, target);
 		ActiveCircuitVersion::<T>::insert(circuit_id, active);
 
+		let origin = admin::<T>();
 		#[extrinsic_call]
-		_(RawOrigin::Root, circuit_id, target);
+		_(origin as T::RuntimeOrigin, circuit_id, target);
 
 		assert!(RetiredVersions::<T>::contains_key(circuit_id, target));
 	}
@@ -202,8 +212,9 @@ mod benchmarks {
 		ActiveCircuitVersion::<T>::insert(circuit_id, active_version);
 		RetiredVersions::<T>::insert(circuit_id, retired, ());
 
+		let origin = admin::<T>();
 		#[extrinsic_call]
-		_(RawOrigin::Root, circuit_id, retired);
+		_(origin as T::RuntimeOrigin, circuit_id, retired);
 
 		assert!(!RetiredVersions::<T>::contains_key(circuit_id, retired));
 	}
@@ -218,8 +229,9 @@ mod benchmarks {
 		insert_sample_vk::<T>(circuit_id, target);
 		ActiveCircuitVersion::<T>::insert(circuit_id, active);
 
+		let origin = admin::<T>();
 		#[extrinsic_call]
-		_(RawOrigin::Root, circuit_id, target);
+		_(origin as T::RuntimeOrigin, circuit_id, target);
 
 		assert!(RetiredVersions::<T>::contains_key(circuit_id, target));
 	}
@@ -248,8 +260,9 @@ mod benchmarks {
 		}
 		ActiveCircuitVersion::<T>::insert(circuit_id, 1u32);
 
+		let origin = admin::<T>();
 		#[extrinsic_call]
-		_(RawOrigin::Root, circuit_id);
+		_(origin as T::RuntimeOrigin, circuit_id);
 
 		assert!(
 			VerificationKeys::<T>::iter_key_prefix(circuit_id)
@@ -296,8 +309,9 @@ mod benchmarks {
 			frame_support::traits::ConstU32<10>,
 		> = entries.try_into().expect("n <= 10, fits the bounded vec");
 
+		let origin = admin::<T>();
 		#[extrinsic_call]
-		_(RawOrigin::Root, bounded_entries);
+		_(origin as T::RuntimeOrigin, bounded_entries);
 
 		for i in 0..n {
 			assert!(

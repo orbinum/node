@@ -17,6 +17,12 @@ extern crate alloc;
 #[cfg(not(feature = "std"))]
 use alloc::vec;
 
+/// The origin the runtime's `AdminOrigin` accepts.
+fn admin<T: Config>() -> T::RuntimeOrigin {
+	<T::AdminOrigin as frame_support::traits::EnsureOrigin<T::RuntimeOrigin>>::try_successful_origin()
+		.expect("AdminOrigin has a successful origin to benchmark with")
+}
+
 #[benchmarks(
 	where
 		T: pallet_zk_verifier::Config,
@@ -233,8 +239,9 @@ mod benchmarks {
 	fn register_asset() {
 		let name: BoundedVec<u8, ConstU32<64>> = vec![1u8; 32].try_into().unwrap();
 		let symbol: BoundedVec<u8, ConstU32<16>> = vec![1u8; 4].try_into().unwrap();
+		let origin = admin::<T>();
 		#[extrinsic_call]
-		register_asset(RawOrigin::Root, name, symbol, 18, None);
+		register_asset(origin as T::RuntimeOrigin, name, symbol, 18, None);
 	}
 
 	#[benchmark]
@@ -245,8 +252,9 @@ mod benchmarks {
 			crate::operations::assets::AssetOperation::register::<T>(name, symbol, 18, None)
 				.unwrap();
 
+		let origin = admin::<T>();
 		#[extrinsic_call]
-		verify_asset(RawOrigin::Root, asset_id);
+		verify_asset(origin as T::RuntimeOrigin, asset_id);
 	}
 
 	#[benchmark]
@@ -258,8 +266,9 @@ mod benchmarks {
 				.unwrap();
 		let _ = crate::operations::assets::AssetOperation::verify::<T>(asset_id);
 
+		let origin = admin::<T>();
 		#[extrinsic_call]
-		unverify_asset(RawOrigin::Root, asset_id);
+		unverify_asset(origin as T::RuntimeOrigin, asset_id);
 	}
 
 	/// Worst case: the validator's account does not exist yet, so the payout
