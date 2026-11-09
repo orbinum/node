@@ -9,6 +9,87 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.5.0] — 2026-11-08
+
+The pallet decides who may validate, so the runtime's staking election can pick
+the active set among admitted candidates. **Breaking** — `Config` gains
+`OpenModeGuard`, `ActiveValidators`, `QueuedValidators` and `Candidacy` (and
+`BenchmarkHelper` under `runtime-benchmarks`); `ValidatorSetInterface` is removed;
+storage version 1. Ships with runtime spec 21.
+
+### Security
+
+- **The author version is credited to the block's real author.** The author is
+  resolved in `on_initialize` (`BlockAuthor`, cleared each block), before a
+  session rotation in the same block replaces the authorities its slot is read
+  against; resolved later, a rotation block credited (or, undeclared, erased)
+  another validator's version.
+- **A minimum author version needs 2/3 of the queued set too**
+  (`Config::QueuedValidators`), so a set about to rotate in is not left
+  without authors.
+
+### Added
+
+- **Admission mode** (`Mode` storage, `set_admission_mode`, call index 8):
+  `Permissioned` admits only `ApprovedValidators`; `Open` ignores the allowlist.
+  Opening is refused unless `Config::OpenModeGuard` allows it, so the runtime
+  can require its safeguards (a minimum self-bond) first.
+- **Bans** (`Bans` storage, `ban_validator` / `unban_validator`, call indices
+  9 and 10): a banned account is not admitted in either mode until the ban ends
+  (`BanTerm::Until(block)` or `BanTerm::Permanent`). `Pallet::ban_offender(who, term)`
+  lets the runtime ban for a reported offence, for any term, without ever
+  shortening a ban in force; a term already over with no ban in force changes
+  nothing. A ban notifies
+  `OnValidatorRemoved`, so the account stops validating at once, and drops its
+  declared node version, so it no longer counts toward a version quorum.
+- **`chill_inadmissible(validator)`** (call index 11, any signed account):
+  ends the candidacy of an account the runtime no longer admits
+  (`Config::Candidacy`, as the runtime defines it: no keys, too little self-bond,
+  not approved), through `OnValidatorRemoved`, so it stops holding a candidate
+  slot; `CandidacyEnded` event, `CandidacyAdmissible` error otherwise. Weight
+  estimated until the next benchmark run.
+- **`Pallet::admission()`**: the rules at the current block (mode, allowlist,
+  bans, session keys), read once per election; `Contains` for one-off checks.
+  It is the one answer to whether an account may validate.
+- **`try_state`**: the allowlist never holds an account twice, and no block's
+  version declaration flag outlives its block.
+- **`Config::BenchmarkHelper`** (`runtime-benchmarks` only): sets the session's
+  validators, so `set_min_author_version` measures a full quorum without
+  depending on the genesis the benchmark runs on.
+
+### Changed
+
+- **`add_validator` refuses banned accounts** (`Error::Banned`).
+- **Genesis refuses an account listed twice** in `initial_validators`:
+  `remove_validator` drops one entry, so a duplicate would stay approved.
+- **The author-version quorum counts the session's validators**
+  (`Config::ActiveValidators`), not the allowlist: under staking an approved
+  account that was not elected cannot author, so it could never declare.
+- `OnValidatorRemoved` is documented as firing on removal **and** on ban.
+- **No longer a `SessionManager`**: staking elects the active set among the
+  accounts `admission()` admits. The `pallet-session` dependency is gone.
+- **Layout by responsibility.** `types/` holds the admission vocabulary
+  (`AdmissionMode`, `BanTerm`, `Inadmissible`) and re-exports `NodeVersion`;
+  `admission/` reads the rules (`mod.rs`) and keeps the write paths apart:
+  `allowlist.rs` (add, remove) and `bans.rs` (ban, offence ban, lift); the calls
+  in `lib.rs` only check the origin and delegate; `invariants.rs` holds
+  `try_state`. Every type is re-exported at the crate root. Tests by concern:
+  `tests/allowlist.rs`, `tests/admission.rs`, `tests/author_version.rs`.
+
+### Removed
+
+- **`ValidatorSetInterface`** (no consumer). `is_active_validator` answered from
+  the allowlist, which is not whether an account may validate: wrong in `Open`
+  mode, and true for a banned account or one without session keys.
+- The deprecated `approved_validators()` getter; read `ApprovedValidators`.
+
+### Weights
+
+- `set_admission_mode`, `ban_validator` and `unban_validator` carry estimated
+  weights until the next benchmark run; `add_validator` counts its extra read.
+
+---
+
 ## [0.4.2] — 2026-10-25
 
 Weights only; ships with runtime spec 20.

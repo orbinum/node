@@ -1,37 +1,10 @@
-//! Public traits exposed by pallet-validator-set.
+//! What the runtime plugs into the pallet: the session-key check, the open-mode
+//! safeguard, the removal hook, the candidacy check and the benchmarks' setup. Tests supply
+//! lightweight mocks in `mock.rs`.
 //!
-//! Other pallets depend on these traits, never on concrete storage. Tests supply
-//! lightweight mock implementations in their own `mock.rs`.
-
-/// Read access to the approved validator set.
-///
-/// Production impl: `pallet_validator_set::Pallet<T>`. For a pallet that gates an
-/// action on membership of the active set.
-pub trait ValidatorSetInterface<AccountId> {
-	/// Returns `true` when `who` is in the approved (active) validator set.
-	fn is_active_validator(who: &AccountId) -> bool;
-
-	/// Put `who` in the approved set so a dependent pallet's benchmarks can pass
-	/// a membership gate.
-	///
-	/// Implementors must repeat this `cfg` attribute verbatim, or the trait will
-	/// fail to compile only when the `runtime-benchmarks` feature is enabled.
-	#[cfg(feature = "runtime-benchmarks")]
-	fn setup_validator(who: &AccountId);
-}
-
-/// Denies everything.
-///
-/// Deliberate: a permissive default would silently disable any gate built on
-/// this trait in a runtime that forgot to wire a real implementation.
-impl<AccountId> ValidatorSetInterface<AccountId> for () {
-	fn is_active_validator(_who: &AccountId) -> bool {
-		false
-	}
-
-	#[cfg(feature = "runtime-benchmarks")]
-	fn setup_validator(_who: &AccountId) {}
-}
+//! Whether an account may validate is not a trait here: read
+//! [`Pallet::admission`](crate::Pallet::admission), the one answer that covers
+//! the mode, the allowlist, bans and session keys.
 
 /// Prerequisite checks injected into [`crate::pallet::Config`].
 ///
@@ -44,16 +17,43 @@ pub trait ValidatorPrerequisites<AccountId> {
 
 	/// Register session keys for `who` so `add_validator` benchmarks pass the gate.
 	///
-	/// Implementors must repeat this `cfg` attribute verbatim — see
-	/// [`ValidatorSetInterface::setup_validator`].
+	/// Implementors must repeat this `cfg` attribute verbatim, or the trait will
+	/// fail to compile only when the `runtime-benchmarks` feature is enabled.
 	#[cfg(feature = "runtime-benchmarks")]
 	fn setup_session_keys(who: &AccountId);
 }
 
-/// Notified when an account leaves the approved validator set.
+/// Whether the validator set may switch to [`AdmissionMode::Open`](crate::AdmissionMode).
 ///
-/// Lets the runtime clean up state that is only valid while the account is an
-/// active validator.
+/// The runtime ties it to safeguards this pallet does not know about, such as a
+/// minimum self-bond high enough to make sybil candidates expensive.
+pub trait OpenModeGuard {
+	fn can_open() -> bool;
+
+	/// Put the runtime's safeguards in place so `set_admission_mode` benchmarks
+	/// can open.
+	///
+	/// Implementors must repeat this `cfg` attribute verbatim — see
+	/// [`ValidatorPrerequisites::setup_session_keys`].
+	#[cfg(feature = "runtime-benchmarks")]
+	fn setup_can_open();
+}
+
+/// Never opens: a runtime that wired no safeguard keeps the set permissioned.
+impl OpenModeGuard for () {
+	fn can_open() -> bool {
+		false
+	}
+
+	#[cfg(feature = "runtime-benchmarks")]
+	fn setup_can_open() {}
+}
+
+/// Notified when an account loses the right to validate: it leaves the approved
+/// set or is banned.
+///
+/// Lets the runtime stop the account validating and clean up state that is only
+/// valid while it may (e.g. chill its staking candidacy).
 ///
 /// Deliberately infallible: leaving the set must always succeed, so a failure to
 /// clean up dependent state can never block removal. A no-op is the safe default
@@ -69,7 +69,7 @@ pub trait OnValidatorRemoved<AccountId> {
 	/// hook short-circuits, and the recorded weight misses the cleanup writes.
 	///
 	/// Implementors must repeat this `cfg` attribute verbatim — see
-	/// [`ValidatorSetInterface::setup_validator`].
+	/// [`ValidatorPrerequisites::setup_session_keys`].
 	#[cfg(feature = "runtime-benchmarks")]
 	fn setup_removal_state(who: &AccountId);
 }
@@ -89,4 +89,30 @@ impl<AccountId> OnValidatorRemoved<AccountId> for Tuple {
 	fn setup_removal_state(who: &AccountId) {
 		for_tuples!( #( Tuple::setup_removal_state(who); )* );
 	}
+}
+
+/// Whether a staking candidate has lost its admission, as the runtime judges
+/// it. [`Pallet::chill_inadmissible`](crate::Pallet::chill_inadmissible) lets
+/// anyone end such a candidacy, which otherwise holds a candidate slot that
+/// only governance could free.
+pub trait Candidacy<AccountId> {
+	/// `who` offers itself as a validator and the runtime would no longer admit
+	/// it.
+	fn is_inadmissible_candidate(who: &AccountId) -> bool;
+}
+
+/// No candidates: a runtime without staking has nothing to chill.
+impl<AccountId> Candidacy<AccountId> for () {
+	fn is_inadmissible_candidate(_: &AccountId) -> bool {
+		false
+	}
+}
+
+/// Benchmark setup the pallet cannot do through its own storage.
+#[cfg(feature = "runtime-benchmarks")]
+pub trait BenchmarkHelper<AccountId> {
+	/// Make `validators` what [`crate::Config::ActiveValidators`] and
+	/// [`crate::Config::QueuedValidators`] return, so `set_min_author_version`
+	/// measures a full quorum.
+	fn set_active_validators(validators: alloc::vec::Vec<AccountId>);
 }

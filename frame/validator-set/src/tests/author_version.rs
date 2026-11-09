@@ -12,12 +12,18 @@ use frame_support::{
 
 const V: fn(u16, u16, u16) -> NodeVersion = NodeVersion::new;
 
+/// `who` authors the current block: its digest names it when the block starts.
+fn start_block(who: AccountId) {
+	set_block_author(Some(who));
+	ValidatorSet::on_initialize(System::block_number());
+}
+
 /// `who` authors the current block declaring `version`, as its node's inherent would.
 fn author_declares(
 	who: AccountId,
 	version: NodeVersion,
 ) -> frame_support::dispatch::DispatchResult {
-	set_block_author(Some(who));
+	start_block(who);
 	ValidatorSet::note_author_version(RuntimeOrigin::none(), version)
 }
 
@@ -77,7 +83,7 @@ fn an_author_that_stops_declaring_no_longer_counts() {
 		.execute_with(|| {
 			all_declare(&[10, 20, 30], V(0, 4, 0));
 			// 30 rolls back to a binary that declares nothing.
-			set_block_author(Some(30));
+			start_block(30);
 			finalize();
 			next_block();
 			assert_eq!(LastAuthorVersion::<Test>::get(30), None);
@@ -101,7 +107,7 @@ fn is_declared_at_most_once_per_block() {
 	ExtBuilder::default().build().execute_with(|| {
 		assert_ok!(author_declares(1, V(0, 4, 0)));
 		assert_noop!(
-			author_declares(1, V(0, 4, 0)),
+			ValidatorSet::note_author_version(RuntimeOrigin::none(), V(0, 4, 0)),
 			Error::<Test>::AuthorVersionAlreadyNoted
 		);
 		finalize();
@@ -114,9 +120,10 @@ fn is_declared_at_most_once_per_block() {
 fn a_version_below_the_minimum_is_refused_equal_or_newer_accepted() {
 	ExtBuilder::default().build().execute_with(|| {
 		MinAuthorVersion::<Test>::put(V(0, 4, 0));
+		start_block(1);
 		for older in [V(0, 3, 9), V(0, 3, 0), V(0, 0, 9)] {
 			assert_noop!(
-				author_declares(1, older),
+				ValidatorSet::note_author_version(RuntimeOrigin::none(), older),
 				Error::<Test>::AuthorVersionTooOld
 			);
 		}
@@ -299,4 +306,70 @@ fn a_version_below_the_minimum_yields_no_inherent() {
 		assert!(inherent_for(V(0, 4, 0)).is_some());
 		assert!(inherent_for(V(1, 0, 0)).is_some());
 	});
+}
+
+// ── Session rotation ─────────────────────────────────────────────────────
+
+/// A rotation in the block's own hooks replaces the authorities its slot is
+/// read against: resolved then, the slot would name a validator of the new set.
+/// The declaration is the author's, kept from before the rotation.
+#[test]
+fn a_rotation_block_credits_its_real_author() {
+	ExtBuilder::default()
+		.validators(vec![1, 2, 3])
+		.build()
+		.execute_with(|| {
+			start_block(2);
+			// Session rotates after this pallet: new set, same slot, another account.
+			set_active_validators(Some(vec![4, 5]));
+			set_block_author(Some(5));
+			assert_ok!(ValidatorSet::note_author_version(
+				RuntimeOrigin::none(),
+				V(0, 4, 0)
+			));
+			finalize();
+			assert_eq!(LastAuthorVersion::<Test>::get(2), Some((V(0, 4, 0), 1)));
+			assert_eq!(LastAuthorVersion::<Test>::get(5), None);
+			assert!(crate::BlockAuthor::<Test>::get().is_none());
+		});
+}
+
+/// An undeclared rotation block drops its own author's entry, not that of the
+/// new set's validator its slot would name.
+#[test]
+fn an_undeclared_rotation_block_forgets_only_its_author() {
+	ExtBuilder::default()
+		.validators(vec![1, 2, 3, 4, 5])
+		.build()
+		.execute_with(|| {
+			all_declare(&[2, 5], V(0, 4, 0));
+			start_block(2);
+			set_active_validators(Some(vec![4, 5]));
+			set_block_author(Some(5));
+			finalize();
+			assert_eq!(LastAuthorVersion::<Test>::get(2), None);
+			assert!(LastAuthorVersion::<Test>::get(5).is_some());
+		});
+}
+
+/// A minimum needs 2/3 of the set queued for the next session too: one that
+/// never declared would rotate in unable to author.
+#[test]
+fn a_minimum_needs_the_queued_set_too() {
+	ExtBuilder::default()
+		.validators(vec![1, 2, 3])
+		.build()
+		.execute_with(|| {
+			all_declare(&[1, 2, 3], V(0, 4, 0));
+			set_queued_validators(Some(vec![4, 5, 6]));
+			assert_noop!(
+				ValidatorSet::set_min_author_version(RuntimeOrigin::root(), Some(V(0, 4, 0))),
+				Error::<Test>::VersionQuorumNotMet
+			);
+			set_queued_validators(Some(vec![1, 2, 6]));
+			assert_ok!(ValidatorSet::set_min_author_version(
+				RuntimeOrigin::root(),
+				Some(V(0, 4, 0))
+			));
+		});
 }

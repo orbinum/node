@@ -45,6 +45,10 @@ pub trait WeightInfo {
 	fn remove_validator() -> Weight;
 	fn set_min_author_version() -> Weight;
 	fn note_author_version() -> Weight;
+	fn set_admission_mode() -> Weight;
+	fn ban_validator() -> Weight;
+	fn unban_validator() -> Weight;
+	fn chill_inadmissible() -> Weight;
 }
 
 /// Weights for pallet_validator_set using the Substrate node and recommended hardware.
@@ -68,7 +72,7 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		//  Estimated: `4860`
 		// Minimum execution time: 19_780_000 picoseconds.
 		Weight::from_parts(22_109_000, 4860)
-			.saturating_add(T::DbWeight::get().reads(6_u64))
+			.saturating_add(T::DbWeight::get().reads(7_u64))
 			.saturating_add(T::DbWeight::get().writes(3_u64))
 	}
 	/// Storage: `ValidatorSet::ApprovedValidators` (r:1 w:1)
@@ -111,8 +115,10 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		//  Measured:  `3183`
 		//  Estimated: `83373`
 		// Minimum execution time: 138_980_000 picoseconds.
+		// Measured over the active set only; the queued set's reads (its keys and
+		// one entry per validator) are added by hand until the next run.
 		Weight::from_parts(146_660_000, 83373)
-			.saturating_add(T::DbWeight::get().reads(37_u64))
+			.saturating_add(T::DbWeight::get().reads(70_u64))
 			.saturating_add(T::DbWeight::get().writes(3_u64))
 	}
 	/// Storage: `ValidatorSet::AuthorVersionNoted` (r:1 w:1)
@@ -129,6 +135,33 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		Weight::from_parts(8_200_000, 1590)
 			.saturating_add(T::DbWeight::get().reads(3_u64))
 			.saturating_add(T::DbWeight::get().writes(1_u64))
+	}
+	// Estimated, not measured: `set_admission_mode`, `ban_validator` and
+	// `unban_validator` are new in 0.5.0. `ban_validator` budgets for the runtime's
+	// `OnValidatorRemoved` (a staking chill). Regenerate this file with
+	// `scripts/benchmarks/run_benchmarks.sh` before release.
+	fn set_admission_mode() -> Weight {
+		Weight::from_parts(15_000_000, 1600)
+			.saturating_add(T::DbWeight::get().reads(4_u64))
+			.saturating_add(T::DbWeight::get().writes(3_u64))
+	}
+	fn ban_validator() -> Weight {
+		Weight::from_parts(80_000_000, 12_000)
+			.saturating_add(T::DbWeight::get().reads(14_u64))
+			.saturating_add(T::DbWeight::get().writes(10_u64))
+	}
+	fn unban_validator() -> Weight {
+		Weight::from_parts(15_000_000, 2600)
+			.saturating_add(T::DbWeight::get().reads(4_u64))
+			.saturating_add(T::DbWeight::get().writes(3_u64))
+	}
+	// Estimated, not measured (new in 0.5.0): the runtime's candidacy check (the
+	// candidacy, the admission snapshot, ban, keys, ledger, minimum bond and
+	// ceiling) plus the chill `ban_validator` budgets for.
+	fn chill_inadmissible() -> Weight {
+		Weight::from_parts(90_000_000, 14_000)
+			.saturating_add(T::DbWeight::get().reads(22_u64))
+			.saturating_add(T::DbWeight::get().writes(9_u64))
 	}
 }
 
@@ -152,7 +185,7 @@ impl WeightInfo for () {
 		//  Estimated: `4860`
 		// Minimum execution time: 19_780_000 picoseconds.
 		Weight::from_parts(22_109_000, 4860)
-			.saturating_add(RocksDbWeight::get().reads(6_u64))
+			.saturating_add(RocksDbWeight::get().reads(7_u64))
 			.saturating_add(RocksDbWeight::get().writes(3_u64))
 	}
 	/// Storage: `ValidatorSet::ApprovedValidators` (r:1 w:1)
@@ -196,7 +229,7 @@ impl WeightInfo for () {
 		//  Estimated: `83373`
 		// Minimum execution time: 138_980_000 picoseconds.
 		Weight::from_parts(146_660_000, 83373)
-			.saturating_add(RocksDbWeight::get().reads(37_u64))
+			.saturating_add(RocksDbWeight::get().reads(70_u64))
 			.saturating_add(RocksDbWeight::get().writes(3_u64))
 	}
 	/// Storage: `ValidatorSet::AuthorVersionNoted` (r:1 w:1)
@@ -213,5 +246,29 @@ impl WeightInfo for () {
 		Weight::from_parts(8_200_000, 1590)
 			.saturating_add(RocksDbWeight::get().reads(3_u64))
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
+	}
+	// Estimated, not measured: `set_admission_mode`, `ban_validator` and
+	// `unban_validator` are new in 0.5.0. `ban_validator` budgets for the runtime's
+	// `OnValidatorRemoved` (a staking chill). Regenerate this file with
+	// `scripts/benchmarks/run_benchmarks.sh` before release.
+	fn set_admission_mode() -> Weight {
+		Weight::from_parts(15_000_000, 1600)
+			.saturating_add(RocksDbWeight::get().reads(4_u64))
+			.saturating_add(RocksDbWeight::get().writes(3_u64))
+	}
+	fn ban_validator() -> Weight {
+		Weight::from_parts(80_000_000, 12_000)
+			.saturating_add(RocksDbWeight::get().reads(14_u64))
+			.saturating_add(RocksDbWeight::get().writes(10_u64))
+	}
+	fn unban_validator() -> Weight {
+		Weight::from_parts(15_000_000, 2600)
+			.saturating_add(RocksDbWeight::get().reads(4_u64))
+			.saturating_add(RocksDbWeight::get().writes(3_u64))
+	}
+	fn chill_inadmissible() -> Weight {
+		Weight::from_parts(90_000_000, 14_000)
+			.saturating_add(RocksDbWeight::get().reads(22_u64))
+			.saturating_add(RocksDbWeight::get().writes(9_u64))
 	}
 }
