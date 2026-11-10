@@ -246,3 +246,21 @@ fn purged_circuit_disappears_from_runtime_api() {
 		assert!(ids.contains(&CircuitId::TRANSFER.0));
 	});
 }
+
+/// A purged version keeps its hash, as after `remove_verification_key`.
+#[test]
+fn purge_circuit_records_the_removed_hashes() {
+	new_test_ext().execute_with(|| {
+		let retired = CircuitId(5);
+		assert_ok!(register(retired, 1, real_vk(2)));
+		let hash = VkHashes::<Test>::get(retired, 1).expect("registration stores the hash");
+
+		assert_ok!(ZkVerifier::purge_circuit(root().into(), retired));
+
+		assert_eq!(crate::RemovedVkHashes::<Test>::get(retired, 1), Some(hash));
+		assert_noop!(
+			register(retired, 1, denied_vk_of(2)),
+			Error::<Test>::VersionReused
+		);
+	});
+}

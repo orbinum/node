@@ -135,9 +135,10 @@ fn a_purged_circuit_registered_again_gets_the_new_keys_prepared_form() {
 		activate(retired, 1);
 		assert_ok!(ZkVerifier::purge_circuit(root().into(), retired));
 		assert_eq!(entries_of(retired), 0);
-		assert_ok!(register(retired, 1, real_vk(5)));
+		// A new key needs a new version: the purged one keeps its hash.
+		assert_ok!(register(retired, 2, real_vk(5)));
 		assert_eq!(
-			PreparedKeys::<Test>::get(retired, 1),
+			PreparedKeys::<Test>::get(retired, 2),
 			Some(ZkVerifier::prepare_vk(&real_vk(5)).unwrap())
 		);
 	});

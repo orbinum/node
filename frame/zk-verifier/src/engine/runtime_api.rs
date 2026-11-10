@@ -5,7 +5,7 @@
 
 use crate::{
 	CircuitVersionInfo, VkVersionHash,
-	pallet::{ActiveCircuitVersion, Config, RetiredVersions, VerificationKeys, VkHashes},
+	pallet::{ActiveCircuitVersion, Config, VerificationKeys, VkHashes},
 	types::CircuitId,
 };
 
@@ -14,9 +14,11 @@ impl<T: Config> crate::Pallet<T> {
 	pub fn runtime_api_get_circuit_version_info(circuit_id: u32) -> Option<CircuitVersionInfo> {
 		let cid = CircuitId(circuit_id);
 
-		let mut supported: alloc::vec::Vec<u32> = VerificationKeys::<T>::iter_prefix(cid)
-			.map(|(v, _)| v)
-			.filter(|v| !RetiredVersions::<T>::contains_key(cid, v))
+		// What pool admission accepts; keys only, none decoded.
+		let mut supported: alloc::vec::Vec<u32> = VerificationKeys::<T>::iter_key_prefix(cid)
+			.filter(|v| {
+				<crate::Pallet<T> as crate::ZkVerifierPort>::is_supported_version(circuit_id, *v)
+			})
 			.collect();
 		if supported.is_empty() {
 			return None;

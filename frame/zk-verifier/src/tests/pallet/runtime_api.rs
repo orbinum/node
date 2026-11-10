@@ -101,3 +101,25 @@ fn runtime_api_all_circuit_versions_excludes_circuits_with_no_active_version() {
 		assert_eq!(all[0].circuit_id, CircuitId::UNSHIELD.0);
 	});
 }
+
+/// A version whose key is denied is not offered: pool admission would refuse it.
+#[test]
+fn runtime_api_circuit_version_info_omits_denied_keys() {
+	new_test_ext().execute_with(|| {
+		let denied = denied_vk_of(TRANSFER_PUBLIC_INPUTS);
+		insert_key(CircuitId::TRANSFER, 1, denied.clone());
+		crate::VkHashes::<Test>::insert(
+			CircuitId::TRANSFER,
+			1,
+			sp_io::hashing::blake2_256(&denied),
+		);
+		insert_vk(CircuitId::TRANSFER, 2, TRANSFER_PUBLIC_INPUTS);
+		activate(CircuitId::TRANSFER, 2);
+		crate::DeniedVkHashes::<Test>::insert(sp_io::hashing::blake2_256(&denied), ());
+
+		let info = Pallet::<Test>::runtime_api_get_circuit_version_info(CircuitId::TRANSFER.0)
+			.expect("version 2 is usable");
+		assert_eq!(info.supported_versions, vec![2u32]);
+		assert_eq!(info.vk_hashes.len(), 1);
+	});
+}

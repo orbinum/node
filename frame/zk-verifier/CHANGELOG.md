@@ -10,6 +10,21 @@ All notable changes to this pallet are documented here.
 
 **Breaking** — `Config` gains `AdminOrigin`. Ships with runtime spec 21.
 
+### Security
+
+- **`deny_version` refuses a key that an active version holds**, under any
+  version or circuit: the same key can be stored twice, and denying the copy
+  left the active version verifying nothing until a new key was activated.
+- **`purge_circuit` records each purged key's hash in `RemovedVkHashes`**, so a
+  purged version can hold only its own key again, as after
+  `remove_verification_key`.
+- **The runtime API lists only versions pool admission accepts**: a version
+  whose key is denied (through any version holding it) is no longer offered,
+  and versions are read without decoding the keys.
+- **`skip-proof-verification` without `runtime-benchmarks` fails the build**
+  (`compile_error!`), replacing the `const` assertion in `integrity_test`, which
+  was evaluated only where that hook was instantiated.
+
 ### Changed
 
 - **Layout** follows `pallet-paged-election`: `lib.rs` holds the pallet macro,
