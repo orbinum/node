@@ -47,7 +47,7 @@ impl pallet_balances::Config for Test {
 	type AccountStore = System;
 	type Balance = Balance;
 
-	/// Zero, as on the real chain (`configs/system.rs:65`); the prelude's default is `1`.
+	/// Zero, as on the real chain (`configs/chain/system.rs`); the prelude's default is `1`.
 	/// Inheriting it made the mock disagree with the runtime about the property
 	/// `outbound::fee_for` cites — that a sender may spend their last planck — so that case
 	/// could not even be written.
@@ -160,6 +160,7 @@ impl pallet_ismp::Config for Test {
 
 impl pallet_ismp_messaging::Config for Test {
 	type DispatchOrigin = frame_system::EnsureSigned<AccountId>;
+	type AdminOrigin = frame_system::EnsureRoot<AccountId>;
 	type DefaultMessageFee = DefaultMessageFee;
 	type DefaultMessageByteFee = DefaultMessageByteFee;
 	type MaxMessageFee = MaxMessageFee;

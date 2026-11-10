@@ -2459,7 +2459,7 @@ fn a_signed_get_is_bounded_by_the_same_guards_as_root() {
 #[test]
 fn a_signer_may_spend_their_very_last_planck() {
 	new_test_ext().execute_with(|| {
-		// `ExistentialDeposit` is zero on this chain (`configs/system.rs:65`), which is what
+		// `ExistentialDeposit` is zero on this chain (`configs/chain/system.rs`), which is what
 		// `fee_for` cites to justify `Preservation::Expendable`: there is no minimum to keep
 		// back, so an account may legitimately pay its whole balance and be reaped.
 		//
@@ -2578,7 +2578,7 @@ fn declared_proof_sizes_stay_within_a_sane_ceiling() {
 	let keys_max = <<Test as crate::Config>::MaxGetKeys as Get<u32>>::get();
 
 	// BOTH impls. The generator writes the same numbers into `SubstrateWeight` and into `()`,
-	// and the runtime uses `SubstrateWeight` (`configs/ismp/mod.rs`) while this mock uses
+	// and the runtime uses `SubstrateWeight` (`configs/stacks/ismp/mod.rs`) while this mock uses
 	// `()`. Checking only the one the mock happens to use would leave the one production
 	// actually runs unguarded — and an earlier draft of this test did exactly that, which a
 	// mutation caught: injecting the exabyte value into `SubstrateWeight` left it green.

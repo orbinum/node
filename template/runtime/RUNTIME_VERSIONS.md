@@ -20,6 +20,444 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
+### spec 21 — tx 8 — 2026-11-08 (`v0.7.0`)
+
+Nominated proof of stake. Staking elects each era's validators by stake among
+the candidates `pallet-validator-set` admits; the election is computed on-chain,
+page by page, with no off-chain miner. GRANDPA equivocations are slashed.
+Nothing is burned: fees fund the era's rewards, tips pay the author, slashes go
+to governance. `transaction_version` moves: pallet indices are renumbered. The
+new extension encodes to nothing. Ships with `pallet-validator-set` 0.5.0,
+`pallet-auto-payout` 0.1.0, `pallet-paged-election` 0.1.0,
+`pallet-zk-verifier` 0.20.0, `pallet-shielded-pool` 0.26.0,
+`pallet-evm-precompile-shielded-pool` 0.10.1 and `pallet-ismp-messaging` 0.2.0.
+Clients ship with it: ts-protocol 0.15.0, wallet-sdk 0.20.0, app 0.6.0 and
+indexer 0.34.0 (see Clients).
+
+#### 1 · Pallets
+
+- **Indices renumbered**, contiguous 0–30 by domain. Existing pallets that
+  move: `Authorship` 15 → 14, `ValidatorSet` 17 → 15, `Session` 18 → 16. The
+  retired 14 and 16 are reused. ISMP keeps 19–21, since relayers cache indices
+  from metadata. Storage is keyed by pallet name, so no migration. A test pins
+  every index.
+- **New pallets.** `Historical` (17), `Offences` (18), `Staking` (22,
+  `pallet-staking-async` 0.14), `VoterList` (bags list, 23), `AhClient` (24,
+  `pallet-staking-async-ah-client`), `AutoPayout` (25, `pallet-auto-payout`),
+  `RcClient` (26, `pallet-staking-async-rc-client`), `PagedElection` (27,
+  `pallet-paged-election`), `NominationPools` (28, `pallet-nomination-pools`
+  47), `DelegatedStaking` (29, `pallet-delegated-staking` 15) and `EraPruning`
+  (30, runtime-local: no calls; `StalledPlan` and `FailedEras` storage and a
+  `PruningFailed` event).
+- **Hook order.** Pallets run genesis and hooks in index order: a new chain's
+  era 0 runs on the genesis keys, and in each block `Session` rotates before
+  `AhClient` reports the session to staking, `AutoPayout` sees the era that
+  report starts, and `RcClient` hands an elected set over.
+
+#### 2 · Staking stack
+
+- **Both sides in one runtime.** Upstream's asynchronous staking, built for a
+  staking chain that talks to a relay chain over XCM, runs both sides here: the
+  staking side (`Staking`, `RcClient`, `VoterList`, `PagedElection`) and the
+  session side (`Session`, `Historical`, `Offences`, `AhClient`, which is the
+  `SessionManager`, the authorship event handler and the offence handler).
+  Session keys are set with `session.setKeys`. Runtime API `StakingApi` (from
+  `pallet-staking-async-runtime-api`) keeps its name and methods.
+- **Era timing.** Staking plans each era `PlanningEraOffsetOf` sessions before
+  its end; the elected set is handed over `SessionsPerEra - 2` sessions into the
+  era, queued by ah-client and applied at the next session boundary; the
+  session report that activates it starts the era and times it for the era
+  payout. A set smaller than two thirds of `ValidatorCount` is dropped and the
+  current set stays.
+- **Clients' messages.** The clients' messages are direct calls
+  (`staking::eras::local_relay`), which register the weight of the staking work
+  they trigger. rc-client's `RelayChainOrigin` and ah-client's `AssetHubOrigin`
+  are `EnsureNone` and the adapters dispatch with origin `None`
+  (`EnsureLocalRelay`): no account and no unsigned extrinsic can send a session
+  report, offence or validator set (neither pallet validates unsigned
+  transactions). Every rc-client and ah-client call is filtered
+  (`BaseCallFilter`), so a block author cannot include them as bare extrinsics;
+  root, past the filter, keeps ah-client's admin calls and upstream's
+  `ensure_origin_or_root` (KL-19).
+- **Historical roots.** Delivering an elected set charges one write per
+  historical session root it prunes, read from the stored range, instead of a
+  fixed era's worth: an era held long (`ForceNone`, a frozen set) prunes many.
+  A set prunes at most 1 000 roots; the rest go with the next sets.
+- **Vote weight.** Stake becomes vote weight divided by a constant 10^9
+  (`staking::voting::vote::DecimalCurrencyToVote`) instead of upstream's
+  `issuance / u64::MAX`, so exposures equal the bonds behind them to 10^-9 ORB,
+  rounded down (upstream read a 1 000 ORB bond as 999.99999999995 ORB), and a
+  stake's weight never moves with the issuance. A single stake saturates above
+  ~18.4 B ORB. The voter list's 200 bags start at 10 ORB's weight (ratio ≈
+  1.1132).
+
+#### 3 · Validator admission
+
+- **Rule.** `pallet-validator-set` stops being the `SessionManager`
+  (`NoteHistoricalRoot<Runtime, AhClient>` is). A candidate needs a self-bond of
+  at least `MinValidatorBond` (never below 100 000 ORB while admission is
+  open), session keys, no ban and, while permissioned, the allowlist. The rule
+  is enforced when `staking.validate` is submitted (`CheckValidatorCandidacy`,
+  rejection codes 1–6), when an account is removed or banned (chill) and in
+  every election snapshot. Removing or banning an account ends its candidacy
+  only: a nominator keeps nominating.
+- **Candidate cap.** The extension refuses a new candidate once there are 256
+  (code 7, the election's `MaxTargets`), whatever `MaxValidatorsCount` says,
+  since staking cuts candidates past that in storage order; a snapshot over
+  more (only root's `sudo_as` gets there) logs an error.
+- **Commission.** No fixed ceiling: the only one is staking's on-chain
+  `MaxCommission` (100 %, none, at genesis and after `InitStaking`), set by
+  governance with `staking.setMaxCommission`. It is checked on the commission
+  `staking.validate` offers (code 5, by the extension and by staking itself)
+  and on the stored one in every election snapshot. When governance lowers it,
+  every candidate above it is clamped to it before staking reads the next
+  session report (`ValidatorPrefsSet` for each, weighed as a read per candidate
+  and a read and a write per clamped one), so the next era is elected and paid
+  at the clamped commission. The clamp and the snapshot filter read at most the
+  256 candidates the election reads, however many `Validators` holds.
+- **Inadmissible candidates.** Candidates the rule no longer admits (purged
+  keys, a self-bond below the minimum, not approved after a return to
+  `Permissioned`) keep their candidate slot until anyone ends them with
+  `validatorSet.chillInadmissible` (call index 11). A commission above a lowered
+  ceiling is not a reason: the next session report clamps it, where ending
+  those candidacies first could shrink the next set.
+- **Session keys in use.** A validator of the current or queued session cannot
+  change its session keys (`CheckValidatorCandidacy`, code 8
+  `SessionKeysInUse`), since equivocations are proven against them (KL-42).
+
+#### 4 · Election
+
+- **Voters.** Nominators and pools are uncapped at genesis and after
+  `InitStaking` (`MaxNominatorsCount`, `MaxPools`, `MaxPoolMembers*` unset):
+  the minimum bonds are the anti-spam, and governance may set or lift any of
+  these caps on-chain (`staking.setStakingConfigs`,
+  `nominationPools.setConfigs`). The 100 000 most staked voters (25 000 under
+  `fast-runtime`, whose 60-block era cannot fit a 32-page election) vote in
+  each era's election; the rest keep their bond but neither vote nor earn that
+  era.
+- **On-chain Phragmén.** `pallet-paged-election` computes sequential Phragmén
+  over a snapshot of up to 100 000 voters in 32 pages of 3 125 (8 pages under
+  `fast-runtime`): 47 blocks of computation plus 32 of export at full size
+  (15 + 8 under `fast-runtime`), a few steps per block in `on_poll` within 40 %
+  of the block, with the same result as `sp_npos_elections::seq_phragmen`;
+  staking then fetches it one page per block. No miners, deposits or offchain
+  workers.
+- **Abort.** Root can abort a stuck election (`pagedElection.abort`) while it
+  computes or before staking fetches a page; once staking fetches, `abort` is
+  refused (`AlreadyFetching`), so a partial set is never seated and staking
+  never waits for pages of a cleared election.
+- **Voter list.** Staking's voter list is the bags list wrapped in
+  `LiveVoters`: the snapshot's walk skips, up to a page per walk with its reads
+  charged, accounts that no longer vote (chilled or deregistered while the
+  snapshot locked the list), which staking would count against twice the page
+  and could empty the following pages with (KL-34). `staking.kick` is refused
+  for a nominator with one target or none (call filter `KickKeepsNominations`),
+  since it would leave a nomination without targets in the list for good
+  (KL-35).
+- **Failure.** An era plan that can no longer start (every page failed, or the
+  set was dropped as too small or undeliverable) is reset before staking reads
+  the next session report (`staking::eras::recovery`): the planned era's
+  partial data, staking's snapshot cursor, the voter list's lock and any page
+  staking still waits to fetch from an idle election are cleared, the event
+  `PagedElection.EraPlanReset` is emitted, and the same report plans the era
+  again with a new election. A dropped set can leave an era's exposures (some
+  25 000 pages): each report removes at most 1 000 items, `EraPruning` the
+  rest from `on_idle`, and the report after that resets the plan, so no block
+  carries the whole removal. The current validators keep their seats and the
+  active era runs on meanwhile. `staking.forceNoEras` holds the retries.
+
+#### 5 · Offences and slashing
+
+- **Reports.** GRANDPA equivocation reports (`KeyOwnerProof = MembershipProof`,
+  `GrandpaApi` key-ownership proofs). Reports go through `OncePerEra`, which
+  refuses one that can change no slash or ban, so a signed one pays its fee
+  instead of being stored for good for free: an offender already reported in
+  the era (recorded at once, so the report's own block is covered too) is heard
+  again only in a time slot other offenders share, or from the block's author
+  (a validator node's unsigned report), where the slot's correlated fraction
+  `(3k/n)²` may raise its slash; an offence staking will not slash (older than
+  `SlashDeferDuration - 1` eras, or without an exposure, as in era 0) is heard
+  once, for the ban, while the offender is not banned.
+- **Ban and disabling.** The offender is banned at once with no end
+  (`BanTerm::Permanent`: a term in blocks could end before the slash if eras
+  stall; governance lifts it with `validatorSet.unbanValidator` after review)
+  and disabled until the active set changes (within the disabling limit,
+  KL-40).
+- **Slash.** The offence goes through ah-client to staking, which slashes it
+  26 eras later (cancellable by root). The deferral is two eras below the
+  bonding duration: an era's exposures are stored in the era before it, so
+  stake unbonded then unlocks an era before stake unbonded in the offence's
+  era, and the slash must land before that (`SLASH_DEFER_DURATION + 2 <=
+  BONDING_DURATION`). An offender's slashes are capped together at 99 %
+  (`MAX_SLASH_FRACTION`, KL-44): staking slashes each era on its own exposure,
+  and a key holder can sign an equivocation for any round of any session still
+  provable, so `BanOffenders` records the fraction it hands staking per era it
+  accepts (`OrbinumOffences::Slashed`) and cuts each new one so the sum stays
+  within the cap. A stake slashed to nothing loses its ledger, which strands a
+  pool's members.
+- **Reporter reward.** The reporter, or the author of the block carrying an
+  unsigned report, gets 1 % of the slash (validator's and nominators'), so
+  reporting oneself pays only with nominators above ~99× the own stake.
+
+#### 6 · Rewards and era data
+
+- **Economy.** Substrate fees and the EVM base fee go to an era fee pool paid
+  out by era points; inflation follows the tokenomics schedule (60 M ORB in
+  year 1), capped at two days of issuance per era. Slashes go to `py/trsry`,
+  which `pallet-treasury` would adopt. Era 0 (at genesis, or opened by the
+  upgrade) has no exposures and pays nothing. The call filter refuses a
+  `staking.bond` paying the deprecated `Controller` destination
+  (`NoControllerPayee`), as `set_payee` does.
+- **Automatic payment.** `AutoPayout` pays every closed era's pages to each
+  staker's reward destination, with no claims. It spreads the work over half
+  an era: from the weight transactions leave unused (`on_idle`, ≤ 10 % of a
+  block), and from `on_initialize` only when an era falls behind (8 %, or 10 %
+  with more than one era waiting); neither on heavy blocks (session rotation,
+  and the election's blocks). Normal transactions keep their 75 %. Each page is
+  charged its estimate (staking's refund omits nominators it read and paid
+  nothing). `MaxExposurePageSize` is 64 (was 512), so each step costs ~35 ms.
+  Manual `payout_stakers` still works; root can pause automatic payment or
+  change its shares within hard caps.
+- **Refusals and expiry.** A refusal that holds for the rest of a validator's
+  pages, or for the whole era, skips them at once instead of paying for each
+  refused call (a validator without an exposure is skipped alone; only an era
+  out of staking's history or without a reward is dropped). Payouts go through
+  the runtime's call filter like a manual claim: a filtered call waits, nothing
+  is skipped. An unpaid era 14 eras from leaving the 84-era history is reported
+  each era (`ExpiryAtRisk`), and a pause is lifted so it is paid
+  (`ResumedToAvoidExpiry`); a pause within that margin is refused, and an era
+  past its window counts as behind. The history counts from staking's planned
+  era, as staking does, so the oldest era is dropped once the next one is
+  planned instead of costing a refused call.
+- **Old eras pruned automatically.** Staking marks an era for pruning when it
+  leaves the 84-era history; `EraPruning` removes its data from `on_idle` with
+  `prune_era_step` calls (≤ 100 storage items each, ~0.6 ms at worst with
+  staking's reference weights), as many as fit 1 % of the block and the weight
+  transactions leave, never on heavy blocks (session rotation, the election).
+  A full 100 000-voter era is some 260 steps. The calls go through the
+  runtime's call filter, as a manual call would (a filtered call prunes
+  nothing); an era whose step fails emits `EraPruning.PruningFailed` once and
+  is tried again once a session (`FailedEras`, at most 16 remembered) while the
+  other eras go on.
+
+#### 7 · Nomination pools
+
+- **Model.** Holders below `MinNominatorBond` stake through a pool
+  (`DelegateStake`: members' funds stay in their accounts, held as delegations;
+  the pool's bonded account is a virtual staker). Each pool is one nominator,
+  paid by `AutoPayout` into its reward account; members claim their share
+  (`claimPayout`), or anyone does for them (`claimPayoutOther`, the default
+  permission) or restakes it (`bondExtraOther`, with
+  `PermissionlessCompound`); nothing iterates members. Runtime API
+  `NominationPoolsApi`.
+- **Slashes.** A slash reduces the pool's bond when it applies; each member's
+  share comes out of its held funds when it withdraws or anyone calls
+  `applySlash` (all of it to governance; the caller earns nothing, since it may
+  be the member).
+- **Limits.** Join from 1 ORB, create from ten nominator bonds (100 ORB on test
+  networks, 1 000 ORB on mainnet), no cap on pools or members, no pool
+  commission ceiling (`GlobalMaxCommission` unset); root changes them
+  (`setConfigs`), and a lowered `GlobalMaxCommission` caps every pool's
+  commission from its next payout. `InitStaking` sets the same bonds on the
+  upgraded chain.
+- **One way to stake.** A pool member cannot `bond` and a direct staker cannot
+  `join` or `create` (`Restricted`, the `Filter` of both pallets).
+
+#### 8 · Signatures and signed text
+
+- **`SignedExtra`** gains `CheckValidatorCandidacy`, appended last and encoding
+  to nothing: extrinsics and signed payloads are unchanged.
+- **EVM wallets sign Substrate transactions.** New signature variant `EcdsaText`
+  (`0x05`): an EVM wallet's `personal_sign` (EIP-191) over the same text, for the
+  account its EVM address maps to (`[h160 ‖ 0x00×12]`, the EVM path's account).
+  MetaMask accounts can stake, nominate and validate. Encodings are unchanged.
+- **Raw `Ecdsa` (`0x02`) no longer verifies**, as raw `Ed25519` since spec 20: it
+  signed `blake2_256(payload)`, a raw 32-byte digest a wallet, MPC or KMS could be
+  handed without knowing it authorises a transaction. secp256k1 keys sign native
+  extrinsics only as `EcdsaText`. The variant stays (polkadot-api needs it in the
+  signature enum) and decodes, and fails with `BadProof`.
+- **Text signatures cover only calls they fully show.** `Ed25519Text`,
+  `Ed25519WrappedText` and `EcdsaText` verify only for calls whose text shows every
+  parameter that moves value or authority: balance transfers, ORB shields and fee
+  claims, the staking calls, the pool calls below (not metadata or role
+  changes), `session.setKeys` (its keys), and calls with nothing to
+  show (`staking.chill`, `withdrawUnbonded`, `session.purgeKeys`,
+  `validatorSet.deregisterValidator`, `system.remark`). Lists are capped at
+  `MaxNominations` accounts. Any other call, such as `evm.call` or `balances.burn`,
+  fails with `BadProof`: until now its text showed only its name, so a site could get
+  it signed under a harmless-looking text (spec 20's `Ed25519Text` included). A
+  test pins the set of text-signable calls, so a new renderer arm needs review.
+- **Staking and pool lines.** The text of the staking calls shows what they
+  do: the amount and reward destination of `bond`, the amount of `bond_extra`,
+  `unbond` and `rebond`, `set_payee`'s destination, every `nominate` target,
+  `validate`'s commission and block, and a payout's validator and era. The
+  pool calls members and operators sign: `join` (pool, amount), `bondExtra`
+  (amount or `rewards`), `bondExtraOther` and `claimPayoutOther` (member),
+  `unbond` (member, points), `withdrawUnbonded` (member), `create` (amount and
+  the three roles), `nominate` (pool and targets), `chill`,
+  `poolWithdrawUnbonded`, `setState` (pool, state), `setClaimPermission` and
+  `claimPayout`. The root's commission calls, each with every parameter:
+  `setCommission` (pool, `commission: {percent}` and `payee: 0x…`, the account
+  every later claim pays, or `commission: none`), `setCommissionMax` (pool,
+  `max commission`), `setCommissionChangeRate` (pool, `max increase`,
+  `min delay: {n} blocks`), `claimCommission` (pool) and
+  `setCommissionClaimPermission` (pool, `permission: permissionless`, the
+  account, or `root only`). The pool still enforces its rules on a text-signed
+  call: root only, under the pool's and the global max, a max that only goes
+  down, a change rate that only tightens and throttles increases.
+  `pallet-staking-async` keeps these calls' indices and argument encodings.
+- **Lines that tell calls apart.** Every text whose payload carries its
+  extension gains `expires: within {period} blocks` (a mortal era) or
+  `expires: never` (immortal), then `nonce: {n}` (`CheckNonce`), after the call's
+  lines and before `tip:`; the payload holds the era, not the block it was signed
+  against. A shield shows `commitment: 0x{first 8 bytes}…{last 8 bytes}` of the
+  commitment and `memo: 0x{8}…{8}` of `blake2_256(memo)` after `amount:` (lowercase
+  hex around U+2026; 128 bits, so no lookalike value can be searched for), to
+  compare with what the app shows (KL-18). `balances.transferAll` adds
+  `keep alive: yes|no`; `staking.payoutStakersByPage` adds `page: {n}`;
+  `system.remark` shows `length: {n} bytes` and `remark: 0x{8}…{8}` of
+  `blake2_256(remark)`. `EcdsaText`'s EIP-191 prefix carries the text's UTF-8 byte
+  length (`…` is 3 bytes).
+- **Accounts in the text.** An EVM account (`[address | 0x00×12]`) is written as
+  its 20-byte address (`0x` + 40 hex) wherever the text names an account
+  (recipient, rewards destination, member, pool roles, payee, validator); any
+  other account stays in full (`0x` + 64 hex), so one sharing an EVM address's
+  first 20 bytes never reads like it (vectors `transfer_to_evm_account`,
+  `transfer_to_evm_lookalike`).
+- **Vectors.** Every text changes. `signature/text/tests/fixtures/ed25519_text_vectors.json`
+  gains each vector's `era` and `nonce`, and `EcdsaText` vectors with a
+  multi-byte text; clients render from it (ts-protocol 0.15.0).
+
+#### 9 · EVM precompiles
+
+- BN128 add, mul and pairing (`0x06`–`0x08`, EIP-196/197) and Blake2F (`0x09`,
+  EIP-152) join ecrecover, sha256, ripemd160, identity and modexp
+  (`0x01`–`0x05`), from Frontier's crates. Outputs and errors are upstream's.
+  Like the other Ethereum precompiles they hold no code.
+- **Prices.** Ethereum's prices charged a third to a half of what these take in
+  the wasm runtime (dev-network measurement), so they carry a 1.5× margin until
+  the reference benchmark (KL-33): the pairing 180 000 gas + 175 000 per pair
+  (EIP-1108: 45 000 + 34 000), addition 600 (150), multiplication 30 000
+  (6 000), modexp four times EIP-7883 however much gas the caller forwards (a
+  cost the gas left cannot cover fails out of gas and takes all of it, as
+  upstream's EIP-7823 refusal does). Blake2F keeps EIP-152's price, within its
+  measured time.
+- The fork's KZG (`0x0a`) and BLS12-381 (`0x0b`–`0x11`) addresses fail instead
+  of succeeding on an empty account (KL-49).
+- `PrecompileCode` now names its version (`CURRENT_VERSION`), and a test pins it
+  to the set of addresses with code, so adding one forces a bump.
+- **Runtime API gas.** `EthereumRuntimeRPCApi::call` and `create` cap the gas
+  limit at the block gas limit. They run without the block and transaction
+  checks, and Substrate's `state_call` reaches them past the RPC's own cap, so
+  any caller could otherwise run up to `u64::MAX` gas on a node.
+
+#### 10 · Governance, genesis and author version
+
+- **Governance roles.** Every admin origin is a named role in
+  `configs/chain/governance.rs` (`StakingAdmin`, `AdmissionAdmin`, `PayoutAdmin`,
+  `CrossChainAdmin` for ISMP, its GRANDPA client and `ismpMessaging`'s sources,
+  fee and outbound pause, `CircuitAdmin` for `pallet-zk-verifier`'s keys,
+  `ShieldedAssetAdmin` for the shielded pool's asset registry), all root today
+  (KL-19).
+- **Genesis presets.** `mainnet` is neither listed nor built until it is
+  configured (`MAINNET_CONFIGURED`; today it has a zero sudo key and no
+  authorities); `preset_names` comes from the preset constants. The EVM
+  benchmark account `0x1000…0001` is only in the development presets. The
+  genesis builder takes each validator's account apart from its session keys;
+  the testnet preset keeps each account its Aura key, as the testnet started
+  (KL-37), and mainnet's must not. `GenesisBuilder::build_state` refuses a state
+  that already holds a genesis (block hash 0): `state_call` reaches it on a
+  live chain, where genesis-only code (`pallet_balances`' `devAccounts`, a loop
+  the caller sizes) would run with no bound.
+- **Author version.** `pallet-validator-set` resolves the block author in its
+  `on_initialize`, before `Session` can rotate in the same block, so a rotation
+  block's declaration is credited to the validator that authored it; a new
+  minimum also needs 2/3 of the set queued for the next session (KL-36).
+
+#### Migrations
+
+- **`InitStaking`** opens era 0 at the current session on a chain without
+  staking (`ActiveEra`, `CurrentEra`, `BondedEras`), sets ah-client `Active`
+  with the current set applied at that session, keeps the current validators
+  and holds eras (`ForceNone`) until governance forces the first election after
+  operators bond, and leaves both commission ceilings unset; it touches no
+  balance. It runs only on a chain whose validator set is still at storage
+  version 0 (spec 20); a new chain starts at version 1.
+- **`PrecompileCode`** runs once per chain (`OrbinumMigrations::Version`, 1 once
+  run).
+
+#### Weights and benchmarks
+
+- **Weights.** Measured on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-09) for
+  staking-async, bags list and nomination pools (runtime-local files in
+  `weights/`), `pallet-paged-election`, `pallet-auto-payout`,
+  `pallet-validator-set`, `pallet-zk-verifier`, `pallet-shielded-pool` and
+  `ismp-grandpa`. `pallet-ismp-messaging` keeps its hand-corrected weights
+  (polkadot-sdk#13066 corrupts a proof size on every regeneration). Timestamp and
+  session use upstream's `SubstrateWeight`; GRANDPA keeps the pallet's default
+  weights. Pruning now fits one or two steps in its 1 % block share (a step
+  writes up to 100 items). The staking glue's hand-counted weights (candidacy,
+  admission, recovery, the clients' adapters) stay hand-counted.
+- **Benchmark preset.** Upstream's staking and pool benchmarks run on a
+  `benchmark` genesis preset (no minimum staking bonds, pool bonds of 10^-6 ORB
+  to create and 10^-9 ORB to join, up to 16 pools, no commission ceiling, one
+  ORB per dev account so the issuance fits `u64`, where a benchmark build makes
+  vote weight equal stake as the pool benchmarks assume) with a one-planck
+  existential deposit; both exist only in a `runtime-benchmarks` build.
+  `run_benchmarks.sh` builds genesis from the runtime with that preset.
+- **Benchmark build.** Staking's `TargetList` is upstream's unfiltered
+  `UseValidatorsMap`, since upstream's benchmark validators have no keys or
+  approval (the admission filter's cost is counted by hand), and pools read
+  block 0 as the current block, as their benchmarks expect.
+  `pallet-validator-set`'s `set_min_author_version` benchmark sets the
+  session's validators itself (`Config::BenchmarkHelper`).
+- **Spec names.** A `runtime-benchmarks` build is named `orbinum-bench` (as
+  `fast-runtime`'s is `orbinum-fast`), so `set_code` refuses it on a live chain,
+  and the release workflow ships only a WASM whose spec name is exactly
+  `orbinum` (`scripts/verify-spec-name.sh`).
+
+#### Node
+
+- **Dev-only flags.** `--sealing` and `--enable-dev-signer` start only on a
+  chain spec whose chain type is `Development`; elsewhere the node refuses to
+  start.
+- **RPC sizes.** `--rpc-max-response-size` is raised to 150 MiB when lower
+  (GRANDPA proofs and ISMP queries need it) and a higher value is kept;
+  `--rpc-max-request-size` stays the operator's (default 15 MiB, which fits the
+  largest ISMP extrinsic); before, both were forced to 150.
+- **EVM.** `eth_call` and `eth_estimateGas` are capped at one block's gas
+  (`--execute-gas-limit-multiplier` defaults to 1, from 10).
+  `--target-gas-price` and the dynamic-fee inherent are gone (the runtime has no
+  dynamic-fee pallet). `--eth-log-block-cache` / `--eth-statuses-cache` default
+  to 64 MiB each (from 50 bytes, which kept a single entry): `eth_getLogs` scans
+  run 2.6× faster.
+- **Unsafe pool dumps.** `txpool_content`, `txpool_inspect` and
+  `eth_pendingTransactions` dump the whole transaction pool and are now unsafe:
+  an endpoint with `methods=safe` (the public RPC) answers them with "RPC call
+  is unsafe to be called externally"; `txpool_status` and `debug_getRaw*` stay
+  safe. This is about cost, not secrecy: pending transactions stay visible
+  through safe methods (`author_pendingExtrinsics`, `newPendingTransactions`,
+  KL-30).
+- **Chain specs.** `--chain testnet` builds a fresh genesis, not the live
+  network's: operators join with node-deploy's raw spec (KL-31).
+  `--chain mainnet` fails with "mainnet genesis not configured" while the
+  runtime does not build the mainnet preset. Offchain indexing stays forced on
+  (ISMP).
+- **Errors, not panics.** A missing runtime WASM, an SQL backend that cannot
+  open and `frontier-db` on the SQL backend are errors. The node's unit tests
+  now run in CI (`make test-release`).
+
+#### Clients
+
+- **Text signers need the new clients.** Every signed text changes, so an
+  `Ed25519Text` or `Ed25519WrappedText` signature from a spec 20 client (Solana
+  wallets, ed25519 extension accounts) fails with `BadProof`. ts-protocol
+  0.15.0, wallet-sdk 0.20.0 and app 0.6.0 render spec 21's text and ship with
+  the upgrade.
+- **Unaffected.** sr25519 extension accounts (payload unchanged, the new
+  extension encodes to nothing) and EVM transactions.
+- **Indexer** 0.34.0 indexes staking, elections, offences and pools.
+
 ### spec 20 — tx 7 — 2026-10-25 (`v0.6.0`)
 
 EVM precompiles: the Balances precompile only runs as a direct call and meters

@@ -60,6 +60,7 @@ parameter_types! {
 impl pallet_zk_verifier::Config for Test {
 	type MaxProofSize = MaxProofSize;
 	type MaxPublicInputs = MaxPublicInputs;
+	type AdminOrigin = frame_system::EnsureRoot<AccountId>;
 	type WeightInfo = pallet_zk_verifier::weights::SubstrateWeight<Test>;
 }
 
@@ -155,6 +156,7 @@ impl pallet_shielded_pool::Config for Test {
 	type MaxHistoricRoots = MaxHistoricRoots;
 	type RootRetentionBlocks = RootRetentionBlocks;
 	type SealedTreePrunedBelowLevel = SealedTreePrunedBelowLevel;
+	type AdminOrigin = frame_system::EnsureRoot<AccountId>;
 	type MaxLeavesPerTree = MaxLeavesPerTree;
 	type WeightInfo = ();
 	type BlockAuthor = BlockAuthorAccount;

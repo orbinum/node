@@ -4,7 +4,7 @@
 //!
 //! ## Responsibilities
 //!
-//! - Store and version verification keys per circuit (Root-gated extrinsics).
+//! - Store and version verification keys per circuit (`AdminOrigin`-gated extrinsics).
 //! - Expose [`ZkVerifierPort`] — the only public interface other pallets use.
 //! - Encode spend statements into public inputs ([`encoding`]) for the layout of
 //!   the key they are checked against.
@@ -13,7 +13,7 @@
 //! ## Key rotation
 //!
 //! A spend circuit's keys are memo-bound or, for a transfer, cross-tree (one
-//! root per input); shield has one layout. Rotation is done by Root: register
+//! root per input); shield has one layout. Rotation is done by `AdminOrigin`: register
 //! the new version, `set_active_version`, then `retire_version` the old one.
 //!
 //! ## Usage
@@ -78,6 +78,9 @@ pub mod pallet {
 		/// Most public inputs `verify_proof` takes.
 		#[pallet::constant]
 		type MaxPublicInputs: Get<u32>;
+		/// Manages verification keys: registers, activates, retires, denies and
+		/// removes them.
+		type AdminOrigin: EnsureOrigin<Self::RuntimeOrigin>;
 		/// Benchmarked weights.
 		type WeightInfo: WeightInfo;
 	}
@@ -304,7 +307,7 @@ pub mod pallet {
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		/// Register a verification key version for a circuit (Root only).
+		/// Register a verification key version for a circuit (`AdminOrigin` only).
 		///
 		/// Refused when the key does not deserialize, its arity gives no admitted
 		/// layout (a spend key is memo-bound or, for a transfer, cross-tree — never
@@ -326,11 +329,11 @@ pub mod pallet {
 			version: u32,
 			verification_key: VkBytes,
 		) -> DispatchResult {
-			ensure_root(origin)?;
+			T::AdminOrigin::ensure_origin(origin)?;
 			Self::register_vk(circuit_id, version, verification_key, false)
 		}
 
-		/// Make `version` the circuit's active one (Root only).
+		/// Make `version` the circuit's active one (`AdminOrigin` only).
 		///
 		/// Refused for a missing key, a retired version, or a key of a layout the
 		/// pallet does not admit: wallets would prove against a key every proof
@@ -342,7 +345,7 @@ pub mod pallet {
 			circuit_id: CircuitId,
 			version: u32,
 		) -> DispatchResult {
-			ensure_root(origin)?;
+			T::AdminOrigin::ensure_origin(origin)?;
 			let info = VerificationKeys::<T>::get(circuit_id, version)
 				.ok_or(Error::<T>::VerificationKeyNotFound)?;
 			ensure!(
@@ -355,7 +358,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Remove a version and all its data (Root only); never the active one.
+		/// Remove a version and all its data (`AdminOrigin` only); never the active one.
 		#[pallet::call_index(2)]
 		#[pallet::weight(T::WeightInfo::remove_verification_key()
 			.saturating_add(T::DbWeight::get().reads_writes(1, 1)))]
@@ -364,7 +367,7 @@ pub mod pallet {
 			circuit_id: CircuitId,
 			version: u32,
 		) -> DispatchResult {
-			ensure_root(origin)?;
+			T::AdminOrigin::ensure_origin(origin)?;
 			ensure!(
 				VerificationKeys::<T>::contains_key(circuit_id, version),
 				Error::<T>::VerificationKeyNotFound
@@ -427,7 +430,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Atomically register (and optionally activate) up to 10 VKs (Root only).
+		/// Atomically register (and optionally activate) up to 10 VKs (`AdminOrigin` only).
 		#[pallet::call_index(4)]
 		#[pallet::weight(T::WeightInfo::batch_register_verification_keys(entries.len() as u32)
 			.saturating_add(T::DbWeight::get().reads(entries.len() as u64)))]
@@ -435,7 +438,7 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			entries: BoundedVec<VkEntry, ConstU32<10>>,
 		) -> DispatchResult {
-			ensure_root(origin)?;
+			T::AdminOrigin::ensure_origin(origin)?;
 			ensure!(!entries.is_empty(), Error::<T>::InvalidBatchSize);
 
 			for entry in entries.iter() {
@@ -453,7 +456,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Retire a version (Root only): it stops verifying, its data is kept.
+		/// Retire a version (`AdminOrigin` only): it stops verifying, its data is kept.
 		/// Never the active one.
 		#[pallet::call_index(5)]
 		#[pallet::weight(T::WeightInfo::retire_version())]
@@ -462,7 +465,7 @@ pub mod pallet {
 			circuit_id: CircuitId,
 			version: u32,
 		) -> DispatchResult {
-			ensure_root(origin)?;
+			T::AdminOrigin::ensure_origin(origin)?;
 			ensure!(
 				VerificationKeys::<T>::contains_key(circuit_id, version),
 				Error::<T>::VerificationKeyNotFound
@@ -483,7 +486,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Undo `retire_version` (Root only).
+		/// Undo `retire_version` (`AdminOrigin` only).
 		///
 		/// The key is held to the registration rules, so one retired for being
 		/// unsafe cannot come back.
@@ -494,7 +497,7 @@ pub mod pallet {
 			circuit_id: CircuitId,
 			version: u32,
 		) -> DispatchResult {
-			ensure_root(origin)?;
+			T::AdminOrigin::ensure_origin(origin)?;
 			ensure!(
 				RetiredVersions::<T>::contains_key(circuit_id, version),
 				Error::<T>::VersionNotRetired
@@ -510,7 +513,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Deny a version for good (Root only): it is retired and its key's hash joins
+		/// Deny a version for good (`AdminOrigin` only): it is retired and its key's hash joins
 		/// `DeniedVkHashes`, so that key cannot be registered, activated, unretired or
 		/// verified again under any circuit or version. Never the active one, and no call
 		/// undoes it.
@@ -521,7 +524,7 @@ pub mod pallet {
 			circuit_id: CircuitId,
 			version: u32,
 		) -> DispatchResult {
-			ensure_root(origin)?;
+			T::AdminOrigin::ensure_origin(origin)?;
 			let info = VerificationKeys::<T>::get(circuit_id, version)
 				.ok_or(Error::<T>::VerificationKeyNotFound)?;
 			ensure!(
@@ -544,7 +547,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Erase every trace of a circuit the runtime no longer implements (Root
+		/// Erase every trace of a circuit the runtime no longer implements (`AdminOrigin`
 		/// only).
 		///
 		/// `retire_version` and `remove_verification_key` never touch the active
@@ -566,7 +569,7 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			circuit_id: CircuitId,
 		) -> DispatchResultWithPostInfo {
-			ensure_root(origin)?;
+			T::AdminOrigin::ensure_origin(origin)?;
 
 			// 1. Unknown id. One past 255 is refused: `as u8` would alias 257 onto 1.
 			let id = u8::try_from(circuit_id.0).map_err(|_| Error::<T>::CircuitStillInUse)?;
@@ -610,7 +613,7 @@ pub mod pallet {
 
 	impl<T: Config> Pallet<T> {
 		/// Upper bound on stored versions per circuit — keeps the versions DoubleMap
-		/// and the runtime-API iteration provably bounded. Registration is Root-only,
+		/// and the runtime-API iteration provably bounded. Registration is `AdminOrigin`-only,
 		/// so this is operator-discipline, not an attacker limit.
 		pub(crate) const MAX_VERSIONS_PER_CIRCUIT: u32 = 64;
 

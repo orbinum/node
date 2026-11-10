@@ -1,6 +1,6 @@
 [package]
 name = "orbinum-node"
-version = "0.6.0"
+version = "0.7.0"
 license = "Unlicense"
 build = "build.rs"
 description = "Orbinum Network Node - Privacy-focused blockchain with ZK proofs and EVM compatibility."
@@ -37,6 +37,7 @@ sc-consensus-manual-seal = { workspace = true }
 sc-executor = { workspace = true }
 sc-network = { workspace = true }
 sc-network-sync = { workspace = true }
+sc-network-transactions = { workspace = true }
 sc-offchain = { workspace = true }
 sc-rpc = { workspace = true }
 sc-service = { workspace = true }
@@ -44,34 +45,25 @@ sc-sysinfo = { workspace = true }
 sc-telemetry = { workspace = true }
 sc-transaction-pool = { workspace = true }
 sc-transaction-pool-api = { workspace = true }
-sp-api = { workspace = true, features = ["default"] }
-sp-block-builder = { workspace = true }
+sc-utils = { workspace = true }
 sp-blockchain = { workspace = true }
 sp-consensus-aura = { workspace = true, features = ["default"] }
 sp-consensus-grandpa = { workspace = true, features = ["default"] }
 sp-core = { workspace = true, features = ["default"] }
 sp-inherents = { workspace = true, features = ["default"] }
 sp-io = { workspace = true, features = ["default"] }
-sp-offchain = { workspace = true, features = ["default"] }
 sp-runtime = { workspace = true, features = ["default"] }
-sp-session = { workspace = true, features = ["default"] }
 sp-state-machine = { workspace = true, features = ["default"] }
 sp-storage = { workspace = true, features = ["default"] }
 sp-timestamp = { workspace = true, features = ["default"] }
-sp-transaction-pool = { workspace = true, features = ["default"] }
-# These dependencies are used for RPC
-frame-system-rpc-runtime-api = { workspace = true }
-# ISMP RPC: the read path relayers use to discover our outbound messages.
+
+# RPC
 pallet-ismp-rpc = { workspace = true }
-pallet-ismp-runtime-api = { workspace = true, default-features = false, features = ["std"] }
-pallet-shielded-pool-runtime-api = { workspace = true }
 pallet-transaction-payment-rpc = { workspace = true }
-pallet-transaction-payment-rpc-runtime-api = { workspace = true }
 pallet-zk-verifier-rpc = { workspace = true }
-pallet-zk-verifier-runtime-api = { workspace = true }
 substrate-frame-rpc-system = { workspace = true }
 
-# These dependencies are used for runtime benchmarking
+# Benchmarking
 frame-benchmarking = { workspace = true }
 frame-benchmarking-cli = { workspace = true }
 frame-metadata-hash-extension = { workspace = true }
@@ -88,15 +80,14 @@ fc-rpc = { workspace = true, features = ["aura"] }
 fc-rpc-core = { workspace = true }
 fc-rpc-v2 = { workspace = true }
 fc-storage = { workspace = true }
-fp-dynamic-fee = { workspace = true, features = ["default"] }
 fp-rpc = { workspace = true, features = ["default"] }
 
-# Orbinum: ZK primitives with native Poseidon host interface
+# Orbinum
 orbinum-runtime = { workspace = true, features = ["std"] }
 orbinum-zk-core = { workspace = true, features = ["std"] }
 orbinum-zk-verifier = { workspace = true, features = ["std", "groth16-native"] }
 
-# Cumulus primitives
+# Cumulus
 cumulus-primitives-proof-size-hostfunction = { workspace = true }
 
 [build-dependencies]
@@ -113,15 +104,13 @@ default = [
 poseidon-native = [
 	"orbinum-zk-core/poseidon-native",
 ]
-# Point the ISMP coprocessor at Hyperbridge's testnet deployment (para 4009, relay
-# Kusama, currently Paseo) instead
-# of Polkadot mainnet (3367). Forwarded to the runtime, which is where the constant
-# lives — without this passthrough the flag is unreachable from a node build, which is
-# the only way anyone actually produces a testnet binary.
-#
-#   cargo build --release -p orbinum-node --features hyperbridge-testnet
+# Use Hyperbridge's testnet coprocessor (para 4009) instead of mainnet (3367).
 hyperbridge-testnet = [
 	"orbinum-runtime/hyperbridge-testnet",
+]
+# Local testing only: short sessions and eras (spec name `orbinum-fast`).
+fast-runtime = [
+	"orbinum-runtime/fast-runtime",
 ]
 rocksdb = [
 	"sc-cli/rocksdb",

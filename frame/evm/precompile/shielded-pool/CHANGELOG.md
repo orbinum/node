@@ -4,6 +4,13 @@ All notable changes to `pallet-evm-precompile-shielded-pool` will be documented 
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-08
+
+### Changed
+
+- Test runtime sets `pallet-shielded-pool` 0.26.0's `AdminOrigin`. No change
+  to the precompile.
+
 ## [0.10.0] - 2026-10-13
 
 **Breaking** — only `shield` remains. Requires the matching

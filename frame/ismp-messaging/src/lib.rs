@@ -72,8 +72,12 @@ pub mod pallet {
 		/// commitment it leaves behind can eventually be reclaimed.
 		type DispatchOrigin: EnsureOrigin<Self::RuntimeOrigin, Success = Self::AccountId>;
 
+		/// Who may change which chains are trusted, the message fee and the outbound
+		/// pause.
+		type AdminOrigin: EnsureOrigin<Self::RuntimeOrigin>;
+
 		/// Starting value for [`MessageFee`], the flat part of what a signed dispatch
-		/// costs. Root moves it afterwards with [`Pallet::set_message_fee`].
+		/// costs. The admin moves it afterwards with [`Pallet::set_message_fee`].
 		///
 		/// **Paid to [`Config::FeeDestination`], never refunded** — `crate::outbound::fee_for`
 		/// explains why an anti-spam charge must not go through `FeeMetadata.fee`.
@@ -175,7 +179,7 @@ pub mod pallet {
 		T::DefaultMessageByteFee::get()
 	}
 
-	/// Flat charge per signed dispatch. Starts at [`Config::DefaultMessageFee`]; Root moves
+	/// Flat charge per signed dispatch. Starts at [`Config::DefaultMessageFee`]; the admin moves
 	/// it with [`Pallet::set_message_fee`].
 	///
 	/// Adjustable rather than constant because the right price tracks what ORB is worth,
@@ -194,7 +198,7 @@ pub mod pallet {
 		DefaultMessageByteFeeValue<T>,
 	>;
 
-	/// Emergency brake on signed outbound dispatch, set by Root.
+	/// Emergency brake on signed outbound dispatch, set by the admin.
 	///
 	/// Opening `DispatchOrigin` made dispatch reachable by anyone; closing it again would
 	/// otherwise need a runtime upgrade, at the moment that hour is most expensive.
@@ -336,11 +340,11 @@ pub mod pallet {
 		SourceRemoved {
 			source: StateMachine,
 		},
-		/// Signed outbound dispatch was paused or resumed by Root.
+		/// Signed outbound dispatch was paused or resumed by the admin.
 		OutboundPauseSet {
 			paused: bool,
 		},
-		/// Root changed what a signed dispatch costs.
+		/// The admin changed what a signed dispatch costs.
 		MessageFeeUpdated {
 			fee: <T as pallet_ismp::Config>::Balance,
 			byte_fee: <T as pallet_ismp::Config>::Balance,
@@ -409,7 +413,7 @@ pub mod pallet {
 		/// storage key is short; a long one is a payload wearing a key's name, and the
 		/// weight charged per key does not cover it.
 		KeyTooLarge,
-		/// Signed outbound dispatch is paused by Root. Root itself is unaffected.
+		/// Signed outbound dispatch is paused by the admin. Root itself is unaffected.
 		OutboundPaused,
 		/// A fee update exceeded [`Config::MaxMessageFee`].
 		MessageFeeTooHigh,
@@ -544,7 +548,7 @@ pub mod pallet {
 		#[pallet::call_index(1)]
 		#[pallet::weight(T::WeightInfo::accept_source())]
 		pub fn accept_source(origin: OriginFor<T>, source: StateMachine) -> DispatchResult {
-			ensure_root(origin)?;
+			<T as Config>::AdminOrigin::ensure_origin(origin)?;
 			AcceptedSources::<T>::insert(source, ());
 			Self::deposit_event(Event::SourceAccepted { source });
 			Ok(())
@@ -553,7 +557,7 @@ pub mod pallet {
 		#[pallet::call_index(2)]
 		#[pallet::weight(T::WeightInfo::remove_source())]
 		pub fn remove_source(origin: OriginFor<T>, source: StateMachine) -> DispatchResult {
-			ensure_root(origin)?;
+			<T as Config>::AdminOrigin::ensure_origin(origin)?;
 			AcceptedSources::<T>::remove(source);
 			Self::deposit_event(Event::SourceRemoved { source });
 			Ok(())
@@ -561,7 +565,7 @@ pub mod pallet {
 
 		/// Set what a signed dispatch costs: a flat part and a per-byte part.
 		///
-		/// Root only, and bounded by what the **largest possible message** would cost —
+		/// [`Config::AdminOrigin`] only, and bounded by what the **largest possible message** would cost —
 		/// `fee + byte_fee × `[`outbound::max_chargeable_size`] — against
 		/// [`Config::MaxMessageFee`]. Checking each
 		/// term separately would miss the case the ceiling is for, since the per-byte term
@@ -574,7 +578,7 @@ pub mod pallet {
 			fee: <T as pallet_ismp::Config>::Balance,
 			byte_fee: <T as pallet_ismp::Config>::Balance,
 		) -> DispatchResult {
-			ensure_root(origin)?;
+			<T as Config>::AdminOrigin::ensure_origin(origin)?;
 			// Saturating, so an absurd `byte_fee` is refused rather than wrapping to a
 			// small total and passing the check.
 			//
@@ -601,7 +605,7 @@ pub mod pallet {
 		#[pallet::call_index(5)]
 		#[pallet::weight(T::WeightInfo::set_outbound_paused())]
 		pub fn set_outbound_paused(origin: OriginFor<T>, paused: bool) -> DispatchResult {
-			ensure_root(origin)?;
+			<T as Config>::AdminOrigin::ensure_origin(origin)?;
 			OutboundPaused::<T>::put(paused);
 			Self::deposit_event(Event::OutboundPauseSet { paused });
 			Ok(())

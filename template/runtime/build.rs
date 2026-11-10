@@ -6,9 +6,8 @@ fn main() {
 			.export_heap_base()
 			.import_memory();
 
-		// Poseidon (~3×) and Groth16 (~3.5×) via host functions. Skipped for
-		// try-runtime builds: the stock try-runtime CLI executor lacks the
-		// custom host interfaces, so those builds fall back to pure Wasm.
+		// Poseidon (~3×) and Groth16 (~3.5×) through host functions. Not for try-runtime:
+		// its stock executor lacks these host interfaces, so it gets pure Wasm.
 		if std::env::var("CARGO_FEATURE_TRY_RUNTIME").is_err() {
 			builder = builder
 				.enable_feature("poseidon-native-runtime")

@@ -4,6 +4,23 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-08
+
+**Breaking** — `Config` gains `AdminOrigin`. Ships with runtime spec 21 and
+needs `pallet-zk-verifier` 0.20.0.
+
+### Changed
+
+- **Weights regenerated** on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-09).
+- **The solvency `try_state` tolerates donations**: it checks the pool
+  account's free balance covers the tracked native ledger, not that they are
+  equal. Anyone can send the pool account funds, which made the check fail for
+  good and blocked try-runtime gating.
+- **`Config::AdminOrigin`** checks the asset registry calls
+  (`register_asset`, `verify_asset`, `unverify_asset`), which checked root in
+  code. Set it to `EnsureRoot` to keep the old behaviour; the runtime names it
+  `ShieldedAssetAdmin`. Benchmarks use the origin's `try_successful_origin`.
+
 ## [0.25.3] - 2026-10-25
 
 ### Changed

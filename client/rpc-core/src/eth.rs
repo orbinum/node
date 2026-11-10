@@ -203,7 +203,9 @@ pub trait EthApi {
 	) -> RpcResult<U256>;
 
 	/// Returns all pending transactions.
-	#[method(name = "eth_pendingTransactions")]
+	///
+	/// Unsafe: denied where the server's RPC methods are `safe`.
+	#[method(name = "eth_pendingTransactions", with_extensions)]
 	async fn pending_transactions(&self) -> RpcResult<Vec<Transaction>>;
 
 	// ########################################################################

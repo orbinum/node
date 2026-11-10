@@ -311,6 +311,16 @@ pub fn internal_err<T: ToString>(message: T) -> jsonrpsee::types::error::ErrorOb
 	err(jsonrpsee::types::error::INTERNAL_ERROR_CODE, message, None)
 }
 
+/// Fails where the RPC server denies unsafe methods (`--rpc-methods safe`, or `auto` on a
+/// non-loopback address). A call without the server's `DenyUnsafe` extension is denied.
+pub(crate) fn check_if_safe(ext: &jsonrpsee::Extensions) -> jsonrpsee::core::RpcResult<()> {
+	ext.get::<sc_rpc::DenyUnsafe>()
+		.copied()
+		.unwrap_or(sc_rpc::DenyUnsafe::Yes)
+		.check_if_safe()
+		.map_err(Into::into)
+}
+
 pub fn internal_err_with_data<T: ToString>(
 	message: T,
 	data: &[u8],
@@ -352,4 +362,23 @@ pub fn public_key(transaction: &EthereumTransaction) -> Result<[u8; 64], sp_io::
 		}
 	}
 	sp_io::crypto::secp256k1_ecdsa_recover(&sig, &msg)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::check_if_safe;
+	use sc_rpc::DenyUnsafe;
+
+	/// The gate of `txpool_content`, `txpool_inspect` and `eth_pendingTransactions`.
+	#[test]
+	fn pool_dump_gate_follows_deny_unsafe() {
+		let with = |deny_unsafe| {
+			let mut ext = jsonrpsee::Extensions::new();
+			ext.insert(deny_unsafe);
+			ext
+		};
+		assert!(check_if_safe(&jsonrpsee::Extensions::new()).is_err());
+		assert!(check_if_safe(&with(DenyUnsafe::Yes)).is_err());
+		assert!(check_if_safe(&with(DenyUnsafe::No)).is_ok());
+	}
 }

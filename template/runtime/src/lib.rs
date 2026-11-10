@@ -1,123 +1,83 @@
 //! The Orbinum runtime. Compiles with `#[no_std]` for Wasm.
+//!
+//! | Module | Contents |
+//! |---|---|
+//! | `primitives` | primitive types, the extrinsic format, constants and the runtime version |
+//! | `opaque` | extrinsic-agnostic types for the node, and the session keys |
+//! | `configs` | each pallet's `Config`, by domain |
+//! | `apis` | the runtime APIs |
+//! | `evm` | precompiles, self-contained Ethereum transactions and the H160 ↔ account mapping |
+//! | `economy` | where fees, tips, slashes and rewards go |
+//! | `staking` | admission, offences, payouts and the staking glue |
+//! | `signature` | the extrinsic signature |
+//! | `genesis` | genesis presets |
+//! | `migrations` | runtime upgrade migrations |
+//! | `pallets` | pallets defined in this crate |
+//! | `benchmarks` | the pallets `frame-benchmarking` measures |
+//!
+//! Tests sit beside the module they exercise; `test_utils` holds the helpers they share.
 
 #![cfg_attr(not(feature = "std"), no_std)]
-// `construct_runtime!` does a lot of recursion and requires us to increase the limit to 256.
+// `#[frame_support::runtime]` expands too deeply for the default limit of 128.
 #![recursion_limit = "256"]
 #![allow(clippy::new_without_default, clippy::or_fun_call)]
 #![cfg_attr(feature = "runtime-benchmarks", warn(unused_crate_dependencies))]
 
 extern crate alloc;
 
-// Required for WASM side effects; suppress unused_crate_dependencies warning.
+// Linked for its Wasm panic handler and allocator; `as _` silences `unused_crate_dependencies`.
 use sp_io as _;
 
+// `#[frame_support::runtime]` names `Vec` unqualified.
+use alloc::vec::Vec;
+
+// Before `apis`, which calls the `list_benchmarks!` and `add_benchmarks!` it defines.
+#[cfg(feature = "runtime-benchmarks")]
+#[macro_use]
+mod benchmarks;
+
+mod apis;
 mod configs;
-mod evm_account;
-mod genesis_config_preset;
+mod economy;
+mod evm;
+mod genesis;
 mod migrations;
-mod orbinum_signature;
-mod precompiles;
+// Declared here, not in `primitives`: `SessionKeys`' path is part of the metadata.
+#[path = "primitives/opaque.rs"]
+pub mod opaque;
+mod pallets;
+mod primitives;
+mod signature;
+pub mod staking;
 mod weights;
 
 #[cfg(test)]
-mod runtime_tests;
+mod test_utils;
 
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
-use alloc::{borrow::Cow, vec, vec::Vec};
-use core::marker::PhantomData;
-use ethereum::AuthorizationList;
-use fp_evm::weight_per_gas;
-use fp_rpc::TransactionStatus;
-#[cfg(feature = "with-paritydb-weights")]
-use frame_support::weights::constants::ParityDbWeight as RuntimeDbWeight;
-#[cfg(feature = "with-rocksdb-weights")]
-use frame_support::weights::constants::RocksDbWeight as RuntimeDbWeight;
-use frame_support::{
-	genesis_builder_helper::build_state,
-	parameter_types,
-	traits::{ConstBool, ConstU32, ConstU64, ConstU8, OnFinalize, OnTimestampSet},
-	weights::{constants::WEIGHT_REF_TIME_PER_MILLIS, ConstantMultiplier, Weight},
-	PalletId,
+/// Orbinum-local runtime APIs.
+pub use apis::ismp as runtime_api;
+#[cfg(feature = "std")]
+pub use apis::RuntimeApi;
+pub use apis::RUNTIME_API_VERSIONS;
+pub use configs::system::{BlockHashCount, SS58Prefix, EXISTENTIAL_DEPOSIT};
+pub use evm::account::{
+	evm_bytes_to_account_id_bytes, evm_h160_to_account_id, evm_h160_to_account_id_bytes,
 };
-use pallet_ethereum::{Call::transact, PostLogContent, Transaction as EthereumTransaction};
-use pallet_evm::{Account as EVMAccount, FeeCalculator, Runner};
-use pallet_transaction_payment::FungibleAdapter;
-use polkadot_runtime_common::SlowAdjustingFeeUpdate;
-use scale_codec::{Decode, Encode};
-use sp_api::impl_runtime_apis;
-use sp_consensus_aura::sr25519::AuthorityId as AuraId;
-use sp_consensus_grandpa::{AuthorityId as GrandpaId, AuthorityList as GrandpaAuthorityList};
-use sp_core::{crypto::KeyTypeId, ConstU128, OpaqueMetadata, H160, H256, U256};
-use sp_genesis_builder::PresetId;
-use sp_runtime::{
-	generic, impl_opaque_keys,
-	traits::{
-		BlakeTwo256, Block as BlockT, Convert, DispatchInfoOf, Dispatchable, Get, IdentityLookup,
-		NumberFor, OpaqueKeys, PostDispatchInfoOf, UniqueSaturatedInto,
-	},
-	transaction_validity::{TransactionSource, TransactionValidity, TransactionValidityError},
-	ApplyExtrinsicResult, ExtrinsicInclusionMode, Perbill, Permill,
-};
-use sp_version::RuntimeVersion;
+pub use evm::self_contained::TransactionConverter;
+#[cfg(feature = "std")]
+pub use primitives::version::native_version;
+pub use primitives::version::VERSION;
+pub use primitives::{constants::*, types::*};
+/// The extrinsic signature. An ECDSA key's account is `[eth_addr ‖ 0x00×12]`, the one
+/// `EeSuffixAddressMapping` gives its EVM address.
+pub use signature::OrbinumSignature;
 
 pub use frame_system::Call as SystemCall;
 pub use pallet_balances::Call as BalancesCall;
 pub use pallet_timestamp::Call as TimestampCall;
-
-pub use evm_account::{
-	evm_bytes_to_account_id_bytes, evm_h160_to_account_id, evm_h160_to_account_id_bytes,
-};
-use evm_account::{EeSuffixAddressMapping, EnsureAddressMatches};
-use precompiles::FrontierPrecompiles;
-
-pub type BlockNumber = u32;
-
-/// ECDSA keys derive their `AccountId` as `[eth_addr | 0x00×12]` — the same layout
-/// `EeSuffixAddressMapping` uses, so an EVM address and its Substrate account agree.
-pub use orbinum_signature::OrbinumSignature;
-pub type Signature = OrbinumSignature;
-
-pub type AccountId = sp_runtime::AccountId32;
-pub type AccountIndex = u32;
-pub type Balance = u128;
-pub type Nonce = u32;
-pub type Hash = H256;
-pub type Hashing = BlakeTwo256;
-pub type DigestItem = generic::DigestItem;
-pub type Address = AccountId;
-pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
-pub type Block = generic::Block<Header, UncheckedExtrinsic>;
-pub type SignedBlock = generic::SignedBlock<Block>;
-pub type BlockId = generic::BlockId<Block>;
-
-/// Order is wire format, not style: Tesseract builds signed payloads against this exact
-/// tuple, so it must end in `ChargeTransactionPayment` → `CheckMetadataHash`. Reordering
-/// or inserting an extension invalidates every signature the relayer produces.
-pub type SignedExtra = (
-	frame_system::CheckNonZeroSender<Runtime>,
-	frame_system::CheckSpecVersion<Runtime>,
-	frame_system::CheckTxVersion<Runtime>,
-	frame_system::CheckGenesis<Runtime>,
-	frame_system::CheckEra<Runtime>,
-	frame_system::CheckNonce<Runtime>,
-	frame_system::CheckWeight<Runtime>,
-	pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
-	frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
-);
-
-pub type UncheckedExtrinsic =
-	fp_self_contained::UncheckedExtrinsic<Address, RuntimeCall, Signature, SignedExtra>;
-
-pub type CheckedExtrinsic =
-	fp_self_contained::CheckedExtrinsic<AccountId, RuntimeCall, SignedExtra, H160>;
-
-pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
-
-/// Runs on upgrade, oldest first. Drop an entry once every live chain has passed its
-/// version: a migration that can no longer run could be re-armed by mistake.
-pub type Migrations = (migrations::PrecompileCode,);
 
 pub type Executive = frame_executive::Executive<
 	Runtime,
@@ -125,121 +85,8 @@ pub type Executive = frame_executive::Executive<
 	frame_system::ChainContext<Runtime>,
 	Runtime,
 	AllPalletsWithSystem,
-	Migrations,
+	migrations::Migrations,
 >;
-
-pub const MILLISECS_PER_BLOCK: u64 = 6000;
-pub const SLOT_DURATION: u64 = MILLISECS_PER_BLOCK;
-pub const MINUTES: BlockNumber = 60_000 / (MILLISECS_PER_BLOCK as BlockNumber);
-pub const HOURS: BlockNumber = MINUTES * 60;
-pub const DAYS: BlockNumber = HOURS * 24;
-
-/// Extrinsic-agnostic types for the CLI, so a node keeps syncing across upgrades that
-/// change the core data structures.
-pub mod opaque {
-	use super::*;
-
-	pub use sp_runtime::OpaqueExtrinsic as UncheckedExtrinsic;
-
-	pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
-	pub type Block = generic::Block<Header, UncheckedExtrinsic>;
-	pub type BlockId = generic::BlockId<Block>;
-
-	impl_opaque_keys! {
-		pub struct SessionKeys {
-			pub aura: Aura,
-			pub grandpa: Grandpa,
-		}
-	}
-}
-
-#[sp_version::runtime_version]
-pub const VERSION: RuntimeVersion = RuntimeVersion {
-	spec_name: Cow::Borrowed("orbinum"),
-	impl_name: Cow::Borrowed("orbinum"),
-	authoring_version: 1,
-	spec_version: 20,
-	impl_version: 1,
-	apis: RUNTIME_API_VERSIONS,
-	transaction_version: 7,
-	system_version: 1,
-};
-
-/// The version information used to identify this runtime when compiled natively.
-#[cfg(feature = "std")]
-pub fn native_version() -> sp_version::NativeVersion {
-	sp_version::NativeVersion {
-		runtime_version: VERSION,
-		can_author_with: Default::default(),
-	}
-}
-
-const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(75);
-/// We allow for 2000ms of compute with a 6 second average block time.
-pub const WEIGHT_MILLISECS_PER_BLOCK: u64 = 2000;
-pub const MAXIMUM_BLOCK_WEIGHT: Weight = Weight::from_parts(
-	WEIGHT_MILLISECS_PER_BLOCK * WEIGHT_REF_TIME_PER_MILLIS,
-	u64::MAX,
-);
-/// 8 MiB: GRANDPA consensus proofs do not fit the 5 MiB this was before ISMP.
-///
-/// Bigger blocks widen the DoS surface — re-run benchmarks and confirm validators keep
-/// up under load before mainnet.
-pub const MAXIMUM_BLOCK_LENGTH: u32 = 8 * 1024 * 1024;
-
-/// Applies to block LENGTH only; weights stay at `NORMAL_DISPATCH_RATIO`.
-pub const BLOCK_LENGTH_NORMAL_RATIO: Perbill = Perbill::from_percent(85);
-
-// Pallet `Config` impls live in `configs/`, grouped by domain. They are plain
-// `impl` items, so moving them out changes nothing about assembly — unlike the
-// macro blocks below, which must stay whole.
-pub use configs::{consensus::*, evm::*, privacy::*, system::*};
-
-// Imported rather than fully qualified: the qualified paths bury the runtime-API
-// signatures. `IsmpEvent`/`IsmpRequest` are aliased because bare `Event`/`Request`
-// collide with runtime types of the same name.
-use ismp::{
-	consensus::{ConsensusClientId, StateMachineHeight, StateMachineId},
-	events::Event as IsmpEvent,
-	host::StateMachine,
-	router::{GetResponse, Request as IsmpRequest},
-};
-// `configs::ismp` is deliberately not glob-imported: it would shadow the `ismp` crate.
-// Its `Config` impls apply regardless of imports.
-
-parameter_types! {
-	pub storage EnableManualSeal: bool = false;
-}
-
-// Dev-only manual seal, defined inline because `#[frame_support::runtime]` below
-// must see the pallet in this crate root. Its `Config` impl lives in `configs/evm`
-// with the rest of the EVM stack.
-#[frame_support::pallet]
-pub mod pallet_manual_seal {
-	use super::*;
-	use frame_support::pallet_prelude::*;
-
-	#[pallet::pallet]
-	pub struct Pallet<T>(PhantomData<T>);
-
-	#[pallet::config]
-	pub trait Config: frame_system::Config {}
-
-	#[pallet::genesis_config]
-	#[derive(frame_support::DefaultNoBound)]
-	pub struct GenesisConfig<T> {
-		pub enable: bool,
-		#[serde(skip)]
-		pub _config: PhantomData<T>,
-	}
-
-	#[pallet::genesis_build]
-	impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
-		fn build(&self) {
-			EnableManualSeal::set(&self.enable);
-		}
-	}
-}
 
 #[frame_support::runtime]
 mod runtime {
@@ -256,6 +103,14 @@ mod runtime {
 		RuntimeTask
 	)]
 	pub struct Runtime;
+
+	// Genesis and hooks run in index order, whatever the order below. Session (16)
+	// builds its genesis before Staking (22) has bonded anyone, so the first session
+	// runs on the genesis keys. In each block's hooks: Session rotates (16), Staking
+	// applies due slashes (22), AhClient (24) sends the session report that lets
+	// staking start an era or plan the next one, AutoPayout (25) sees that era, and
+	// RcClient (26) hands an elected set over. The election runs in `on_poll`.
+	// Pools (28, 29) have no block hooks; EraPruning (30) works in `on_idle`.
 
 	#[runtime::pallet_index(0)]
 	pub type System = frame_system;
@@ -291,7 +146,7 @@ mod runtime {
 	pub type BaseFee = pallet_base_fee;
 
 	#[runtime::pallet_index(11)]
-	pub type ManualSeal = pallet_manual_seal;
+	pub type ManualSeal = pallets::manual_seal;
 
 	#[runtime::pallet_index(12)]
 	pub type ZkVerifier = pallet_zk_verifier;
@@ -299,22 +154,25 @@ mod runtime {
 	#[runtime::pallet_index(13)]
 	pub type ShieldedPool = pallet_shielded_pool;
 
-	// Index 14 is retired. Do not reassign: a new pallet here would make
-	// previously encoded calls decode as a different extrinsic.
-
-	#[runtime::pallet_index(15)]
+	// Consensus and sessions.
+	#[runtime::pallet_index(14)]
 	pub type Authorship = pallet_authorship;
 
-	// Index 16 is retired (`pallet_relayer`, removed in spec 19). Do not reassign.
-
-	#[runtime::pallet_index(17)]
+	#[runtime::pallet_index(15)]
 	pub type ValidatorSet = pallet_validator_set;
 
-	#[runtime::pallet_index(18)]
+	#[runtime::pallet_index(16)]
 	pub type Session = pallet_session;
 
-	// ISMP / Hyperbridge. `IsmpGrandpa` is the consensus client that lets Hyperbridge
-	// verify this chain's own finality — what keeps Orbinum sovereign, not a parachain.
+	#[runtime::pallet_index(17)]
+	pub type Historical = pallet_session::historical;
+
+	#[runtime::pallet_index(18)]
+	pub type Offences = pallet_offences;
+
+	// ISMP / Hyperbridge. Relayers cache these indices from metadata; keep them fixed.
+	// `IsmpGrandpa` is the GRANDPA consensus client that verifies counterparty
+	// finality; Orbinum keeps its own consensus (solochain, not a parachain).
 	#[runtime::pallet_index(19)]
 	pub type Ismp = pallet_ismp;
 
@@ -323,762 +181,39 @@ mod runtime {
 
 	#[runtime::pallet_index(21)]
 	pub type IsmpMessaging = pallet_ismp_messaging;
-}
 
-#[derive(Clone)]
-pub struct TransactionConverter<B>(PhantomData<B>);
+	// Staking.
+	#[runtime::pallet_index(22)]
+	pub type Staking = pallet_staking_async;
 
-impl<B> Default for TransactionConverter<B> {
-	fn default() -> Self {
-		Self(PhantomData)
-	}
-}
+	#[runtime::pallet_index(23)]
+	pub type VoterList = pallet_bags_list<Instance1>;
 
-impl<B: BlockT> fp_rpc::ConvertTransaction<<B as BlockT>::Extrinsic> for TransactionConverter<B> {
-	fn convert_transaction(
-		&self,
-		transaction: pallet_ethereum::Transaction,
-	) -> <B as BlockT>::Extrinsic {
-		let extrinsic = UncheckedExtrinsic::new_bare(
-			pallet_ethereum::Call::<Runtime>::transact { transaction }.into(),
-		);
-		let encoded = extrinsic.encode();
-		<B as BlockT>::Extrinsic::decode(&mut &encoded[..])
-			.expect("Encoded extrinsic is always valid")
-	}
-}
+	// The session side's client: hands the elected set to `Session` and reports
+	// each session to staking.
+	#[runtime::pallet_index(24)]
+	pub type AhClient = pallet_staking_async_ah_client;
 
-impl fp_self_contained::SelfContainedCall for RuntimeCall {
-	type SignedInfo = H160;
+	#[runtime::pallet_index(25)]
+	pub type AutoPayout = pallet_auto_payout;
 
-	fn is_self_contained(&self) -> bool {
-		match self {
-			RuntimeCall::Ethereum(call) => call.is_self_contained(),
-			_ => false,
-		}
-	}
+	// The staking side's client: hands the elected set to `AhClient` and takes
+	// its session reports and offences to staking.
+	#[runtime::pallet_index(26)]
+	pub type RcClient = pallet_staking_async_rc_client;
 
-	fn check_self_contained(&self) -> Option<Result<Self::SignedInfo, TransactionValidityError>> {
-		match self {
-			RuntimeCall::Ethereum(call) => call.check_self_contained(),
-			_ => None,
-		}
-	}
+	#[runtime::pallet_index(27)]
+	pub type PagedElection = pallet_paged_election;
 
-	fn validate_self_contained(
-		&self,
-		info: &Self::SignedInfo,
-		dispatch_info: &DispatchInfoOf<RuntimeCall>,
-		len: usize,
-	) -> Option<TransactionValidity> {
-		match self {
-			RuntimeCall::Ethereum(call) => call.validate_self_contained(info, dispatch_info, len),
-			_ => None,
-		}
-	}
+	// Members stake through a pool, one nominator to staking; their funds stay
+	// in their accounts, held as delegations (`staking::pools`).
+	#[runtime::pallet_index(28)]
+	pub type NominationPools = pallet_nomination_pools;
 
-	fn pre_dispatch_self_contained(
-		&self,
-		info: &Self::SignedInfo,
-		dispatch_info: &DispatchInfoOf<RuntimeCall>,
-		len: usize,
-	) -> Option<Result<(), TransactionValidityError>> {
-		match self {
-			RuntimeCall::Ethereum(call) => {
-				call.pre_dispatch_self_contained(info, dispatch_info, len)
-			}
-			_ => None,
-		}
-	}
+	#[runtime::pallet_index(29)]
+	pub type DelegatedStaking = pallet_delegated_staking;
 
-	fn apply_self_contained(
-		self,
-		info: Self::SignedInfo,
-	) -> Option<sp_runtime::DispatchResultWithInfo<PostDispatchInfoOf<Self>>> {
-		match self {
-			call @ RuntimeCall::Ethereum(pallet_ethereum::Call::transact { .. }) => {
-				Some(call.dispatch(RuntimeOrigin::from(
-					pallet_ethereum::RawOrigin::EthereumTransaction(info),
-				)))
-			}
-			_ => None,
-		}
-	}
-}
-
-#[cfg(feature = "runtime-benchmarks")]
-mod benches {
-	frame_benchmarking::define_benchmarks!(
-		[frame_benchmarking, BaselineBench::<Runtime>]
-		[frame_system, SystemBench::<Runtime>]
-		[pallet_balances, Balances]
-		[pallet_timestamp, Timestamp]
-		[pallet_sudo, Sudo]
-		[pallet_evm, EVM]
-		[pallet_evm_precompile_curve25519, EVMPrecompileCurve25519Bench::<Runtime>]
-		[pallet_evm_precompile_sha3fips, EVMPrecompileSha3FIPSBench::<Runtime>]
-		[pallet_zk_verifier, ZkVerifier]
-		[pallet_shielded_pool, ShieldedPool]
-		[pallet_validator_set, ValidatorSet]
-		[ismp_grandpa, IsmpGrandpa]
-		[pallet_ismp_messaging, IsmpMessaging]
-	);
-}
-
-/// Orbinum-local ISMP runtime API.
-///
-/// Upstream has no coprocessor accessor, and neither `Coprocessor` nor
-/// `HostStateMachine` is a `#[pallet::constant]`, so neither reaches metadata. Without
-/// this, the value is undiscoverable from a running node and callers must restate it.
-pub mod runtime_api {
-	use ismp::host::StateMachine;
-
-	sp_api::decl_runtime_apis! {
-		/// Build-dependent ISMP identities that are otherwise compile-time only.
-		pub trait OrbinumIsmpApi {
-			/// The configured coprocessor, i.e. which Hyperbridge deployment this
-			/// build talks to. `None` would mean ISMP proxying is disabled.
-			fn coprocessor() -> Option<StateMachine>;
-
-			/// The slot duration to whitelist the coprocessor with, so callers derive
-			/// it from the runtime instead of restating it.
-			fn hyperbridge_slot_duration() -> u64;
-		}
-	}
-}
-
-/// A circuit's version info from `pallet-zk-verifier`, as its runtime API returns it.
-fn zk_circuit_version_info(
-	info: pallet_zk_verifier::CircuitVersionInfo,
-) -> pallet_zk_verifier_runtime_api::CircuitVersionInfo {
-	pallet_zk_verifier_runtime_api::CircuitVersionInfo {
-		circuit_id: info.circuit_id,
-		active_version: info.active_version,
-		supported_versions: info.supported_versions,
-		vk_hashes: info
-			.vk_hashes
-			.into_iter()
-			.map(|item| pallet_zk_verifier_runtime_api::VkVersionHash {
-				version: item.version,
-				vk_hash: item.vk_hash,
-			})
-			.collect(),
-	}
-}
-
-impl_runtime_apis! {
-	impl sp_api::Core<Block> for Runtime {
-		fn version() -> RuntimeVersion {
-			VERSION
-		}
-
-		fn execute_block(block: <Block as BlockT>::LazyBlock) {
-			Executive::execute_block(block)
-		}
-
-		fn initialize_block(header: &<Block as BlockT>::Header) -> ExtrinsicInclusionMode {
-			Executive::initialize_block(header)
-		}
-	}
-
-	impl sp_api::Metadata<Block> for Runtime {
-		fn metadata() -> OpaqueMetadata {
-			OpaqueMetadata::new(Runtime::metadata().into())
-		}
-
-		fn metadata_at_version(version: u32) -> Option<OpaqueMetadata> {
-			Runtime::metadata_at_version(version)
-		}
-
-		fn metadata_versions() -> Vec<u32> {
-			Runtime::metadata_versions()
-		}
-	}
-
-	impl sp_block_builder::BlockBuilder<Block> for Runtime {
-		fn apply_extrinsic(extrinsic: <Block as BlockT>::Extrinsic) -> ApplyExtrinsicResult {
-			Executive::apply_extrinsic(extrinsic)
-		}
-
-		fn finalize_block() -> <Block as BlockT>::Header {
-			Executive::finalize_block()
-		}
-
-		fn inherent_extrinsics(data: sp_inherents::InherentData) -> Vec<<Block as BlockT>::Extrinsic> {
-			data.create_extrinsics()
-		}
-
-		fn check_inherents(
-			block: <Block as BlockT>::LazyBlock,
-			data: sp_inherents::InherentData,
-		) -> sp_inherents::CheckInherentsResult {
-			data.check_extrinsics(&block)
-		}
-	}
-
-	impl sp_transaction_pool::runtime_api::TaggedTransactionQueue<Block> for Runtime {
-		fn validate_transaction(
-			source: TransactionSource,
-			tx: <Block as BlockT>::Extrinsic,
-			block_hash: <Block as BlockT>::Hash,
-		) -> TransactionValidity {
-			Executive::validate_transaction(source, tx, block_hash)
-		}
-	}
-
-	impl sp_offchain::OffchainWorkerApi<Block> for Runtime {
-		fn offchain_worker(header: &<Block as BlockT>::Header) {
-			Executive::offchain_worker(header)
-		}
-	}
-
-	#[cfg(feature = "try-runtime")]
-	impl frame_try_runtime::TryRuntime<Block> for Runtime {
-		fn on_runtime_upgrade(checks: frame_try_runtime::UpgradeCheckSelect) -> (Weight, Weight) {
-			let weight = Executive::try_runtime_upgrade(checks)
-				.expect("try_runtime_upgrade must not fail");
-			(weight, BlockWeights::get().max_block)
-		}
-
-		fn execute_block(
-			block: <Block as BlockT>::LazyBlock,
-			state_root_check: bool,
-			signature_check: bool,
-			select: frame_try_runtime::TryStateSelect,
-		) -> Weight {
-			Executive::try_execute_block(block, state_root_check, signature_check, select)
-				.expect("try_execute_block must not fail")
-		}
-	}
-
-	impl sp_genesis_builder::GenesisBuilder<Block> for Runtime {
-		fn build_state(config: Vec<u8>) -> sp_genesis_builder::Result {
-			build_state::<RuntimeGenesisConfig>(config)
-		}
-
-		fn get_preset(id: &Option<PresetId>) -> Option<Vec<u8>> {
-			frame_support::genesis_builder_helper::get_preset::<RuntimeGenesisConfig>(id, genesis_config_preset::get_preset)
-		}
-
-		fn preset_names() -> Vec<sp_genesis_builder::PresetId> {
-			vec![
-				PresetId::from(sp_genesis_builder::DEV_RUNTIME_PRESET),
-				PresetId::from("orbinum_local_testnet_runtime_preset"),
-				PresetId::from("orbinum_testnet_runtime_preset"),
-				PresetId::from("orbinum_mainnet_runtime_preset"),
-			]
-		}
-	}
-
-	impl sp_session::SessionKeys<Block> for Runtime {
-		fn generate_session_keys(
-			owner: Vec<u8>,
-			seed: Option<Vec<u8>>,
-		) -> sp_session::OpaqueGeneratedSessionKeys {
-			opaque::SessionKeys::generate(&owner, seed).into()
-		}
-
-		fn decode_session_keys(
-			encoded: Vec<u8>,
-		) -> Option<Vec<(Vec<u8>, KeyTypeId)>> {
-			opaque::SessionKeys::decode_into_raw_public_keys(&encoded)
-		}
-	}
-
-	impl sp_consensus_aura::AuraApi<Block, AuraId> for Runtime {
-		fn slot_duration() -> sp_consensus_aura::SlotDuration {
-			sp_consensus_aura::SlotDuration::from_millis(Aura::slot_duration())
-		}
-
-		fn authorities() -> Vec<AuraId> {
-			pallet_aura::Authorities::<Runtime>::get().into_inner()
-		}
-	}
-
-	impl sp_consensus_grandpa::GrandpaApi<Block> for Runtime {
-		fn grandpa_authorities() -> GrandpaAuthorityList {
-			Grandpa::grandpa_authorities()
-		}
-
-		fn current_set_id() -> sp_consensus_grandpa::SetId {
-			Grandpa::current_set_id()
-		}
-
-		fn submit_report_equivocation_unsigned_extrinsic(
-			_equivocation_proof: sp_consensus_grandpa::EquivocationProof<
-				<Block as BlockT>::Hash,
-				NumberFor<Block>,
-			>,
-			_key_owner_proof: sp_consensus_grandpa::OpaqueKeyOwnershipProof,
-		) -> Option<()> {
-			None
-		}
-
-		fn generate_key_ownership_proof(
-			_set_id: sp_consensus_grandpa::SetId,
-			_authority_id: GrandpaId,
-		) -> Option<sp_consensus_grandpa::OpaqueKeyOwnershipProof> {
-			// NOTE: this is the only implementation possible since we've
-			// defined our key owner proof type as a bottom type (i.e. a type
-			// with no values).
-			None
-		}
-	}
-
-	impl frame_system_rpc_runtime_api::AccountNonceApi<Block, AccountId, Nonce> for Runtime {
-		fn account_nonce(account: AccountId) -> Nonce {
-			System::account_nonce(account)
-		}
-	}
-
-	impl pallet_transaction_payment_rpc_runtime_api::TransactionPaymentApi<
-		Block,
-		Balance,
-	> for Runtime {
-		fn query_info(
-			uxt: <Block as BlockT>::Extrinsic,
-			len: u32
-		) -> pallet_transaction_payment_rpc_runtime_api::RuntimeDispatchInfo<Balance> {
-			TransactionPayment::query_info(uxt, len)
-		}
-
-		fn query_fee_details(
-			uxt: <Block as BlockT>::Extrinsic,
-			len: u32,
-		) -> pallet_transaction_payment::FeeDetails<Balance> {
-			TransactionPayment::query_fee_details(uxt, len)
-		}
-
-		fn query_weight_to_fee(weight: Weight) -> Balance {
-			TransactionPayment::weight_to_fee(weight)
-		}
-
-		fn query_length_to_fee(length: u32) -> Balance {
-			TransactionPayment::length_to_fee(length)
-		}
-	}
-
-	impl fp_rpc::EthereumRuntimeRPCApi<Block> for Runtime {
-		fn chain_id() -> u64 {
-			<Runtime as pallet_evm::Config>::ChainId::get()
-		}
-
-		fn account_basic(address: H160) -> EVMAccount {
-			let (account, _) = pallet_evm::Pallet::<Runtime>::account_basic(&address);
-			account
-		}
-
-		fn gas_price() -> U256 {
-			let (gas_price, _) = <Runtime as pallet_evm::Config>::FeeCalculator::min_gas_price();
-			gas_price
-		}
-
-		fn account_code_at(address: H160) -> Vec<u8> {
-			pallet_evm::AccountCodes::<Runtime>::get(address)
-		}
-
-		fn author() -> H160 {
-			<pallet_evm::Pallet<Runtime>>::find_author()
-		}
-
-		fn storage_at(address: H160, index: U256) -> H256 {
-			pallet_evm::AccountStorages::<Runtime>::get(address, H256::from(index.to_big_endian()))
-		}
-
-		fn call(
-			from: H160,
-			to: H160,
-			data: Vec<u8>,
-			value: U256,
-			gas_limit: U256,
-			max_fee_per_gas: Option<U256>,
-			max_priority_fee_per_gas: Option<U256>,
-			nonce: Option<U256>,
-			estimate: bool,
-			access_list: Option<Vec<(H160, Vec<H256>)>>,
-			authorization_list: Option<AuthorizationList>,
-		) -> Result<pallet_evm::CallInfo, sp_runtime::DispatchError> {
-			use pallet_evm::GasWeightMapping as _;
-
-			let config = if estimate {
-				let mut config = <Runtime as pallet_evm::Config>::config().clone();
-				config.estimate = true;
-				Some(config)
-			} else {
-				None
-			};
-
-			// Estimated encoded transaction size must be based on the heaviest transaction
-			// type (EIP7702Transaction) to be compatible with all transaction types.
-			let mut estimated_transaction_len = data.len() +
-				// pallet ethereum index: 1
-				// transact call index: 1
-				// Transaction enum variant: 1
-				// chain_id 8 bytes
-				// nonce: 32
-				// max_priority_fee_per_gas: 32
-				// max_fee_per_gas: 32
-				// gas_limit: 32
-				// action: 21 (enum varianrt + call address)
-				// value: 32
-				// access_list: 1 (empty vec size)
-				// authorization_list: 1 (empty vec size)
-				// 65 bytes signature
-				259;
-
-			if access_list.is_some() {
-				estimated_transaction_len += access_list.encoded_size();
-			}
-
-			if authorization_list.is_some() {
-				estimated_transaction_len += authorization_list.encoded_size();
-			}
-
-			let gas_limit = if gas_limit > U256::from(u64::MAX) {
-				u64::MAX
-			} else {
-				gas_limit.low_u64()
-			};
-			let without_base_extrinsic_weight = true;
-
-			let (weight_limit, proof_size_base_cost) =
-				match <Runtime as pallet_evm::Config>::GasWeightMapping::gas_to_weight(
-					gas_limit,
-					without_base_extrinsic_weight
-				) {
-					weight_limit if weight_limit.proof_size() > 0 => {
-						(Some(weight_limit), Some(estimated_transaction_len as u64))
-					}
-					_ => (None, None),
-				};
-
-			<Runtime as pallet_evm::Config>::Runner::call(
-				from,
-				to,
-				data,
-				value,
-				gas_limit.unique_saturated_into(),
-				max_fee_per_gas,
-				max_priority_fee_per_gas,
-				nonce,
-				access_list.unwrap_or_default(),
-				authorization_list.unwrap_or_default(),
-				false,
-				true,
-				weight_limit,
-				proof_size_base_cost,
-				config.as_ref().unwrap_or(<Runtime as pallet_evm::Config>::config()),
-			).map_err(|err| err.error.into())
-		}
-
-		fn create(
-			from: H160,
-			data: Vec<u8>,
-			value: U256,
-			gas_limit: U256,
-			max_fee_per_gas: Option<U256>,
-			max_priority_fee_per_gas: Option<U256>,
-			nonce: Option<U256>,
-			estimate: bool,
-			access_list: Option<Vec<(H160, Vec<H256>)>>,
-			authorization_list: Option<AuthorizationList>,
-		) -> Result<pallet_evm::CreateInfo, sp_runtime::DispatchError> {
-			use pallet_evm::GasWeightMapping as _;
-
-			let config = if estimate {
-				let mut config = <Runtime as pallet_evm::Config>::config().clone();
-				config.estimate = true;
-				Some(config)
-			} else {
-				None
-			};
-
-
-			let mut estimated_transaction_len = data.len() +
-				// from: 20
-				// value: 32
-				// gas_limit: 32
-				// nonce: 32
-				// 1 byte transaction action variant
-				// chain id 8 bytes
-				// 65 bytes signature
-				190;
-
-			if max_fee_per_gas.is_some() {
-				estimated_transaction_len += 32;
-			}
-			if max_priority_fee_per_gas.is_some() {
-				estimated_transaction_len += 32;
-			}
-			if access_list.is_some() {
-				estimated_transaction_len += access_list.encoded_size();
-			}
-			if authorization_list.is_some() {
-				estimated_transaction_len += authorization_list.encoded_size();
-			}
-
-			let gas_limit = if gas_limit > U256::from(u64::MAX) {
-				u64::MAX
-			} else {
-				gas_limit.low_u64()
-			};
-			let without_base_extrinsic_weight = true;
-
-			let (weight_limit, proof_size_base_cost) =
-				match <Runtime as pallet_evm::Config>::GasWeightMapping::gas_to_weight(
-					gas_limit,
-					without_base_extrinsic_weight
-				) {
-					weight_limit if weight_limit.proof_size() > 0 => {
-						(Some(weight_limit), Some(estimated_transaction_len as u64))
-					}
-					_ => (None, None),
-				};
-
-			<Runtime as pallet_evm::Config>::Runner::create(
-				from,
-				data,
-				value,
-				gas_limit.unique_saturated_into(),
-				max_fee_per_gas,
-				max_priority_fee_per_gas,
-				nonce,
-				access_list.unwrap_or_default(),
-				authorization_list.unwrap_or_default(),
-				false,
-				true,
-				weight_limit,
-				proof_size_base_cost,
-				config.as_ref().unwrap_or(<Runtime as pallet_evm::Config>::config()),
-			).map_err(|err| err.error.into())
-		}
-
-		fn current_transaction_statuses() -> Option<Vec<TransactionStatus>> {
-			pallet_ethereum::CurrentTransactionStatuses::<Runtime>::get()
-		}
-
-		fn current_block() -> Option<pallet_ethereum::Block> {
-			pallet_ethereum::CurrentBlock::<Runtime>::get()
-		}
-
-		fn current_receipts() -> Option<Vec<pallet_ethereum::Receipt>> {
-			pallet_ethereum::CurrentReceipts::<Runtime>::get()
-		}
-
-		fn current_all() -> (
-			Option<pallet_ethereum::Block>,
-			Option<Vec<pallet_ethereum::Receipt>>,
-			Option<Vec<TransactionStatus>>
-		) {
-			(
-				pallet_ethereum::CurrentBlock::<Runtime>::get(),
-				pallet_ethereum::CurrentReceipts::<Runtime>::get(),
-				pallet_ethereum::CurrentTransactionStatuses::<Runtime>::get()
-			)
-		}
-
-		fn extrinsic_filter(
-			xts: Vec<<Block as BlockT>::Extrinsic>,
-		) -> Vec<EthereumTransaction> {
-			xts.into_iter().filter_map(|xt| match xt.0.function {
-				RuntimeCall::Ethereum(transact { transaction }) => Some(transaction),
-				_ => None
-			}).collect::<Vec<EthereumTransaction>>()
-		}
-
-		fn elasticity() -> Option<Permill> {
-			Some(pallet_base_fee::Elasticity::<Runtime>::get())
-		}
-
-		fn gas_limit_multiplier_support() {}
-
-		fn pending_block(
-			xts: Vec<<Block as BlockT>::Extrinsic>,
-		) -> (Option<pallet_ethereum::Block>, Option<Vec<TransactionStatus>>) {
-			for ext in xts.into_iter() {
-				let _ = Executive::apply_extrinsic(ext);
-			}
-
-			Ethereum::on_finalize(System::block_number() + 1);
-
-			(
-				pallet_ethereum::CurrentBlock::<Runtime>::get(),
-				pallet_ethereum::CurrentTransactionStatuses::<Runtime>::get()
-			)
-		}
-
-		fn initialize_pending_block(header: &<Block as BlockT>::Header) {
-			Executive::initialize_block(header);
-		}
-	}
-
-	impl fp_rpc::ConvertTransactionRuntimeApi<Block> for Runtime {
-		fn convert_transaction(transaction: EthereumTransaction) -> <Block as BlockT>::Extrinsic {
-			UncheckedExtrinsic::new_bare(
-				pallet_ethereum::Call::<Runtime>::transact { transaction }.into(),
-			)
-		}
-	}
-
-	// ShieldedPool Runtime API implementation
-	#[api_version(5)]
-	impl pallet_shielded_pool_runtime_api::ShieldedPoolRuntimeApi<Block> for Runtime {
-		fn get_merkle_tree_info() -> (pallet_shielded_pool::Hash, u32, u32) {
-			ShieldedPool::get_merkle_tree_info()
-		}
-
-		fn get_merkle_proof(leaf_index: u32) -> Option<pallet_shielded_pool::DefaultMerklePath> {
-			ShieldedPool::get_merkle_proof(leaf_index)
-		}
-
-		fn get_forest_info() -> ([u8; 32], u32, u32, u32, u32) {
-			ShieldedPool::get_forest_info()
-		}
-
-		fn get_root_for_leaf(leaf_index: u32) -> Option<([u8; 32], u32)> {
-			ShieldedPool::get_root_for_leaf(leaf_index)
-		}
-
-		fn get_merkle_proof_for_commitment(
-			commitment: pallet_shielded_pool::Hash,
-		) -> Option<(u32, pallet_shielded_pool::DefaultMerklePath)> {
-			ShieldedPool::get_merkle_proof_for_commitment(commitment)
-		}
-
-		fn get_subtree_roots(
-			tree_id: u32,
-			start: u32,
-			count: u32,
-		) -> Option<pallet_shielded_pool::SubtreeRoots> {
-			ShieldedPool::get_subtree_roots(tree_id, start, count)
-		}
-
-	}
-
-	impl pallet_zk_verifier_runtime_api::ZkVerifierRuntimeApi<Block> for Runtime {
-		fn get_circuit_version_info(
-			circuit_id: u32,
-		) -> Option<pallet_zk_verifier_runtime_api::CircuitVersionInfo> {
-			pallet_zk_verifier::Pallet::<Runtime>::runtime_api_get_circuit_version_info(circuit_id)
-				.map(zk_circuit_version_info)
-		}
-
-		fn get_all_circuit_versions() -> alloc::vec::Vec<pallet_zk_verifier_runtime_api::CircuitVersionInfo> {
-			pallet_zk_verifier::Pallet::<Runtime>::runtime_api_get_all_circuit_versions()
-				.into_iter()
-				.map(zk_circuit_version_info)
-				.collect()
-		}
-	}
-
-	// ISMP Runtime API — the read path relayers depend on:
-	//   relayer -> RPC (ismp_query*) -> this runtime API -> offchain DB
-	//
-	// Thin delegations; the pallet owns the logic. `requests`/`responses` read the
-	// offchain DB, populated only when offchain indexing is on — `command.rs` forces
-	// it, because a node without it answers every query with an empty list and no error.
-	impl pallet_ismp_runtime_api::IsmpRuntimeApi<Block, <Block as BlockT>::Hash> for Runtime {
-		fn host_state_machine() -> StateMachine {
-			configs::ismp::network::host_state_machine()
-		}
-
-		fn block_events() -> Vec<IsmpEvent> {
-			Ismp::block_events()
-		}
-
-		fn block_events_with_metadata() -> Vec<(IsmpEvent, Option<u32>)> {
-			Ismp::block_events_with_metadata()
-		}
-
-		fn consensus_state(id: ConsensusClientId) -> Option<Vec<u8>> {
-			pallet_ismp::ConsensusStates::<Runtime>::get(id)
-		}
-
-		/// The host's *local* timestamp when this height was committed — the clock the
-		/// challenge period is measured against, not the counterparty's own block
-		/// timestamp, which lives in `StateCommitment.timestamp`.
-		///
-		/// The map is named explicitly so a future rename cannot silently redirect it.
-		fn state_machine_update_time(id: StateMachineHeight) -> Option<u64> {
-			pallet_ismp::BoundedStateMachineUpdateTime::<Runtime>::get(id.id, id.height)
-		}
-
-		fn challenge_period(id: StateMachineId) -> Option<u64> {
-			pallet_ismp::ChallengePeriod::<Runtime>::get(id)
-		}
-
-		fn latest_state_machine_height(id: StateMachineId) -> Option<u64> {
-			pallet_ismp::LatestStateMachineHeight::<Runtime>::get(id)
-		}
-
-		fn requests(request_commitments: Vec<H256>) -> Vec<IsmpRequest> {
-			Ismp::requests(request_commitments)
-		}
-
-		/// Returns `GetResponse`, not `Response`: ISMP has no first-class POST response,
-		/// by design — `IsmpDispatcher` declares only `dispatch_request`, so an
-		/// application replies with a POST in the opposite direction, a block later. The
-		/// published docs show `Vec<Response>`, which does not compile.
-		fn responses(response_commitments: Vec<H256>) -> Vec<GetResponse> {
-			Ismp::responses(response_commitments)
-		}
-	}
-
-	impl crate::runtime_api::OrbinumIsmpApi<Block> for Runtime {
-		fn coprocessor() -> Option<StateMachine> {
-			configs::ismp::network::coprocessor()
-		}
-
-		fn hyperbridge_slot_duration() -> u64 {
-			configs::ismp::network::HYPERBRIDGE_SLOT_DURATION_MS
-		}
-	}
-
-	#[cfg(feature = "runtime-benchmarks")]
-	impl frame_benchmarking::Benchmark<Block> for Runtime {
-		fn benchmark_metadata(extra: bool) -> (
-			Vec<frame_benchmarking::BenchmarkList>,
-			Vec<frame_support::traits::StorageInfo>,
-		) {
-			use frame_benchmarking::{baseline, BenchmarkList};
-			use frame_support::traits::StorageInfoTrait;
-
-			use baseline::Pallet as BaselineBench;
-			use frame_system_benchmarking::Pallet as SystemBench;
-
-			use pallet_evm_precompile_curve25519_benchmarking::Pallet as EVMPrecompileCurve25519Bench;
-			use pallet_evm_precompile_sha3fips_benchmarking::Pallet as EVMPrecompileSha3FIPSBench;
-
-			let mut list = Vec::<BenchmarkList>::new();
-			list_benchmarks!(list, extra);
-
-			let storage_info = AllPalletsWithSystem::storage_info();
-			(list, storage_info)
-		}
-
-		#[allow(non_local_definitions)]
-		fn dispatch_benchmark(
-			config: frame_benchmarking::BenchmarkConfig
-		) -> Result<Vec<frame_benchmarking::BenchmarkBatch>, alloc::string::String> {
-			use frame_benchmarking::{baseline, BenchmarkBatch};
-			use frame_support::traits::TrackedStorageKey;
-
-			use baseline::Pallet as BaselineBench;
-			use frame_system_benchmarking::Pallet as SystemBench;
-			use pallet_evm_precompile_curve25519_benchmarking::Pallet as EVMPrecompileCurve25519Bench;
-			use pallet_evm_precompile_sha3fips_benchmarking::Pallet as EVMPrecompileSha3FIPSBench;
-
-			impl baseline::Config for Runtime {}
-			impl frame_system_benchmarking::Config for Runtime {}
-			impl pallet_evm_precompile_curve25519_benchmarking::Config for Runtime {}
-			impl pallet_evm_precompile_sha3fips_benchmarking::Config for Runtime {}
-
-			let whitelist: Vec<TrackedStorageKey> = Vec::new();
-
-			let mut batches = Vec::<BenchmarkBatch>::new();
-			let params = (&config, &whitelist);
-			add_benchmarks!(params, batches);
-			Ok(batches)
-		}
-	}
+	// Prunes eras past the history from `on_idle` (`staking::pruning`).
+	#[runtime::pallet_index(30)]
+	pub type EraPruning = staking::pruning;
 }

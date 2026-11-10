@@ -1,6 +1,6 @@
 [package]
 name = "pallet-ismp-messaging"
-version = "0.1.0"
+version = "0.2.0"
 description = "Cross-chain messaging over ISMP for Orbinum"
 authors = { workspace = true }
 license = "GPL-3.0-or-later"

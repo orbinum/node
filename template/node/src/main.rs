@@ -1,25 +1,7 @@
-//! Substrate Node Template CLI library.
+//! Orbinum node binary.
 
-#![warn(missing_docs)]
-#![allow(
-	clippy::type_complexity,
-	clippy::too_many_arguments,
-	clippy::large_enum_variant,
-	clippy::result_large_err
-)]
-#![cfg_attr(feature = "runtime-benchmarks", warn(unused_crate_dependencies))]
-
-mod author_version;
-#[cfg(feature = "runtime-benchmarks")]
-mod benchmarking;
-mod chain_spec;
-mod cli;
-mod client;
-mod command;
-mod eth;
-mod rpc;
-mod service;
+#![allow(clippy::result_large_err)]
 
 fn main() -> sc_cli::Result<()> {
-	command::run()
+	orbinum_node::run()
 }

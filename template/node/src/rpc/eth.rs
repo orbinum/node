@@ -1,112 +1,51 @@
-use std::{collections::BTreeMap, sync::Arc};
+//! Ethereum RPCs: `eth_*`, `net_*`, `web3_*`, `debug_*` and, with `txpool`, `txpool_*`.
 
-use jsonrpsee::RpcModule;
-// Substrate
-use sc_client_api::{
-	backend::{Backend, StorageProvider},
-	client::BlockchainEvents,
-	AuxStore, UsageProvider,
+use std::sync::Arc;
+
+use fc_rpc::{
+	pending::AuraConsensusDataProvider, Debug, DebugApiServer, Eth, EthApiServer, EthDevSigner,
+	EthFilter, EthFilterApiServer, EthPubSub, EthPubSubApiServer, EthSigner, LogsJournal, Net,
+	NetApiServer, Web3, Web3ApiServer,
 };
-use sc_network::service::traits::NetworkService;
-use sc_network_sync::SyncingService;
+#[cfg(feature = "txpool")]
+use fc_rpc::{TxPool, TxPoolApiServer};
+use jsonrpsee::RpcModule;
 use sc_rpc::SubscriptionTaskExecutor;
-use sc_transaction_pool_api::TransactionPool;
-use sp_api::{CallApiAt, ProvideRuntimeApi};
-use sp_block_builder::BlockBuilder as BlockBuilderApi;
-use sp_blockchain::{Error as BlockChainError, HeaderBackend, HeaderMetadata};
-use sp_consensus_aura::{sr25519::AuthorityId as AuraId, AuraApi};
-use sp_core::H256;
 use sp_inherents::CreateInherentDataProviders;
-use sp_runtime::traits::Block as BlockT;
-// Frontier
-pub use fc_rpc::{EthBlockDataCacheTask, EthConfig, LogsJournalConfig};
-pub use fc_rpc_core::types::{FeeHistoryCache, FeeHistoryCacheLimit, FilterPool};
-use fc_storage::StorageOverride;
-use fp_rpc::{ConvertTransaction, ConvertTransactionRuntimeApi, EthereumRuntimeRPCApi};
 
-/// Extra dependencies for Ethereum compatibility.
-pub struct EthDeps<B: BlockT, C, P, CT, CIDP> {
-	/// The client instance to use.
-	pub client: Arc<C>,
-	/// Transaction pool instance.
-	pub pool: Arc<P>,
-	/// Ethereum transaction converter.
-	pub converter: Option<CT>,
-	/// The Node authority flag
-	pub is_authority: bool,
-	/// Whether to enable dev signer
-	pub enable_dev_signer: bool,
-	/// Network service
-	pub network: Arc<dyn NetworkService>,
-	/// Chain syncing service
-	pub sync: Arc<SyncingService<B>>,
-	/// Frontier Backend.
-	pub frontier_backend: Arc<dyn fc_api::Backend<B>>,
-	/// Ethereum data access overrides.
-	pub storage_override: Arc<dyn StorageOverride<B>>,
-	/// Cache for Ethereum block data.
-	pub block_data_cache: Arc<EthBlockDataCacheTask<B>>,
-	/// EthFilterApi pool.
-	pub filter_pool: Option<FilterPool>,
-	/// Maximum number of logs in a query.
-	pub max_past_logs: u32,
-	/// Maximum block range for eth_getLogs.
-	pub max_block_range: u32,
-	/// Reorg journal limits for log filters and subscriptions.
-	pub logs_journal_config: LogsJournalConfig,
-	/// Fee history cache.
-	pub fee_history_cache: FeeHistoryCache,
-	/// Maximum fee history cache size.
-	pub fee_history_cache_limit: FeeHistoryCacheLimit,
-	/// Maximum allowed gas limit will be ` block.gas_limit * execute_gas_limit_multiplier` when
-	/// using eth_call/eth_estimateGas.
-	pub execute_gas_limit_multiplier: u64,
-	/// Allow RPC submission of unprotected legacy transactions.
-	pub rpc_allow_unprotected_txs: bool,
-	/// Mandated parent hashes for a given block hash.
-	pub forced_parent_hashes: Option<BTreeMap<H256, H256>>,
-	/// Something that can create the inherent data providers for pending state
-	pub pending_create_inherent_data_providers: CIDP,
+use super::{storage_override::EeSuffixStorageOverride, EthDeps, MergeResult};
+use crate::{
+	client::{Backend, Client, TransactionPool},
+	frontier::PubSubNotificationSinks,
+};
+use orbinum_runtime::{opaque::Block, TransactionConverter};
+
+/// Filters `eth_newFilter` keeps at once.
+const MAX_STORED_FILTERS: usize = 500;
+
+/// Frontier's RPC configuration for this runtime.
+pub struct EthConfig;
+
+impl fc_rpc::EthConfig<Block, Client> for EthConfig {
+	type EstimateGasAdapter = ();
+	// Frontier's stock overrides assume either AccountId20 or HashedAddressMapping;
+	// this runtime is AccountId32 with EeSuffixAddressMapping.
+	type RuntimeStorageOverride = EeSuffixStorageOverride<Block, Client, Backend>;
 }
 
-/// Instantiate Ethereum-compatible RPC extensions.
-pub fn create_eth<B, C, BE, P, CT, CIDP, EC>(
-	mut io: RpcModule<()>,
-	deps: EthDeps<B, C, P, CT, CIDP>,
+/// Merges the Ethereum RPCs into `io`.
+pub fn merge<CIDP>(
+	io: &mut RpcModule<()>,
+	client: &Arc<Client>,
+	pool: &Arc<TransactionPool>,
+	deps: EthDeps<CIDP>,
 	subscription_task_executor: SubscriptionTaskExecutor,
-	pubsub_notification_sinks: Arc<
-		fc_mapping_sync::EthereumBlockNotificationSinks<
-			fc_mapping_sync::EthereumBlockNotification<B>,
-		>,
-	>,
-) -> Result<RpcModule<()>, Box<dyn std::error::Error + Send + Sync>>
+	pubsub_notification_sinks: Arc<PubSubNotificationSinks>,
+) -> MergeResult
 where
-	B: BlockT,
-	C: CallApiAt<B> + ProvideRuntimeApi<B>,
-	C::Api: AuraApi<B, AuraId>
-		+ BlockBuilderApi<B>
-		+ ConvertTransactionRuntimeApi<B>
-		+ EthereumRuntimeRPCApi<B>,
-	C: HeaderBackend<B> + HeaderMetadata<B, Error = BlockChainError>,
-	C: BlockchainEvents<B> + AuxStore + UsageProvider<B> + StorageProvider<B, BE> + 'static,
-	BE: Backend<B> + 'static,
-	P: TransactionPool<Block = B, Hash = B::Hash> + 'static,
-	CT: ConvertTransaction<<B as BlockT>::Extrinsic> + Send + Sync + 'static,
-	CIDP: CreateInherentDataProviders<B, ()> + Send + 'static,
-	EC: EthConfig<B, C>,
+	CIDP: CreateInherentDataProviders<Block, ()> + Send + 'static,
 {
-	use fc_rpc::{
-		pending::AuraConsensusDataProvider, Debug, DebugApiServer, Eth, EthApiServer, EthDevSigner,
-		EthFilter, EthFilterApiServer, EthPubSub, EthPubSubApiServer, EthSigner, LogsJournal, Net,
-		NetApiServer, Web3, Web3ApiServer,
-	};
-	#[cfg(feature = "txpool")]
-	use fc_rpc::{TxPool, TxPoolApiServer};
-
 	let EthDeps {
-		client,
-		pool,
-		converter,
 		is_authority,
 		enable_dev_signer,
 		network,
@@ -122,7 +61,6 @@ where
 		fee_history_cache_limit,
 		execute_gas_limit_multiplier,
 		rpc_allow_unprotected_txs,
-		forced_parent_hashes,
 		pending_create_inherent_data_providers,
 	} = deps;
 
@@ -139,10 +77,10 @@ where
 	));
 
 	io.merge(
-		Eth::<B, C, P, CT, BE, CIDP, EC>::new(
+		Eth::<Block, Client, TransactionPool, TransactionConverter<Block>, Backend, CIDP, EthConfig>::new(
 			client.clone(),
 			pool.clone(),
-			converter,
+			Some(TransactionConverter::<Block>::default()),
 			sync.clone(),
 			signers,
 			storage_override.clone(),
@@ -153,11 +91,11 @@ where
 			fee_history_cache_limit,
 			execute_gas_limit_multiplier,
 			rpc_allow_unprotected_txs,
-			forced_parent_hashes,
+			None,
 			pending_create_inherent_data_providers,
 			Some(Box::new(AuraConsensusDataProvider::new(client.clone()))),
 		)
-		.replace_config::<EC>()
+		.replace_config::<EthConfig>()
 		.into_rpc(),
 	)?;
 
@@ -168,7 +106,7 @@ where
 				frontier_backend.clone(),
 				pool.clone(),
 				filter_pool,
-				500_usize, // max stored filters
+				MAX_STORED_FILTERS,
 				max_past_logs,
 				max_block_range,
 				block_data_cache.clone(),
@@ -191,18 +129,9 @@ where
 		.into_rpc(),
 	)?;
 
-	io.merge(
-		Net::new(
-			client.clone(),
-			network,
-			// Whether to format the `peer_count` response as Hex (default) or not.
-			true,
-		)
-		.into_rpc(),
-	)?;
-
+	// `true`: `net_peerCount` answers in hex.
+	io.merge(Net::new(client.clone(), network, true).into_rpc())?;
 	io.merge(Web3::new(client.clone()).into_rpc())?;
-
 	io.merge(
 		Debug::new(
 			client.clone(),
@@ -216,5 +145,5 @@ where
 	#[cfg(feature = "txpool")]
 	io.merge(TxPool::new(client.clone(), pool.clone()).into_rpc())?;
 
-	Ok(io)
+	Ok(())
 }

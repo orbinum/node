@@ -14,7 +14,9 @@
 //! ```
 
 use super::*;
-use crate::{OnValidatorRemoved, ValidatorPrerequisites};
+use crate::{
+	Candidacy, OnValidatorRemoved, OpenModeGuard, ValidatorPrerequisites, traits::BenchmarkHelper,
+};
 use frame_benchmarking::v2::*;
 use frame_support::traits::Get;
 use frame_system::RawOrigin;
@@ -63,6 +65,7 @@ mod benchmarks {
 		let target: T::AccountId = account("target", 0, 0);
 		validators.push(target.clone());
 
+		T::BenchmarkHelper::set_active_validators(validators.clone());
 		let bounded: frame_support::BoundedVec<T::AccountId, T::MaxValidators> = validators
 			.try_into()
 			.expect("max entries == MaxValidators; qed");
@@ -90,6 +93,7 @@ mod benchmarks {
 		for v in &validators {
 			LastAuthorVersion::<T>::insert(v, (min, now));
 		}
+		T::BenchmarkHelper::set_active_validators(validators.clone());
 		let bounded: frame_support::BoundedVec<T::AccountId, T::MaxValidators> = validators
 			.try_into()
 			.expect("max entries == MaxValidators; qed");
@@ -115,6 +119,58 @@ mod benchmarks {
 		note_author_version(RawOrigin::None, NodeVersion::new(1, 0, 0));
 
 		assert!(AuthorVersionNoted::<T>::get());
+	}
+
+	// ── Admission ────────────────────────────────────────────────────────────
+
+	/// Worst case: opening, which also consults the runtime's guard.
+	#[benchmark]
+	fn set_admission_mode() {
+		T::OpenModeGuard::setup_can_open();
+
+		#[extrinsic_call]
+		set_admission_mode(RawOrigin::Root, AdmissionMode::Open);
+
+		assert_eq!(Mode::<T>::get(), AdmissionMode::Open);
+	}
+
+	/// Worst case: the account has dependent state, so the removal hook's
+	/// cleanup (a staking chill in the runtime) is measured.
+	#[benchmark]
+	fn ban_validator() {
+		let target: T::AccountId = account("target", 0, 0);
+		T::OnValidatorRemoved::setup_removal_state(&target);
+
+		#[extrinsic_call]
+		ban_validator(RawOrigin::Root, target.clone(), BanTerm::Permanent);
+
+		assert!(Pallet::<T>::is_banned(&target));
+	}
+
+	#[benchmark]
+	fn unban_validator() {
+		let target: T::AccountId = account("target", 0, 0);
+		Bans::<T>::insert(&target, BanTerm::Permanent);
+
+		#[extrinsic_call]
+		unban_validator(RawOrigin::Root, target.clone());
+
+		assert!(!Pallet::<T>::is_banned(&target));
+	}
+
+	/// A candidate the runtime no longer admits: the removal hook's setup
+	/// bonds and offers it as a validator, without session keys.
+	#[benchmark]
+	fn chill_inadmissible() {
+		let target: T::AccountId = account("target", 0, 0);
+		let caller: T::AccountId = whitelisted_caller();
+		T::OnValidatorRemoved::setup_removal_state(&target);
+		assert!(T::Candidacy::is_inadmissible_candidate(&target));
+
+		#[extrinsic_call]
+		chill_inadmissible(RawOrigin::Signed(caller), target.clone());
+
+		assert!(!T::Candidacy::is_inadmissible_candidate(&target));
 	}
 
 	impl_benchmark_test_suite!(

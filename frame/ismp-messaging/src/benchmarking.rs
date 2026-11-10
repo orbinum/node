@@ -42,7 +42,7 @@ use crate::{AcceptedSources, InboundCount, inbound::IsmpModuleCallback, payload:
 use alloc::{vec, vec::Vec};
 use frame_benchmarking::v2::*;
 use frame_support::traits::{
-	Get,
+	EnsureOrigin, Get,
 	fungible::{Inspect, Mutate},
 };
 use frame_system::RawOrigin;
@@ -189,25 +189,31 @@ mod benchmarks {
 
 	/// Worst case: one storage write plus the event.
 	#[benchmark]
-	fn accept_source() {
+	fn accept_source() -> Result<(), BenchmarkError> {
+		let admin = <T as crate::Config>::AdminOrigin::try_successful_origin()
+			.map_err(|_| BenchmarkError::Weightless)?;
 		let source = counterparty();
 
 		#[extrinsic_call]
-		accept_source(RawOrigin::Root, source);
+		accept_source(admin as T::RuntimeOrigin, source);
 
 		assert!(AcceptedSources::<T>::contains_key(source));
+		Ok(())
 	}
 
 	/// Worst case: removing an entry that exists.
 	#[benchmark]
-	fn remove_source() {
+	fn remove_source() -> Result<(), BenchmarkError> {
+		let admin = <T as crate::Config>::AdminOrigin::try_successful_origin()
+			.map_err(|_| BenchmarkError::Weightless)?;
 		let source = counterparty();
 		AcceptedSources::<T>::insert(source, ());
 
 		#[extrinsic_call]
-		remove_source(RawOrigin::Root, source);
+		remove_source(admin as T::RuntimeOrigin, source);
 
 		assert!(!AcceptedSources::<T>::contains_key(source));
+		Ok(())
 	}
 
 	/// Worst case: two storage writes and an event.
@@ -221,7 +227,9 @@ mod benchmarks {
 	/// ceiling on any chain where a full GET outweighs a full body, and the benchmark would
 	/// measure the rejection instead of the write.
 	#[benchmark]
-	fn set_message_fee() {
+	fn set_message_fee() -> Result<(), BenchmarkError> {
+		let admin = <T as crate::Config>::AdminOrigin::try_successful_origin()
+			.map_err(|_| BenchmarkError::Weightless)?;
 		let max = T::MaxMessageFee::get();
 		let worst: <T as pallet_ismp::Config>::Balance =
 			crate::outbound::max_chargeable_size::<T>().saturated_into();
@@ -229,19 +237,23 @@ mod benchmarks {
 		let fee = max.saturating_sub(byte_fee.saturating_mul(worst));
 
 		#[extrinsic_call]
-		set_message_fee(RawOrigin::Root, fee, byte_fee);
+		set_message_fee(admin as T::RuntimeOrigin, fee, byte_fee);
 
 		assert_eq!(crate::MessageFee::<T>::get(), fee);
 		assert_eq!(crate::MessageByteFee::<T>::get(), byte_fee);
+		Ok(())
 	}
 
 	/// Worst case: one storage write and an event.
 	#[benchmark]
-	fn set_outbound_paused() {
+	fn set_outbound_paused() -> Result<(), BenchmarkError> {
+		let admin = <T as crate::Config>::AdminOrigin::try_successful_origin()
+			.map_err(|_| BenchmarkError::Weightless)?;
 		#[extrinsic_call]
-		set_outbound_paused(RawOrigin::Root, true);
+		set_outbound_paused(admin as T::RuntimeOrigin, true);
 
 		assert!(crate::OutboundPaused::<T>::get());
+		Ok(())
 	}
 
 	/// Worst case: an accepted source and a full-length body that decodes, i.e. the

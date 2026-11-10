@@ -1,6 +1,6 @@
 [package]
 name = "orbinum-runtime"
-version = "0.6.0"
+version = "0.7.0"
 license = "Apache-2.0 OR GPL-3.0-or-later"
 description = "Orbinum Privacy Chain Runtime"
 publish = false
@@ -12,6 +12,7 @@ repository = { workspace = true }
 targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
+environmental = { workspace = true }
 ethereum = { workspace = true }
 hex-literal = { workspace = true }
 libsecp256k1 = { workspace = true }
@@ -34,11 +35,12 @@ sp-io = { workspace = true }
 sp-offchain = { workspace = true }
 sp-runtime = { workspace = true }
 sp-session = { workspace = true }
-sp-std = { workspace = true }
+sp-staking = { workspace = true }
 sp-transaction-pool = { workspace = true }
 sp-version = { workspace = true }
 # Substrate FRAME
 frame-benchmarking = { workspace = true, optional = true }
+frame-election-provider-support = { workspace = true }
 frame-executive = { workspace = true }
 frame-metadata-hash-extension = { workspace = true }
 frame-support = { workspace = true, features = ["experimental"] }
@@ -48,16 +50,28 @@ frame-system-rpc-runtime-api = { workspace = true }
 frame-try-runtime = { workspace = true, optional = true }
 pallet-aura = { workspace = true }
 pallet-authorship = { workspace = true }
+pallet-auto-payout = { workspace = true }
+pallet-bags-list = { workspace = true }
 pallet-balances = { workspace = true, features = ["insecure_zero_ed"] }
+pallet-delegated-staking = { workspace = true }
 pallet-grandpa = { workspace = true }
-pallet-session = { workspace = true }
+pallet-nomination-pools = { workspace = true }
+pallet-nomination-pools-benchmarking = { workspace = true, optional = true }
+pallet-nomination-pools-runtime-api = { workspace = true }
+pallet-offences = { workspace = true }
+pallet-paged-election = { workspace = true }
+pallet-session = { workspace = true, features = ["historical"] }
+pallet-staking-async = { workspace = true }
+pallet-staking-async-ah-client = { workspace = true }
+pallet-staking-async-rc-client = { workspace = true }
+pallet-staking-async-runtime-api = { workspace = true }
 pallet-sudo = { workspace = true }
 pallet-timestamp = { workspace = true }
 pallet-transaction-payment = { workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { workspace = true }
 pallet-validator-set = { workspace = true }
 
-# ISMP / Hyperbridge — see the workspace Cargo.toml for why these need patching.
+# ISMP / Hyperbridge
 anyhow = { workspace = true }
 ismp = { workspace = true }
 ismp-grandpa = { workspace = true }
@@ -71,11 +85,12 @@ fp-rpc = { workspace = true }
 fp-self-contained = { workspace = true, features = ["serde"] }
 # Frontier FRAME
 pallet-base-fee = { workspace = true }
-pallet-dynamic-fee = { workspace = true }
 pallet-ethereum = { workspace = true }
 pallet-evm = { workspace = true }
 pallet-evm-chain-id = { workspace = true }
 pallet-evm-precompile-balances = { workspace = true }
+pallet-evm-precompile-blake2 = { workspace = true }
+pallet-evm-precompile-bn128 = { workspace = true }
 pallet-evm-precompile-curve25519 = { workspace = true }
 pallet-evm-precompile-curve25519-benchmarking = { workspace = true }
 pallet-evm-precompile-modexp = { workspace = true }
@@ -98,7 +113,10 @@ substrate-wasm-builder = { workspace = true, optional = true, features = ["metad
 
 [dev-dependencies]
 sp-maybe-compressed-blob = "11.1.0"
-# Only the consensus-binding tests build fixtures from it.
+# GRANDPA equivocation proofs signed with dev keys, for the offence tests.
+finality-grandpa = { version = "0.16.3", features = ["derive-codec"] }
+sp-keyring = { workspace = true, features = ["std"] }
+# Fixtures for the ISMP consensus-client tests.
 grandpa-verifier-primitives = { workspace = true, features = ["std"] }
 
 [features]
@@ -106,12 +124,11 @@ default = ["std", "with-rocksdb-weights", "poseidon-native-runtime", "groth16-na
 with-rocksdb-weights = []
 with-paritydb-weights = []
 
-# Point the ISMP coprocessor at Hyperbridge's testnet deployment (para 4009, currently
-# on the Paseo relay) instead of mainnet (3367). This selects where the BRIDGE lives,
-# not which chains we message — destinations are per-message. Getting it wrong is a
-# silent failure, proofs verify against the wrong chain, so it is a build flag rather
-# than a constant to remember to edit.
+# Use Hyperbridge's testnet coprocessor (para 4009) instead of mainnet (3367).
 hyperbridge-testnet = []
+
+# Local testing only: short sessions and eras; spec name `orbinum-fast`, rejected by live chains.
+fast-runtime = []
 
 poseidon-native-runtime = [
 	"pallet-shielded-pool/poseidon-native",
@@ -121,6 +138,7 @@ groth16-native-runtime = [
 ]
 
 std = [
+	"environmental/std",
 	"ethereum/std",
 	"log/std",
 	"scale-codec/std",
@@ -137,12 +155,13 @@ std = [
 	"sp-offchain/std",
 	"sp-runtime/std",
 	"sp-session/std",
-	"sp-std/std",
+	"sp-staking/std",
 	"sp-transaction-pool/std",
 	"sp-version/std",
 	"substrate-wasm-builder",
 	# Substrate FRAME
 	"frame-benchmarking/std",
+	"frame-election-provider-support/std",
 	"frame-executive/std",
 	"frame-metadata-hash-extension/std",
 	"frame-support/std",
@@ -152,11 +171,23 @@ std = [
 	"frame-system-benchmarking?/std",
 	"pallet-aura/std",
 	"pallet-authorship/std",
+	"pallet-bags-list/std",
+	"pallet-delegated-staking/std",
+	"pallet-nomination-pools/std",
+	"pallet-nomination-pools-benchmarking?/std",
+	"pallet-nomination-pools-runtime-api/std",
 	"pallet-balances/std",
 	"pallet-grandpa/std",
+	"pallet-offences/std",
 	"pallet-session/std",
+	"pallet-paged-election/std",
+	"pallet-staking-async/std",
+	"pallet-staking-async-ah-client/std",
+	"pallet-staking-async-rc-client/std",
+	"pallet-staking-async-runtime-api/std",
 	"pallet-sudo/std",
 	"pallet-validator-set/std",
+	"pallet-auto-payout/std",
 	"pallet-ismp/std",
 	"pallet-ismp-messaging/std",
 	"pallet-ismp-runtime-api/std",
@@ -172,7 +203,6 @@ std = [
 	"fp-self-contained/std",
 	# Frontier FRAME
 	"pallet-base-fee/std",
-	"pallet-dynamic-fee/std",
 	"pallet-ethereum/std",
 	"pallet-evm/std",
 	"pallet-evm-chain-id/std",
@@ -183,6 +213,8 @@ std = [
 	"pallet-evm-precompile-curve25519/std",
 	"pallet-evm-precompile-curve25519-benchmarking/std",
 	"pallet-evm-precompile-balances/std",
+	"pallet-evm-precompile-blake2/std",
+	"pallet-evm-precompile-bn128/std",
 	"pallet-evm-precompile-shielded-pool/std",
 	# Orbinum Privacy
 	"pallet-zk-verifier/std",
@@ -193,12 +225,23 @@ std = [
 	"polkadot-runtime-common/std",
 ]
 
+# Benchmarking only: spec name `orbinum-bench`, rejected by live chains and by the release.
 runtime-benchmarks = [
 	"frame-benchmarking/runtime-benchmarks",
 	"frame-system-benchmarking/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
+	"frame-election-provider-support/runtime-benchmarks",
+	"pallet-bags-list/runtime-benchmarks",
+	"pallet-delegated-staking/runtime-benchmarks",
+	"pallet-nomination-pools/runtime-benchmarks",
+	"pallet-nomination-pools-benchmarking/runtime-benchmarks",
 	"pallet-balances/runtime-benchmarks",
 	"pallet-grandpa/runtime-benchmarks",
+	"pallet-session/runtime-benchmarks",
+	"pallet-paged-election/runtime-benchmarks",
+	"pallet-staking-async/runtime-benchmarks",
+	"pallet-staking-async-ah-client/runtime-benchmarks",
+	"pallet-staking-async-rc-client/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"pallet-sudo/runtime-benchmarks",
 	"pallet-ethereum/runtime-benchmarks",
@@ -208,6 +251,7 @@ runtime-benchmarks = [
 	"pallet-zk-verifier/runtime-benchmarks",
 	"pallet-shielded-pool/runtime-benchmarks",
 	"pallet-validator-set/runtime-benchmarks",
+	"pallet-auto-payout/runtime-benchmarks",
 	"pallet-ismp/runtime-benchmarks",
 	"pallet-ismp-messaging/runtime-benchmarks",
 	"ismp-grandpa/runtime-benchmarks",
@@ -227,19 +271,28 @@ try-runtime = [
 	"frame-system/try-runtime",
 	"pallet-aura/try-runtime",
 	"pallet-authorship/try-runtime",
+	"frame-election-provider-support/try-runtime",
+	"pallet-bags-list/try-runtime",
+	"pallet-delegated-staking/try-runtime",
+	"pallet-nomination-pools/try-runtime",
 	"pallet-balances/try-runtime",
 	"pallet-base-fee/try-runtime",
-	"pallet-dynamic-fee/try-runtime",
 	"pallet-ethereum/try-runtime",
 	"pallet-evm/try-runtime",
 	"pallet-evm-chain-id/try-runtime",
 	"pallet-grandpa/try-runtime",
+	"pallet-offences/try-runtime",
 	"pallet-session/try-runtime",
+	"pallet-paged-election/try-runtime",
+	"pallet-staking-async/try-runtime",
+	"pallet-staking-async-ah-client/try-runtime",
+	"pallet-staking-async-rc-client/try-runtime",
 	"pallet-shielded-pool/try-runtime",
 	"pallet-sudo/try-runtime",
 	"pallet-timestamp/try-runtime",
 	"pallet-transaction-payment/try-runtime",
 	"pallet-validator-set/try-runtime",
+	"pallet-auto-payout/try-runtime",
 	"pallet-ismp/try-runtime",
 	"pallet-ismp-messaging/try-runtime",
 	"ismp-grandpa/try-runtime",

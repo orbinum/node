@@ -133,6 +133,14 @@ jobs:
           CI_DUMMY_VK: "1"
           RUSTFLAGS: "-D warnings"
 
+      # `fast-runtime` changes the session, era, bonding and election constants.
+      - name: Run runtime tests with fast-runtime
+        run: cargo test --release --lib -p orbinum-runtime --features fast-runtime
+        env:
+          CI_DUMMY_VK: "1"
+          RUSTFLAGS: "-D warnings"
+          SKIP_WASM_BUILD: "1"
+
   # Step 3b: Clippy (check mode, its own feature set; runs in parallel with tests)
   clippy:
     name: Clippy

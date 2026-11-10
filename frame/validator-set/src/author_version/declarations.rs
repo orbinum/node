@@ -4,8 +4,8 @@
 
 use super::NodeVersion;
 use crate::{
-	ApprovedValidators, AuthorVersionNoted, Call, Config, Error, LastAuthorVersion,
-	MinAuthorVersion, Pallet,
+	AuthorVersionNoted, BlockAuthor, Call, Config, Error, LastAuthorVersion, MinAuthorVersion,
+	Pallet,
 };
 use frame_support::{
 	dispatch::DispatchResult,
@@ -51,20 +51,29 @@ impl<T: Config> Pallet<T> {
 	/// FRAME rejects a block, so the author's node fails to build it and any
 	/// other node fails to import it.
 	pub(crate) fn settle_author_declaration() {
+		let author = BlockAuthor::<T>::take();
 		if AuthorVersionNoted::<T>::take() {
 			return;
 		}
-		Self::forget_author_version();
+		// It may have rolled back to an older binary.
+		if let Some(author) = author {
+			LastAuthorVersion::<T>::remove(author);
+		}
 		if let Some(min) = MinAuthorVersion::<T>::get() {
 			panic!("block author declared no node version; minimum is {min}");
 		}
 	}
 
-	/// Whether at least 2/3 of the approved set declared `min` or newer within
-	/// `QuorumWindow`. An empty set proves nothing: the session may still run
-	/// validators that never declared.
+	/// Whether at least 2/3 of the active validators, and of those queued for
+	/// the next session, declared `min` or newer within `QuorumWindow`. An
+	/// empty set proves nothing: the session may still run validators that
+	/// never declared.
 	pub(crate) fn has_version_quorum(min: &NodeVersion) -> bool {
-		let validators = ApprovedValidators::<T>::get();
+		Self::quorum_in(&T::ActiveValidators::get(), min)
+			&& Self::quorum_in(&T::QueuedValidators::get(), min)
+	}
+
+	fn quorum_in(validators: &[T::AccountId], min: &NodeVersion) -> bool {
 		if validators.is_empty() {
 			return false;
 		}
@@ -81,29 +90,27 @@ impl<T: Config> Pallet<T> {
 		ready.saturating_mul(3) >= validators.len().saturating_mul(2)
 	}
 
-	/// Records `version` against the block's author if it is approved. Only
-	/// approved validators count toward the quorum, and keeping the map to them
-	/// bounds it by `MaxValidators`.
+	/// Records `version` against the block's author, if it is an active
+	/// validator ([`Self::note_block_author`]). Only they count toward the
+	/// quorum, so the map only ever holds accounts that authored as validators.
 	fn record_author_version(version: NodeVersion) {
-		let Some(author) = Self::block_author() else {
-			return;
-		};
-		if ApprovedValidators::<T>::get().contains(&author) {
+		if let Some(author) = BlockAuthor::<T>::get() {
 			let now = frame_system::Pallet::<T>::block_number();
 			LastAuthorVersion::<T>::insert(author, (version, now));
 		}
 	}
 
-	/// Drops the block's author's last declaration.
-	fn forget_author_version() {
-		if let Some(author) = Self::block_author() {
-			LastAuthorVersion::<T>::remove(author);
-		}
-	}
-
-	/// The current block's author, from its pre-runtime digests.
-	fn block_author() -> Option<T::AccountId> {
+	/// Keeps the block's author for its declaration, if it is an active
+	/// validator. Runs in `on_initialize`, before a session rotation in the same
+	/// block replaces the authorities its slot is read against (`Session` comes
+	/// after this pallet): resolved later, a rotation block's slot would name a
+	/// validator of the new set.
+	pub(crate) fn note_block_author() {
 		let digest = frame_system::Pallet::<T>::digest();
-		T::FindAuthor::find_author(digest.logs.iter().filter_map(|d| d.as_pre_runtime()))
+		let author =
+			T::FindAuthor::find_author(digest.logs.iter().filter_map(|d| d.as_pre_runtime()));
+		if let Some(author) = author.filter(|a| T::ActiveValidators::get().contains(a)) {
+			BlockAuthor::<T>::put(author);
+		}
 	}
 }

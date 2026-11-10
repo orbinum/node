@@ -1,33 +1,26 @@
-//! Orbinum Mainnet chain configuration (stub — not yet launched).
+//! Orbinum Mainnet (`--chain mainnet`), EVM chain ID 270. Not launched.
 //!
-//! Activated with `--chain mainnet` or `--chain orbinum_mainnet`.
-//!
-//! EVM chain ID: **270** (registered in ChainList).
-//!
-//! Genesis state lives in the runtime preset `orbinum_mainnet_runtime_preset`
-//! — see `template/runtime/src/genesis_config_preset/mainnet.rs`. It is a
-//! placeholder: before triggering mainnet genesis, configure there:
-//! - Sudo key (Sr25519)
-//! - Validator set (Aura + GRANDPA keys)
-//! - Genesis balances (treasury, team, investors)
+//! Genesis is the runtime preset `orbinum_mainnet_runtime_preset`, which the runtime
+//! only builds once `MAINNET_CONFIGURED` is set (`template/runtime/src/genesis`).
 
-use sc_chain_spec::ChainType;
+use sc_chain_spec::{ChainType, GenesisConfigBuilderRuntimeCaller};
 
-use super::{properties, ChainSpec};
+use super::{base_builder, wasm_binary, ChainSpec};
 
-/// Orbinum Mainnet configuration (placeholder — not yet launched).
-///
-/// - **Genesis preset:** `"orbinum_mainnet_runtime_preset"` (placeholder values)
-/// - **EVM chain ID:** 270
-pub fn orbinum_mainnet_config() -> ChainSpec {
-	ChainSpec::builder(
-		orbinum_runtime::WASM_BINARY.expect("WASM not available"),
-		Default::default(),
+const PRESET: &str = "orbinum_mainnet_runtime_preset";
+
+/// Orbinum Mainnet configuration. Refused while the runtime does not build its preset.
+pub fn orbinum_mainnet_config() -> Result<ChainSpec, String> {
+	let presets = GenesisConfigBuilderRuntimeCaller::<()>::new(wasm_binary()?).preset_names()?;
+	if !presets.iter().any(|preset| preset == PRESET) {
+		return Err(format!(
+			"mainnet genesis not configured: this runtime does not build the `{PRESET}` \
+			 preset (`MAINNET_CONFIGURED` in template/runtime/src/genesis)"
+		));
+	}
+	Ok(
+		base_builder("Orbinum Mainnet", "orbinum_mainnet", ChainType::Live)?
+			.with_genesis_config_preset_name(PRESET)
+			.build(),
 	)
-	.with_name("Orbinum Mainnet")
-	.with_id("orbinum_mainnet")
-	.with_chain_type(ChainType::Live)
-	.with_properties(properties())
-	.with_genesis_config_preset_name("orbinum_mainnet_runtime_preset")
-	.build()
 }

@@ -36,7 +36,9 @@ pub trait TxPoolApi {
 	///
 	/// For details, see [txpool_content (geth)](https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-txpool#txpool-content)
 	/// or [txpool_content (nethermind)](https://docs.nethermind.io/nethermind/ethereum-client/json-rpc/txpool#txpool_content).
-	#[method(name = "txpool_content")]
+	///
+	/// Unsafe: denied where the server's RPC methods are `safe`.
+	#[method(name = "txpool_content", with_extensions)]
 	fn content(&self) -> RpcResult<TxPoolResult<TransactionMap<Transaction>>>;
 
 	/// The inspect inspection property can be queried to list a textual summary of all the
@@ -51,7 +53,9 @@ pub trait TxPoolApi {
 	///
 	/// For details, see [txpool_inspect (geth)](https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-txpool#txpool-inspect)
 	/// or [txpool_inspect (nethermind)](https://docs.nethermind.io/nethermind/ethereum-client/json-rpc/txpool#txpool_inspect).
-	#[method(name = "txpool_inspect")]
+	///
+	/// Unsafe: denied where the server's RPC methods are `safe`.
+	#[method(name = "txpool_inspect", with_extensions)]
 	fn inspect(&self) -> RpcResult<TxPoolResult<TransactionMap<Summary>>>;
 
 	/// The status inspection property can be queried for the number of transactions currently

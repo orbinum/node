@@ -1,15 +1,10 @@
-//! `eth_call` / `eth_estimateGas` state-override support for Orbinum's account model.
+//! `eth_call` / `eth_estimateGas` state overrides for Orbinum's account model.
 //!
-//! Frontier ships two overrides, one per address model it supports: an
-//! `AccountId20` runtime (`IdentityAddressMapping`) and an `AccountId32` runtime
-//! using `HashedAddressMapping`. Orbinum is neither — it keeps `AccountId32` but
-//! maps addresses with `EeSuffixAddressMapping` (`[H160 | 0x00 × 12]`), so both
-//! stock overrides build a `System::Account` key that does not exist and the
-//! caller's `state_overrides` are silently dropped.
-//!
-//! This override derives the key the way the runtime does. It must stay in step
-//! with `EeSuffixAddressMapping`: a mismatch here does not fail loudly, it just
-//! makes simulated balances and nonces disappear.
+//! Frontier's stock overrides assume `IdentityAddressMapping` (`AccountId20`) or
+//! `HashedAddressMapping` (`AccountId32`). Orbinum maps addresses with
+//! `EeSuffixAddressMapping` (`[H160 | 0x00 × 12]`), so they would build a
+//! `System::Account` key that does not exist and silently drop the overrides.
+//! This one derives the key as the runtime does and must stay in step with it.
 
 use std::marker::PhantomData;
 
@@ -90,9 +85,7 @@ mod tests {
 
 	use super::*;
 
-	/// The whole point of this file: the RPC-side derivation and the runtime's
-	/// `EeSuffixAddressMapping` must agree, or state overrides build a
-	/// `System::Account` key that does not exist and are dropped without an error.
+	/// The RPC-side derivation agrees with the runtime's `EeSuffixAddressMapping`.
 	#[test]
 	fn matches_the_runtime_address_mapping() {
 		for byte in [0x00u8, 0x01, 0x42, 0xAB, 0xFF] {
