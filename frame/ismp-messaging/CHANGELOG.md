@@ -15,6 +15,14 @@ Ships with runtime spec 21.
 
 ### Changed
 
+- **Layout** follows `pallet-paged-election`: `lib.rs` holds the pallet macro,
+  `engine/` the logic by concern, `types/` the data types, `benchmarking/` the
+  benchmarks and `weights.rs`, `tests/` the mock and one folder per concern
+  (`inbound/`, `outbound/`, `pallet/`). Every public path, the storage layout
+  and the metadata are unchanged.
+  `inbound`, `outbound`, `receipts` and `payload` stay reachable at the crate
+  root. The `try-runtime` feature enables `pallet-ismp/try-runtime`, so the crate
+  builds with it on its own.
 - **`Config::AdminOrigin`** (breaking): `accept_source`, `remove_source`,
   `set_message_fee` and `set_outbound_paused` check it instead of root in code, so
   the chain's cross-chain trust can move to a multisig or council by changing a

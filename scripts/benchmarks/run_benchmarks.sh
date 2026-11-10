@@ -93,13 +93,13 @@ SCRATCH_DIR="./target/benchmark-weights"
 # so the runtime does not register it and there is no weights file to generate.
 PALLETS=(
     # pallet:output:group
-    "pallet_zk_verifier:./frame/zk-verifier/src/weights.rs:core"
-    "pallet_shielded_pool:./frame/shielded-pool/src/weights.rs:core"
-    "pallet_validator_set:./frame/validator-set/src/weights.rs:core"
+    "pallet_zk_verifier:./frame/zk-verifier/src/benchmarking/weights.rs:core"
+    "pallet_shielded_pool:./frame/shielded-pool/src/benchmarking/weights.rs:core"
+    "pallet_validator_set:./frame/validator-set/src/benchmarking/weights.rs:core"
     # ISMP crates we do not own: the WeightInfo trait belongs to the upstream crate, so
     # the generated impl lives runtime-side rather than in the pallet. Every output under
     # $RUNTIME_WEIGHTS_DIR is rewritten by `adopt_upstream_trait` to implement it.
-    "pallet_ismp_messaging:./frame/ismp-messaging/src/weights.rs:ismp"
+    "pallet_ismp_messaging:./frame/ismp-messaging/src/benchmarking/weights.rs:ismp"
     "ismp_grandpa:./template/runtime/src/weights/ismp_grandpa.rs:ismp"
     # Staking. Upstream traits too: the runtime uses each pallet's `SubstrateWeight`
     # (Parity's reference machine) until a generated file is declared in

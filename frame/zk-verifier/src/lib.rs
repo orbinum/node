@@ -1,58 +1,74 @@
-//! # ZK Verifier Pallet
+//! # Pallet ZK Verifier
 //!
-//! On-chain Groth16 proof verification with versioned verification keys.
+//! On-chain Groth16 proof verification under versioned verification keys. Other
+//! pallets verify through [`ZkVerifierPort`], describing a spend as a statement
+//! of domain values; the pallet encodes it for the key it is checked against
+//! and runs the pairing.
 //!
-//! ## Responsibilities
+//! ## Keys
 //!
-//! - Store and version verification keys per circuit (`AdminOrigin`-gated extrinsics).
-//! - Expose [`ZkVerifierPort`] — the only public interface other pallets use.
-//! - Encode spend statements into public inputs ([`encoding`]) for the layout of
-//!   the key they are checked against.
-//! - Verify proofs and track per-circuit statistics ([`verifier`]).
+//! - `AdminOrigin` registers, activates, retires, denies and removes keys, up to
+//!   `MAX_VERSIONS_PER_CIRCUIT` versions per circuit; one version is active.
+//! - A key is admitted only if it deserializes and its arity gives the circuit
+//!   an admitted layout: a spend circuit's keys are memo-bound or, for a
+//!   transfer, cross-tree (one root per input), never base; shield has one
+//!   layout.
+//! - Each key is stored with its hash and prepared once ([`PreparedKeys`]), so
+//!   a verification skips preparing it.
+//! - Rotation: register the new version, `set_active_version`, then
+//!   `retire_version` the old one.
 //!
-//! ## Key rotation
+//! ## Verification
 //!
-//! A spend circuit's keys are memo-bound or, for a transfer, cross-tree (one
-//! root per input); shield has one layout. Rotation is done by `AdminOrigin`: register
-//! the new version, `set_active_version`, then `retire_version` the old one.
+//! The version (the given one, else the active one) is resolved, its key loaded
+//! and its arity read; the statement is encoded for that layout ([`encoding`])
+//! and verified if it fills the key exactly. Every attempt is counted in
+//! [`VerificationStats`]. Only an unknown circuit or version is an error; any
+//! other failure is an invalid proof.
 //!
-//! ## Usage
+//! ## Safety
 //!
-//! ```ignore
-//! ZkVerifier::verify_proof(origin, circuit_id, proof, public_inputs)?;
-//! ```
+//! - A denied key ([`DeniedVkHashes`]) is refused on register, activate and
+//!   unretire, and verifies nothing if stored; a removed version can hold only
+//!   its own key again ([`RemovedVkHashes`]). Both records are append-only.
+//! - A retired version verifies nothing and never falls back to the active one.
+//! - `skip-proof-verification` builds only together with `runtime-benchmarks`.
+//!
+//! ## Layout
+//!
+//! - [`types`]: keys and their bookkeeping, the [`ZkVerifierPort`] interface
+//!   and its statements, and the runtime API's responses.
+//! - `engine`: the pallet's logic, one module per concern (registry, key
+//!   storage, verification, the port, the runtime API), [`encoding`], the
+//!   statements' public inputs as pure functions, and the storage
+//!   [`migrations`].
+//! - `benchmarking`: the benchmarks and the [`weights`] they produce.
+//! - `tests`: the mock runtime and the tests, grouped by concern as `engine` is.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
 
-pub use pallet::*;
+pub mod types;
 
-mod encoding;
-mod keys;
-pub mod migrations;
-mod port;
-mod runtime_api;
-mod types;
-mod verifier;
-pub mod weights;
+mod benchmarking;
+mod engine;
 
-#[cfg(test)]
-mod mock;
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "runtime-benchmarks")]
-mod benchmarking;
+pub use benchmarking::weights;
+pub use engine::{encoding, migrations};
 
-pub use port::{ShieldStatement, TransferStatement, UnshieldStatement, ZkVerifierPort};
+use engine::verifier;
+
+pub use pallet::*;
 pub use types::{
-	CircuitId, CircuitVersionInfo, PreparedVkBytes, ProofSystem, VerificationKeyInfo,
-	VerificationStatistics, VkBytes, VkEntry, VkVersionHash,
+	CircuitId, CircuitVersionInfo, PreparedVkBytes, ProofSystem, ShieldStatement,
+	TransferStatement, UnshieldStatement, VerificationKeyInfo, VerificationStatistics, VkBytes,
+	VkEntry, VkVersionHash, ZkVerifierPort,
 };
 pub use weights::WeightInfo;
-
-// ─── Pallet ───────────────────────────────────────────────────────────────────
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -606,82 +622,6 @@ pub mod pallet {
 			// Weighed by versions: the benchmark charges one read and a write per
 			// map for each version.
 			Ok(Some(T::WeightInfo::purge_circuit(widest as u32)).into())
-		}
-	}
-
-	// ── Key rules ─────────────────────────────────────────────────────────────
-
-	impl<T: Config> Pallet<T> {
-		/// Upper bound on stored versions per circuit — keeps the versions DoubleMap
-		/// and the runtime-API iteration provably bounded. Registration is `AdminOrigin`-only,
-		/// so this is operator-discipline, not an attacker limit.
-		pub(crate) const MAX_VERSIONS_PER_CIRCUIT: u32 = 64;
-
-		/// The version genesis registers.
-		pub(crate) const FIRST_VERSION: u32 = 1;
-
-		/// Validate and store a new key for `(circuit_id, version)`, then activate
-		/// it if `set_active` or the circuit has no active version yet. Every
-		/// registration path (extrinsics, genesis) goes through here.
-		pub(crate) fn register_vk(
-			circuit_id: CircuitId,
-			version: u32,
-			key_data: VkBytes,
-			set_active: bool,
-		) -> DispatchResult {
-			ensure!(!key_data.is_empty(), Error::<T>::EmptyVerificationKey);
-			Self::ensure_vk_admitted(circuit_id, &key_data)?;
-			// Never overwrite: a replaced key would silently change what verifies.
-			ensure!(
-				!VerificationKeys::<T>::contains_key(circuit_id, version),
-				Error::<T>::CircuitAlreadyExists
-			);
-			// Nor reuse a removed version for another key.
-			ensure!(
-				RemovedVkHashes::<T>::get(circuit_id, version)
-					.is_none_or(|h| h == sp_io::hashing::blake2_256(&key_data)),
-				Error::<T>::VersionReused
-			);
-			Self::store_vk(circuit_id, version, key_data)?;
-			Self::deposit_event(Event::VerificationKeyRegistered {
-				circuit_id,
-				version,
-			});
-			if set_active || ActiveCircuitVersion::<T>::get(circuit_id).is_none() {
-				Self::activate(circuit_id, version);
-			}
-			Ok(())
-		}
-
-		/// Make `version` the one new spends of `circuit_id` are verified under.
-		pub(crate) fn activate(circuit_id: CircuitId, version: u32) {
-			ActiveCircuitVersion::<T>::insert(circuit_id, version);
-			Self::deposit_event(Event::ActiveVersionSet {
-				circuit_id,
-				version,
-			});
-		}
-
-		/// Whether `hash` is in `DeniedVkHashes`.
-		pub(crate) fn is_denied(hash: &[u8; 32]) -> bool {
-			DeniedVkHashes::<T>::contains_key(hash)
-		}
-
-		/// The rule every stored key is held to: it is not denied, it deserializes as
-		/// a BN254 Groth16 key, and its arity gives an admitted layout
-		/// ([`verifier::admitted_layout`]). Ids outside the known table are only
-		/// checked to deserialize.
-		fn ensure_vk_admitted(circuit_id: CircuitId, key_data: &[u8]) -> DispatchResult {
-			ensure!(
-				!Self::is_denied(&sp_io::hashing::blake2_256(key_data)),
-				Error::<T>::DeniedVerificationKey
-			);
-			let arity = orbinum_zk_verifier::VerifyingKey::new(key_data.to_vec())
-				.num_public_inputs()
-				.map_err(|_| Error::<T>::InvalidVerificationKey)?;
-			verifier::admitted_layout(circuit_id, arity)
-				.map(|_| ())
-				.ok_or(Error::<T>::InvalidVerificationKey.into())
 		}
 	}
 }

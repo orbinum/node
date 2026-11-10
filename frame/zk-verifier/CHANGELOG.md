@@ -12,6 +12,11 @@ All notable changes to this pallet are documented here.
 
 ### Changed
 
+- **Layout** follows `pallet-paged-election`: `lib.rs` holds the pallet macro,
+  `engine/` the logic by concern, `types/` the data types, `benchmarking/` the
+  benchmarks and `weights.rs`, `tests/` the mock and one folder per concern
+  (`keys/`, `verification/`, `pallet/`). Every public path, the storage layout
+  and the metadata are unchanged. `types` and `encoding` are now public modules.
 - **Weights regenerated** on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-09).
 - **`Config::AdminOrigin`** checks every key-management call
   (`register_verification_key`, `set_active_version`,

@@ -64,28 +64,37 @@
 //! // Collect the spend fees credited to a validator
 //! ShieldedPool::claim_fees(RuntimeOrigin::signed(validator), asset_id, amount)?;
 //! ```
+//!
+//! ## Layout
+//!
+//! - [`types`]: commitments, nullifiers, notes, memos, Merkle paths and asset
+//!   metadata.
+//! - `engine`: the pallet's logic, one module per concern: the calls'
+//!   workflows ([`operations`]), pool admission of unsigned spends
+//!   ([`validate_unsigned`]), the Merkle forest ([`merkle`]), the storage
+//!   repositories ([`storage`]), the initial state and the invariants
+//!   `try_state` checks (`state`, with [`genesis`]), and the queries wallets and
+//!   RPC use (`queries`, with [`helpers`]). Its public modules are re-exported
+//!   at the crate root.
+//! - `benchmarking`: the benchmarks and the [`weights`] they produce.
+//! - `tests`: the mock runtime and the tests, grouped by concern as `engine` is.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
 
-pub mod genesis;
-pub mod helpers;
-pub mod merkle;
-pub mod operations;
-pub mod storage;
 pub mod types;
-pub mod validate_unsigned;
-pub mod weights;
 
-mod runtime_api_impl;
-
-#[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
-#[cfg(test)]
-mod mock;
+mod engine;
+
 #[cfg(test)]
 mod tests;
+
+pub use benchmarking::weights;
+pub use engine::{
+	merkle, operations, queries::helpers, state::genesis, storage, unsigned as validate_unsigned,
+};
 
 pub use pallet::*;
 pub use types::{
@@ -473,112 +482,12 @@ pub mod pallet {
 		}
 
 		fn integrity_test() {
-			// `const` block: both operands are `cfg!`, so this resolves at compile time
-			// and a bad feature combination fails the build rather than the runtime's
-			// integrity check. Strictly stronger than asserting at runtime, and it is
-			// what clippy::assertions_on_constants asks for.
-			const {
-				assert!(
-					!cfg!(feature = "skip-proof-verification")
-						|| cfg!(feature = "runtime-benchmarks"),
-					"pallet-shielded-pool compiled with `skip-proof-verification` but without \
-					 `runtime-benchmarks`: shield/unshield/transfer proofs are NOT verified \
-					 outside a benchmark build. This must never run on a live chain."
-				);
-			}
-
-			assert_eq!(
-				T::MaxTreeDepth::get(),
-				crate::types::MAX_TREE_DEPTH,
-				"MaxTreeDepth config must equal the fixed tree depth (MAX_TREE_DEPTH)"
-			);
-
-			assert!(
-				T::MaxHistoricRoots::get() > 0,
-				"MaxHistoricRoots must be non-zero, otherwise no root can ever be stored"
-			);
-
-			// The retention window must outlive the mempool longevity an unsigned
-			// transaction is admitted with, or a spend can pass validation, get
-			// gossiped, and only revert once included.
-			let retention: u64 =
-				sp_runtime::traits::UniqueSaturatedInto::<u64>::unique_saturated_into(
-					T::RootRetentionBlocks::get(),
-				);
-			assert!(
-				retention > crate::validate_unsigned::TX_LONGEVITY,
-				"RootRetentionBlocks must exceed TX_LONGEVITY, otherwise a root can \
-				 expire while a transaction admitted against it is still valid in the pool"
-			);
-
-			// Level 0 is `MerkleLeaves` and never prunable; the top level is the
-			// root itself. A cut outside that range would either prune nothing or
-			// leave `get_merkle_path` with no stored node to start from.
-			let cut = T::SealedTreePrunedBelowLevel::get();
-			assert!(
-				cut > 0 && (cut as usize) < crate::types::DEFAULT_TREE_DEPTH,
-				"SealedTreePrunedBelowLevel must be in 1..DEFAULT_TREE_DEPTH"
-			);
-
-			let cap = T::MaxLeavesPerTree::get();
-			assert!(
-				cap.is_power_of_two() && cap <= (1u32 << crate::types::MAX_TREE_DEPTH),
-				"MaxLeavesPerTree must be a power of two <= 2^MAX_TREE_DEPTH; \
-				 clients derive tree_id from the global leaf index using this \
-				 constant, so it must never change on a live chain"
-			);
+			Self::check_parameters();
 		}
 
-		/// Ledger-solvency invariant: the pool account's physical free balance
-		/// covers the tracked native-asset pool balance. Fees stay physical in the
-		/// pool until `claim_fees` pays them out, so both move together, and the
-		/// pending fees never exceed the ledger that backs them. Anyone can send
-		/// the pool account funds (a transfer, an EVM value transfer), so the
-		/// physical balance may exceed the ledger; that surplus is a donation no
-		/// note can spend.
-		/// Only the native asset (0) is backed by `Currency`; other assets live in
-		/// external backends — TODO: extend when a per-asset balance reader exists.
 		#[cfg(feature = "try-runtime")]
 		fn try_state(_: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
-			let pool = Self::pool_account_id();
-			let physical = T::Currency::free_balance(&pool);
-			let tracked = PoolBalancePerAsset::<T>::get(0u32);
-			frame_support::ensure!(
-				tracked <= physical,
-				sp_runtime::TryRuntimeError::Other(
-					"shielded-pool native ledger exceeds the physical pool balance"
-				)
-			);
-			let pending = PendingFees::<T>::iter()
-				.filter(|(_, asset_id, _)| *asset_id == 0)
-				.fold(0u128, |sum, (_, _, amount)| sum.saturating_add(amount));
-			frame_support::ensure!(
-				pending <= sp_runtime::SaturatedConversion::saturated_into::<u128>(tracked),
-				sp_runtime::TryRuntimeError::Other(
-					"shielded-pool pending fees exceed the native pool ledger"
-				)
-			);
-
-			// Forest invariants: the active root must always be provable
-			// against; one sealed root per completed tree; the sealed maps
-			// are a bijection.
-			use crate::storage::MerkleRepository;
-			frame_support::ensure!(
-				MerkleRepository::is_known_root::<T>(&MerkleRepository::get_poseidon_root::<T>()),
-				sp_runtime::TryRuntimeError::Other("PoseidonRoot not in known-roots set")
-			);
-			let sealed = SealedTreeRoots::<T>::iter().count() as u32;
-			frame_support::ensure!(
-				sealed == MerkleRepository::get_tree_size::<T>() / T::MaxLeavesPerTree::get(),
-				sp_runtime::TryRuntimeError::Other("sealed-tree count != tree_size / cap")
-			);
-			for (tree_id, root) in SealedTreeRoots::<T>::iter() {
-				frame_support::ensure!(
-					SealedRootIndex::<T>::get(root) == Some(tree_id),
-					sp_runtime::TryRuntimeError::Other("SealedRootIndex out of sync")
-				);
-			}
-			Ok(())
+			Self::do_try_state()
 		}
 	}
 
@@ -1118,26 +1027,6 @@ pub mod pallet {
 			call: &Self::Call,
 		) -> Result<(), sp_runtime::transaction_validity::TransactionValidityError> {
 			Self::validate_spend(call, false).map(|_| ())
-		}
-	}
-
-	impl<T: Config> Pallet<T> {
-		/// Admission of an unsigned spend; `with_proof` also verifies its proof.
-		fn validate_spend(
-			call: &Call<T>,
-			with_proof: bool,
-		) -> sp_runtime::transaction_validity::TransactionValidity {
-			use crate::{operations::SpendRequest, validate_unsigned as admit};
-			use sp_runtime::transaction_validity::InvalidTransaction;
-
-			let Some((proof, request)) = SpendRequest::from_call(call) else {
-				return InvalidTransaction::Call.into();
-			};
-			let proof = with_proof.then_some(proof.as_slice());
-			match request {
-				SpendRequest::Transfer(req) => admit::validate_private_transfer(proof, &req),
-				SpendRequest::Unshield(req) => admit::validate_unshield(proof, &req),
-			}
 		}
 	}
 }
