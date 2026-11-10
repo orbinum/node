@@ -246,6 +246,8 @@ pub(crate) struct MockHandle {
 	/// Differs from `context.address` under DELEGATECALL.
 	pub code_address: H160,
 	pub is_static: bool,
+	/// The `(ref_time, proof_size)` external costs recorded, in order.
+	pub external_costs: Vec<(Option<u64>, Option<u64>)>,
 }
 
 impl MockHandle {
@@ -259,6 +261,7 @@ impl MockHandle {
 			},
 			code_address: H160::zero(),
 			is_static: false,
+			external_costs: Vec::new(),
 		}
 	}
 
@@ -290,10 +293,11 @@ impl PrecompileHandle for MockHandle {
 
 	fn record_external_cost(
 		&mut self,
-		_ref_time: Option<u64>,
-		_proof_size: Option<u64>,
+		ref_time: Option<u64>,
+		proof_size: Option<u64>,
 		_storage_growth: Option<u64>,
 	) -> Result<(), ExitError> {
+		self.external_costs.push((ref_time, proof_size));
 		Ok(())
 	}
 

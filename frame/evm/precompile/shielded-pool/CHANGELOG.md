@@ -6,6 +6,13 @@ All notable changes to `pallet-evm-precompile-shielded-pool` will be documented 
 
 ## [0.10.1] - 2026-11-08
 
+### Security
+
+- **The call's weight is recorded as external cost** (ref time and proof size)
+  before it dispatches, as upstream's dispatch precompile does, so the EVM's
+  weight limits see the tree and memo reads a shield makes. Gas alone left its
+  proof size unmetered. Storage growth stays unrecorded, as upstream.
+
 ### Changed
 
 - Test runtime sets `pallet-shielded-pool` 0.26.0's `AdminOrigin`. No change

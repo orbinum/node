@@ -1,9 +1,8 @@
 //! Dispatch helpers for the shielded-pool precompile.
 //!
 //! [`origin::from_self`] builds the origin (the precompile's own address,
-//! signed); converting the pallet call to a runtime call, charging gas from its
-//! weight and mapping the dispatch result to a precompile outcome live here, in
-//! [`record_and_dispatch`].
+//! signed). [`record_and_dispatch`] converts the pallet call, charges its weight
+//! as gas and external cost, and maps the dispatch result.
 
 mod origin;
 
@@ -38,9 +37,10 @@ where
 	let runtime_call = <<T as frame_system::Config>::RuntimeCall as From<
 		pallet_shielded_pool::Call<T>,
 	>>::from(call);
-	let gas_cost =
-		T::GasWeightMapping::weight_to_gas(runtime_call.get_dispatch_info().total_weight());
-	handle.record_cost(gas_cost)?;
+	let weight = runtime_call.get_dispatch_info().total_weight();
+	// Feeds the EVM's weight limits, as upstream's dispatch precompile does.
+	handle.record_external_cost(Some(weight.ref_time()), Some(weight.proof_size()), None)?;
+	handle.record_cost(T::GasWeightMapping::weight_to_gas(weight))?;
 
 	dispatch(runtime_call, build_origin())
 }
