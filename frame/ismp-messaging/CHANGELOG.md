@@ -13,6 +13,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Ships with runtime spec 21.
 
+### Security
+
+- **An inbound body must decode exactly** (`decode_all`): trailing bytes make it
+  `Undecodable`, so two different bodies cannot carry the same message.
+
 ### Changed
 
 - **Layout** follows `pallet-paged-election`: `lib.rs` holds the pallet macro,

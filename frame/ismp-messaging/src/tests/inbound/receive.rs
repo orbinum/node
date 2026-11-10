@@ -76,6 +76,22 @@ fn an_undecodable_body_is_accepted_and_reported_not_errored() {
 }
 
 #[test]
+fn a_body_with_trailing_bytes_is_rejected_as_undecodable() {
+	new_test_ext().execute_with(|| {
+		AcceptedSources::<Test>::insert(COPROCESSOR, ());
+		let mut body = Message::Ping { nonce: 7 }.encode();
+		body.push(0);
+
+		assert!(
+			IsmpModuleCallback::<Test>::default()
+				.on_accept(post_from(COPROCESSOR, body))
+				.is_ok()
+		);
+		assert_eq!(InboundCount::<Test>::get(), 0, "not counted as handled");
+	});
+}
+
+#[test]
 fn on_accept_does_not_dispatch() {
 	new_test_ext().execute_with(|| {
 		AcceptedSources::<Test>::insert(COPROCESSOR, ());
