@@ -120,8 +120,7 @@ impl MerkleRepository {
 	pub fn set_historic_roots_tail<T: Config>(tail: u64) {
 		HistoricRootsTail::<T>::put(tail);
 	}
-	/// Number of slots still queued. Bounded by the retention window in practice
-	/// and hard-capped by `MaxHistoricRoots`.
+	/// Slots still queued: about one retention window of roots.
 	pub fn historic_roots_queued<T: Config>() -> u64 {
 		HistoricRootsHead::<T>::get().saturating_sub(HistoricRootsTail::<T>::get())
 	}

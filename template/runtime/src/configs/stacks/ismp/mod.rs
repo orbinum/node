@@ -89,13 +89,53 @@ impl pallet_ismp::Config for Runtime {
 	///
 	/// Separate from the outbound message charge, which `pallet-ismp-messaging` takes
 	/// directly (its `outbound::fee_for`).
-	type FeeHandler = pallet_ismp::fee_handler::WeightFeeHandler<
-		AccountId,
-		Balances,
-		<Runtime as pallet_transaction_payment::Config>::WeightToFee,
-		IsmpTreasuryPalletId,
-		false,
-	>;
+	type FeeHandler = (
+		pallet_ismp::fee_handler::WeightFeeHandler<
+			AccountId,
+			Balances,
+			<Runtime as pallet_transaction_payment::Config>::WeightToFee,
+			IsmpTreasuryPalletId,
+			false,
+		>,
+		ChargeBlockWeight,
+	);
+}
+
+/// Charges an inbound batch's real cost to the block.
+///
+/// `handle_unsigned` declares a flat weight and reports no actual one, so callback
+/// work never reached `BlockWeight`. This registers each message's callback weight
+/// (summed upstream, passed only to the fee handler) plus a read and write per
+/// request, response and timeout. One batch is still bounded only by block length.
+pub struct ChargeBlockWeight;
+
+impl pallet_ismp::fee_handler::FeeHandler for ChargeBlockWeight {
+	fn on_executed(
+		messages: alloc::vec::Vec<ismp::messaging::MessageWithWeight>,
+		_events: alloc::vec::Vec<ismp::events::Event>,
+	) -> frame_support::dispatch::DispatchResultWithPostInfo {
+		let used = messages
+			.iter()
+			.fold(frame_support::weights::Weight::zero(), |used, m| {
+				let receipts = match &m.message {
+					ismp::messaging::Message::Request(r) => r.requests.len() as u64,
+					ismp::messaging::Message::Response(r) => r.requests().len() as u64,
+					ismp::messaging::Message::Timeout(t) => t.requests().len() as u64,
+					_ => 0,
+				};
+				used.saturating_add(m.weight).saturating_add(
+					<<Runtime as frame_system::Config>::DbWeight as frame_support::traits::Get<
+						frame_support::weights::RuntimeDbWeight,
+					>>::get()
+					.reads_writes(receipts, receipts),
+				)
+			});
+		frame_system::Pallet::<Runtime>::register_extra_weight_unchecked(
+			used,
+			frame_support::dispatch::DispatchClass::Normal,
+		);
+		Ok(().into())
+	}
 }
 
 // Commitment retention stays at the pallet default: 10,240 heights, ~17 h against a 6 s

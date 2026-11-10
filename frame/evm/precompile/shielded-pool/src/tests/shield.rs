@@ -139,3 +139,22 @@ fn shield_with_zero_value_rejected() {
 		expect_error(ShieldedPoolPrecompile::<Test>::execute(&mut h));
 	});
 }
+
+/// The call's ref time and proof size are recorded as external cost.
+#[test]
+fn shield_records_its_weight_as_external_cost() {
+	new_test_ext().execute_with(|| {
+		let input = encode_shield(0, canon(0x51), &[0xAB; 180]);
+		let mut h = MockHandle::with_value(input, 1_000);
+		assert_success(ShieldedPoolPrecompile::<Test>::execute(&mut h));
+
+		let [(ref_time, proof_size)] = h.external_costs[..] else {
+			panic!("one external cost, got {:?}", h.external_costs);
+		};
+		assert!(ref_time.is_some_and(|t| t > 0));
+		assert!(
+			proof_size.is_some_and(|p| p > 0),
+			"proof size must be metered"
+		);
+	});
+}

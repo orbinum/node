@@ -24,19 +24,6 @@ use frame_support::traits::Get;
 impl<T: Config> Pallet<T> {
 	/// Panics on parameters the pallet cannot work with.
 	pub(crate) fn check_parameters() {
-		// `const` block: both operands are `cfg!`, so this resolves at compile time
-		// and a bad feature combination fails the build rather than the runtime's
-		// integrity check. Strictly stronger than asserting at runtime, and it is
-		// what clippy::assertions_on_constants asks for.
-		const {
-			assert!(
-				!cfg!(feature = "skip-proof-verification") || cfg!(feature = "runtime-benchmarks"),
-				"pallet-shielded-pool compiled with `skip-proof-verification` but without \
-				 `runtime-benchmarks`: shield/unshield/transfer proofs are NOT verified \
-				 outside a benchmark build. This must never run on a live chain."
-			);
-		}
-
 		assert_eq!(
 			T::MaxTreeDepth::get(),
 			crate::types::MAX_TREE_DEPTH,
@@ -67,6 +54,12 @@ impl<T: Config> Pallet<T> {
 		assert!(
 			cut > 0 && (cut as usize) < crate::types::DEFAULT_TREE_DEPTH,
 			"SealedTreePrunedBelowLevel must be in 1..DEFAULT_TREE_DEPTH"
+		);
+		// `get_subtree_roots` reads stored level-SUBTREE_LEVEL nodes; pruned under a
+		// higher cut, every call would rebuild each from 64 leaves.
+		assert!(
+			cut <= crate::types::SUBTREE_LEVEL,
+			"SealedTreePrunedBelowLevel must not exceed SUBTREE_LEVEL"
 		);
 
 		let cap = T::MaxLeavesPerTree::get();

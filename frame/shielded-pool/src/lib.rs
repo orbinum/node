@@ -81,6 +81,16 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+// The feature skips proof verification: only the benchmark runner may build it.
+#[cfg(all(
+	feature = "skip-proof-verification",
+	not(feature = "runtime-benchmarks")
+))]
+compile_error!(
+	"`skip-proof-verification` requires `runtime-benchmarks`: proofs would not be \
+	 verified, and such a runtime must never run on a live chain"
+);
+
 extern crate alloc;
 
 pub mod types;
@@ -186,11 +196,10 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxLeavesPerTree: Get<u32>;
 
-		/// Safety cap on the historic-root queue: the most roots kept at once,
-		/// and the most a single insert may prune. This bounds worst-case work
-		/// and storage — the retention *window* is [`Self::RootRetentionBlocks`].
-		/// Size it above the roots produced in one window, or it becomes the
-		/// binding constraint and the window silently shortens.
+		/// Soft cap on the historic-root queue: past it, inserts evict the oldest
+		/// slot within their prune budget and re-queue a live root. Size it above
+		/// the roots one [`Self::RootRetentionBlocks`] window produces, or every
+		/// insert pays the eviction and logs a warning.
 		#[pallet::constant]
 		type MaxHistoricRoots: Get<u32>;
 
@@ -355,7 +364,7 @@ pub mod pallet {
 	/// Oldest slot still queued in [`HistoricRootsQueue`]. Monotonic; never reset.
 	///
 	/// `head - tail` is the number of live entries, bounded in practice by the
-	/// retention window and hard-capped by `MaxHistoricRoots`.
+	/// roots one retention window produces (`MaxHistoricRoots` is a soft cap).
 	#[pallet::storage]
 	pub type HistoricRootsTail<T> = StorageValue<_, u64, ValueQuery>;
 

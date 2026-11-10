@@ -150,6 +150,11 @@ pub mod pallet {
 		/// authors.
 		type QueuedValidators: Get<Vec<Self::AccountId>>;
 
+		/// Which [`Config::ActiveValidators`] are disabled this session, by index
+		/// into that list (the runtime's `Session`). They cannot author, so they
+		/// never count toward the quorum.
+		type DisabledValidators: frame_support::traits::DisabledValidators;
+
 		/// The validator account that authored the current block, from its
 		/// pre-runtime digests: an account in [`Config::ActiveValidators`], not
 		/// the author's consensus key. A declaration from an author it cannot

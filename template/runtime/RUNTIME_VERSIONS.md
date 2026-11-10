@@ -350,6 +350,9 @@ indexer 0.34.0 (see Clients).
   limit at the block gas limit. They run without the block and transaction
   checks, and Substrate's `state_call` reaches them past the RPC's own cap, so
   any caller could otherwise run up to `u64::MAX` gas on a node.
+- **Shielded-pool precompile PoV.** The `shield` precompile records its call's
+  ref time and proof size as external cost before dispatching, so the EVM's
+  weight limits meter the tree and memo reads; gas alone left them out.
 
 #### 10 · Governance, genesis and author version
 
@@ -372,7 +375,9 @@ indexer 0.34.0 (see Clients).
 - **Author version.** `pallet-validator-set` resolves the block author in its
   `on_initialize`, before `Session` can rotate in the same block, so a rotation
   block's declaration is credited to the validator that authored it; a new
-  minimum also needs 2/3 of the set queued for the next session (KL-36).
+  minimum also needs 2/3 of the set queued for the next session (KL-36), and a
+  validator `Session` disabled this session does not count toward it
+  (`DisabledValidators = Session`).
 
 #### Migrations
 
@@ -388,16 +393,24 @@ indexer 0.34.0 (see Clients).
 
 #### Weights and benchmarks
 
-- **Weights.** Measured on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-09) for
+- **Weights.** Measured on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats) for
   staking-async, bags list and nomination pools (runtime-local files in
   `weights/`), `pallet-paged-election`, `pallet-auto-payout`,
   `pallet-validator-set`, `pallet-zk-verifier`, `pallet-shielded-pool` and
-  `ismp-grandpa`. `pallet-ismp-messaging` keeps its hand-corrected weights
+  `ismp-grandpa`: 2026-11-10 for validator-set, zk-verifier and shielded-pool,
+  2026-11-09 for the rest. `pallet-ismp-messaging` keeps its hand-corrected weights
   (polkadot-sdk#13066 corrupts a proof size on every regeneration). Timestamp and
   session use upstream's `SubstrateWeight`; GRANDPA keeps the pallet's default
   weights. Pruning now fits one or two steps in its 1 % block share (a step
   writes up to 100 items). The staking glue's hand-counted weights (candidacy,
   admission, recovery, the clients' adapters) stay hand-counted.
+- **ISMP inbound batches charge their real cost to the block.**
+  `ismp.handleUnsigned` declares a flat 300 µs whatever it carries and reports no
+  actual weight, so module callbacks (each `on_accept`, ~15 µs + 6 reads and 3
+  writes) never reached `BlockWeight`. The fee handler is now a tuple with
+  `ChargeBlockWeight`, which registers each batch's callback weights plus a
+  read and write per request, response and timeout once it runs, so the block
+  builder sees what it cost.
 - **Benchmark preset.** Upstream's staking and pool benchmarks run on a
   `benchmark` genesis preset (no minimum staking bonds, pool bonds of 10^-6 ORB
   to create and 10^-9 ORB to join, up to 16 pools, no commission ceiling, one

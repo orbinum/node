@@ -267,3 +267,19 @@ fn genesis_denied_hashes_read_as_hex_strings() {
 	.unwrap();
 	assert_eq!(config.denied_vk_hashes[0].0[..4], [0x8e, 0xb9, 0xdb, 0xb2]);
 }
+
+/// Denying a copy of the active key would leave the active version verifying nothing.
+#[test]
+fn deny_version_refuses_a_copy_of_an_active_key() {
+	new_test_ext().execute_with(|| {
+		let key = denied_vk();
+		insert_with_hash(CircuitId::UNSHIELD, 2, key.clone());
+		insert_with_hash(CircuitId::UNSHIELD, 3, key);
+		activate(CircuitId::UNSHIELD, 3);
+
+		assert_noop!(
+			ZkVerifier::deny_version(root().into(), CircuitId::UNSHIELD, 2),
+			Error::<Test>::CannotRetireActiveVersion
+		);
+	});
+}

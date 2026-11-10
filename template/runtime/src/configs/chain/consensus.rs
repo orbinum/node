@@ -149,6 +149,7 @@ impl pallet_validator_set::Config for Runtime {
 	type Candidacy = StakingCandidacy;
 	type ActiveValidators = SessionValidators;
 	type QueuedValidators = QueuedSessionValidators;
+	type DisabledValidators = Session;
 	type FindAuthor = ValidatorAuthor;
 	type QuorumWindow = Period;
 	type WeightInfo = pallet_validator_set::weights::SubstrateWeight<Runtime>;

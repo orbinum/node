@@ -20,16 +20,15 @@ pub use hashing::{get_zero_hash_cached, hash_pair, hash_pair_poseidon, zero_hash
 pub use service::MerkleTreeService;
 pub use tree::IncrementalMerkleTree;
 
-/// Most expired historic roots a single leaf insert may prune.
+/// Most expired historic roots one leaf insert may prune, across the roots it
+/// records (retired, new and, on a seal, empty).
 ///
-/// Pruning is amortised across inserts so one extrinsic never pays for a backlog
-/// it did not create: after a long idle stretch the whole queue can be expired
-/// at once, and clearing it in one call would be storage work outside the
-/// benchmarked weight. Leftovers are cleaned by the following inserts, and an
-/// expired entry lingering in the queue is harmless — spendability is decided by
-/// the expiry stored per root, never by queue membership.
+/// Pruning is amortised so an insert never pays for a backlog it did not create;
+/// leftovers go with later inserts, and a lingering expired entry is harmless:
+/// spendability reads each root's stored expiry, not the queue.
 ///
-/// Each pruned slot costs at most 2 reads and 2 writes (the queue slot and the
-/// map entry), so this bounds the extra work per insert at 8 reads and 8 writes
-/// on top of the benchmarked cost.
+/// Each pruned or evicted slot costs 2 reads and 2 writes, so at most 8 and 8 per
+/// insert, plus one read per drain that stops at a live slot. The insert
+/// benchmarks start from an expired backlog to measure it; a seal's few constant
+/// writes are not measured.
 pub(crate) const MAX_ROOTS_PRUNED_PER_INSERT: usize = 4;

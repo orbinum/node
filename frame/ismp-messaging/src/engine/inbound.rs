@@ -38,7 +38,7 @@ use ismp::{
 	module::IsmpModule,
 	router::{GetResponse, PostRequest, Request},
 };
-use scale_codec::Decode;
+use scale_codec::{Decode, DecodeAll};
 use sp_runtime::Weight;
 
 /// Routes ISMP callbacks into this pallet.
@@ -96,8 +96,8 @@ impl<T: Config> IsmpModule for IsmpModuleCallback<T> {
 			return Ok(T::WeightInfo::on_accept(body_len));
 		}
 
-		// `Ok` on a decode failure — see the module docs.
-		let Ok(_message) = Message::decode(&mut &request.body[..]) else {
+		// `Ok` on a decode failure — see the module docs. Trailing bytes count as one.
+		let Ok(_message) = Message::decode_all(&mut &request.body[..]) else {
 			Pallet::<T>::deposit_event(Event::MessageRejected {
 				source: request.source,
 				reason: RejectReason::Undecodable,

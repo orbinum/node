@@ -225,9 +225,15 @@ mod benchmarks {
 		let active = 1u32;
 		let target = 2u32;
 
-		insert_sample_vk::<T>(circuit_id, active);
-		insert_sample_vk::<T>(circuit_id, target);
-		ActiveCircuitVersion::<T>::insert(circuit_id, active);
+		// Each known circuit has an active key to check against; the target's differs.
+		for (i, id) in [CircuitId::TRANSFER, CircuitId::UNSHIELD, CircuitId::SHIELD]
+			.into_iter()
+			.enumerate()
+		{
+			store_key::<T>(id, active, synthetic_vk(10 + i));
+			ActiveCircuitVersion::<T>::insert(id, active);
+		}
+		store_key::<T>(circuit_id, target, synthetic_vk(7));
 
 		let origin = admin::<T>();
 		#[extrinsic_call]

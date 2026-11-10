@@ -47,6 +47,16 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+// The feature skips proof verification: only the benchmark runner may build it.
+#[cfg(all(
+	feature = "skip-proof-verification",
+	not(feature = "runtime-benchmarks")
+))]
+compile_error!(
+	"`skip-proof-verification` requires `runtime-benchmarks`: proofs would not be \
+	 verified, and such a runtime must never run on a live chain"
+);
+
 extern crate alloc;
 
 pub mod types;
@@ -212,30 +222,6 @@ pub mod pallet {
 					.expect("Genesis VK exceeds the maximum key size");
 				Pallet::<T>::register_vk(*circuit_id, Pallet::<T>::FIRST_VERSION, key_data, true)
 					.expect("Genesis VK must deserialize and match its circuit's arity");
-			}
-		}
-	}
-
-	// ── Hooks ─────────────────────────────────────────────────────────────────
-
-	#[pallet::hooks]
-	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
-		/// Runs when the runtime is built. `skip-proof-verification` disables ZK
-		/// verification and is only legitimate together with `runtime-benchmarks`
-		/// (the benchmark runner). Enabling it alone means a release runtime with no
-		/// verification, so abort construction in that case.
-		fn integrity_test() {
-			// A `const` block: both operands are `cfg!`, so a bad feature set fails
-			// the build, not the runtime check (what clippy::assertions_on_constants
-			// asks for).
-			const {
-				assert!(
-					!cfg!(feature = "skip-proof-verification")
-						|| cfg!(feature = "runtime-benchmarks"),
-					"pallet-zk-verifier compiled with `skip-proof-verification` but without \
-					 `runtime-benchmarks`: ZK proof verification is disabled outside a \
-					 benchmark build. This must never run on a live chain."
-				);
 			}
 		}
 	}
@@ -437,8 +423,7 @@ pub mod pallet {
 					version,
 				});
 				// Benchmarks feed proofs that never verify: skipping the error lets the
-				// runner record the weight. Gated on `skip-proof-verification`, which
-				// `integrity_test` keeps out of any non-benchmark build.
+				// runner record the weight (`skip-proof-verification` is benchmark-only).
 				#[cfg(not(feature = "skip-proof-verification"))]
 				return Err(Error::<T>::VerificationFailed.into());
 			}
@@ -552,6 +537,12 @@ pub mod pallet {
 				!DeniedVkHashes::<T>::contains_key(vk_hash),
 				Error::<T>::KeyAlreadyDenied
 			);
+			// Another version may hold the same key: never deny an active one.
+			ensure!(
+				!ActiveCircuitVersion::<T>::iter()
+					.any(|(c, v)| VkHashes::<T>::get(c, v) == Some(vk_hash)),
+				Error::<T>::CannotRetireActiveVersion
+			);
 
 			DeniedVkHashes::<T>::insert(vk_hash, ());
 			RetiredVersions::<T>::insert(circuit_id, version, ());
@@ -611,7 +602,11 @@ pub mod pallet {
 				Error::<T>::TooManyVersions
 			);
 
-			// 4. Clear, in one pass: the count proved every prefix fits the cap.
+			// 4. Keep each hash, so a purged version can hold only its own key again,
+			// then clear in one pass: the count proved every prefix fits.
+			for (version, hash) in VkHashes::<T>::iter_prefix(circuit_id) {
+				RemovedVkHashes::<T>::insert(circuit_id, version, hash);
+			}
 			Self::clear_circuit(circuit_id);
 
 			// Entries, not versions: the figure an indexer reconciles against.

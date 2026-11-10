@@ -9,6 +9,29 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 **Breaking** — `Config` gains `AdminOrigin`. Ships with runtime spec 21 and
 needs `pallet-zk-verifier` 0.20.0.
 
+### Security
+
+- **One prune budget per leaf insert.** An insert records up to three historic
+  roots (the retired one, the new one and, on a seal, the empty one), and each
+  drained up to `MAX_ROOTS_PRUNED_PER_INSERT` expired slots, so one insert could
+  prune 8 (12 on a seal) while the weights measured none. The budget is now
+  shared across the insert, the `MaxHistoricRoots` eviction counts against it,
+  and `MaxHistoricRoots` is documented as the soft cap it is.
+- **Spend and shield weights are measured at their worst case.** The insert
+  benchmarks (`shield`, `shield_batch`, `private_transfer`, `unshield`) start
+  from an expired backlog so every insert drains its full budget, and `unshield`
+  is a partial unshield, whose change note adds a leaf insert and a memo the
+  total unshield it measured before did not. Unsigned spends pay no weight fee,
+  so their declared weight is their only per-block bound. `unshield` now
+  declares about 1.1 ms (from 0.12 ms) and each inserted leaf 8 more reads
+  and writes.
+- **`skip-proof-verification` without `runtime-benchmarks` fails the build**
+  (`compile_error!`). The `const` assertion it replaces sat in a generic function
+  and was evaluated only when that function was instantiated.
+- **`SealedTreePrunedBelowLevel` cannot exceed `SUBTREE_LEVEL`** (`integrity_test`).
+  A higher cut would make `get_subtree_roots` rebuild every level-6 root of a
+  sealed tree from its 64 leaves on each call.
+
 ### Changed
 
 - **Layout** follows `pallet-paged-election`: `lib.rs` holds the pallet macro,
@@ -18,7 +41,7 @@ needs `pallet-zk-verifier` 0.20.0.
   `types/`, `unsigned/`). Every public path, the storage layout and the
   metadata are unchanged. `merkle`, `operations`, `storage`, `validate_unsigned`,
   `genesis` and `helpers` stay reachable at the crate root.
-- **Weights regenerated** on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-09).
+- **Weights regenerated** on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-10).
 - **The solvency `try_state` tolerates donations**: it checks the pool
   account's free balance covers the tracked native ledger, not that they are
   equal. Anyone can send the pool account funds, which made the check fail for
