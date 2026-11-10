@@ -13,7 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 The pallet decides who may validate, so the runtime's staking election can pick
 the active set among admitted candidates. **Breaking** — `Config` gains
-`OpenModeGuard`, `ActiveValidators`, `QueuedValidators` and `Candidacy` (and
+`OpenModeGuard`, `ActiveValidators`, `QueuedValidators`, `DisabledValidators` and `Candidacy` (and
 `BenchmarkHelper` under `runtime-benchmarks`); `ValidatorSetInterface` is removed;
 storage version 1. Ships with runtime spec 21.
 
@@ -24,6 +24,10 @@ storage version 1. Ships with runtime spec 21.
   session rotation in the same block replaces the authorities its slot is read
   against; resolved later, a rotation block credited (or, undeclared, erased)
   another validator's version.
+- **Disabled validators do not count toward the author-version quorum**
+  (`Config::DisabledValidators`, the runtime's `Session`): a validator disabled
+  for the session cannot author, so its declaration no longer helps the active
+  set reach 2/3.
 - **A minimum author version needs 2/3 of the queued set too**
   (`Config::QueuedValidators`), so a set about to rotate in is not left
   without authors.

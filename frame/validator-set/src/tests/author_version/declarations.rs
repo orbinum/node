@@ -212,6 +212,23 @@ fn is_refused_without_quorum() {
 		});
 }
 
+/// A disabled validator's declaration does not count: it cannot author.
+#[test]
+fn disabled_validators_do_not_count_toward_quorum() {
+	ExtBuilder::default()
+		.validators(vec![10, 20, 30, 40])
+		.build()
+		.execute_with(|| {
+			all_declare(&[10, 20, 30], V(0, 4, 0));
+			set_disabled_validators(vec![2]);
+			assert_noop!(
+				ValidatorSet::set_min_author_version(RuntimeOrigin::root(), Some(V(0, 4, 0))),
+				Error::<Test>::VersionQuorumNotMet
+			);
+			set_disabled_validators(vec![]);
+		});
+}
+
 #[test]
 fn older_declarations_do_not_count_toward_quorum() {
 	ExtBuilder::default()

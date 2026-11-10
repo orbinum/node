@@ -18,6 +18,7 @@ thread_local! {
 	static OPEN_MODE_ALLOWED: RefCell<bool> = const { RefCell::new(true) };
 	static ACTIVE_VALIDATORS: RefCell<Option<Vec<AccountId>>> = const { RefCell::new(None) };
 	static QUEUED_VALIDATORS: RefCell<Option<Vec<AccountId>>> = const { RefCell::new(None) };
+	static DISABLED_VALIDATORS: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
 	static INADMISSIBLE_CANDIDATES: RefCell<Vec<AccountId>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -60,6 +61,21 @@ impl pallet_validator_set::OpenModeGuard for MockOpenModeGuard {
 /// active ones, as when the next session keeps the set.
 pub fn set_queued_validators(validators: Option<Vec<AccountId>>) {
 	QUEUED_VALIDATORS.with(|v| *v.borrow_mut() = validators);
+}
+
+/// Disables the active validators at `indices` for the session.
+pub fn set_disabled_validators(indices: Vec<u32>) {
+	DISABLED_VALIDATORS.with(|d| *d.borrow_mut() = indices);
+}
+
+pub struct MockDisabledValidators;
+impl frame_support::traits::DisabledValidators for MockDisabledValidators {
+	fn is_disabled(index: u32) -> bool {
+		DISABLED_VALIDATORS.with(|d| d.borrow().contains(&index))
+	}
+	fn disabled_validators() -> Vec<u32> {
+		DISABLED_VALIDATORS.with(|d| d.borrow().clone())
+	}
 }
 
 pub struct MockQueuedValidators;
@@ -175,6 +191,7 @@ impl pallet_validator_set::Config for Test {
 	type Candidacy = MockCandidacy;
 	type ActiveValidators = MockActiveValidators;
 	type QueuedValidators = MockQueuedValidators;
+	type DisabledValidators = MockDisabledValidators;
 	type FindAuthor = MockFindAuthor;
 	type QuorumWindow = QuorumWindow;
 	type WeightInfo = ();

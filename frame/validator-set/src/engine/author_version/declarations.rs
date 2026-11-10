@@ -65,26 +65,34 @@ impl<T: Config> Pallet<T> {
 	}
 
 	/// Whether at least 2/3 of the active validators, and of those queued for
-	/// the next session, declared `min` or newer within `QuorumWindow`. An
-	/// empty set proves nothing: the session may still run validators that
-	/// never declared.
+	/// the next session, can author and declared `min` or newer within
+	/// `QuorumWindow`. An empty set proves nothing: the session may still run
+	/// validators that never declared.
 	pub(crate) fn has_version_quorum(min: &NodeVersion) -> bool {
-		Self::quorum_in(&T::ActiveValidators::get(), min)
-			&& Self::quorum_in(&T::QueuedValidators::get(), min)
+		use frame_support::traits::DisabledValidators;
+		Self::quorum_in(&T::ActiveValidators::get(), min, T::DisabledValidators::is_disabled)
+			// Disabling lasts one session: the queued set has none.
+			&& Self::quorum_in(&T::QueuedValidators::get(), min, |_| false)
 	}
 
-	fn quorum_in(validators: &[T::AccountId], min: &NodeVersion) -> bool {
+	/// A disabled validator counts in the set, never as ready.
+	fn quorum_in(
+		validators: &[T::AccountId],
+		min: &NodeVersion,
+		disabled: impl Fn(u32) -> bool,
+	) -> bool {
 		if validators.is_empty() {
 			return false;
 		}
 		let now = frame_system::Pallet::<T>::block_number();
 		let window = T::QuorumWindow::get();
-		let ready = validators
-			.iter()
-			.filter(|v| {
-				LastAuthorVersion::<T>::get(v).is_some_and(|(version, at)| {
-					version >= *min && now.saturating_sub(at) <= window
-				})
+		let ready = (0u32..)
+			.zip(validators)
+			.filter(|(index, v)| {
+				!disabled(*index)
+					&& LastAuthorVersion::<T>::get(v).is_some_and(|(version, at)| {
+						version >= *min && now.saturating_sub(at) <= window
+					})
 			})
 			.count();
 		ready.saturating_mul(3) >= validators.len().saturating_mul(2)
