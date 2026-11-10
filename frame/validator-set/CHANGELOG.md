@@ -58,6 +58,17 @@ storage version 1. Ships with runtime spec 21.
 
 ### Changed
 
+- **Layout** follows `pallet-paged-election`: `lib.rs` holds the pallet macro
+  and the calls, which only check the origin and delegate. `engine/admission/`
+  reads the rules (`mod.rs`) and keeps the write paths apart (`allowlist.rs`
+  for add and remove, `bans.rs` for ban, offence ban and lift);
+  `engine/author_version/` holds the inherent and the declarations;
+  `engine/invariants.rs` holds `try_state`. `types/` holds the admission
+  vocabulary (`AdmissionMode`, `BanTerm`, `Inadmissible`), `NodeVersion` and the
+  runtime traits; `benchmarking/` the benchmarks and `weights.rs`; `tests/` the
+  mock and one folder per concern (`admission/`, `author_version/`). Every
+  public path, the storage layout and the metadata are unchanged: `admission`,
+  `author_version`, `traits` and every type stay reachable at the crate root.
 - **`add_validator` refuses banned accounts** (`Error::Banned`).
 - **Genesis refuses an account listed twice** in `initial_validators`:
   `remove_validator` drops one entry, so a duplicate would stay approved.
@@ -67,13 +78,6 @@ storage version 1. Ships with runtime spec 21.
 - `OnValidatorRemoved` is documented as firing on removal **and** on ban.
 - **No longer a `SessionManager`**: staking elects the active set among the
   accounts `admission()` admits. The `pallet-session` dependency is gone.
-- **Layout by responsibility.** `types/` holds the admission vocabulary
-  (`AdmissionMode`, `BanTerm`, `Inadmissible`) and re-exports `NodeVersion`;
-  `admission/` reads the rules (`mod.rs`) and keeps the write paths apart:
-  `allowlist.rs` (add, remove) and `bans.rs` (ban, offence ban, lift); the calls
-  in `lib.rs` only check the origin and delegate; `invariants.rs` holds
-  `try_state`. Every type is re-exported at the crate root. Tests by concern:
-  `tests/allowlist.rs`, `tests/admission.rs`, `tests/author_version.rs`.
 
 ### Removed
 

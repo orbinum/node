@@ -1,0 +1,109 @@
+//! Fixtures the tests share: canonical field values, memos, proofs and a
+//! funded pool.
+
+use crate::{
+	operations::assets::AssetOperation,
+	storage::PoolBalanceRepository,
+	tests::mock::{Balances, Test, acc},
+	types::{Commitment, EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE, Nullifier},
+};
+use frame_support::{BoundedVec, pallet_prelude::ConstU32, traits::Currency};
+
+/// A root the tests register as known before spending against it.
+pub(crate) const KNOWN_ROOT: [u8; 32] = [0xAA; 32];
+
+/// A distinct, canonical 32-byte field value for `seed`.
+///
+/// The seed goes in the low byte rather than filling all 32: a repeated high
+/// byte puts the value above the BN254 modulus (`p` starts at 0x30), which
+/// the canonicity guard refuses. Real nullifiers and commitments come out of
+/// Poseidon and are always canonical.
+pub(crate) fn canonical_bytes(seed: u8) -> [u8; 32] {
+	let mut b = [0u8; 32];
+	b[0] = seed;
+	b[1] = 0xA5;
+	b
+}
+
+pub(crate) fn nullifier(seed: u8) -> Nullifier {
+	Nullifier::new(canonical_bytes(seed))
+}
+
+pub(crate) fn commitment(seed: u8) -> Commitment {
+	Commitment::new(canonical_bytes(seed))
+}
+
+/// One nullifier per seed, in order.
+pub(crate) fn nullifiers_of(seeds: &[u8]) -> BoundedVec<Nullifier, ConstU32<2>> {
+	seeds
+		.iter()
+		.map(|&s| nullifier(s))
+		.collect::<Vec<_>>()
+		.try_into()
+		.unwrap()
+}
+
+/// One commitment per seed, in order.
+pub(crate) fn commitments_of(seeds: &[u8]) -> BoundedVec<Commitment, ConstU32<2>> {
+	seeds
+		.iter()
+		.map(|&s| commitment(s))
+		.collect::<Vec<_>>()
+		.try_into()
+		.unwrap()
+}
+
+/// A full-size memo filled with `byte`.
+pub(crate) fn memo(byte: u8) -> EncryptedMemo {
+	EncryptedMemo::from_bytes(&[byte; MAX_ENCRYPTED_MEMO_SIZE as usize]).unwrap()
+}
+
+/// A 32-byte memo: non-empty but too short to hold a note's secrets.
+pub(crate) fn short_memo() -> EncryptedMemo {
+	EncryptedMemo::new(vec![0x01u8; 32]).unwrap()
+}
+
+/// A proof the mock verifier accepts (any non-empty bytes).
+pub(crate) fn proof() -> BoundedVec<u8, ConstU32<512>> {
+	BoundedVec::try_from(vec![0x01u8; 72]).unwrap()
+}
+
+/// `x + r`, little-endian: different bytes, the same BN254 field element as
+/// `x`. What a copier would submit to give one value a second on-chain identity.
+pub(crate) fn field_twin(x: [u8; 32]) -> [u8; 32] {
+	use ark_bn254::Fr;
+	use ark_ff::{BigInteger, PrimeField};
+	let r = Fr::MODULUS.to_bytes_le();
+	let mut out = [0u8; 32];
+	let mut carry = 0u16;
+	for i in 0..32 {
+		let sum = u16::from(x[i]) + u16::from(r[i]) + carry;
+		out[i] = sum as u8;
+		carry = sum >> 8;
+	}
+	assert_eq!(carry, 0, "x + r must fit in 32 bytes");
+	assert_eq!(
+		Fr::from_le_bytes_mod_order(&out),
+		Fr::from_le_bytes_mod_order(&x),
+		"a twin is the same field element"
+	);
+	out
+}
+
+/// Register an asset without verifying it, returning its id.
+pub(crate) fn register_asset() -> u32 {
+	let name = BoundedVec::try_from(b"Orbinum".to_vec()).unwrap();
+	let symbol = BoundedVec::try_from(b"ORB".to_vec()).unwrap();
+	AssetOperation::register_asset::<Test>(name, symbol, 18, None, acc(1)).unwrap()
+}
+
+/// The asset pool operations can move: the native one, verified at genesis.
+pub(crate) fn setup_asset() -> u32 {
+	crate::types::NATIVE_ASSET_ID
+}
+
+/// Fund the pool both physically and in the ledger, as a shield would.
+pub(crate) fn fund_pool(asset_id: u32, amount: u128) {
+	Balances::make_free_balance_be(&crate::Pallet::<Test>::pool_account_id(), amount);
+	PoolBalanceRepository::set_asset_balance::<Test>(asset_id, amount);
+}

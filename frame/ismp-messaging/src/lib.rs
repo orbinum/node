@@ -1,3 +1,5 @@
+//! # Pallet ISMP Messaging
+//!
 //! Cross-chain messaging over ISMP, with Hyperbridge as the transport.
 //!
 //! Exists because `pallet_ismp` has no send extrinsic: originating a request means
@@ -7,43 +9,38 @@
 //!
 //! Deliberately not feature-gated: a pallet that exists only under `--features test`
 //! means the binary being validated is not the binary that ships.
+//!
+//! ## Layout
+//!
+//! - [`types`]: the message wire format ([`Message`]) and the module id counterparties
+//!   address this pallet by ([`PALLET_ID`]).
+//! - `engine`: the pallet's work, one module per concern: sending POSTs and GETs and
+//!   charging for them ([`outbound`]), the ISMP callbacks ([`inbound`]) and the
+//!   delivery-receipt keys a confirmation reads ([`receipts`]).
+//! - `benchmarking`: the benchmarks and the [`weights`] they produce.
+//! - `tests`: the mock runtime and the tests, grouped by concern as `engine` is.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
 
-pub mod inbound;
-pub mod outbound;
-pub mod payload;
-pub mod receipts;
-pub mod weights;
+pub mod types;
 
-#[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
-#[cfg(test)]
-mod mock;
+mod engine;
+
 #[cfg(test)]
 mod tests;
 
+pub use benchmarking::weights;
+pub use engine::{inbound, outbound, receipts};
+pub use types::payload;
+
 pub use pallet::*;
-pub use payload::Message;
+pub use types::{Message, PALLET_ID, PALLET_ID_BYTES};
 pub use weights::WeightInfo;
 
-use frame_support::PalletId;
-use pallet_ismp::pallet::ModuleId;
 use sp_runtime::traits::Saturating;
-
-/// This pallet's ISMP module identifier — how counterparties address messages to us.
-///
-/// `ModuleId::from_bytes` infers the variant **from the length alone**: 8 bytes is a
-/// pallet, 20 an EVM contract, 32 an account, anything else an error — so this must stay
-/// exactly 8 bytes.
-///
-/// Wire format: changing it once messages are in flight orphans them.
-pub const PALLET_ID: ModuleId = ModuleId::Pallet(PalletId(*b"orb/msgs"));
-
-/// [`PALLET_ID`] as raw bytes, for the router's comparison and for `DispatchPost.from`.
-pub const PALLET_ID_BYTES: &[u8] = b"orb/msgs";
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -609,22 +606,6 @@ pub mod pallet {
 			OutboundPaused::<T>::put(paused);
 			Self::deposit_event(Event::OutboundPauseSet { paused });
 			Ok(())
-		}
-	}
-
-	impl<T: Config> Pallet<T> {
-		/// Who is dispatching, and so who pays: `None` for Root, which is exempt, and the
-		/// account for anyone [`Config::DispatchOrigin`] admits.
-		///
-		/// Root is checked first and unconditionally, so a runtime that later narrows
-		/// `DispatchOrigin` — even to `EnsureNever` — keeps its own automation working.
-		fn payer_of(origin: OriginFor<T>) -> Result<Option<T::AccountId>, DispatchError> {
-			if ensure_root(origin.clone()).is_ok() {
-				return Ok(None);
-			}
-			T::DispatchOrigin::ensure_origin(origin)
-				.map(Some)
-				.map_err(Into::into)
 		}
 	}
 }

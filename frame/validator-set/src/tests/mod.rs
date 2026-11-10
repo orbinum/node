@@ -1,9 +1,11 @@
-//! Tests by concern: the allowlist, admission (mode, bans) and the minimum author
-//! version.
+//! Tests by concern, grouped as `engine` is: admission (the rules, the
+//! allowlist, bans) and the author version (declarations, the minimum and the
+//! node version).
 
-pub(crate) use crate::{ApprovedValidators, Error, Event, mock::*};
+pub(crate) use crate::{ApprovedValidators, Error, Event};
 pub(crate) use frame_support::{assert_noop, assert_ok};
+pub(crate) use mock::*;
 
 mod admission;
-mod allowlist;
 mod author_version;
+pub(crate) mod mock;

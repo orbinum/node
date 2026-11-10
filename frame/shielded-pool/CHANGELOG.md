@@ -11,6 +11,13 @@ needs `pallet-zk-verifier` 0.20.0.
 
 ### Changed
 
+- **Layout** follows `pallet-paged-election`: `lib.rs` holds the pallet macro,
+  `engine/` the logic by concern (`invariants` for `try_state`), `types/` the
+  data types, `benchmarking/` the benchmarks and `weights.rs`, `tests/` the mock
+  and one folder per concern (`merkle/`, `operations/`, `queries/`, `state/`,
+  `types/`, `unsigned/`). Every public path, the storage layout and the
+  metadata are unchanged. `merkle`, `operations`, `storage`, `validate_unsigned`,
+  `genesis` and `helpers` stay reachable at the crate root.
 - **Weights regenerated** on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-09).
 - **The solvency `try_state` tolerates donations**: it checks the pool
   account's free balance covers the tracked native ledger, not that they are

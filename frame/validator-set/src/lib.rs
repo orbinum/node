@@ -47,14 +47,6 @@
 //!   the allowlist alone is not it (it does not hold in `Open` mode, nor for a
 //!   banned account or one without session keys).
 //!
-//! ## Layout
-//!
-//! - [`types`]: the admission vocabulary and the declared [`NodeVersion`].
-//! - [`admission`]: reading the rules, the [`admission::allowlist`] and
-//!   [`admission::bans`].
-//! - [`author_version`]: the version each author declares and its minimum.
-//! - [`traits`]: what the runtime plugs in.
-//!
 //! ## Minimum author version
 //!
 //! Each block's author declares its node version in an inherent
@@ -65,39 +57,40 @@
 //! that version within [`Config::QuorumWindow`], so neither is left without
 //! authors. Validators elected later are not checked: an operator upgrades
 //! before validating. With no minimum set, any binary may author.
+//!
+//! ## Layout
+//!
+//! - [`types`]: the admission vocabulary, the declared [`NodeVersion`] and
+//!   [`traits`], what the runtime plugs in.
+//! - `engine`: the pallet's logic, one module per concern: [`admission`]
+//!   (reading the rules, the [`admission::allowlist`] and [`admission::bans`]),
+//!   [`author_version`] (the version each author declares and its minimum) and
+//!   the invariants.
+//! - `benchmarking`: the benchmarks and the [`weights`] they produce.
+//! - `tests`: the mock runtime and the tests, grouped by concern as `engine` is.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
 use alloc::vec::Vec;
 
-pub mod weights;
-pub use weights::WeightInfo;
+pub mod types;
 
-pub use pallet::*;
-
-#[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
-
-#[cfg(test)]
-mod mock;
+mod engine;
 
 #[cfg(test)]
 mod tests;
 
-pub mod traits;
-pub use traits::{Candidacy, OnValidatorRemoved, OpenModeGuard, ValidatorPrerequisites};
+pub use benchmarking::weights;
+pub use engine::{admission, author_version};
+pub use types::traits;
 
-pub mod types;
-pub use types::{AdmissionMode, BanTerm, Inadmissible, NodeVersion};
-
-pub mod admission;
 pub use admission::Admission;
-
-pub mod author_version;
-
-#[cfg(any(feature = "try-runtime", test))]
-mod invariants;
+pub use pallet::*;
+pub use traits::{Candidacy, OnValidatorRemoved, OpenModeGuard, ValidatorPrerequisites};
+pub use types::{AdmissionMode, BanTerm, Inadmissible, NodeVersion};
+pub use weights::WeightInfo;
 
 #[frame_support::pallet]
 pub mod pallet {

@@ -1,7 +1,10 @@
-//! The pallet's types: admission ([`admission`]) and the declared node version
-//! ([`NodeVersion`], defined with the rest of the author-version rules).
+//! The pallet's types: the admission vocabulary ([`admission`]), the node
+//! version a block author declares ([`version`]) and what the runtime plugs in
+//! ([`traits`]).
 
 pub mod admission;
+pub mod traits;
+pub mod version;
 
-pub use crate::author_version::NodeVersion;
 pub use admission::{AdmissionMode, BanTerm, Inadmissible};
+pub use version::NodeVersion;
