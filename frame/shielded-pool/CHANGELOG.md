@@ -9,6 +9,28 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 **Breaking** — `Config` gains `AdminOrigin`. Ships with runtime spec 21 and
 needs `pallet-zk-verifier` 0.20.0.
 
+### Security
+
+- **One prune budget per leaf insert.** An insert records up to three historic
+  roots (the retired one, the new one and, on a seal, the empty one), and each
+  drained up to `MAX_ROOTS_PRUNED_PER_INSERT` expired slots, so one insert could
+  prune 8 (12 on a seal) while the weights measured none. The budget is now
+  shared across the insert, the `MaxHistoricRoots` eviction counts against it,
+  and `MaxHistoricRoots` is documented as the soft cap it is.
+- **Spend and shield weights are measured at their worst case.** The insert
+  benchmarks (`shield`, `shield_batch`, `private_transfer`, `unshield`) start
+  from an expired backlog so every insert drains its full budget, and `unshield`
+  is a partial unshield, whose change note adds a leaf insert and a memo the
+  total unshield it measured before did not. Unsigned spends pay no weight fee,
+  so their declared weight is their only per-block bound. Needs a weight
+  regeneration on the reference hardware.
+- **`skip-proof-verification` without `runtime-benchmarks` fails the build**
+  (`compile_error!`). The `const` assertion it replaces sat in a generic function
+  and was evaluated only when that function was instantiated.
+- **`SealedTreePrunedBelowLevel` cannot exceed `SUBTREE_LEVEL`** (`integrity_test`).
+  A higher cut would make `get_subtree_roots` rebuild every level-6 root of a
+  sealed tree from its 64 leaves on each call.
+
 ### Changed
 
 - **Layout** follows `pallet-paged-election`: `lib.rs` holds the pallet macro,

@@ -87,6 +87,29 @@ mod benchmarks {
 		if scaled > floor { scaled } else { floor }
 	}
 
+	/// Worst case for `inserts` leaf inserts: a full prune budget of expired roots
+	/// each, and an active root from an earlier block to retire. Call before
+	/// seeding the spend's own roots, which must stay live. Returns the queue tail.
+	fn seed_expired_roots<T: Config>(inserts: u32) -> u64 {
+		let per_insert = crate::merkle::MAX_ROOTS_PRUNED_PER_INSERT as u32;
+		for i in 0..inserts * per_insert {
+			let mut root = [0xBEu8; 32];
+			root[..4].copy_from_slice(&i.to_le_bytes());
+			crate::merkle::MerkleTreeService::add_poseidon_historic_root::<T>(root);
+		}
+		let past =
+			frame_system::Pallet::<T>::block_number() + T::RootRetentionBlocks::get() + 1u32.into();
+		frame_system::Pallet::<T>::set_block_number(past);
+		crate::storage::MerkleRepository::get_historic_roots_tail::<T>()
+	}
+
+	/// Every insert pruned its whole budget.
+	fn assert_budget_spent<T: Config>(tail: u64, inserts: u32) {
+		let per_insert = crate::merkle::MAX_ROOTS_PRUNED_PER_INSERT as u64;
+		let pruned = crate::storage::MerkleRepository::get_historic_roots_tail::<T>() - tail;
+		assert_eq!(pruned, inserts as u64 * per_insert, "inserts {inserts}");
+	}
+
 	/// A distinct, canonical 32-byte field value for `seed`.
 	///
 	/// Commitments and nullifiers are checked against the BN254 modulus, and a
@@ -103,6 +126,7 @@ mod benchmarks {
 	#[benchmark]
 	fn shield() {
 		let (caller, asset_id) = setup_benchmark_env::<T>();
+		let tail = seed_expired_roots::<T>(1);
 		let amount: BalanceOf<T> = bench_amount::<T>();
 		let commitment = Commitment(canonical_bytes(1));
 		// Memo must be exactly 180 bytes (MAX_ENCRYPTED_MEMO_SIZE): nonce(12) + data(120) + MAC(16) + ephPk(32)
@@ -121,11 +145,14 @@ mod benchmarks {
 			proof,
 			1u32,
 		);
+
+		assert_budget_spent::<T>(tail, 1);
 	}
 
 	#[benchmark]
 	fn shield_batch(n: Linear<1, 20>) {
 		let (caller, asset_id) = setup_benchmark_env::<T>();
+		let tail = seed_expired_roots::<T>(n);
 		let amount: BalanceOf<T> = bench_amount::<T>();
 
 		let mut operations = Vec::new();
@@ -140,11 +167,14 @@ mod benchmarks {
 
 		#[extrinsic_call]
 		shield_batch(RawOrigin::Signed(caller), operations_vec);
+
+		assert_budget_spent::<T>(tail, n);
 	}
 
 	#[benchmark]
 	fn private_transfer() {
 		let (_caller, _) = setup_benchmark_env::<T>();
+		let tail = seed_expired_roots::<T>(2);
 		// Two notes from two sealed trees: each root misses the active and
 		// historic lookups and is found last, in `SealedRootIndex`.
 		let merkle_roots = [[1u8; 32], [2u8; 32]];
@@ -194,11 +224,14 @@ mod benchmarks {
 			fee,
 			1u32,
 		);
+
+		assert_budget_spent::<T>(tail, 2);
 	}
 
 	#[benchmark]
 	fn unshield() {
 		let (_caller, asset_id) = setup_benchmark_env::<T>();
+		let tail = seed_expired_roots::<T>(1);
 		let recipient: T::AccountId = account("recipient", 0, 0);
 		let merkle_root = [1u8; 32];
 		let amount: BalanceOf<T> = bench_amount::<T>();
@@ -214,6 +247,13 @@ mod benchmarks {
 
 		let proof: Proof = vec![0u8; 128].try_into().unwrap();
 		let nullifier = Nullifier(canonical_bytes(4));
+		// Partial: the change note's leaf and memo make it the costlier branch.
+		let change_commitment = canonical_bytes(9);
+		let change_memo = FrameEncryptedMemo(
+			vec![0u8; MAX_ENCRYPTED_MEMO_SIZE as usize]
+				.try_into()
+				.unwrap(),
+		);
 
 		// Non-zero, so the fee is credited, and >= MinSpendFee to pass FeeTooLow.
 		let fee: BalanceOf<T> = T::MinSpendFee::get().max(1).saturated_into();
@@ -229,10 +269,15 @@ mod benchmarks {
 			amount,
 			recipient,
 			fee,
-			Hash::default(),    // change_commitment: [0u8; 32] for total unshield
-			Default::default(), // change_encrypted_memo: empty for total unshield
-			1u32,               // circuit_version
+			change_commitment,
+			change_memo,
+			1u32, // circuit_version
 		);
+
+		assert_budget_spent::<T>(tail, 1);
+		assert!(crate::storage::CommitmentRepository::exists::<T>(
+			&Commitment(change_commitment)
+		));
 	}
 
 	#[benchmark]

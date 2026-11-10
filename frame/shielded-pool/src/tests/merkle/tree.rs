@@ -1153,6 +1153,29 @@ fn queue_drain_is_capped_per_insert() {
 	});
 }
 
+/// An insert that records two roots (retired and new) prunes one budget in total.
+#[test]
+fn leaf_insert_prunes_at_most_the_budget_across_its_calls() {
+	new_test_ext().execute_with(|| {
+		let start = System::block_number();
+		MerkleTreeService::insert_leaf::<Test>(Commitment::new([0x01u8; 32])).unwrap();
+		for i in 0..(MAX_ROOTS_PRUNED_PER_INSERT * 3) as u32 {
+			MerkleTreeService::add_poseidon_historic_root::<Test>(root_numbered(i));
+		}
+
+		// All expired, and the active root is from an earlier block: retire + append.
+		System::set_block_number(start + retention() + 1);
+		let before = MerkleRepository::historic_roots_queued::<Test>();
+		MerkleTreeService::insert_leaf::<Test>(Commitment::new([0x02u8; 32])).unwrap();
+
+		assert_eq!(
+			MerkleRepository::historic_roots_queued::<Test>(),
+			before - MAX_ROOTS_PRUNED_PER_INSERT as u64 + 2,
+			"two roots recorded, one shared prune budget"
+		);
+	});
+}
+
 /// Head and tail only ever move forward, and the queue never reports a
 /// negative or oversized length.
 #[test]

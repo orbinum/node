@@ -83,9 +83,11 @@ impl MerkleTreeService {
 		MerkleRepository::set_tree_size::<T>(index.saturating_add(1));
 		PoolStatsRepository::increment_commitments_inserted::<T>();
 		MerkleRepository::set_frontier::<T>(frontier);
-		Self::retire_active_root::<T>(old_poseidon_root);
+		// One prune budget for the whole insert: retire, append and seal share it.
+		let mut budget = MAX_ROOTS_PRUNED_PER_INSERT;
+		Self::retire_active_root::<T>(old_poseidon_root, &mut budget);
 		MerkleRepository::set_poseidon_root::<T>(new_poseidon_root);
-		Self::add_poseidon_historic_root::<T>(new_poseidon_root);
+		Self::record_historic_root::<T>(new_poseidon_root, &mut budget);
 
 		// Emitted before any seal resets the active root: the leaf belongs to this one.
 		Pallet::<T>::deposit_event(Event::MerkleRootUpdated {
@@ -96,7 +98,7 @@ impl MerkleTreeService {
 
 		// 4. Seal.
 		if local + 1 == cap {
-			Self::seal_tree::<T>(tree_id, new_poseidon_root, cap);
+			Self::seal_tree::<T>(tree_id, new_poseidon_root, cap, &mut budget);
 		}
 		Ok(index)
 	}
@@ -108,12 +110,12 @@ impl MerkleTreeService {
 	///    spendable forever.
 	/// 2. The active tree resets to empty, and the empty root joins the historic
 	///    window so `PoseidonRoot` is always a known root.
-	fn seal_tree<T: Config>(tree_id: u32, final_root: Hash, cap: u32) {
+	fn seal_tree<T: Config>(tree_id: u32, final_root: Hash, cap: u32, budget: &mut usize) {
 		MerkleRepository::insert_sealed_root::<T>(tree_id, final_root);
 		MerkleRepository::set_frontier::<T>([[0u8; 32]; crate::types::DEFAULT_TREE_DEPTH]);
 		let empty_root = get_zero_hash_cached(crate::types::DEFAULT_TREE_DEPTH);
 		MerkleRepository::set_poseidon_root::<T>(empty_root);
-		Self::add_poseidon_historic_root::<T>(empty_root);
+		Self::record_historic_root::<T>(empty_root, budget);
 
 		Pallet::<T>::deposit_event(Event::TreeSealed {
 			tree_id,
@@ -131,14 +133,21 @@ impl MerkleTreeService {
 	/// long ago; its window must count from when it stops being active, or the
 	/// next insert would refuse that spend at once. Only a root created in an
 	/// earlier block needs this, so it costs at most one slot per block.
-	fn retire_active_root<T: Config>(root: Hash) {
+	fn retire_active_root<T: Config>(root: Hash, budget: &mut usize) {
 		let expires_at =
 			frame_system::Pallet::<T>::block_number().saturating_add(T::RootRetentionBlocks::get());
 		let fresh = MerkleRepository::get_historic_root_expiry::<T>(&root)
 			.is_some_and(|expiry| expiry >= expires_at);
 		if !fresh {
-			Self::add_poseidon_historic_root::<T>(root);
+			Self::record_historic_root::<T>(root, budget);
 		}
+	}
+
+	/// Record a root with its own prune budget; leaf inserts share one instead.
+	#[cfg(any(test, feature = "runtime-benchmarks"))]
+	pub(crate) fn add_poseidon_historic_root<T: Config>(poseidon_root: Hash) {
+		let mut budget = MAX_ROOTS_PRUNED_PER_INSERT;
+		Self::record_historic_root::<T>(poseidon_root, &mut budget);
 	}
 
 	/// Record a new root, dropping the ones whose retention window has passed.
@@ -146,11 +155,11 @@ impl MerkleTreeService {
 	/// The window is measured in blocks (`RootRetentionBlocks`); the queue only
 	/// orders roots by expiry.
 	///
-	/// 1. Drain expired slots from the tail, at most `MAX_ROOTS_PRUNED_PER_INSERT`.
-	/// 2. If the queue still reaches `MaxHistoricRoots` — a safety cap, not the
-	///    window — evict the oldest and log the misconfiguration.
+	/// 1. Drain expired slots from the tail while `budget` lasts.
+	/// 2. At `MaxHistoricRoots`, while budget remains, evict the oldest and log the
+	///    misconfiguration: a soft cap, a live root is re-queued, never dropped.
 	/// 3. Append the new root.
-	pub(crate) fn add_poseidon_historic_root<T: Config>(poseidon_root: Hash) {
+	fn record_historic_root<T: Config>(poseidon_root: Hash, budget: &mut usize) {
 		let now = frame_system::Pallet::<T>::block_number();
 		let expires_at = now.saturating_add(T::RootRetentionBlocks::get());
 
@@ -159,14 +168,13 @@ impl MerkleTreeService {
 
 		// 1. Drain. Slots are in expiry order (each stores `now + retention`), so
 		// the first live one ends the scan.
-		let mut pruned = 0usize;
-		while tail < head && pruned < MAX_ROOTS_PRUNED_PER_INSERT {
+		while tail < head && *budget > 0 {
 			let Some((root, slot_expiry)) = MerkleRepository::get_historic_root_slot::<T>(tail)
 			else {
 				// A hole, which this code never leaves: skip it, and count it so the
 				// scan stays bounded.
 				tail = tail.saturating_add(1);
-				pruned = pruned.saturating_add(1);
+				*budget -= 1;
 				continue;
 			};
 			if slot_expiry >= now {
@@ -174,7 +182,7 @@ impl MerkleTreeService {
 			}
 			MerkleRepository::remove_historic_root_slot::<T>(tail);
 			tail = tail.saturating_add(1);
-			pruned = pruned.saturating_add(1);
+			*budget -= 1;
 
 			// A root can sit in several slots; its map entry holds the latest expiry
 			// and decides whether it is still spendable.
@@ -186,7 +194,8 @@ impl MerkleTreeService {
 
 		// 2. Cap. Reaching it means the window holds more roots than allowed:
 		// evict the oldest so inserts keep working, and say so.
-		if head.saturating_sub(tail) >= T::MaxHistoricRoots::get() as u64 {
+		if *budget > 0 && head.saturating_sub(tail) >= T::MaxHistoricRoots::get() as u64 {
+			*budget -= 1;
 			// A log, not `defensive!`: that panics in debug builds, and this state
 			// is reachable.
 			frame_support::__private::log::warn!(
