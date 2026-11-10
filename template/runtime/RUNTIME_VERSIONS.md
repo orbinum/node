@@ -393,11 +393,12 @@ indexer 0.34.0 (see Clients).
 
 #### Weights and benchmarks
 
-- **Weights.** Measured on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-09) for
+- **Weights.** Measured on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats) for
   staking-async, bags list and nomination pools (runtime-local files in
   `weights/`), `pallet-paged-election`, `pallet-auto-payout`,
   `pallet-validator-set`, `pallet-zk-verifier`, `pallet-shielded-pool` and
-  `ismp-grandpa`. `pallet-ismp-messaging` keeps its hand-corrected weights
+  `ismp-grandpa`: 2026-11-10 for validator-set, zk-verifier and shielded-pool,
+  2026-11-09 for the rest. `pallet-ismp-messaging` keeps its hand-corrected weights
   (polkadot-sdk#13066 corrupts a proof size on every regeneration). Timestamp and
   session use upstream's `SubstrateWeight`; GRANDPA keeps the pallet's default
   weights. Pruning now fits one or two steps in its 1 % block share (a step

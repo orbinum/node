@@ -22,8 +22,9 @@ needs `pallet-zk-verifier` 0.20.0.
   from an expired backlog so every insert drains its full budget, and `unshield`
   is a partial unshield, whose change note adds a leaf insert and a memo the
   total unshield it measured before did not. Unsigned spends pay no weight fee,
-  so their declared weight is their only per-block bound. Needs a weight
-  regeneration on the reference hardware.
+  so their declared weight is their only per-block bound. `unshield` now
+  declares about 1.1 ms (from 0.12 ms) and each inserted leaf 8 more reads
+  and writes.
 - **`skip-proof-verification` without `runtime-benchmarks` fails the build**
   (`compile_error!`). The `const` assertion it replaces sat in a generic function
   and was evaluated only when that function was instantiated.
@@ -40,7 +41,7 @@ needs `pallet-zk-verifier` 0.20.0.
   `types/`, `unsigned/`). Every public path, the storage layout and the
   metadata are unchanged. `merkle`, `operations`, `storage`, `validate_unsigned`,
   `genesis` and `helpers` stay reachable at the crate root.
-- **Weights regenerated** on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-09).
+- **Weights regenerated** on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-10).
 - **The solvency `try_state` tolerates donations**: it checks the pool
   account's free balance covers the tracked native ledger, not that they are
   equal. Anyone can send the pool account funds, which made the check fail for

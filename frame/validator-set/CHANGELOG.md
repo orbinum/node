@@ -92,7 +92,7 @@ storage version 1. Ships with runtime spec 21.
 
 ### Weights
 
-- Every call regenerated on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-09),
+- Every call regenerated on reference hardware (Hetzner CPX62, AMD EPYC-Genoa; 50 steps, 20 repeats, 2026-11-10),
   with the allowlist at its 256-entry cap: `remove_validator` and
   `set_min_author_version` cost several times their 32-entry figures.
 
