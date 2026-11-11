@@ -202,8 +202,9 @@ indexer 0.34.0 (see Clients).
 #### 6 · Rewards and era data
 
 - **Economy.** Substrate fees and the EVM base fee go to an era fee pool paid
-  out by era points; inflation follows the tokenomics schedule (60 M ORB in
-  year 1), capped at two days of issuance per era. Slashes go to `py/trsry`,
+  out by era points; rewards are new issuance on the tokenomics schedule (the
+  300 M ORB staking allocation over ten years, 45 M ORB in year 1 down to 20 M in
+  year 10, then 20 M a year), capped at two days' worth per era. Slashes go to `py/trsry`,
   which `pallet-treasury` would adopt. Era 0 (at genesis, or opened by the
   upgrade) has no exposures and pays nothing. The call filter refuses a
   `staking.bond` paying the deprecated `Controller` destination
@@ -254,8 +255,8 @@ indexer 0.34.0 (see Clients).
   share comes out of its held funds when it withdraws or anyone calls
   `applySlash` (all of it to governance; the caller earns nothing, since it may
   be the member).
-- **Limits.** Join from 1 ORB, create from ten nominator bonds (100 ORB on test
-  networks, 1 000 ORB on mainnet), no cap on pools or members, no pool
+- **Limits.** Join from 1 ORB, create from 100 ORB on test networks and 1 000 ORB on
+  mainnet, no cap on pools or members, no pool
   commission ceiling (`GlobalMaxCommission` unset); root changes them
   (`setConfigs`), and a lowered `GlobalMaxCommission` caps every pool's
   commission from its next payout. `InitStaking` sets the same bonds on the

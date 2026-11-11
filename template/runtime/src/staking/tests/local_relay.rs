@@ -29,7 +29,7 @@ use sp_keyring::Sr25519Keyring::{Alice, Bob};
 use sp_runtime::{
 	traits::{Dispatchable, Header as _},
 	transaction_validity::{TransactionSource, TransactionValidityError, UnknownTransaction},
-	DispatchError, Perbill,
+	BoundedVec, DispatchError, Perbill,
 };
 use sp_staking::SessionIndex;
 
@@ -292,8 +292,8 @@ fn a_stale_session_report_neither_resets_the_plan_nor_clamps() {
 		};
 		let report = |end_index| rc_client::SessionReport::new_terminal(end_index, vec![], None);
 
-		// Era 2 planned with nothing holding its set, and a commission above the
-		// ceiling.
+		// Era 1 active since session 5, era 2 planned with nothing holding its set,
+		// and a commission above the ceiling.
 		System::set_block_number(1);
 		let active = 1;
 		staking::ActiveEra::<Runtime>::put(staking::ActiveEraInfo {
@@ -301,6 +301,8 @@ fn a_stale_session_report_neither_resets_the_plan_nor_clamps() {
 			start: Some(0),
 		});
 		staking::CurrentEra::<Runtime>::put(active + 1);
+		let last = 5;
+		staking::BondedEras::<Runtime>::put(BoundedVec::truncate_from(vec![(active, last)]));
 		staking::Validators::<Runtime>::insert(
 			&alice,
 			staking::ValidatorPrefs {
@@ -309,7 +311,6 @@ fn a_stale_session_report_neither_resets_the_plan_nor_clamps() {
 			},
 		);
 		staking::MaxCommission::<Runtime>::put(Perbill::from_percent(10));
-		let last = 5;
 		rc_client::LastSessionReportEndingIndex::<Runtime>::put(last);
 		assert!(plan_is_stalled(&report(last + 1)));
 		System::reset_events();

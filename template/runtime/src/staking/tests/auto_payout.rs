@@ -426,7 +426,7 @@ fn paid_out(era: u32, who: &AccountId) -> bool {
 }
 
 /// Runs blocks until nothing waits to be paid, at most `max`.
-fn pay_everything(max: u32) {
+pub(super) fn pay_everything(max: u32) {
 	for _ in 0..max {
 		if pallet_auto_payout::Current::<Runtime>::get().is_none()
 			&& pallet_auto_payout::Queue::<Runtime>::get().is_empty()
@@ -570,6 +570,44 @@ fn issuance_is_conserved_across_a_paid_era() {
 		assert!(
 			dust <= shares * (rewards / 1_000_000_000 + 1),
 			"{dust} never minted of {rewards}"
+		);
+	});
+}
+
+/// A closed era's reward is its share of the yearly schedule for the time it
+/// lasted, plus its fees: one day in year 1 is 45M ORB / 365.
+#[test]
+fn an_era_reward_is_its_share_of_the_schedule() {
+	use crate::economy::{
+		schedule::{era_issuance, TokenomicsSchedule},
+		EraFeePoolAccount,
+	};
+	use crate::primitives::constants::DAY_MS;
+	use pallet_staking_async::{ActiveEra, ErasValidatorReward};
+	let start = || {
+		ActiveEra::<Runtime>::get()
+			.and_then(|era| era.start)
+			.unwrap()
+	};
+	with_validators(|| {
+		assert_ok!(AutoPayout::pause(RuntimeOrigin::root()));
+		run_to_era(2);
+		let began = start();
+		let fees = 1_000 * ORB;
+		assert_ok!(Balances::mint_into(&EraFeePoolAccount::get(), fees));
+		run_to_era(3);
+
+		let lasted = start() - began;
+		#[cfg(not(feature = "fast-runtime"))]
+		assert_eq!(lasted, DAY_MS);
+		let scheduled = era_issuance::<TokenomicsSchedule>(0, lasted);
+		assert_eq!(
+			scheduled,
+			45_000_000 * ORB * u128::from(lasted) / u128::from(365 * DAY_MS)
+		);
+		assert_eq!(
+			ErasValidatorReward::<Runtime>::get(2),
+			Some(scheduled + fees)
 		);
 	});
 }

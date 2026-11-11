@@ -13,7 +13,10 @@ use crate::{
 	economy::GovernanceAccount,
 	staking::{
 		candidacy::check_candidacy,
-		params::{BONDING_DURATION, POOL_MIN_JOIN_BOND, TEST_POOL_MIN_CREATE_BOND},
+		params::{
+			BONDING_DURATION, POOL_MIN_JOIN_BOND, TEST_MIN_NOMINATOR_BOND,
+			TEST_POOL_MIN_CREATE_BOND,
+		},
 	},
 	test_utils::{account, ORB},
 	AccountId, AutoPayout, Balance, Balances, NominationPools, Runtime, RuntimeEvent,
@@ -165,7 +168,7 @@ fn an_account_stakes_directly_or_through_a_pool_not_both() {
 		Balances::set_balance(&staker, 1_000 * ORB);
 		assert_ok!(Staking::bond(
 			signed(&staker),
-			10 * ORB,
+			TEST_MIN_NOMINATOR_BOND,
 			pallet_staking_async::RewardDestination::Staked
 		));
 		assert_noop!(
@@ -195,10 +198,10 @@ fn a_staker_with_only_unlocking_funds_cannot_join_or_create_a_pool() {
 		Balances::set_balance(&staker, 1_000 * ORB);
 		assert_ok!(Staking::bond(
 			signed(&staker),
-			10 * ORB,
+			TEST_MIN_NOMINATOR_BOND,
 			pallet_staking_async::RewardDestination::Staked
 		));
-		assert_ok!(Staking::unbond(signed(&staker), 10 * ORB));
+		assert_ok!(Staking::unbond(signed(&staker), TEST_MIN_NOMINATOR_BOND));
 		let ledger = pallet_staking_async::Ledger::<Runtime>::get(&staker).unwrap();
 		assert_eq!(ledger.active, 0);
 		assert!(!ledger.unlocking.is_empty());

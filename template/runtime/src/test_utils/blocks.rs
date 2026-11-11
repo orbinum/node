@@ -14,14 +14,28 @@ use frame_support::{
 use scale_codec::Encode;
 use sp_runtime::{traits::Dispatchable, Digest, DigestItem};
 
-/// The first slot from block `n` on that is later than the current one and
-/// whose author is not disabled: Aura refuses blocks from disabled authors.
+/// Where [`stall`] keeps the slots the chain has lost; read by [`next_slot`].
+const SLOT_OFFSET: &[u8] = b":test:slot_offset";
+
+/// The chain produces no block for `slots` slots: every later block's slot,
+/// and so its timestamp, moves that far ahead of its number, as after a halt.
+/// Sessions still end by block number, so the session running stretches in time.
+pub(crate) fn stall(slots: u64) {
+	let offset: u64 = frame_support::storage::unhashed::get_or_default(SLOT_OFFSET);
+	frame_support::storage::unhashed::put(SLOT_OFFSET, &(offset + slots));
+}
+
+/// The first slot from block `n` (plus any [`stall`]) on that is later than the
+/// current one and whose author is not disabled: Aura refuses blocks from
+/// disabled authors.
 fn next_slot(n: BlockNumber) -> Option<u64> {
 	let authorities = pallet_aura::Authorities::<Runtime>::decode_len().unwrap_or(0) as u64;
 	if authorities == 0 {
 		return None;
 	}
-	let mut slot = u64::from(n).max(u64::from(pallet_aura::CurrentSlot::<Runtime>::get()) + 1);
+	let offset: u64 = frame_support::storage::unhashed::get_or_default(SLOT_OFFSET);
+	let mut slot =
+		(u64::from(n) + offset).max(u64::from(pallet_aura::CurrentSlot::<Runtime>::get()) + 1);
 	while <Session as DisabledValidators>::is_disabled((slot % authorities) as u32) {
 		slot += 1;
 	}

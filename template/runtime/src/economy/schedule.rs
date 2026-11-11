@@ -1,5 +1,6 @@
-//! The yearly issuance that pays stakers (tokenomics: 60M ORB in year 1 down to
-//! 25M in year 10), prorated per era.
+//! The yearly issuance that pays stakers, prorated per era: the 300M ORB staking
+//! allocation over ten years (45M in year 1 down to 20M in year 10), then 20M a
+//! year.
 
 use crate::{
 	primitives::constants::{DAY_MS, ORB, YEAR_MS},
@@ -8,21 +9,26 @@ use crate::{
 
 const MILLION_ORB: Balance = 1_000_000 * ORB;
 
-/// Issuance for stakers in years 1 to 10. Later years repeat the last value.
+/// The tokenomics' staking allocation, issued over years 1 to 10.
+#[cfg(test)]
+pub const STAKING_ALLOCATION: Balance = 300 * MILLION_ORB;
+
+/// Issuance for stakers in years 1 to 10, summing to [`STAKING_ALLOCATION`].
+/// Later years repeat the last value: 20M ORB a year.
 pub const ANNUAL_ISSUANCE: [Balance; 10] = [
-	60 * MILLION_ORB,
-	50 * MILLION_ORB,
 	45 * MILLION_ORB,
 	40 * MILLION_ORB,
-	35 * MILLION_ORB,
+	36 * MILLION_ORB,
+	33 * MILLION_ORB,
 	30 * MILLION_ORB,
+	27 * MILLION_ORB,
 	25 * MILLION_ORB,
+	23 * MILLION_ORB,
+	21 * MILLION_ORB,
 	20 * MILLION_ORB,
-	20 * MILLION_ORB,
-	25 * MILLION_ORB,
 ];
 
-/// Eras in a year at one era a day. Counts years from staking's first era.
+/// Eras in a year at one era a day. Years count from staking's first paid era.
 pub const ERAS_PER_YEAR: u32 = 365;
 
 /// The longest era duration that is paid for. An era stretched by a stall pays
@@ -48,7 +54,7 @@ impl InflationSchedule for TokenomicsSchedule {
 /// What an era of `duration_ms` in `year` issues under `S`.
 pub fn era_issuance<S: InflationSchedule>(year: u32, duration_ms: u64) -> Balance {
 	let paid_ms = duration_ms.min(MAX_PAID_ERA_MS) as Balance;
-	// At most 60M ORB × 2 days in ms ≈ 1e34, well inside u128.
+	// At most 45M ORB × 2 days in ms ≈ 8e33, well inside u128.
 	S::annual(year).saturating_mul(paid_ms) / YEAR_MS as Balance
 }
 
@@ -57,19 +63,24 @@ mod tests {
 	use super::*;
 
 	#[test]
+	fn ten_years_issue_the_staking_allocation() {
+		assert_eq!(ANNUAL_ISSUANCE.iter().sum::<Balance>(), STAKING_ALLOCATION);
+	}
+
+	#[test]
 	fn year_one_day_pays_a_365th() {
 		assert_eq!(
 			era_issuance::<TokenomicsSchedule>(0, DAY_MS),
-			60 * MILLION_ORB / 365
+			45 * MILLION_ORB / 365
 		);
 	}
 
 	#[test]
 	fn later_years_follow_the_table_then_repeat_the_last() {
-		assert_eq!(TokenomicsSchedule::annual(1), 50 * MILLION_ORB);
-		assert_eq!(TokenomicsSchedule::annual(9), 25 * MILLION_ORB);
-		assert_eq!(TokenomicsSchedule::annual(10), 25 * MILLION_ORB);
-		assert_eq!(TokenomicsSchedule::annual(u32::MAX), 25 * MILLION_ORB);
+		assert_eq!(TokenomicsSchedule::annual(1), 40 * MILLION_ORB);
+		assert_eq!(TokenomicsSchedule::annual(9), 20 * MILLION_ORB);
+		assert_eq!(TokenomicsSchedule::annual(10), 20 * MILLION_ORB);
+		assert_eq!(TokenomicsSchedule::annual(u32::MAX), 20 * MILLION_ORB);
 	}
 
 	#[test]

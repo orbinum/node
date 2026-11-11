@@ -9,6 +9,7 @@
 //! - `offences`: a GRANDPA equivocation, from report to slash.
 //! - `pools`: nomination pools through delegated staking.
 //! - `auto_payout`: era rewards paid without transactions.
+//! - `emission`: era rewards against the schedule over a year, and their split.
 //! - `pruning`: eras past the history pruned from `on_idle`.
 //! - `local_relay`: the direct calls between the two staking clients.
 //! - `voters`: the voter list's walk kept to accounts that vote.
@@ -18,6 +19,7 @@ mod auto_payout;
 mod bonds;
 mod commission;
 mod election;
+mod emission;
 mod genesis;
 mod local_relay;
 mod offences;

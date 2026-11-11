@@ -9,7 +9,7 @@ use crate::test_utils::{
 use crate::{
 	configs::{staking::EraPruningBlockShare, system::BlockWeights},
 	staking::{params::HISTORY_DEPTH, HeavyBlocks},
-	AutoPayout, BlockNumber, EraPruning, Runtime, RuntimeEvent, RuntimeOrigin, System,
+	AutoPayout, BlockNumber, EraPruning, Runtime, RuntimeEvent, RuntimeOrigin, Session, System,
 };
 use frame_support::{
 	assert_ok,
@@ -46,6 +46,10 @@ fn with_marked_eras<R>(run: impl FnOnce() -> R) -> R {
 			start: None,
 		});
 		staking::CurrentEra::<Runtime>::put(active);
+		// Staking reads the active era's start session when a session ends.
+		staking::BondedEras::<Runtime>::mutate(|eras| {
+			eras.force_push((active, Session::current_index()));
+		});
 		for era in PRUNED {
 			EraPruningState::<Runtime>::insert(era, PruningStep::ErasStakersPaged);
 		}
