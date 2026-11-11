@@ -39,6 +39,16 @@ ignore = [
     # 0.14. Here k256 hashes, recovers and verifies public data; no secret key is used.
     "RUSTSEC-2026-0387",
 
+    # hickory-proto 0.24.4 / 0.25.2 — from libp2p-dns (libp2p 0.54) and litep2p 0.14 through
+    # sc-network; fixed only in 0.26.2, and sc-network 0.61 still pins libp2p 0.54. 0487,
+    # 0489 and 0490 panic when parsing zone files or record text, which the node never does.
+    # 0491 over-allocates (~18 MB, freed when decoding fails) on a DNS response with forged
+    # record counts, reachable only by spoofing replies to the node's `/dns` multiaddr lookups.
+    "RUSTSEC-2026-0487",
+    "RUSTSEC-2026-0489",
+    "RUSTSEC-2026-0490",
+    "RUSTSEC-2026-0491",
+
     # Unmaintained — all transitive, no direct upgrade path
     "RUSTSEC-2025-0161",  # libsecp256k1 0.7.2 (from frontier fp-evm/pallet-evm)
     "RUSTSEC-2026-0119",  # hickory-proto 0.24.x (from libp2p-dns → sc-network)
