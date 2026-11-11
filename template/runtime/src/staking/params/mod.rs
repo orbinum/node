@@ -105,7 +105,7 @@ pub const OPEN_MODE_MIN_SELF_BOND: Balance = 1_000 * ORB;
 /// Genesis bonds for test networks (dev, local, testnet). Governance raises them
 /// on-chain; mainnet's genesis uses the tokenomics values below.
 pub const TEST_MIN_VALIDATOR_BOND: Balance = 1_000 * ORB;
-pub const TEST_MIN_NOMINATOR_BOND: Balance = 10 * ORB;
+pub const TEST_MIN_NOMINATOR_BOND: Balance = 100 * ORB;
 pub const MAINNET_MIN_VALIDATOR_BOND: Balance = 100_000 * ORB;
 pub const MAINNET_MIN_NOMINATOR_BOND: Balance = 100 * ORB;
 
@@ -119,10 +119,11 @@ pub const SLASH_REWARD_FRACTION: Perbill = Perbill::from_percent(1);
 /// are how holders below `MinNominatorBond` stake.
 pub const POOL_MIN_JOIN_BOND: Balance = ORB;
 
-/// Least a depositor bonds to create a pool: ten nominator bonds, since every
-/// pool is a nominator that each election snapshot reads. With the nominator
-/// bond, it is what keeps the uncapped voter list from being flooded.
-pub const TEST_POOL_MIN_CREATE_BOND: Balance = 10 * TEST_MIN_NOMINATOR_BOND;
+/// Least a depositor bonds to create a pool, since every pool is a nominator that
+/// each election snapshot reads: one nominator bond on test networks, ten on
+/// mainnet. With the nominator bond, it is what keeps the uncapped voter list
+/// from being flooded.
+pub const TEST_POOL_MIN_CREATE_BOND: Balance = TEST_MIN_NOMINATOR_BOND;
 pub const MAINNET_POOL_MIN_CREATE_BOND: Balance = 10 * MAINNET_MIN_NOMINATOR_BOND;
 
 /// Eras past [`BONDING_DURATION`] that a pool keeps each era's unbonding funds

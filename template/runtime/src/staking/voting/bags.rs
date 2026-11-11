@@ -1,8 +1,8 @@
 //! Bag thresholds for the voter list (`pallet-bags-list`), which ranks nominators
 //! by stake so the election snapshot takes the largest first.
 //!
-//! 200 bags, geometric from the vote weight of 10 ORB (the test networks'
-//! nominator minimum) up to `u64::MAX`, ratio ≈ 1.1132: `floor(first × ratio^i)`,
+//! 200 bags, geometric from the vote weight of 10 ORB (a tenth of the nominator
+//! minimum, so the lowest bags stay empty) up to `u64::MAX`, ratio ≈ 1.1132: `floor(first × ratio^i)`,
 //! the last `u64::MAX`. Vote weight is stake divided by a constant 10^9
 //! ([`super::vote::DecimalCurrencyToVote`]), so a stake stays in its bag
 //! whatever the issuance. Regenerate if the minimum bond changes by orders of
@@ -239,16 +239,19 @@ mod tests {
 	#[test]
 	fn the_minimum_bonds_land_in_the_expected_bags() {
 		use super::super::vote::VOTE_FACTOR;
-		use crate::staking::params::*;
-		assert_eq!(bag_of(TEST_MIN_NOMINATOR_BOND), THRESHOLDS[0]);
-		assert_eq!(bag_of(TEST_MIN_NOMINATOR_BOND - 1), THRESHOLDS[0]);
-		assert_eq!(
-			bag_of(TEST_MIN_NOMINATOR_BOND + VOTE_FACTOR - 1),
-			THRESHOLDS[0]
-		);
-		assert_eq!(bag_of(TEST_MIN_NOMINATOR_BOND + VOTE_FACTOR), THRESHOLDS[1]);
-		// Ten times the bond, ⌈log(10) / log(1.1132)⌉ = 22 bags up.
-		assert_eq!(bag_of(MAINNET_MIN_NOMINATOR_BOND), THRESHOLDS[22]);
-		assert_eq!(bag_of(TEST_POOL_MIN_CREATE_BOND), THRESHOLDS[22]);
+		use crate::{primitives::constants::ORB, staking::params::*};
+		let first = 10 * ORB;
+		assert_eq!(bag_of(first), THRESHOLDS[0]);
+		assert_eq!(bag_of(first - 1), THRESHOLDS[0]);
+		assert_eq!(bag_of(first + VOTE_FACTOR - 1), THRESHOLDS[0]);
+		assert_eq!(bag_of(first + VOTE_FACTOR), THRESHOLDS[1]);
+		// Ten times the first, ⌈log(10) / log(1.1132)⌉ = 22 bags up.
+		for bond in [
+			TEST_MIN_NOMINATOR_BOND,
+			MAINNET_MIN_NOMINATOR_BOND,
+			TEST_POOL_MIN_CREATE_BOND,
+		] {
+			assert_eq!(bag_of(bond), THRESHOLDS[22]);
+		}
 	}
 }

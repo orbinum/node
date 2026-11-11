@@ -255,8 +255,8 @@ indexer 0.34.0 (see Clients).
   share comes out of its held funds when it withdraws or anyone calls
   `applySlash` (all of it to governance; the caller earns nothing, since it may
   be the member).
-- **Limits.** Join from 1 ORB, create from ten nominator bonds (100 ORB on test
-  networks, 1 000 ORB on mainnet), no cap on pools or members, no pool
+- **Limits.** Join from 1 ORB, create from 100 ORB on test networks and 1 000 ORB on
+  mainnet, no cap on pools or members, no pool
   commission ceiling (`GlobalMaxCommission` unset); root changes them
   (`setConfigs`), and a lowered `GlobalMaxCommission` caps every pool's
   commission from its next payout. `InitStaking` sets the same bonds on the
