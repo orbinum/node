@@ -6,9 +6,11 @@
 //! burned: at most all of it, less the shares nobody can be paid (a validator
 //! with no points or no exposure) and rounding. Pure inflation burns nothing.
 //!
-//! The inflation year is the era's index over [`ERAS_PER_YEAR`], not time:
-//! eras forced or cut short reach the next year sooner. Each era still mints
-//! for the time it lasted.
+//! The inflation year counts eras from the first one that pays (era 1: era 0 has
+//! no exposures), [`ERAS_PER_YEAR`] to a year, not time. An era lasts at least a
+//! day: its set is handed over at a fixed session, forced or not. Halts and missed
+//! slots make it longer, and each era mints for the time it lasted, so a year of
+//! longer eras turns later than the calendar and mints more than the year's rate.
 //!
 //! The era's duration is measured from the timestamp the session side reports
 //! when the era's set became active to the one of the next set.
@@ -46,7 +48,7 @@ pub struct Inflation<S>(PhantomData<S>);
 
 impl<S: InflationSchedule> EraRewardSource for Inflation<S> {
 	fn take(era: EraIndex, duration_ms: u64) -> Balance {
-		era_issuance::<S>(era / ERAS_PER_YEAR, duration_ms)
+		era_issuance::<S>(era.saturating_sub(1) / ERAS_PER_YEAR, duration_ms)
 	}
 }
 
@@ -104,13 +106,29 @@ where
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{economy::schedule::TokenomicsSchedule, primitives::constants::DAY_MS};
+	use crate::{
+		economy::schedule::{TokenomicsSchedule, STAKING_ALLOCATION},
+		primitives::constants::DAY_MS,
+	};
+
+	type Scheduled = Inflation<TokenomicsSchedule>;
 
 	#[test]
-	fn inflation_year_follows_the_era() {
-		assert_eq!(
-			Inflation::<TokenomicsSchedule>::take(ERAS_PER_YEAR, DAY_MS),
-			era_issuance::<TokenomicsSchedule>(1, DAY_MS)
-		);
+	fn inflation_years_count_from_the_first_paid_era() {
+		let year = |y| era_issuance::<TokenomicsSchedule>(y, DAY_MS);
+		assert_eq!(Scheduled::take(1, DAY_MS), year(0));
+		assert_eq!(Scheduled::take(ERAS_PER_YEAR, DAY_MS), year(0));
+		assert_eq!(Scheduled::take(ERAS_PER_YEAR + 1, DAY_MS), year(1));
+		assert_eq!(Scheduled::take(10 * ERAS_PER_YEAR + 1, DAY_MS), year(10));
+	}
+
+	/// The first ten years of one-day eras, era 1 to era 3650, issue the staking
+	/// allocation: never more, and under one unit per era less (rounding).
+	#[test]
+	fn ten_years_of_paid_eras_issue_the_allocation() {
+		let eras = 10 * ERAS_PER_YEAR;
+		let issued: Balance = (1..=eras).map(|era| Scheduled::take(era, DAY_MS)).sum();
+		assert!(issued <= STAKING_ALLOCATION);
+		assert!(STAKING_ALLOCATION - issued < eras as Balance);
 	}
 }
