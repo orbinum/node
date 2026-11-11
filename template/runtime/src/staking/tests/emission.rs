@@ -84,6 +84,10 @@ fn pace(era: EraIndex) -> Pace {
 #[test]
 #[ignore = "runs 366 eras (about 10 minutes): cargo test -p orbinum-runtime --lib a_year_of_eras -- --ignored --nocapture"]
 fn a_year_of_eras_pays_the_schedule() {
+	// The pace script needs day-long eras; `fast-runtime` eras last minutes.
+	if cfg!(feature = "fast-runtime") {
+		return;
+	}
 	let clock = std::time::Instant::now();
 	let mut ext = genesis_of(3);
 	let first_issuance = ext.execute_with(|| {

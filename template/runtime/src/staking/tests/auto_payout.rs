@@ -583,16 +583,28 @@ fn an_era_reward_is_its_share_of_the_schedule() {
 		EraFeePoolAccount,
 	};
 	use crate::primitives::constants::DAY_MS;
-	use pallet_staking_async::ErasValidatorReward;
+	use pallet_staking_async::{ActiveEra, ErasValidatorReward};
+	let start = || {
+		ActiveEra::<Runtime>::get()
+			.and_then(|era| era.start)
+			.unwrap()
+	};
 	with_validators(|| {
 		assert_ok!(AutoPayout::pause(RuntimeOrigin::root()));
 		run_to_era(2);
+		let began = start();
 		let fees = 1_000 * ORB;
 		assert_ok!(Balances::mint_into(&EraFeePoolAccount::get(), fees));
 		run_to_era(3);
 
-		let scheduled = era_issuance::<TokenomicsSchedule>(0, DAY_MS);
-		assert_eq!(scheduled, 45_000_000 * ORB / 365);
+		let lasted = start() - began;
+		#[cfg(not(feature = "fast-runtime"))]
+		assert_eq!(lasted, DAY_MS);
+		let scheduled = era_issuance::<TokenomicsSchedule>(0, lasted);
+		assert_eq!(
+			scheduled,
+			45_000_000 * ORB * u128::from(lasted) / u128::from(365 * DAY_MS)
+		);
 		assert_eq!(
 			ErasValidatorReward::<Runtime>::get(2),
 			Some(scheduled + fees)
