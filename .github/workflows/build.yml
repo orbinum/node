@@ -39,10 +39,12 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
+      # A stalled runner mirror makes apt wait 30 s per package; a 10 s timeout caps that.
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang libclang-dev protobuf-compiler
+          APT="sudo apt-get -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 -o Acquire::Retries=3"
+          $APT update
+          $APT install -y build-essential clang libclang-dev protobuf-compiler
 
       - name: Cache cargo registry & git sources
         uses: actions/cache@v5

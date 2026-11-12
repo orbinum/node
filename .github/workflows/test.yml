@@ -51,10 +51,14 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v5
 
-      - name: Install system dependencies
+      # A stalled runner mirror makes apt wait 30 s per package before falling back to
+      # archive.ubuntu.com (27 min seen); a 10 s timeout caps that.
+      - &install-system-deps
+        name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang libclang-dev protobuf-compiler
+          APT="sudo apt-get -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 -o Acquire::Retries=3"
+          $APT update
+          $APT install -y build-essential clang libclang-dev protobuf-compiler
 
       - name: Cache cargo registry & git sources
         uses: actions/cache@v5
@@ -123,10 +127,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v5
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang libclang-dev protobuf-compiler
+      - *install-system-deps
 
       - name: Cache cargo registry & git sources
         uses: actions/cache@v5
@@ -175,10 +176,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v5
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang libclang-dev protobuf-compiler
+      - *install-system-deps
 
       - name: Cache cargo registry & git sources
         uses: actions/cache@v5
