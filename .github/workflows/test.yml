@@ -41,7 +41,8 @@ jobs:
       - name: Check code format
         run: make fmt-check
 
-  # Step 2: Check compilation (no binary generation)
+  # Step 2: check, clippy and the test variants run in parallel. `cargo check` emits no
+  # codegen the tests could reuse, so gating them on it only delayed them.
   check:
     name: Check
     runs-on: ubuntu-latest
@@ -84,12 +85,24 @@ jobs:
           cargo check -p orbinum-zk-verifier --no-default-features
           cargo check -p orbinum-zk-verifier --no-default-features --features groth16-native
 
-  # Step 3a: Unit tests. Compiles in this job: a separate build job never matched its
-  # RUSTFLAGS, features or the runtime WASM, so the tests recompiled everything anyway.
+  # Unit tests, one runner per feature set: each set is its own compile, so running them
+  # in one job serialized three builds. A shared build job never matched their RUSTFLAGS,
+  # features or the runtime WASM, so each variant compiles here (sccache-backed).
   unit-test:
-    name: Unit Tests
+    name: Unit Tests (${{ matrix.variant }})
     runs-on: ubuntu-latest
-    needs: [check]
+    needs: [fmt]
+    strategy:
+      matrix:
+        include:
+          - variant: default
+            cmd: cargo test --release --lib --all
+          - variant: benchmarks
+            cmd: cargo test --release --lib --all --features=runtime-benchmarks,skip-proof-verification
+          # `fast-runtime` changes the session, era, bonding and election constants.
+          # SKIP_WASM_BUILD inline: wasm-builder skips on any value, even an empty one.
+          - variant: fast-runtime
+            cmd: SKIP_WASM_BUILD=1 cargo test --release --lib -p orbinum-runtime --features fast-runtime
     steps:
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@main
@@ -128,24 +141,16 @@ jobs:
         run: make setup
 
       - name: Run unit tests
-        run: make test-release
+        run: ${{ matrix.cmd }}
         env:
           CI_DUMMY_VK: "1"
           RUSTFLAGS: "-D warnings"
 
-      # `fast-runtime` changes the session, era, bonding and election constants.
-      - name: Run runtime tests with fast-runtime
-        run: cargo test --release --lib -p orbinum-runtime --features fast-runtime
-        env:
-          CI_DUMMY_VK: "1"
-          RUSTFLAGS: "-D warnings"
-          SKIP_WASM_BUILD: "1"
-
-  # Step 3b: Clippy (check mode, its own feature set; runs in parallel with tests)
+  # Clippy (check mode, its own feature set)
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
-    needs: [check]
+    needs: [fmt]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
