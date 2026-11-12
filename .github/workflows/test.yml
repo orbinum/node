@@ -97,8 +97,17 @@ jobs:
         include:
           - variant: default
             cmd: cargo test --release --lib --all
+          # Only the crates that declare these features; the rest have no code gated on them
+          # and run in `default`. A new crate declaring either feature must be added here.
           - variant: benchmarks
-            cmd: cargo test --release --lib --all --features=runtime-benchmarks,skip-proof-verification
+            cmd: >-
+              cargo test --release --lib --features=runtime-benchmarks,skip-proof-verification
+              -p orbinum-node -p orbinum-runtime
+              -p pallet-auto-payout -p pallet-ethereum -p pallet-evm -p pallet-evm-polkavm
+              -p pallet-evm-polkavm-proc-macro -p pallet-evm-precompile-curve25519-benchmarking
+              -p pallet-evm-precompile-sha3fips-benchmarking -p pallet-hotfix-sufficients
+              -p pallet-ismp-messaging -p pallet-paged-election -p pallet-shielded-pool
+              -p pallet-validator-set -p pallet-zk-verifier
     steps: &unit-test-steps
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@main
