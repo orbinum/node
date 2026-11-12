@@ -294,6 +294,8 @@ fn a_slash_takes_the_validator_own_stake_not_its_nominators() {
 			&nominator,
 			vec![charlie()]
 		));
+		// What the bond took: the whole balance, less any existential deposit.
+		let bonded = <Staking as StakingInterface>::stake(&nominator).map(|s| s.total);
 		run_to_era(2);
 		assert_ok!(AutoPayout::pause(RuntimeOrigin::root()));
 		assert!(
@@ -314,7 +316,7 @@ fn a_slash_takes_the_validator_own_stake_not_its_nominators() {
 		settle();
 		assert_eq!(
 			<Staking as StakingInterface>::stake(&nominator).map(|s| s.total),
-			Ok(backing),
+			bonded,
 			"the nominator keeps its bond"
 		);
 	});
