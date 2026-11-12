@@ -99,11 +99,7 @@ jobs:
             cmd: cargo test --release --lib --all
           - variant: benchmarks
             cmd: cargo test --release --lib --all --features=runtime-benchmarks,skip-proof-verification
-          # `fast-runtime` changes the session, era, bonding and election constants.
-          # SKIP_WASM_BUILD inline: wasm-builder skips on any value, even an empty one.
-          - variant: fast-runtime
-            cmd: SKIP_WASM_BUILD=1 cargo test --release --lib -p orbinum-runtime --features fast-runtime
-    steps:
+    steps: &unit-test-steps
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -145,6 +141,21 @@ jobs:
         env:
           CI_DUMMY_VK: "1"
           RUSTFLAGS: "-D warnings"
+
+  # Short variant, held until `check` ends: one fewer job hitting the GHA cache at start
+  # (rate-limited with 5 at once) while still finishing before `benchmarks`.
+  unit-test-fast-runtime:
+    name: Unit Tests (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    needs: [check]
+    strategy:
+      matrix:
+        include:
+          # `fast-runtime` changes the session, era, bonding and election constants.
+          # SKIP_WASM_BUILD inline: wasm-builder skips on any value, even an empty one.
+          - variant: fast-runtime
+            cmd: SKIP_WASM_BUILD=1 cargo test --release --lib -p orbinum-runtime --features fast-runtime
+    steps: *unit-test-steps
 
   # Clippy (check mode, its own feature set)
   clippy:
