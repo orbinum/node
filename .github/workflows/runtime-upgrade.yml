@@ -88,9 +88,16 @@ jobs:
           # 3. spec_version must RISE. A setCode to an equal or lower spec is rejected by
           #    the runtime and applies nothing — `deploy-runtime.sh` used to warn and exit
           #    0, so a no-op upgrade reported success. The expected value is read from the
-          #    runtime source at the deployed ref, not from the workflow's checkout.
-          EXPECTED=$(git show "$SRC_REF:template/runtime/src/lib.rs" \
-            | grep -oE 'spec_version: *[0-9]+' | head -1 | grep -oE '[0-9]+')
+          #    runtime source at the deployed ref, not from the workflow's checkout. It
+          #    lives in `primitives/version.rs`; refs before that refactor keep it in
+          #    `lib.rs`. A ref with neither fails with a message, not a bare `grep` exit.
+          EXPECTED=$(for f in template/runtime/src/primitives/version.rs template/runtime/src/lib.rs; do
+              git show "$SRC_REF:$f" 2>/dev/null || true
+            done | grep -oE 'spec_version: *[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+          if [ -z "$EXPECTED" ]; then
+            echo "::error::no spec_version found in the runtime source at $SRC_REF"
+            exit 1
+          fi
           ONCHAIN=$(curl -sf --max-time 10 -H 'Content-Type: application/json' \
             -d '{"jsonrpc":"2.0","id":1,"method":"state_getRuntimeVersion"}' \
             "${RPC_URL/wss:\/\//https://}" \
