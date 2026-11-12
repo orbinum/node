@@ -22,7 +22,10 @@ The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 
 ### spec 22 — tx 8 — [Unreleased] (`v0.8.0`)
 
-Pool roles become text-signable. Extrinsics and their encoding are unchanged.
+Pool roles become text-signable, and only validators are slashed: nominators and
+pool members leave in two eras instead of twenty-eight, while validators keep the
+full bonding duration and the long window in which governance may cancel a
+slash. Extrinsics and their encoding are unchanged.
 
 #### 1 · Pool roles are text-signable
 
@@ -31,10 +34,39 @@ or the account it is handed to, so EVM (`EcdsaText`) and Solana (`Ed25519Text`,
 `Ed25519WrappedText`) roots can sign it; spec 21 refused it with `BadProof`.
 `set_metadata` stays refused: its free bytes cannot be shown safely.
 
+#### 2 · Only validators are slashed
+
+- **Nominators are not slashed.** Staking's `AreNominatorsSlashable` is off: a
+  slash takes the offender's own stake only. Genesis turns it off for a new chain
+  (`EraPruning`'s genesis, built after staking's, which has no setting for it);
+  the `NominatorsUnslashable` migration turns it off once on a chain from before
+  spec 22, and does not undo a later governance change. Staking copies the flag
+  into each era as it starts: an era started before the upgrade keeps slashing
+  its nominators.
+- **Nominators and pool members unbond in `NOMINATOR_UNBOND_DURATION` = 2 eras**
+  (`NominatorFastUnbondDuration`; `fast-runtime`: 1), the active era and the next,
+  whose election already counts the stake. Pools take the same time
+  (`nominator_bonding_duration`). Chunks already unbonding keep their unlock era.
+- **Validators are unchanged:** `BONDING_DURATION` = 28 eras and
+  `SLASH_DEFER_DURATION` = 26 eras, during which governance may cancel a slash.
+  An account that validated within the last 28 eras waits the full time even if
+  it nominates now (`LastValidatorEra`), so switching role does not dodge a slash.
+- Governance may turn nominator slashing back on (`staking.setStakingConfigs`);
+  backers then wait the full bonding duration again.
+
+#### 3 · Migrations
+
+- Added `NominatorsUnslashable` (above). Runs once per chain.
+- Dropped `InitStaking`: it applied the spec 20 → 21 move to staking on testnet,
+  which has run. `PrecompileCode` stays: it is versioned, for precompiles added
+  later.
+
 #### Clients to ship with it
 
 - ts-protocol: renders `update_roles` as the runtime does (shared vector
   `pools_update_roles`) and adds `NominationPoolsModule.updateRoles`.
+- App: a nominator's and a pool member's unlock era from the nominator unbonding
+  time, and no slash-sharing warnings for backers while nominator slashing is off.
 
 ### spec 21 — tx 8 — 2026-11-08 (`v0.7.0`)
 

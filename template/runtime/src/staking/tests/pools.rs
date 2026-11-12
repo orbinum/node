@@ -14,8 +14,8 @@ use crate::{
 	staking::{
 		candidacy::check_candidacy,
 		params::{
-			BONDING_DURATION, POOL_MIN_JOIN_BOND, TEST_MIN_NOMINATOR_BOND,
-			TEST_POOL_MIN_CREATE_BOND,
+			BONDING_DURATION, NOMINATOR_UNBOND_DURATION, POOL_MIN_JOIN_BOND,
+			TEST_MIN_NOMINATOR_BOND, TEST_POOL_MIN_CREATE_BOND,
 		},
 	},
 	test_utils::{account, ORB},
@@ -517,10 +517,11 @@ fn a_member_can_let_anyone_compound_its_rewards() {
 
 // Leaving
 
-/// A member unbonds and withdraws after the bonding duration; then the pool is
+/// A member unbonds and withdraws after the nominators' unbonding time, not the
+/// validators' bonding duration: members are not slashed. Then the pool is
 /// destroyed: the depositor leaves last and the pool's accounts are freed.
 #[test]
-fn members_leave_after_the_bonding_duration_and_the_pool_is_destroyed() {
+fn members_leave_after_the_nominator_unbonding_and_the_pool_is_destroyed() {
 	with_validators(|| {
 		assert_ok!(AutoPayout::pause(RuntimeOrigin::root()));
 		create_pool(&[(member(1), 100 * ORB)], vec![alice()]);
@@ -532,11 +533,13 @@ fn members_leave_after_the_bonding_duration_and_the_pool_is_destroyed() {
 			100 * ORB
 		));
 		let unbonded_at = active_era();
-		// Still held, and slashable, until the bonding duration has passed.
+		// Still held until the nominators' unbonding time has passed.
 		assert_eq!(held(&member(1)), 100 * ORB);
 		assert!(NominationPools::withdraw_unbonded(signed(&member(1)), member(1), 0).is_err());
+		run_to_era(unbonded_at + NOMINATOR_UNBOND_DURATION - 1);
+		assert!(NominationPools::withdraw_unbonded(signed(&member(1)), member(1), 0).is_err());
 
-		run_to_era(unbonded_at + BONDING_DURATION);
+		run_to_era(unbonded_at + NOMINATOR_UNBOND_DURATION);
 		assert_ok!(NominationPools::withdraw_unbonded(
 			signed(&member(1)),
 			member(1),
@@ -558,7 +561,7 @@ fn members_leave_after_the_bonding_duration_and_the_pool_is_destroyed() {
 			TEST_POOL_MIN_CREATE_BOND
 		));
 		let unbonded_at = active_era();
-		run_to_era(unbonded_at + BONDING_DURATION);
+		run_to_era(unbonded_at + NOMINATOR_UNBOND_DURATION);
 		assert_ok!(NominationPools::withdraw_unbonded(
 			signed(&depositor()),
 			depositor(),
@@ -607,6 +610,7 @@ fn a_destroying_pool_lets_anyone_remove_its_members() {
 #[test]
 fn a_slash_on_a_backed_validator_reduces_every_member_in_proportion() {
 	with_validators(|| {
+		super::nominators_slashable();
 		// Rewards would change the balances checked below.
 		assert_ok!(AutoPayout::pause(RuntimeOrigin::root()));
 		create_pool(
@@ -700,6 +704,7 @@ fn a_pool_behind_an_offender_reported_in_two_eras_keeps_a_sliver() {
 	use crate::test_utils::network::equivocation_now;
 	use sp_keyring::Ed25519Keyring;
 	with_validators(|| {
+		super::nominators_slashable();
 		assert_ok!(AutoPayout::pause(RuntimeOrigin::root()));
 		create_pool(&[(member(1), 100 * ORB)], vec![charlie()]);
 		run_to_era(2);
@@ -733,6 +738,7 @@ fn a_pool_behind_an_offender_reported_in_two_eras_keeps_a_sliver() {
 #[test]
 fn a_pool_slashed_to_nothing_lets_its_members_leave() {
 	with_validators(|| {
+		super::nominators_slashable();
 		assert_ok!(AutoPayout::pause(RuntimeOrigin::root()));
 		create_pool(&[(member(1), 100 * ORB)], vec![charlie()]);
 		run_to_era(2);

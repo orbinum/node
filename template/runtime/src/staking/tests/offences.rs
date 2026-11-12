@@ -210,6 +210,7 @@ fn self_report_is_not_profitable() {
 	use frame_support::traits::fungible::Mutate;
 	use sp_runtime::traits::Dispatchable;
 	genesis().execute_with(|| {
+		super::nominators_slashable();
 		let nominator = account(Sr25519Keyring::Ferdie);
 		let backing = 20 * TEST_MIN_VALIDATOR_BOND;
 		Balances::set_balance(&nominator, 2 * backing);
@@ -276,6 +277,51 @@ fn an_unsigned_report_needs_no_origin_but_rejects_signed() {
 	});
 }
 
+/// By default only the offender's own stake is slashed: a nominator backing it is
+/// not, and keeps its whole bond.
+#[test]
+fn a_slash_takes_the_validator_own_stake_not_its_nominators() {
+	use crate::test_utils::network::genesis;
+	use frame_support::traits::fungible::Mutate;
+	genesis().execute_with(|| {
+		let nominator = account(Sr25519Keyring::Ferdie);
+		let backing = 10 * TEST_MIN_VALIDATOR_BOND;
+		Balances::set_balance(&nominator, backing);
+		assert_ok!(<Staking as StakingInterface>::bond(
+			&nominator, backing, &nominator
+		));
+		assert_ok!(<Staking as StakingInterface>::nominate(
+			&nominator,
+			vec![charlie()]
+		));
+		// What the bond took: the whole balance, less any existential deposit.
+		let bonded = <Staking as StakingInterface>::stake(&nominator).map(|s| s.total);
+		run_to_era(2);
+		assert_ok!(AutoPayout::pause(RuntimeOrigin::root()));
+		assert!(
+			pallet_staking_async::ErasStakersOverview::<Runtime>::get(2, charlie())
+				.is_some_and(|exposure| exposure.total > backing)
+		);
+
+		assert_ok!(report_charlie());
+		settle();
+		let slashes: Vec<_> =
+			pallet_staking_async::UnappliedSlashes::<Runtime>::iter_values().collect();
+		assert!(!slashes.is_empty(), "the validator is slashed");
+		assert!(slashes
+			.iter()
+			.all(|slash| slash.own > 0 && slash.others.is_empty()));
+
+		run_to_era(2 + SLASH_DEFER_DURATION + 1);
+		settle();
+		assert_eq!(
+			<Staking as StakingInterface>::stake(&nominator).map(|s| s.total),
+			bonded,
+			"the nominator keeps its bond"
+		);
+	});
+}
+
 /// Stake unbonded in the era before the offence, once the election has exposed
 /// it for the offence's era, unlocks an era earlier than stake unbonded in the
 /// offence's own era. The slash must still land before it can be withdrawn,
@@ -285,6 +331,7 @@ fn stake_unbonded_before_the_offence_era_cannot_outrun_its_slash() {
 	use crate::{staking::params::BONDING_DURATION, test_utils::network::genesis};
 	use frame_support::traits::fungible::Mutate;
 	genesis().execute_with(|| {
+		super::nominators_slashable();
 		let nominator = account(Sr25519Keyring::Ferdie);
 		let backing = 10 * TEST_MIN_VALIDATOR_BOND;
 		Balances::set_balance(&nominator, backing);

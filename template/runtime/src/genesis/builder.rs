@@ -138,6 +138,7 @@ pub(super) fn build_genesis(params: GenesisParams) -> serde_json::Value {
 			key: Some(sudo_key),
 		},
 		transaction_payment: Default::default(),
+		era_pruning: Default::default(),
 		zk_verifier: Default::default(),
 		shielded_pool: Default::default(),
 		session: SessionConfig {
