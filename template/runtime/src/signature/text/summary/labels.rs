@@ -7,8 +7,19 @@ use crate::{
 	AccountId, Balance,
 };
 use alloc::vec::Vec;
-use pallet_nomination_pools::{BondExtra, ClaimPermission, CommissionClaimPermission, PoolState};
+use pallet_nomination_pools::{
+	BondExtra, ClaimPermission, CommissionClaimPermission, ConfigOp, PoolState,
+};
 use pallet_staking_async::RewardDestination;
+
+/// A pool role change: `keep`, `remove`, or the account the role is handed to.
+pub(super) fn role_op(op: &ConfigOp<AccountId>) -> Vec<u8> {
+	match op {
+		ConfigOp::Noop => b"keep".to_vec(),
+		ConfigOp::Remove => b"remove".to_vec(),
+		ConfigOp::Set(who) => account(who),
+	}
+}
 
 /// `pool: {id}`.
 pub(super) fn pool_line(id: &u32) -> Line {

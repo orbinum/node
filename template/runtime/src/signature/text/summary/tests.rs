@@ -6,7 +6,7 @@ use crate::{
 	test_utils::{shield, signed_extra, signed_extra_with_era, transfer, BOB, ORB},
 	AccountId, BalancesCall, Runtime, RuntimeCall, SignedExtra,
 };
-use pallet_nomination_pools::{BondExtra, ClaimPermission, PoolState};
+use pallet_nomination_pools::{BondExtra, ClaimPermission, ConfigOp, PoolState};
 use pallet_staking_async::RewardDestination;
 use scale_codec::Encode;
 use sp_runtime::generic::Era;
@@ -346,6 +346,24 @@ fn pool_operator_calls_show_the_pool_and_its_roles() {
 			},
 			"NominationPools.set_state\npool: 3\nstate: destroying".to_string(),
 		),
+		(
+			Call::update_roles {
+				pool_id: 3,
+				new_root: ConfigOp::Noop,
+				new_nominator: ConfigOp::Set(AccountId::from(a)),
+				new_bouncer: ConfigOp::Remove,
+			},
+			format!("NominationPools.update_roles\npool: 3\nroot: keep\nnominator: {a_hex}\nbouncer: remove"),
+		),
+		(
+			Call::update_roles {
+				pool_id: 3,
+				new_root: ConfigOp::Set(AccountId::from(BOB)),
+				new_nominator: ConfigOp::Noop,
+				new_bouncer: ConfigOp::Noop,
+			},
+			format!("NominationPools.update_roles\npool: 3\nroot: {bob}\nnominator: keep\nbouncer: keep"),
+		),
 	];
 	for (call, text) in cases {
 		let call = pools(call);
@@ -518,7 +536,7 @@ fn pool_commission_texts_tell_their_parameters_apart() {
 
 #[test]
 fn pool_calls_that_hide_value_or_authority_are_not_signable() {
-	use pallet_nomination_pools::{Call, ConfigOp};
+	use pallet_nomination_pools::Call;
 	let too_many = Call::nominate {
 		pool_id: 1,
 		validators: (0..=MAX_LISTED_ACCOUNTS)
@@ -531,13 +549,6 @@ fn pool_calls_that_hide_value_or_authority_are_not_signable() {
 		metadata: vec![1, 2],
 	};
 	assert!(!signs(pools(metadata)));
-	let roles = Call::update_roles {
-		pool_id: 1,
-		new_root: ConfigOp::Set(AccountId::from(BOB)),
-		new_nominator: ConfigOp::Noop,
-		new_bouncer: ConfigOp::Noop,
-	};
-	assert!(!signs(pools(roles)));
 }
 
 fn signs(call: RuntimeCall) -> bool {
@@ -721,6 +732,7 @@ const SIGNABLE_CALLS: &[&str] = &[
 	"NominationPools.create",
 	"NominationPools.nominate",
 	"NominationPools.set_state",
+	"NominationPools.update_roles",
 	"NominationPools.bond_extra_other",
 	"NominationPools.set_claim_permission",
 	"NominationPools.claim_payout_other",
