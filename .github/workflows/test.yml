@@ -51,10 +51,14 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v5
 
-      - name: Install system dependencies
+      # A stalled runner mirror makes apt wait 30 s per package before falling back to
+      # archive.ubuntu.com (27 min seen); a 10 s timeout caps that.
+      - &install-system-deps
+        name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang libclang-dev protobuf-compiler
+          APT="sudo apt-get -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 -o Acquire::Retries=3"
+          $APT update
+          $APT install -y build-essential clang libclang-dev protobuf-compiler
 
       - name: Cache cargo registry & git sources
         uses: actions/cache@v5
@@ -97,13 +101,18 @@ jobs:
         include:
           - variant: default
             cmd: cargo test --release --lib --all
+          # Only the crates that declare these features; the rest have no code gated on them
+          # and run in `default`. A new crate declaring either feature must be added here.
           - variant: benchmarks
-            cmd: cargo test --release --lib --all --features=runtime-benchmarks,skip-proof-verification
-          # `fast-runtime` changes the session, era, bonding and election constants.
-          # SKIP_WASM_BUILD inline: wasm-builder skips on any value, even an empty one.
-          - variant: fast-runtime
-            cmd: SKIP_WASM_BUILD=1 cargo test --release --lib -p orbinum-runtime --features fast-runtime
-    steps:
+            cmd: >-
+              cargo test --release --lib --features=runtime-benchmarks,skip-proof-verification
+              -p orbinum-node -p orbinum-runtime
+              -p pallet-auto-payout -p pallet-ethereum -p pallet-evm -p pallet-evm-polkavm
+              -p pallet-evm-polkavm-proc-macro -p pallet-evm-precompile-curve25519-benchmarking
+              -p pallet-evm-precompile-sha3fips-benchmarking -p pallet-hotfix-sufficients
+              -p pallet-ismp-messaging -p pallet-paged-election -p pallet-shielded-pool
+              -p pallet-validator-set -p pallet-zk-verifier
+    steps: &unit-test-steps
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -118,10 +127,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v5
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang libclang-dev protobuf-compiler
+      - *install-system-deps
 
       - name: Cache cargo registry & git sources
         uses: actions/cache@v5
@@ -146,6 +152,21 @@ jobs:
           CI_DUMMY_VK: "1"
           RUSTFLAGS: "-D warnings"
 
+  # Short variant, held until `check` ends: one fewer job hitting the GHA cache at start
+  # (rate-limited with 5 at once) while still finishing before `benchmarks`.
+  unit-test-fast-runtime:
+    name: Unit Tests (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    needs: [check]
+    strategy:
+      matrix:
+        include:
+          # `fast-runtime` changes the session, era, bonding and election constants.
+          # SKIP_WASM_BUILD inline: wasm-builder skips on any value, even an empty one.
+          - variant: fast-runtime
+            cmd: SKIP_WASM_BUILD=1 cargo test --release --lib -p orbinum-runtime --features fast-runtime
+    steps: *unit-test-steps
+
   # Clippy (check mode, its own feature set)
   clippy:
     name: Clippy
@@ -155,10 +176,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v5
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang libclang-dev protobuf-compiler
+      - *install-system-deps
 
       - name: Cache cargo registry & git sources
         uses: actions/cache@v5
