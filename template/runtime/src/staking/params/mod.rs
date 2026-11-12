@@ -25,13 +25,27 @@ pub const SESSIONS_PER_ERA: SessionIndex = 24;
 #[cfg(feature = "fast-runtime")]
 pub const SESSIONS_PER_ERA: SessionIndex = 3;
 
-/// Eras a stake stays locked after `unbond`, and so slashable.
+/// Eras a validator's stake stays locked after `unbond`, and so slashable. It
+/// applies too to an account that validated within the last `BONDING_DURATION`
+/// eras, whatever it does now: switching to nominating does not shorten it.
 #[cfg(not(feature = "fast-runtime"))]
 pub const BONDING_DURATION: EraIndex = 28;
 #[cfg(feature = "fast-runtime")]
 pub const BONDING_DURATION: EraIndex = 3;
 
-/// Eras before a reported slash applies; governance may cancel it meanwhile.
+/// Eras a nominator's or a pool member's stake stays locked after `unbond`.
+/// Only validators are slashed (`AreNominatorsSlashable` is off, see
+/// `staking::eras::pruning`), so backers need not wait out the slash window:
+/// two eras cover the active one and the next, whose election already counts
+/// the stake.
+#[cfg(not(feature = "fast-runtime"))]
+pub const NOMINATOR_UNBOND_DURATION: EraIndex = 2;
+#[cfg(feature = "fast-runtime")]
+pub const NOMINATOR_UNBOND_DURATION: EraIndex = 1;
+
+/// Eras before a reported slash applies; governance may cancel it meanwhile. Only
+/// validators' own stake is slashed, and it stays locked the full
+/// [`BONDING_DURATION`], so the window can be long while backers leave fast.
 ///
 /// Two below [`BONDING_DURATION`], so no stake exposed in the offence's era can
 /// be withdrawn before the slash lands. An era's exposures are stored while the
@@ -145,6 +159,8 @@ pub const fn minimum_validator_count(validators: u32) -> u32 {
 }
 
 const _: () = assert!(SLASH_DEFER_DURATION + 2 <= BONDING_DURATION);
+const _: () =
+	assert!(NOMINATOR_UNBOND_DURATION >= 1 && NOMINATOR_UNBOND_DURATION <= BONDING_DURATION);
 const _: () = assert!(MAX_ACTIVE_VALIDATORS <= MAX_VALIDATOR_CANDIDATES);
 const _: () = assert!(TEST_POOL_MIN_CREATE_BOND >= TEST_MIN_NOMINATOR_BOND);
 const _: () = assert!(MAINNET_POOL_MIN_CREATE_BOND >= MAINNET_MIN_NOMINATOR_BOND);

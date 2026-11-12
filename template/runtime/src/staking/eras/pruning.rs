@@ -22,6 +22,11 @@
 //! Before pruning, `on_idle` goes on removing the data of a stalled era plan
 //! ([`StalledPlan`], `staking::recovery`), which is reset only once its data is
 //! gone.
+//!
+//! Its genesis also turns staking's `AreNominatorsSlashable` off, which
+//! staking's own genesis cannot set: only validators are slashed here
+//! (`params::NOMINATOR_UNBOND_DURATION`). A chain started before spec 22 has it
+//! turned off by `migrations::NominatorsUnslashable`.
 
 pub use pallet::*;
 
@@ -91,6 +96,25 @@ pub mod pallet {
 		/// A pruning step of `era` failed. Reported once; the era is tried again
 		/// every `RetryAfter` blocks while the others go on.
 		PruningFailed { era: EraIndex, error: DispatchError },
+	}
+
+	/// Nothing to configure: building it turns nominator slashing off.
+	#[pallet::genesis_config]
+	#[derive(frame_support::DefaultNoBound)]
+	pub struct GenesisConfig<T: Config> {
+		#[serde(skip)]
+		pub _config: core::marker::PhantomData<T>,
+	}
+
+	#[pallet::genesis_build]
+	impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
+		/// Built after staking's genesis (pallet order), which leaves the default on.
+		fn build(&self) {
+			staking::AreNominatorsSlashable::<T>::put(false);
+			// The genesis era starts without the copy staking takes at each era's start.
+			let era = staking::ActiveEra::<T>::get().map_or(0, |era| era.index);
+			staking::ErasNominatorsSlashable::<T>::insert(era, false);
+		}
 	}
 
 	#[pallet::hooks]

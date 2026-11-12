@@ -25,6 +25,7 @@ mod local_relay;
 mod offences;
 mod pools;
 mod pruning;
+mod unbonding;
 mod voters;
 
 use crate::{
@@ -40,6 +41,14 @@ use pallet_staking_async::{UseValidatorsMap, ValidatorPrefs};
 use sp_staking::StakingInterface;
 
 type Targets = AdmissionFilteredTargets<UseValidatorsMap<Runtime>>;
+
+/// Turns nominator slashing back on, as governance may (`set_staking_configs`), from
+/// the active era: the tests of what a slash does to nominators and pools.
+pub(super) fn nominators_slashable() {
+	pallet_staking_async::AreNominatorsSlashable::<crate::Runtime>::put(true);
+	let era = pallet_staking_async::ActiveEra::<crate::Runtime>::get().map_or(0, |era| era.index);
+	pallet_staking_async::ErasNominatorsSlashable::<crate::Runtime>::insert(era, true);
+}
 
 pub(super) fn account(n: u8) -> AccountId {
 	AccountId::from([n; 32])

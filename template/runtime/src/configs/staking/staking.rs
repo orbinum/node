@@ -17,6 +17,7 @@ use sp_staking::{EraIndex, SessionIndex};
 parameter_types! {
 	pub const SessionsPerEra: SessionIndex = SESSIONS_PER_ERA;
 	pub const BondingDuration: EraIndex = BONDING_DURATION;
+	pub const NominatorUnbondDuration: EraIndex = NOMINATOR_UNBOND_DURATION;
 	pub const SlashDeferDuration: EraIndex = SLASH_DEFER_DURATION;
 	pub const MaxActiveValidators: u32 = MAX_ACTIVE_VALIDATORS;
 	pub const MaxElectingVoters: u32 = MAX_ELECTING_VOTERS;
@@ -55,8 +56,8 @@ impl pallet_staking_async::Config for Runtime {
 	type SessionsPerEra = SessionsPerEra;
 	type PlanningEraOffset = PlanningEraOffset;
 	type BondingDuration = BondingDuration;
-	/// Nominators stay slashable, so they unbond in `BondingDuration` too.
-	type NominatorFastUnbondDuration = BondingDuration;
+	/// Nominators and pool members are not slashed (`staking::eras::pruning`): they leave sooner.
+	type NominatorFastUnbondDuration = NominatorUnbondDuration;
 	type SlashDeferDuration = SlashDeferDuration;
 	type AdminOrigin = StakingAdmin;
 	/// Each era's reward is minted on claim, as `EraPayout` prices it.
