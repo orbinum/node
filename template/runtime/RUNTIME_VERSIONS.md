@@ -20,6 +20,22 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
+### spec 22 — tx 8 — [Unreleased] (`v0.8.0`)
+
+Pool roles become text-signable. Extrinsics and their encoding are unchanged.
+
+#### 1 · Pool roles are text-signable
+
+`NominationPools.update_roles` renders its pool and each role as `keep`, `remove`
+or the account it is handed to, so EVM (`EcdsaText`) and Solana (`Ed25519Text`,
+`Ed25519WrappedText`) roots can sign it; spec 21 refused it with `BadProof`.
+`set_metadata` stays refused: its free bytes cannot be shown safely.
+
+#### Clients to ship with it
+
+- ts-protocol: renders `update_roles` as the runtime does (shared vector
+  `pools_update_roles`) and adds `NominationPoolsModule.updateRoles`.
+
 ### spec 21 — tx 8 — 2026-11-08 (`v0.7.0`)
 
 Nominated proof of stake. Staking elects each era's validators by stake among

@@ -13,7 +13,7 @@ macro_rules! runtime_version {
 			spec_name: Cow::Borrowed($spec_name),
 			impl_name: Cow::Borrowed("orbinum"),
 			authoring_version: 1,
-			spec_version: 21,
+			spec_version: 22,
 			impl_version: 1,
 			apis: RUNTIME_API_VERSIONS,
 			transaction_version: 8,

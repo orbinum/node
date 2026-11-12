@@ -403,6 +403,15 @@ fn vector_messages() -> Vec<(&'static str, Vec<u8>)> {
 			),
 		),
 		(
+			"pools_update_roles",
+			pools(pallet_nomination_pools::Call::update_roles {
+				pool_id: 7,
+				new_root: pallet_nomination_pools::ConfigOp::Noop,
+				new_nominator: pallet_nomination_pools::ConfigOp::Set(AccountId::from(BOB)),
+				new_bouncer: pallet_nomination_pools::ConfigOp::Remove,
+			}),
+		),
+		(
 			"pools_set_metadata",
 			pools(pallet_nomination_pools::Call::set_metadata {
 				pool_id: 7,

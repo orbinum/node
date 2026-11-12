@@ -1,11 +1,11 @@
 //! Nomination pool calls: the member calls (join, bond more, claim, leave) and the pool
-//! operator's calls that bond, nominate, set the pool's state or manage its commission.
-//! Metadata and role changes are not text-signable.
+//! operator's calls that bond, nominate, set the pool's state, hand its roles over or
+//! manage its commission. Metadata changes are not text-signable: they are free bytes.
 
 use super::{
 	labels::{
 		account_lines, blocks, bond_extra, claim_permission, commission_claim_permission,
-		member_line, pool_line, pool_state,
+		member_line, pool_line, pool_state, role_op,
 	},
 	Line,
 };
@@ -67,6 +67,18 @@ pub(super) fn lines(call: &Call<Runtime>) -> Option<Vec<Line>> {
 		Call::set_state { pool_id, state } => {
 			vec![pool_line(pool_id), (b"state", pool_state(state))]
 		}
+		// Hands the pool's authority over: each role kept, removed or set, in full.
+		Call::update_roles {
+			pool_id,
+			new_root,
+			new_nominator,
+			new_bouncer,
+		} => vec![
+			pool_line(pool_id),
+			(b"root", role_op(new_root)),
+			(b"nominator", role_op(new_nominator)),
+			(b"bouncer", role_op(new_bouncer)),
+		],
 		Call::set_claim_permission { permission } => {
 			vec![(b"permission", claim_permission(permission))]
 		}
