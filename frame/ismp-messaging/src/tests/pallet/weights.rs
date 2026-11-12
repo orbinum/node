@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The declared weights: they grow with what they are charged for, and no regeneration
 //! slips an absurd proof size past the tests.
 

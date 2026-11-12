@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Staking's fixed parameters. Bonds, counts and commission limits live on-chain
 //! instead (`staking.set_staking_configs`, `staking.set_max_commission`,
 //! `nomination_pools.set_configs`), so governance can tune them without an

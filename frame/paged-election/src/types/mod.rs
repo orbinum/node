@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The pallet's types: the snapshot it takes from staking ([`snapshot`]) and
 //! the election's progress and outcome ([`phase`]).
 

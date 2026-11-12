@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The yearly issuance that pays stakers, prorated per era: the 300M ORB staking
 //! allocation over ten years (45M in year 1 down to 20M in year 10), then 20M a
 //! year.

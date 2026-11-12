@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Storage access — typed wrappers over every `StorageValue` / `StorageMap`.
 //!
 //! One module per logical domain, one repository struct in each. All functions

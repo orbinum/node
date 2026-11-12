@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The expiry watchdog: warning before an unpaid era leaves history, and a
 //! pause that cannot outlast it.
 

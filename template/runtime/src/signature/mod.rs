@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! `OrbinumSignature`: the runtime's extrinsic signature.
 //!
 //! | Tag  | Variant              | Signs                              | Account                   |

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Business operations for the shielded pool.
 //!
 //! This is the single application entrypoint used by the pallet extrinsics.

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Shield: deposit public tokens into the pool as a new note.
 
 use frame_support::{

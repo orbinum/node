@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! End-to-end Groth16 verification against a real proof generated in-test.
 //!
 //! The pallet's `do_verify` short-circuits to `true` under `#[cfg(test)]`, so the

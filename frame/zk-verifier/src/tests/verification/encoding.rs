@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Public-input encoding: circuit order, canonical inputs, and the shield
 //! encoding against a real proof.
 

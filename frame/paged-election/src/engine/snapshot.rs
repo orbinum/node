@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The snapshot: targets and seats in one step, then one voter page per step,
 //! most significant first, as staking pages its voters.
 

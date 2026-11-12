@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The election's progress, its bookkeeping and the ways it can end.
 
 use super::TargetIndex;

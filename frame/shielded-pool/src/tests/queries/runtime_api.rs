@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The runtime API: tree and forest info, Merkle proofs and subtree roots.
 
 use crate::{

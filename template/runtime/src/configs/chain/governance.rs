@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Who may perform each privileged action, by role. Every role is root (sudo); moving
 //! one to a multisig, a council or an OpenGov track means changing its alias.
 //!

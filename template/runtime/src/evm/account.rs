@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! One account for an EVM address and its Substrate key: `H160` ↔ `AccountId32` as
 //! `[address | 0x00×12]`, and the EVM origin check built on it.
 

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! [`ZkVerifierPort`]: each statement verified under its circuit's keys.
 
 use crate::{

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The voter list's walk: accounts that stopped voting while the snapshot held
 //! the list locked, or whose nomination `kick` would empty, never cost the
 //! voters behind them their page.

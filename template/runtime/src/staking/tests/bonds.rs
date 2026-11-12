@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The direct bond's lifecycle: the staking hold always equals the ledger's
 //! total, unbonded stake unlocks after exactly the bonding duration, nothing
 //! but staking moves held funds, and a bond cannot pay the deprecated

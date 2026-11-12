@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! What the signed text shows of a transaction: the call's name, the recipient and
 //! amount of the calls that move ORB, what the staking and nomination pool calls bond,
 //! pay to and back, when the transaction expires, its nonce, and a non-zero tip.

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Storage migrations.
 
 /// v1 → v2: store every key prepared ([`crate::pallet::PreparedKeys`]).

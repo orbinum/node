@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the pallet needs from staking, behind one trait so the pacing and the
 //! queue can be tested without a staking pallet, and what paying a page returns.
 

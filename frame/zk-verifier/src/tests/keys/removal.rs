@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `remove_verification_key`: what it removes and what it keeps.
 
 use crate::tests::util::*;

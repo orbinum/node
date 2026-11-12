@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Unsigned transaction validation for `private_transfer` and `unshield`.
 //!
 //! Cheap checks first, the proof last. The proof IS verified at admission:

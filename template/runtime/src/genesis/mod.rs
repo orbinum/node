@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Genesis presets: the development, local and testnet chains, and mainnet once it is
 //! configured.
 //!

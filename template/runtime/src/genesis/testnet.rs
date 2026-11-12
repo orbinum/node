@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The testnet preset: its sudo key, treasury, faucet and three validators.
 
 use super::{

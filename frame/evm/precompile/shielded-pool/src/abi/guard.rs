@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Bounds- and overflow-checked arithmetic over attacker-chosen calldata.
 //!
 //! Offsets and lengths come from calldata, so every `+` on them

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `Pallet` helpers: the pool account and the Merkle tree delegations.
 
 use crate::{

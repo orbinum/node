@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Whole-tree root computation from a leaf set.
 //!
 //! O(n) in the number of leaves, so it is **not** used on any dispatchable path

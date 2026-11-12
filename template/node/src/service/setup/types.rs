@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! Types the service is assembled from.
 
 use orbinum_runtime::{opaque::Block, Hash};

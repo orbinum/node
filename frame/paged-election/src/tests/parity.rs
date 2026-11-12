@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The election matches `sp_npos_elections::seq_phragmen` (no balancing):
 //! the same winners in the same order, each winner's total stake exactly, and
 //! every voter's edges.

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The EVM's precompiles: Ethereum's (0x01–0x09), Frontier's extras (0x400–0x403) and
 //! Orbinum's (0x801–0x802).
 

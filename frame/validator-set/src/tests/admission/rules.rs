@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Admission: the mode, the allowlist, session keys and bans, in both modes.
 
 use crate::tests::*;

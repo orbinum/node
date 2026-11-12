@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! Every spec the node ships builds its genesis storage.
 
 use sc_chain_spec::ChainSpec as _;

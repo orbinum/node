@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Runtime-level storage migrations, run by `Executive` on upgrade (`Migrations`).
 
 mod nominators_unslashable;

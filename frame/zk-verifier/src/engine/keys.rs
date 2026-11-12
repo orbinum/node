@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Key storage: a key, its hash and its prepared form are written and removed
 //! together, and only here.
 //!

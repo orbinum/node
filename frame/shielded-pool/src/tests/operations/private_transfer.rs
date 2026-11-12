@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `PrivateTransferOperation`: validation, settlement, the ledger and fee
 //! crediting, plus an adversarial battery against its non-cryptographic checks.
 

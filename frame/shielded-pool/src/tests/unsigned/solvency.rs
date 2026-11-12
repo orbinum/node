@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Solvency at admission: what a spend may take, also across two trees.
 
 use super::*;

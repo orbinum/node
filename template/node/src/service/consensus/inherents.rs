@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! Inherent data providers, for every path that builds or checks a block.
 //!
 //! Import and authoring must provide the same inherents: a block authored with data the

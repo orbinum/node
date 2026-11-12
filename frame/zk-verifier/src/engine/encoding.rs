@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Public-input encoding: a circuit's statement to the field elements its
 //! verifying key expects.
 //!

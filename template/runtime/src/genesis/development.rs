@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The development and local presets: Alice as sudo, the dev accounts funded, and the
 //! validators from the node's chain spec patch.
 

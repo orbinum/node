@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Per-asset pool ledger.
 //!
 //! Tracks what the pool holds for each asset. Only the native asset is backed by

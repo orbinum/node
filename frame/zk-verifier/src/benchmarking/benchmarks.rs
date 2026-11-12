@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Benchmarking setup for pallet-zk-verifier.
 //!
 //! Run benchmarks with (`skip-proof-verification` lets `verify_proof` record

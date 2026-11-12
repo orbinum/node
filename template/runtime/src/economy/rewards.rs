@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! What an era pays stakers, and where it comes from.
 //!
 //! Staking (`pallet-staking-async`, minting mode) mints an era's reward when

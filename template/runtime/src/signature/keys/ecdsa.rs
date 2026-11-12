@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! ECDSA (secp256k1) verification and the EVM-compatible account.
 
 use crate::{evm::account::evm_bytes_to_account_id_bytes, AccountId};

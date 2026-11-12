@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Bounds on a whitelisted state machine's slot duration.
 //!
 //! Upstream's `fetch_overlay_root_and_timestamp` derives header timestamps with an

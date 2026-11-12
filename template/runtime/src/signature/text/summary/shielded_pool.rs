@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Shielded pool calls in ORB: the amount, and a shield's commitment and memo.
 //!
 //! ORB only: other assets have their own decimals, so their amounts cannot be shown as

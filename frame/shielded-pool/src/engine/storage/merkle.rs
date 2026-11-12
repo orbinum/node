@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Merkle tree and historic-root storage.
 //!
 //! Covers the live tree (root, size, leaves, frontier, internal nodes), the

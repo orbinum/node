@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! How values are written in the signed text: lowercase `0x` hex, accounts, ORB
 //! amounts and `key: value` lines. Pure functions; clients reproduce them byte
 //! for byte.

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! Node identity and the chain spec ids `--chain` accepts.
 
 use sc_cli::{ChainSpec, SubstrateCli};

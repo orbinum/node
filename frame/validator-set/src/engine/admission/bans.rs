@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Bans: who may not validate in either mode, and until when.
 
 use crate::{BanTerm, Bans, Config, Error, Event, LastAuthorVersion, OnValidatorRemoved, Pallet};

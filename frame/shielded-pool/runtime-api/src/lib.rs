@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use pallet_shielded_pool::{DefaultMerklePath, Hash, SubtreeRoots};

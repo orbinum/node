@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `retire_version` and `unretire_version`.
 
 use crate::tests::util::*;

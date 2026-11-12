@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Admission of `private_transfer`: the checks it runs before the pool takes it.
 
 use super::*;

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Commitment storage: each note's encrypted memo, and whether a commitment is
 //! already in the forest.
 

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Mock runtime for `pallet-ismp-messaging`.
 //!
 //! Carries a real `pallet_ismp` because our callbacks read its associated types

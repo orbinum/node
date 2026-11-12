@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Known-answer vectors for the Poseidon hashers and native/WASM equivalence.
 //!
 //! The expected values are the canonical circomlib (iden3) Poseidon outputs over

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `abort`: fails a running or finished election, clears a failed one, and is
 //! refused once staking fetched a page.
 

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Staking calls: what they bond, where rewards go, whom they nominate and what a
 //! validator charges.
 

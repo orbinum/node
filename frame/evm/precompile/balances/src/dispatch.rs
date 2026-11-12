@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Runs a decoded transfer as a `pallet_balances` call from the EVM caller.
 
 use crate::{abi::TransferCall, revert};

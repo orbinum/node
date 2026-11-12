@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Sequential Phragmén's arithmetic, exactly as `sp_npos_elections::seq_phragmen`
 //! computes it, so the incremental election lands on the same integers.
 //!

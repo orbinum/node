@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! What a reported offence does beyond staking's slash: the offender is banned
 //! from validating at once, permanently, and what staking may slash it for is
 //! bounded across eras.

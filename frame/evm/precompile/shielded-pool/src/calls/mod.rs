@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Per-function call decoders for the shielded-pool precompile.
 //!
 //! Each sub-module owns:

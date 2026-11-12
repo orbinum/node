@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Reading a destination's delivery receipt.
 //!
 //! A POST this chain dispatches leaves no trace here once it is handed over. The protocol

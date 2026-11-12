@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Who may be a validator candidate: the admission mode, the allowlist and bans.
 //!
 //! This pallet answers *may this account validate*; it does not pick the active

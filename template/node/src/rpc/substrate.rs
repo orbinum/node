@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! Substrate RPCs beyond `spawn_tasks`' own: account nonce and dry run, GRANDPA finality,
 //! fees, and manual seal.
 

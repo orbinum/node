@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The `ShieldedPoolRuntimeApi` queries (defined in the runtime-api crate):
 //! read-only views of the tree and the forest, callable from RPC.
 

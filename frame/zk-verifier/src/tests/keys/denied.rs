@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Denied keys: `deny_version`, and a denied key refused or inert on every
 //! path.
 

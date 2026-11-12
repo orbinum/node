@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Timing and weight per step for 12,500 and 25,000 voters, natively. Run with
 //! `cargo test --release -p pallet-paged-election report -- --ignored --nocapture`.
 //! Wall time here is native, without staking's reads; the weights are the

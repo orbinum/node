@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The admission rule and its three enforcement points (the candidacy extension, the
 //! election filter and removal from the validator set), and the extension itself.
 

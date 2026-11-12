@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Era rewards through the runtime: a year of eras run a day long, forced (still
 //! a day) and stretched by missed slots and halts (two past the two-day cap), each
 //! closed era's reward checked against the schedule, paid, and the supply grown by

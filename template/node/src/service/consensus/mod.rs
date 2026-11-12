@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! Block authoring and finality: Aura + GRANDPA, or manual seal on development chains,
 //! with their import queues (`import_queue`) and the inherents both sides provide
 //! (`inherents`).

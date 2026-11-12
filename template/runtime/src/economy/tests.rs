@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Where value goes, through the whole runtime: the keyless accounts are distinct, a
 //! transaction's fee and tip are routed apart, and an era's payout drains the fee pool.
 

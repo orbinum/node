@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `Pallet<T>` helper methods — thin delegations to the underlying modules.
 //!
 //! Separating these from `lib.rs` keeps the FRAME interface file focused on

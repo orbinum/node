@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! EVM fees go where Substrate fees go: the base fee to the era's fee pool, the
 //! priority tip to the block author, or to governance without one. Nothing burns.
 

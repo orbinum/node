@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The EVM through the runtime.
 //!
 //! - `address_mapping`: one account for an EVM address and its secp256k1 key.

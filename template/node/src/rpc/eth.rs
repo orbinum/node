@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! Ethereum RPCs: `eth_*`, `net_*`, `web3_*`, `debug_*` and, with `txpool`, `txpool_*`.
 
 use std::sync::Arc;

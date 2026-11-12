@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Noticing closed eras: queueing, expiring and the first sight.
 
 use crate::{Current, Event, LastActiveEra, Paused, Queue, tests::mock::*};

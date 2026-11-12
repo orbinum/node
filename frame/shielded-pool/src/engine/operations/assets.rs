@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use crate::{
 	pallet::{Config, Error, Event, Pallet},
 	storage::AssetRepository,

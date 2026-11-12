@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Texts shared with clients (`fixtures/ed25519_text_vectors.json`, copied to
 //! ts-protocol's tests): the same payload must render the same text, byte for byte.
 

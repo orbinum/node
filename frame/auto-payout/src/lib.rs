@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! # Pallet Auto Payout
 //!
 //! Pays staking rewards automatically each era, so no one has to claim them.

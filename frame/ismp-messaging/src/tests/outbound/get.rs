@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Reading remote state with a GET, and the answer that comes back.
 //!
 //! A GET exists as a separate path because a POST can be refused by a module on the

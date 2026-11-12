@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! `pallet-staking-async`: bonds, nominations, eras, rewards and slashes.
 
 use crate::{

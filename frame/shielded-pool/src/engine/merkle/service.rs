@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! On-chain Merkle tree: leaf insertion, tree sealing, and the historic-root
 //! window.
 //!

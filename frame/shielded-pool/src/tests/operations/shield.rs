@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `ShieldOperation`: validation, settlement, queries, the proof and the batch
 //! guard.
 

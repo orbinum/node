@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Random instances and the upstream reference they are checked against.
 
 use crate::tests::mock::*;

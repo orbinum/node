@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! GRANDPA: the voter and what its RPC reads.
 
 use std::{sync::Arc, time::Duration};

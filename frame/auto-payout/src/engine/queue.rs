@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Noticing closed eras: queueing the ones that closed, expiring the ones that
 //! left staking's history unpaid.
 

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Core FRAME configuration: system, timestamp, balances, fees, sudo.
 //!
 //! `BlockWeights` is the one to read first — it caps what a block may execute,

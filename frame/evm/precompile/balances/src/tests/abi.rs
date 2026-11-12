@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 use super::{encode_transfer, revert_reason, run};
 use crate::{
 	mock::{bob_account, new_test_ext, MockHandle},

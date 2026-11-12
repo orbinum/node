@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Receiving messages: the [`IsmpModule`] callbacks.
 //!
 //! By the time `on_accept` runs, `ismp/src/handlers/request.rs` has verified a

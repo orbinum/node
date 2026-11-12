@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Per-pallet `Config` implementations, grouped by domain.
 //!
 //! - `chain`: system, timestamp, balances, transaction fees and sudo (`system`); Aura,

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! `OrbinumSigner`: the public key behind an `OrbinumSignature`, and its account.
 
 use crate::AccountId;

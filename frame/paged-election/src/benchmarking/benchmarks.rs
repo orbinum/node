@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Benchmarks for each `on_poll` step, staking's page fetch and `abort`. The
 //! snapshot steps go through `Config::DataProvider`, so in the runtime they
 //! price staking's own reads; the round steps run on a synthetic snapshot in

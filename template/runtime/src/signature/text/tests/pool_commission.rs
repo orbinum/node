@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Pool commission signed as text (`Ed25519Text`, `Ed25519WrappedText`, `EcdsaText`):
 //! each call is accepted and dispatches; a text that misstates any of its parameters,
 //! or another key's signature, is refused; the pool's commission rules hold for

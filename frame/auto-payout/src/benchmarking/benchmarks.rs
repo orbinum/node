@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Benchmarks for `pallet-auto-payout`'s calls. The hooks price their pages
 //! with staking's weights and their storage accesses with `DbWeight`.
 

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The EVM precompile set: its address list matches what it executes, the Ethereum
 //! precompiles return the consensus-test outputs through the EVM, the BN128 and
 //! modexp precompiles charge their measured cost, and the fork's precompiles the

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Pool admission of `private_transfer` and `unshield`: rejection codes, pool
 //! tags, the fee floor, solvency, memo shape and the proof.
 

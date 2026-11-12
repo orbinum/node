@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The host functions the runtime imports, which every node must provide.
 
 /// The runtime imports `bn254_groth16_verify` (provided from node 0.4.0); a node

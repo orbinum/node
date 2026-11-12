@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! Local testnet (`--chain local`): three validators on one machine, run by
 //! `scripts/local-net/start.sh`.
 

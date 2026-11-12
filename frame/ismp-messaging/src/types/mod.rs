@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The pallet's types: the wire format of the messages it carries ([`payload`]) and
 //! the module id counterparties address it by ([`module_id`]).
 //!

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Two session validators, one keyed from another account, and a pre-digest that
 //! names a block's author.
 

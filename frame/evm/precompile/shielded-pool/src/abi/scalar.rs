@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Fixed-width ABI decoders: `uint32` and `bytes32`.
 
 use fp_evm::PrecompileFailure;

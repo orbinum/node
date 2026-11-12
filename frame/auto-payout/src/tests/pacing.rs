@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The budget rules, as pure functions.
 
 use crate::{LimitsError, PayoutLimits, pacing::*};

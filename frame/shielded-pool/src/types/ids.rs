@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Newtypes over the 32-byte field elements and the asset id.
 //!
 //! `Commitment` and `Nullifier` are both `[u8; 32]` underneath, and confusing

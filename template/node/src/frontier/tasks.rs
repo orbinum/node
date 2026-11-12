@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! Frontier's background tasks: the mapping-sync worker and cache maintenance.
 
 use std::{sync::Arc, time::Duration};

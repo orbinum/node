@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The hooks' work, one concern per module: noticing closed eras ([`queue`]),
 //! guarding unpaid eras from expiry ([`expiry`]), deciding each block's budget
 //! ([`hooks`]), paying pages within it ([`payment`]) and the invariants

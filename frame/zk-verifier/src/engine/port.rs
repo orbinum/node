@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! [`ZkVerifierPort`] for the pallet: each statement is encoded for the key it
 //! is checked against ([`crate::encoding`]) and verified by [`super::verifier`].
 

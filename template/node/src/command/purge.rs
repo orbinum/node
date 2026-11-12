@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! `purge-chain`: the Frontier database, then the chain's.
 
 use crate::{cli::Cli, frontier};

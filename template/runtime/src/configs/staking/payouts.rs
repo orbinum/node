@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Upkeep with no transactions: paying each era (`pallet-auto-payout`) and pruning
 //! old ones (`EraPruning`).
 

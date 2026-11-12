@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Cryptographic types for ZK-SNARK operations.
 //!
 //! Constants, field element newtypes (Commitment, Nullifier, etc.), and the Note struct.

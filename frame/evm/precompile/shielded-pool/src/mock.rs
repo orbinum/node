@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Test mock for `pallet-evm-precompile-shielded-pool`.
 
 use fp_evm::{ExitError, ExitReason, Transfer};

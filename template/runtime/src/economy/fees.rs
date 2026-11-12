@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Routing a transaction's payment: the fee and the tip go to different places.
 
 use crate::AccountId;

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Who may change the limits and pause, and which limits are accepted.
 
 use crate::{Error, Event, Limits, Paused, PayoutLimits, tests::mock::*};

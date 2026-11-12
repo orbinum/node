@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! The network, with GRANDPA's protocol and warp sync unless manual seal is on.
 
 use std::sync::Arc;

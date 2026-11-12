@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the runtime API returns: each circuit's versions and their key hashes.
 //! The runtime maps these onto `pallet-zk-verifier-runtime-api`'s own types.
 

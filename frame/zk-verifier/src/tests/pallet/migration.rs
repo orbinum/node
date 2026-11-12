@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The v1 → v2 migration: every stored key gets its prepared form.
 
 use crate::tests::util::*;

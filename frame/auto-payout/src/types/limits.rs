@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The shares of a block automatic payment may spend, and their hard caps.
 
 use frame_support::{pallet_prelude::*, weights::Weight};

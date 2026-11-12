@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Keeping the voter list's walk to accounts that vote.
 //!
 //! Staking walks the voter list for each snapshot page and counts every node it

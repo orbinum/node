@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Runs blocks as `frame-executive` does, and the chain to a session or era.
 
 use crate::{

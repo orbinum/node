@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! The dispatch mode: builds the origin and defers the shared work to
 //! [`super::record_and_dispatch`].
 

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The Merkle tree: hashing, the incremental frontier, the on-chain service,
 //! the forest and the historic-root window.
 

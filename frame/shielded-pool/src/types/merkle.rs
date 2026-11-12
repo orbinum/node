@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Merkle path type and the tree-depth constants.
 //!
 //! `DEFAULT_TREE_DEPTH` is fixed at 20 and pinned by `integrity_test`: clients

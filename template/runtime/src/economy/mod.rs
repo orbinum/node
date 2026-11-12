@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Where value moves: transaction fees, tips, slashed funds and era rewards.
 //!
 //! Nothing is burned on purpose. Fees fund the era's rewards (burned when the

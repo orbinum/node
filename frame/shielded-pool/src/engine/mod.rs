@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The pallet's logic, one concern per module:
 //!
 //! - [`operations`]: the calls' workflows (shield, transfer, unshield, fees,

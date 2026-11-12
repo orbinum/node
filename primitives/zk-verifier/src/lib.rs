@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! # orbinum-zk-verifier
 //!
 //! Groth16 proof verification for Substrate runtime (BN254 curve).

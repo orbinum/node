@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The calls' workflows: shield, private transfer, unshield, fees, the asset registry and the public statement a proof binds.
 
 mod assets;

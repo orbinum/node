@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `IncrementalMerkleTree` — the in-memory frontier structure.
 //!
 //! Holds no storage handles and knows nothing about `Config`: it is the pure

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 #![allow(unexpected_cfgs)]
 //! Groth16 verification as a native host function (~3.5× faster than Wasm).
 //!

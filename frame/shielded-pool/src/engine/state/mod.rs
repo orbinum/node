@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The chain state the pallet starts from and must keep: genesis
 //! ([`genesis`]) and the invariants `try_state` checks (`invariants`).
 

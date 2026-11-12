@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! The RPC a dev node serves, built the way [`super::new_full`] builds it.
 //!
 //! The node runs in-process with no p2p listen addresses, no bootnodes and no mDNS, so it

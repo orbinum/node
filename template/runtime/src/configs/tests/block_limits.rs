@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! What a block may hold: normal transactions get 75 % of the weight and 85 % of the
 //! length; operational and mandatory work may use the whole block.
 

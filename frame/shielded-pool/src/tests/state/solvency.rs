@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The ledger-solvency invariant: a donation to the pool account leaves it
 //! intact; a ledger above the physical balance breaks it.
 

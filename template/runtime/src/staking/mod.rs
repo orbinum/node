@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Nominated proof of stake: who validates, chosen by stake among the candidates
 //! the validator set admits, and how misbehaviour is punished.
 //!

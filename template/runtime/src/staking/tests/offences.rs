@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! A GRANDPA equivocation, from report to slash: the proof, the offence, the ban
 //! and chill it triggers at once, the offence's way through ah-client to
 //! staking, the deferred slash, and its cancellation.

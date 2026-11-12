@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The mock runtime the tests run on.
 
 use crate as pallet_shielded_pool;

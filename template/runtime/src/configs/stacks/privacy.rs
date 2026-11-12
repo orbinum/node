@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Orbinum privacy stack: the ZK verifier and the shielded pool.
 //!
 //! The reasoning behind each bound lives on the pallet's `Config`.

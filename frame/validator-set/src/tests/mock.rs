@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use frame_support::{derive_impl, parameter_types, traits::ConstU64};
 use sp_runtime::{BuildStorage, traits::IdentityLookup};
 

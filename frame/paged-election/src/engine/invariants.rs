@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What must hold after every block: checked by `try_state` and by the tests.
 
 use crate::{

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Validator admission as staking applies it: the validator set's rules (bans,
 //! session keys, allowlist) plus the self-bond, which only staking knows.
 //!

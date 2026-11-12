@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Orbinum-local ISMP runtime API, re-exported as `crate::runtime_api`.
 //!
 //! Neither `Coprocessor` nor `HostStateMachine` is a `#[pallet::constant]` and

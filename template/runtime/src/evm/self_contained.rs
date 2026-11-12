@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Ethereum transactions as extrinsics: `pallet_ethereum::transact` carries its own
 //! signature (self-contained), and the RPC wraps a transaction into an extrinsic.
 

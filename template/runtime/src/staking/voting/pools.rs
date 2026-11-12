@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Nomination pools: holders below `MinNominatorBond` stake together. Each pool
 //! is one nominator to staking; its members never appear in an election.
 //!

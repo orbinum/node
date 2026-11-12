@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Dispatch helpers for the shielded-pool precompile.
 //!
 //! [`origin::from_self`] builds the origin (the precompile's own address,

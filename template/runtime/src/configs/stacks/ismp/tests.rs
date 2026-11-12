@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The GRANDPA consensus client the runtime wires rejects a proof whose envelope does
 //! not match the tracked chain.
 

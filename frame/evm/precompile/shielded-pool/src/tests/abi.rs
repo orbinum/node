@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Router and ABI decoders: pure decoding, no pallet state.
 
 use super::*;

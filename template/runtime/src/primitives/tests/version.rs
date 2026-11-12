@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The spec name keeps local-only builds (`fast-runtime`, `runtime-benchmarks`) off
 //! real chains: `set_code` refuses a runtime whose spec name differs from the one it
 //! replaces, and the release workflow accepts only `orbinum`.

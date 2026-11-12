@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Substrate weights and fees priced like EVM gas.
 
 use crate::{configs::evm::WeightPerGas, Runtime};

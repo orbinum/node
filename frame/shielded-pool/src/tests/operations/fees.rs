@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Spend fees: crediting the block author, the fee floor, and claims.
 
 use crate::{

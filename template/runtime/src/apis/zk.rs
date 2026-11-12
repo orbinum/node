@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! `pallet-zk-verifier`'s values as its runtime API returns them.
 
 /// A circuit's version info from `pallet-zk-verifier`, in the runtime API's type.

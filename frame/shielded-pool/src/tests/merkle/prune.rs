@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Sealed-tree node pruning: the per-block sweep and the paths it leaves.
 
 use crate::{

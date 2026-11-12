@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Asset registry storage.
 //!
 //! Asset metadata plus the monotonic id counter. `increment_asset_id` hands out

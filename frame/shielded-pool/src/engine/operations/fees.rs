@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Spend fees: crediting them to the block author and paying them out.
 //!
 //! A spend's fee never leaves the pool when the spend executes: it is recorded

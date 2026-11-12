@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Helpers the runtime's tests share: accounts, extensions, calls and genesis, and
 //! running the whole runtime.
 //!

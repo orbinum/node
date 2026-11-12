@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the runtime plugs into the pallet: the session-key check, the open-mode
 //! safeguard, the removal hook, the candidacy check and the benchmarks' setup. Tests supply
 //! lightweight mocks in `tests/mock.rs`.

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Receiving a POST: the source check, the size bound and the decode, and the events that
 //! make an arrival or a rejection attributable to the message that caused it.
 //!

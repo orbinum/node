@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Every pallet's index, pinned: an index is part of every call, event and
 //! error encoding, and ISMP's relayers cache the metadata. Changing one is a
 //! `transaction_version` bump and a client release, never a side effect.

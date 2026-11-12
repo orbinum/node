@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `integrity_test`: each parameter the election cannot work with panics.
 
 use crate::tests::mock::*;

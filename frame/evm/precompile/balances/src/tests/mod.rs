@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Tests for `pallet-evm-precompile-balances`, one module per concern:
 //!
 //! | Module     | What it verifies                                                  |

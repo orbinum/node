@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Random chains: eras of random size, pages claimed by hand or refused, heavy
 //! blocks and traffic from none to full. Every block stays within its shares,
 //! the invariants hold, every page is paid at most once, and every era settles

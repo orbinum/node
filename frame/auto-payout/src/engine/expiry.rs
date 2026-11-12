@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The expiry watchdog: an unpaid era must not leave staking's history quietly.
 
 use crate::{

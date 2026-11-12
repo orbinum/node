@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Only validators are slashed (spec 22): a chain started before it turns
 //! staking's `AreNominatorsSlashable` off, as genesis does for a new chain
 //! (`staking::eras::pruning`).

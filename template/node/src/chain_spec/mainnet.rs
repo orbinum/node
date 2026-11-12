@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! Orbinum Mainnet (`--chain mainnet`), EVM chain ID 270. Not launched.
 //!
 //! Genesis is the runtime preset `orbinum_mainnet_runtime_preset`, which the runtime

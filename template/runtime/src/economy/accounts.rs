@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Keyless accounts that hold value on the chain's behalf. Nobody holds their
 //! keys: only the runtime and root (`balances.force_transfer`) can move funds out.
 

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Benchmarks for pallet-shielded-pool
 //!
 //! These benchmarks measure the execution time of extrinsics.

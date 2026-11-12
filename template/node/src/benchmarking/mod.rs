@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! Extrinsic builders and inherent data for `benchmark overhead` and
 //! `benchmark extrinsic`. Benchmarking only.
 

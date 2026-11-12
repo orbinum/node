@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The pallet configurations through the runtime.
 //!
 //! - `block_author`: the block author, from the Aura pre-digest to its account.

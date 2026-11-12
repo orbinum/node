@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Signed dispatch: who pays, and where it goes.
 //!
 //! `DispatchOrigin` is `EnsureSigned` here, as in the runtime. Accounts 1 and 2 hold

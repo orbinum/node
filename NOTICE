@@ -1,0 +1,58 @@
+Orbinum Node
+Copyright (C) 2026 Orbinum Technologies.
+https://orbinum.network
+
+This repository is licensed per component; each crate's Cargo.toml and each
+file's SPDX-License-Identifier state which license applies:
+
+  - Apache-2.0
+      (LICENSE-APACHE2)
+  - GPL-3.0-or-later, with or without the Classpath exception 2.0
+      (LICENSE-GPL3)
+  - Apache-2.0 OR GPL-3.0-or-later, at your option
+
+Files carrying "Copyright (C) Orbinum Technologies." are original works of
+Orbinum Technologies. Files that also carry "Modifications Copyright (C)
+Orbinum Technologies." are third-party works modified by Orbinum
+Technologies; the original copyright notice above that line still applies.
+
+--------------------------------------------------------------------------------
+Third-party software
+--------------------------------------------------------------------------------
+
+This product includes software from the following projects. Their copyright
+notices are retained in the files they apply to.
+
+Frontier — the Ethereum compatibility layer for Substrate
+  Copyright (C) Parity Technologies (UK) Ltd. and Frontier developers.
+  https://github.com/polkadot-evm/frontier
+  The EVM pallets, the Ethereum primitives and RPC, and the client crates
+  (frame/, primitives/, client/), under Apache-2.0 and GPL-3.0-or-later WITH
+  Classpath-exception-2.0. The node and runtime templates this repository
+  started from were released under the Unlicense.
+
+Precompile utilities, as shipped with Frontier
+  Copyright (c) Moonsong Labs, under Apache-2.0; one macro test
+  Copyright 2019-2022 PureStake Inc. (Moonbeam), under GPL-3.0-only.
+  https://github.com/moonbeam-foundation/moonbeam
+  The precompile macros and helpers (precompiles/).
+
+EVM account provider, as shipped with Frontier
+  Copyright (c) Humanode Core, under Apache-2.0.
+  primitives/evm/src/account_provider.rs.
+
+Runtime fuzzing harness
+  Copyright 2025 Security Research Labs GmbH.
+  https://srlabs.de
+  template/fuzz, under Apache-2.0.
+
+--------------------------------------------------------------------------------
+Trademarks
+--------------------------------------------------------------------------------
+
+"Orbinum", "Orbinum Network" and the Orbinum logo are trademarks of Orbinum
+Technologies. The licenses above grant no rights to them (Apache-2.0,
+section 6). Forks and redistributions must not use them in a way that
+suggests endorsement by, or affiliation with, Orbinum Technologies.
+
+Contact: contact@orbinum.com

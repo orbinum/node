@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Fixtures the tests share: canonical field values, memos, proofs and a
 //! funded pool.
 

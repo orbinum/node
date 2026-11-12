@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! How much of a block the pallet may spend. Pure functions over the limits,
 //! the era's progress and the block's weight.
 

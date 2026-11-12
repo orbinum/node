@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Poseidon hashing for Merkle nodes.
 //!
 //! Pure functions over 32-byte field elements — no storage, no `Config`. The

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Mock runtime and storage helpers for testing pallet-zk-verifier.
 
 use crate as pallet_zk_verifier;

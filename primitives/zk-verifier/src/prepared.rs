@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Verifying keys prepared once and stored, instead of prepared per proof.
 //!
 //! Preparing a key (deserializing it with point validation, computing

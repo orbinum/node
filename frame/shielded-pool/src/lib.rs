@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! # Shielded Pool Pallet
 //!
 //! A pallet for private transactions using Zero-Knowledge proofs.

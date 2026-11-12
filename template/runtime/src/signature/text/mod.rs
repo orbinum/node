@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! `Ed25519Text`, `Ed25519WrappedText` and `EcdsaText`: a signature over a UTF-8 text the
 //! runtime renders from the whole signing payload, so a person reads what they sign.
 //! ed25519 signs the text (or its `<Bytes>` wrapping); ECDSA signs its EIP-191

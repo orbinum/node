@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Paths through sealed trees: one pruned under a higher cut, and a sibling
 //! subtree past the tree's capacity.
 

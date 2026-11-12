@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests by concern, grouped as `engine` is: admission (the rules, the
 //! allowlist, bans) and the author version (declarations, the minimum and the
 //! node version).

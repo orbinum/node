@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The commission ceiling: none by default, set by governance on-chain, and
 //! validators above a lowered one clamped to it at the next session report.
 

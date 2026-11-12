@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Staking as the runtime wires it, one module per concern.
 //!
 //! - `bonds`: the direct bond's lifecycle and its hold.

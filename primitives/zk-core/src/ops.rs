@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Core ZK cryptographic operations as free functions.
 //!
 //! These functions encode the Poseidon-based formulas that the Circom circuits

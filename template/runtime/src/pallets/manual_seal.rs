@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Dev-only manual seal: a genesis switch that lets the node seal blocks on demand and
 //! stops Aura from checking their slots (`configs::consensus::ConsensusOnTimestampSet`).
 

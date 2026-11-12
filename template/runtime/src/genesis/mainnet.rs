@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The mainnet preset, not configured yet.
 
 use super::builder::{build_genesis, EvmGenesis, GenesisParams, StakingGenesis};

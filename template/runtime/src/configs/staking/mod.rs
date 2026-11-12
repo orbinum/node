@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Nominated proof of stake: staking, its election, and the glue that joins them
 //! to sessions.
 //!

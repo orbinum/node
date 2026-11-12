@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The public values a spend's proof binds: the memo digest and the recipient.
 
 use crate::{

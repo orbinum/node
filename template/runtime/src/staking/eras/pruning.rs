@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Removes staking's data of eras past the history, and of an era plan that will
 //! not start, with no transactions.
 //!

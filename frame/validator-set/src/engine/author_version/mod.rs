@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The node version a block author declares, and the rules the runtime applies
 //! to it.
 //!

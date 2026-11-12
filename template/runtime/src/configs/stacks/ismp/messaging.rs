@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! `pallet-ismp-messaging`: this chain's ISMP application, and what a signed
 //! dispatch costs.
 

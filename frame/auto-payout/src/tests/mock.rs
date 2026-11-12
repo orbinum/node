@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use crate::{
 	self as pallet_auto_payout, EraIndex, EraPayouts, Page, PayoutLimits, PayoutOutcome,
 	ValidatorPages,

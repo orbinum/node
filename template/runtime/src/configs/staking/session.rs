@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The session side's record of each session's validators, and offence reports.
 
 use crate::{AccountId, AhClient, Balance, Runtime, RuntimeEvent};

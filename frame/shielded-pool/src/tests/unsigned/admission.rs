@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What admission checks so dispatch cannot fail: the memo's shape and the proof.
 
 use super::*;

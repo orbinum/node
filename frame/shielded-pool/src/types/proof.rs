@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The serialized Groth16 proof a pool call carries.
 
 use frame_support::{BoundedVec, pallet_prelude::ConstU32};

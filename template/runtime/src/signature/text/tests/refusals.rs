@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Signatures that authorize nothing: a text that misstates the transaction, a text over
 //! the payload hash, raw ed25519, and one framing passed off as the other.
 

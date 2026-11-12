@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The pallets `frame-benchmarking` measures. Defines `list_benchmarks!` and
 //! `add_benchmarks!`, which the `Benchmark` runtime API runs.
 

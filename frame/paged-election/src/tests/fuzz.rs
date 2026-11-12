@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Random chains: elections of random shape under random block load, with
 //! starts, fetches and aborts out of turn. The invariants hold after every
 //! block, out-of-turn calls change nothing, and every election that is not

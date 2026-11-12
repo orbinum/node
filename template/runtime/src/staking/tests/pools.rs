@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Nomination pools as the runtime wires them: a pool nominates like any
 //! nominator, the election counts it once, automatic payouts pay it, members
 //! claim their share, leave after the bonding duration, take their share of a

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Registering and activating keys, and the rule every stored key is held to.
 
 use super::verifier::admitted_layout;

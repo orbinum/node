@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! # Pallet ZK Verifier
 //!
 //! On-chain Groth16 proof verification under versioned verification keys. Other

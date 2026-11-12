@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Every block stays within the budget and what the block has left, and the
 //! election finishes within `duration()`.
 

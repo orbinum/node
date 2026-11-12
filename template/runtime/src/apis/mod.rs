@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The runtime APIs: one `impl_runtime_apis!` (the macro must see every API at once),
 //! delegating to the pallets and to the helpers beside it.
 //!

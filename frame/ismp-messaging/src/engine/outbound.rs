@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Building and dispatching outgoing requests.
 //!
 //! `dest` is the recipient, not the route. Hyperbridge is the coprocessor:

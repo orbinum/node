@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! `Ed25519Text`, `Ed25519WrappedText` and `EcdsaText`: the text's frame (here), and
 //! through the runtime the extrinsic check, the texts that must authorize nothing, the
 //! wire format and the vectors shared with clients. How a call is summarised is tested

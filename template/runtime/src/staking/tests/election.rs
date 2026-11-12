@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The era election end to end: computed on-chain by `pallet-paged-election`
 //! over a paged snapshot, fetched by staking page by page, handed to the session
 //! side, applied at a session boundary. And what happens when an era plan can no

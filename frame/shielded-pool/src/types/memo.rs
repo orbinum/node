@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Encrypted memo attached to a commitment.
 //!
 //! Fixed at exactly `MAX_ENCRYPTED_MEMO_SIZE` bytes with a fixed field layout,

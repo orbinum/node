@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! `NominatorsUnslashable`: a chain from before spec 22 stops slashing nominators,
 //! once.
 

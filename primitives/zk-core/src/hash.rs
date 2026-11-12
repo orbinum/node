@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Poseidon hash trait and concrete implementations.
 //!
 //! - [`PoseidonHasher`]: abstraction for circuit-compatible hashing (testable via mocks).

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! `CheckValidatorCandidacy`: rejects a `staking.validate` that the admission
 //! rule would ignore, and a `session.set_keys` or `session.purge_keys` from a
 //! validator of the current or the queued session, before it reaches a block

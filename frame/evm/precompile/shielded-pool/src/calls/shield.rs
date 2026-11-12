@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! ABI decoding and call construction for `shield(uint32,bytes32,bytes,bytes,uint32)`.
 //!
 //! ## Selector

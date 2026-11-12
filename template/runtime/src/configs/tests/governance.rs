@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Each privileged role's origin: every pallet's admin origin is its role's alias in
 //! `configs::governance`, and only root passes it.
 

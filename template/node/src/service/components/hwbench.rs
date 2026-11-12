@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! Hardware benchmark, run at startup unless `--no-hardware-benchmarks`.
 
 use frame_benchmarking_cli::SUBSTRATE_REFERENCE_HARDWARE;

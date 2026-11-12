@@ -8,11 +8,9 @@ Thank you for your interest in contributing to Orbinum Network Node! This docume
 
 Orbinum Network Node is in early development phase and the core team is working on establishing the base architecture and completing the initial security audit.
 
-**Estimated opening date:** Q2 2026
-
 **In the meantime, you can:**
 - Star the project to follow updates
-- Report critical security vulnerabilities to: contact@orbinum.com
+- Report security vulnerabilities privately, as [SECURITY.md](SECURITY.md) describes
 - Participate in [GitHub Discussions](https://github.com/orbinum/node/discussions)
 - Review documentation and suggest minor improvements
 
@@ -23,17 +21,17 @@ We appreciate your interest. We will notify you when we open contributions.
 ## Getting Started
 
 ### Requirements
-- **Rust 1.75+** (specified in `rust-toolchain.toml`)
+- **Rust**: the toolchain pinned in `rust-toolchain.toml`, and `protoc`
 - **Git**
-- **Node.js 16+** (for circuit compilation and tests)
+- **Node.js** (for the TypeScript tests in `ts-tests/`)
 - Basic knowledge of Rust, Substrate, and blockchain development
 
 ### Setting up your Environment
 
 1. **Fork the repository**
    ```bash
-   git clone https://github.com/your-username/orbinum-node.git
-   cd orbinum-node
+   git clone https://github.com/your-username/node.git
+   cd node
    ```
 
 2. **Install dependencies**
@@ -63,12 +61,11 @@ We appreciate your interest. We will notify you when we open contributions.
 **Priority areas:**
 - **Core Runtime**: Frame pallets (shielded-pool, zk-verifier, etc.)
 - **Client**: Node client, RPC, and consensus implementations
-- **ZK Circuits**: Zero-knowledge circuit implementations and optimizations
 - **Precompiles**: EVM precompile implementations
 - **Bugs**: Reported in Issues
 - **Features**: Listed in Issues with `enhancement` label
 - **Documentation**: Improve README, docs, architecture documentation
-- **Tests**: Increase coverage across runtime, client, and circuits
+- **Tests**: Increase coverage across runtime and client
 - **Performance**: Optimize cryptographic operations and runtime execution
 
 ### 2. Create an Issue (if it doesn't exist)
@@ -163,7 +160,6 @@ git push origin feature/your-feature
 ## Project Structure
 
 ```
-├── circuits/          # Zero-knowledge circuits (Circom)
 ├── client/           # Node client implementation
 │   ├── api/         # Client API
 │   ├── cli/         # Command-line interface
@@ -174,15 +170,17 @@ git push origin feature/your-feature
 ├── frame/           # Substrate pallets (runtime modules)
 │   ├── shielded-pool/  # Shielded transactions pallet
 │   ├── zk-verifier/    # Zero-knowledge proof verifier
+│   ├── validator-set/  # Validator admission
+│   ├── paged-election/ # On-chain staking election
+│   ├── auto-payout/    # Automatic staking payouts
 │   ├── evm/            # EVM integration
 │   └── ...
 ├── precompiles/     # EVM precompile implementations
 ├── primitives/      # Core types and traits
-│   ├── zk-circuits/     # Circuit primitives
 │   ├── zk-core/   # ZK cryptographic primitives
 │   ├── ethereum/        # Ethereum compatibility
 │   └── ...
-├── template/        # Node runtime template
+├── template/        # The node (`node/`) and the runtime (`runtime/`)
 └── ts-tests/        # TypeScript integration tests
 ```
 
@@ -197,8 +195,23 @@ When contributing, place code in the appropriate module based on its functionali
 - [ ] I've made commits with descriptive messages
 - [ ] Local tests pass (`cargo test --workspace`)
 - [ ] If modifying runtime: I've run benchmarks if needed (`make benchmark`)
-- [ ] If modifying circuits: I've tested circuit compilation and proof generation
 - [ ] I've checked for breaking changes and noted them in the PR
+
+## Licensing your contribution
+
+Orbinum is licensed per crate (see the [README](README.md#license) and [NOTICE](NOTICE)). By submitting a contribution you agree that:
+
+- it is licensed under the license of the crate it changes, as stated in that crate's `Cargo.toml`;
+- you have the right to submit it under that license.
+
+A new source file starts with Orbinum's header, its SPDX identifier matching the crate's license:
+
+```rust
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+```
+
+A file that comes from Frontier or another project keeps its original copyright notice; when you change it, add `// Modifications Copyright (C) Orbinum Technologies.` below that notice.
 
 ## Code of Conduct
 

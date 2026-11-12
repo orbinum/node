@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! The only way to reach this precompile: a direct, non-static, valueless call.
 
 use crate::revert;

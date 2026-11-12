@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The interface other pallets verify through: [`ZkVerifierPort`] and the
 //! statements it takes.
 //!

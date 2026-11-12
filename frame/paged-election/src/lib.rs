@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! # Pallet Paged Election
 //!
 //! Staking's election, computed on-chain: sequential Phragmén over a paged

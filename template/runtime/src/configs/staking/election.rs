@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The election (`pallet-paged-election`) and the voter list it reads voters from.
 
 use super::staking::{MaxActiveValidators, MaxElectingVoters};

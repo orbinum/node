@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Staking fetches the pages: each holds the supports of its own voters,
 //! within the bounds, and page 0 clears every trace of the election.
 

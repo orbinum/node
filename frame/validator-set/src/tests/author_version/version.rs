@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The declared node version: parsing, ordering and display.
 
 use crate::NodeVersion;

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Each call family's lines, the expiry and tip lines, and what is signable.
 
 use super::{render, signable, MAX_LISTED_ACCOUNTS};

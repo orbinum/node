@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Precompile tests, split by concern, plus the shared helpers and ABI encoders.
 
 use fp_evm::{Precompile, PrecompileFailure};

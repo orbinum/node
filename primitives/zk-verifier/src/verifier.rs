@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Groth16 proof verifier — stateless, all methods are static.
 
 use ark_bn254::Bn254;

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, types::ErrorObjectOwned};
 use pallet_zk_verifier_runtime_api::{CircuitVersionInfo, ZkVerifierRuntimeApi};
 use serde::{Deserialize, Serialize};

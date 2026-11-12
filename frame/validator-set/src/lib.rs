@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! # Pallet Validator Set
 //!
 //! Decides who may be a validator candidate for Orbinum. It does not pick the

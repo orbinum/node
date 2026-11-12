@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Each block's budget: what `on_initialize` must spend to keep the schedule,
 //! and what `on_idle` may take from the weight transactions left.
 

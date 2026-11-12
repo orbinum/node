@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The clients' message calls (`staking::local_relay`): only the adapters reach
 //! them, with origin `None`; accounts, bare extrinsics in the pool or in a block,
 //! and `None` outside the adapters cannot.

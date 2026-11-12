@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! What the Ethereum RPC API's `call` and `create` share: the encoded length they
 //! charge proof size for, the gas limit as `u64`, the weight limit it implies, and
 //! the EVM config for estimates.

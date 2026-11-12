@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Ed25519 verification, shared by `Ed25519Text` and `Ed25519WrappedText`.
 
 use hex_literal::hex;

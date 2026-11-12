@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The pool-side values a spend proof commits to, in the form the verifier port
 //! takes them. Field encoding is `pallet_zk_verifier::encoding`'s job; this module
 //! only turns pool types into bytes.

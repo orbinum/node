@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The genesis every preset is built from: one validator account per initial
 //! authority, bonded and admitted, with its session keys.
 

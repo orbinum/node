@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Pure ABI decoding helpers for the shielded-pool precompile.
 //!
 //! All functions are stateless free functions — no FRAME generics, no pallet types.

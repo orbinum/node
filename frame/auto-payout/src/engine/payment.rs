@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Paying pages within a block's budget: starting queued eras, paying each page
 //! through staking and acting on how far a refusal reaches.
 

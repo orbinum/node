@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Paying eras: on a quiet chain, on a full one, behind schedule, with pages
 //! claimed or refused, and within budget every block.
 

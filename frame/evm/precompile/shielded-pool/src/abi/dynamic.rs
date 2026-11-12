@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Dynamic ABI decoder: `bytes`.
 //!
 //! Reads an offset pointer from the head, then a length word at that

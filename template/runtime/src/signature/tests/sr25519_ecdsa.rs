@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Sr25519 signatures verify for their own account only; raw ECDSA never verifies.
 
 use crate::{

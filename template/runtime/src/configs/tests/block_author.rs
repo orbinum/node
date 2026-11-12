@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The block author is the session validator the Aura pre-digest names, whoever
 //! registered its key, and it earns what an author earns.
 

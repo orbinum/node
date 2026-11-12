@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Who waits how long to leave: validators the full bonding duration, nominators
 //! and pool members the shorter nominator time, since only validators are
 //! slashed; an account that validated recently waits the full time whatever it

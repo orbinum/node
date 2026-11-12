@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Minimum author version: declarations, the block check and the quorum.
 
 use crate::tests::*;

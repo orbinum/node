@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Nullifier set — the double-spend guard.
 //!
 //! Insert-only by design: there is no removal path, and a nullifier maps to the

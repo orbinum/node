@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! `EcdsaText`: an EVM wallet's `personal_sign` (EIP-191) over the same text, for the
 //! account its EVM address maps to.
 

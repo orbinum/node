@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The snapshot: candidates by index, and voters by page with their votes as
 //! candidate indices.
 

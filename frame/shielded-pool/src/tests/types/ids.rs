@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Field-element identifiers: only canonical encodings are accepted.
 
 use crate::types::ids::*;

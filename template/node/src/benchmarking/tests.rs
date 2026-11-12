@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! The benchmark extrinsics pass the runtime's validation on the dev genesis.
 
 use super::*;

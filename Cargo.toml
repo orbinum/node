@@ -57,7 +57,7 @@ resolver = "2"
 authors = ["Orbinum Technologies <contact@orbinum.com>"]
 edition = "2021"
 repository = "https://github.com/orbinum/node"
-homepage = "https://orbinum.net"
+homepage = "https://orbinum.network"
 
 [workspace.dependencies]
 async-trait = "0.1"

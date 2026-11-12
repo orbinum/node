@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! # EVM Precompile — Balances
 //!
 //! Exposes native `pallet_balances` transfers to arbitrary `AccountId32`

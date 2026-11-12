@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Runtime API query helpers for `pallet-zk-verifier`.
 //!
 //! Read-only functions called by the runtime API implementation in

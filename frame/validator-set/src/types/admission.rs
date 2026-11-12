@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The admission vocabulary: the mode, how long a ban lasts and why an account
 //! may not validate.
 

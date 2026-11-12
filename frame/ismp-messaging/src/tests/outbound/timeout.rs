@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Expiry: `on_timeout` never errs, and its event names the request that expired.
 
 use crate::tests::util::*;

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The [`ElectionProvider`] interface, as `pallet-staking-async` drives it:
 //! `start` when it plans an era, `status` each block until ready, then
 //! `elect(page)` once per block from the most significant page down to 0.

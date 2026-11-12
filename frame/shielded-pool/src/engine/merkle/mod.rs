@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Merkle tree — hashing, the incremental structure, and the on-chain service.
 //!
 //! Split by responsibility so the storage-touching code is separable from the

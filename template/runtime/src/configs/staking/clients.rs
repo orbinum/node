@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The two clients that join staking and sessions in one runtime: rc-client on the
 //! staking side, ah-client on the session side (`staking::local_relay`).
 

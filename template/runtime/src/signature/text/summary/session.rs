@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Session keys, leaving the validator set, and a remark.
 
 use super::{labels::bytes, Line};

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Anti-spam: the fee floor and the circuit-version guard.
 
 use super::*;

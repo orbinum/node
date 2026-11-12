@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! Frontier's mapping database: where it lives, opening it and purging it.
 
 use std::{num::NonZeroU32, path::PathBuf, sync::Arc};

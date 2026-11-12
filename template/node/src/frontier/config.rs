@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! Ethereum-compatibility command-line settings.
 
 /// Where Frontier keeps its Ethereum mapping and log index.

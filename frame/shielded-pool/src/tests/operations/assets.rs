@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The asset registry: registering, verifying and unverifying assets, and the
 //! id-collision guard.
 

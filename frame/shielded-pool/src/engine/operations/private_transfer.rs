@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Private transfer: spend up to two notes into two new ones, all inside the pool.
 
 use crate::{

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The Ethereum RPC API's `call` and `create`, as `eth_call`, `eth_estimateGas` and
 //! contract deployment reach them.
 

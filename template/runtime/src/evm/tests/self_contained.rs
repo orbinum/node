@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Ethereum transactions as extrinsics: the RPC wraps one into a bare extrinsic
 //! (`TransactionConverter`), and only `Ethereum::transact` is self-contained, signed by
 //! the address its signature recovers.

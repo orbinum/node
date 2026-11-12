@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Fixtures the tests share: the counterparties, request builders, event readers and
 //! balance helpers.
 

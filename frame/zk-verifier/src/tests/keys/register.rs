@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `register_verification_key`: the rules a key is admitted under and what a
 //! registration stores.
 

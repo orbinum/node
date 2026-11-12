@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Registered asset metadata.
 //!
 //! An asset must be both registered and verified before it can be shielded or

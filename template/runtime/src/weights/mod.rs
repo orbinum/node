@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Benchmarked weights for the runtime-local configurations that need their own:
 //! `ismp-grandpa`, the curve25519 and SHA3-FIPS precompiles, and the upstream staking
 //! pallets (staking-async, bags list, nomination pools) measured on this runtime.

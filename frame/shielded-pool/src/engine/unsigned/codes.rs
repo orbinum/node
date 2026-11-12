@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Pool-rejection codes for unsigned transactions.
 //!
 //! `InvalidTransaction::Custom` carries a bare `u8`, which reaches operators as

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The wire format: the module id, the message codec and the commitment's ABI
 //! encoding. A mistake in any of them goes unnoticed locally and breaks every message.
 

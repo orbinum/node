@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! The validators' commission ceiling: staking's `MaxCommission`, set by
 //! governance (`staking.set_max_commission`) and 100 % (none) by default.
 //!

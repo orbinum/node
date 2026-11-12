@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The rejection codes are part of the pool's interface: their values never change.
 
 use super::*;

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! A network of dev validators (Alice, Bob, Charlie, and up to Ferdie), as the
 //! local chain spec builds it, and their GRANDPA equivocations.
 

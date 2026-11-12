@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use crate::{self as pallet_paged_election, ElectionProvider, Phase};
 use frame_election_provider_support::{
 	BoundedSupportsOf, ElectionDataProvider, PageIndex, VoteWeight, bounds::DataProviderBounds,

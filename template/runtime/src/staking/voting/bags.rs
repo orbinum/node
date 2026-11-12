@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Bag thresholds for the voter list (`pallet-bags-list`), which ranks nominators
 //! by stake so the election snapshot takes the largest first.
 //!

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Pallet types — every struct, newtype and alias defined by the pallet.
 //!
 //! Split by domain, but re-exported flat so consumers keep reaching them through

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The rounds: elect the lowest score, then pass over the voter pages giving
 //! the winner's score as load to the voters approving it, which updates the
 //! sums of the candidates they also approve.

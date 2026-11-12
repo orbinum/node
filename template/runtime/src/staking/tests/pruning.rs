@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Eras past the history pruned from `on_idle` (`staking::pruning`): over the
 //! blocks that follow, never in a heavy block and never above its share of the
 //! block.

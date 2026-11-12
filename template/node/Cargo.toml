@@ -1,7 +1,7 @@
 [package]
 name = "orbinum-node"
 version = "0.8.0"
-license = "Unlicense"
+license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
 build = "build.rs"
 description = "Orbinum Network Node - Privacy-focused blockchain with ZK proofs and EVM compatibility."
 publish = false

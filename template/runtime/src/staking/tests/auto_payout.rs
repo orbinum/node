@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Automatic payouts as the runtime wires them: the budget against the block and
 //! the worst-case era, the staking adapter, and eras paid end to end.
 

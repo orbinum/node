@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! What the chain subcommands (check, import, export, revert, benchmark, frontier-db) run
 //! on: the node's partial components with an in-memory keystore.
 

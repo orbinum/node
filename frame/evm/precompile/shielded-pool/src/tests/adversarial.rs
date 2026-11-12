@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Adversarial ABI battery: the attacker controls every byte of `input`.
 //!
 //! This is the only surface where untrusted bytes reach the node directly: an

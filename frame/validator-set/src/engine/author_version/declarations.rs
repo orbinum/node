@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The on-chain rules for declared author versions: which declarations a block
 //! accepts, what is recorded, when a block is invalid, and the quorum a new
 //! minimum needs.

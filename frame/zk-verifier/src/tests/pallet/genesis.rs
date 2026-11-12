@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Genesis: the keys and denied hashes a chain starts with.
 
 use crate::{

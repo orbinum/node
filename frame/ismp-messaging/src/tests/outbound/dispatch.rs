@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Sending a POST: the guards that refuse a message before it is committed, and the
 //! `RequestDispatched` fields. Two are easy to get wrong: a timeout of 0 means never, and
 //! the nonce must be read before the dispatcher consumes it.

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Recovery from an era plan that can no longer start.
 //!
 //! Staking plans era `n + 1` by starting an election. The elected set goes to

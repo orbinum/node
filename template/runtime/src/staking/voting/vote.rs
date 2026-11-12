@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Stake to vote weight, for the election and the voter list.
 //!
 //! Vote weights are `u64` and ORB has 18 decimals, so the supply does not fit and

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The allowlist: genesis, adding, removing, leaving and the removal hook.
 
 use crate::tests::*;

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `purge_circuit`: what it clears and the circuits it refuses.
 
 use crate::tests::util::*;

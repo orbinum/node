@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! The node version this binary declares in the blocks it authors.
 //!
 //! - [`inherent_data_provider`] hands the version to every block the node builds;

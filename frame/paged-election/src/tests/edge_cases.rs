@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Requests out of turn, degenerate inputs and failures.
 
 use super::util::*;

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Staking as `pallet-auto-payout` pays it: the eras that closed, their
 //! validators' pages, and paying a page exactly as `payout_stakers_by_page` would.
 

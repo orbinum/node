@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `UnshieldOperation`: validation, settlement, the ledger and fee crediting.
 
 use crate::{

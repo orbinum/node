@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Nomination pool calls: the member calls (join, bond more, claim, leave) and the pool
 //! operator's calls that bond, nominate, set the pool's state, hand its roles over or
 //! manage its commission. Metadata changes are not text-signable: they are free bytes.

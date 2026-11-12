@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! What each preset sets up for staking: the testnet's bonded validators and era 0,
 //! mainnet's bonds, and no caps on nominators, pools or commission.
 

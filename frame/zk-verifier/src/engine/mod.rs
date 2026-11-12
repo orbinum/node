@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The pallet's logic, one concern per module: registering and activating keys
 //! under the rule every stored key is held to ([`registry`]), storing them with
 //! their hash and prepared form ([`keys`]), encoding statements into public

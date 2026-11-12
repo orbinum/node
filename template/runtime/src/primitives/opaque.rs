@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Extrinsic-agnostic types for the CLI, so a node keeps syncing across upgrades that
 //! change the core data structures; and the session keys.
 //!

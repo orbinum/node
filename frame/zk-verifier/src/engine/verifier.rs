@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Core Groth16 proof verification.
 //!
 //! Resolves the circuit version, loads its key — prepared at registration —

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The hooks' work, one concern per module: taking the snapshot
 //! ([`snapshot`]), electing winners and applying their loads ([`rounds`]),
 //! rebuilding a page's supports ([`export`]) and the invariants (`invariants`,

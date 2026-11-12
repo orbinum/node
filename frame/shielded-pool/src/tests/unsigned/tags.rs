@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Pool tags: one pool entry per note, and tags an attacker cannot game.
 
 use super::*;

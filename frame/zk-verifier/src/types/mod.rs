@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The pallet's types: keys and their bookkeeping (this module), the interface
 //! other pallets verify through ([`port`]) and what the runtime API returns
 //! ([`runtime_api`]).

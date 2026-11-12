@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Calldata decoding: the two selectors and their fixed-size arguments.
 
 use crate::revert;

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Which Hyperbridge deployment this runtime talks to, and how Orbinum names itself.
 //!
 //! Hyperbridge is the transport, not the destination: these constants say where the

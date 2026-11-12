@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Helpers the tests share: origins, keys, batches, proofs and seeded circuits.
 
 use crate::{CircuitId, Event, VkBytes, VkEntry, VkHashes, tests::mock::*};

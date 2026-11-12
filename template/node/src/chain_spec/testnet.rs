@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 //! Orbinum public testnet (`--chain testnet`), EVM chain ID 2700.
 //!
 //! Genesis (sudo, treasury, faucet, validators, balances) is the runtime preset

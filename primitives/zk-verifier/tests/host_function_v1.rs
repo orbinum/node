@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Golden vectors for the frozen `bn254_groth16_verify` host function (version 1).
 //!
 //! Blocks already executed called version 1 with prepared keys written by earlier

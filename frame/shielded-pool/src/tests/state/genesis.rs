@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Genesis: the native asset, the initial root and the historic-root window.
 
 use crate::{

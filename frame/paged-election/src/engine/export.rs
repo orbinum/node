@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A page's supports, rebuilt from the winners' scores: each voter's stake is
 //! split across the winners it approves as upstream's backing step does.
 

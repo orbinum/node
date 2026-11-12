@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! # Orbinum ZK Core
 //!
 //! Poseidon-based cryptographic primitives for ZK-SNARK operations in Orbinum Network.

@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0
+
 use super::{revert_reason, run, transfer_handle};
 use crate::mock::{bob_account, caller_account, new_test_ext, Test};
 use pallet_balances::Pallet as Balances;

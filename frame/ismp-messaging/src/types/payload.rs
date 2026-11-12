@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The wire format for messages Orbinum sends and accepts.
 //!
 //! Codec indices are pinned explicitly: the discriminant is wire format, so letting it

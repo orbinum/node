@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Delivery confirmation: the receipt key a confirmation reads, and how the GET response
 //! that carries the receipt is read.
 

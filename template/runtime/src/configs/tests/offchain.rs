@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Unsigned transactions built by offchain code (GRANDPA equivocation reports)
 //! must survive the wire as bare extrinsics carrying the same call.
 

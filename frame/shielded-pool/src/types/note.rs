@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The shielded note — the private-side unit of value.
 //!
 //! Only ever built and inspected off-chain: the chain sees its commitment, never

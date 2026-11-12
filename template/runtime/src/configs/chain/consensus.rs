@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Block production and finality: Aura, GRANDPA, sessions, the validator set, block
 //! authorship and dev-only manual seal.
 //!

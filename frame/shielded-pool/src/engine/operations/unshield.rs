@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Unshield: spend a note to a public account, optionally keeping change private.
 
 use crate::{

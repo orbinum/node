@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The admin's levers: accepted sources, the outbound pause and the message fee, each
 //! root-only and announced by an event.
 

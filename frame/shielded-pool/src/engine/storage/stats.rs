@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Pool counters.
 //!
 //! Monotonic totals for commitments inserted and nullifiers spent. Saturating

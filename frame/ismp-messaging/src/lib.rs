@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! # Pallet ISMP Messaging
 //!
 //! Cross-chain messaging over ISMP, with Hyperbridge as the transport.

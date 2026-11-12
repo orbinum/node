@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Frontier EVM layer: EVM, Ethereum and the base fee.
 //!
 //! A transaction's base fee goes to the era's reward pool and its priority tip to

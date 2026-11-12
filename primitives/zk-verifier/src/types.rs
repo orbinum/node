@@ -1,3 +1,6 @@
+// Copyright (C) Orbinum Technologies.
+// SPDX-License-Identifier: Apache-2.0 OR GPL-3.0-or-later
+
 //! Core Groth16 types: proofs, keys, public inputs, errors, and size limits.
 
 use alloc::vec::Vec;
