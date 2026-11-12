@@ -44,14 +44,18 @@ ignore = [
     # 0489 and 0490 panic when parsing zone files or record text, which the node never does.
     # 0491 over-allocates (~18 MB, freed when decoding fails) on a DNS response with forged
     # record counts, reachable only by spoofing replies to the node's `/dns` multiaddr lookups.
-    # 0504 and 0505 are flaws in DNSSEC's NSEC3 validation, compiled only with hickory's
-    # `dnssec*` features, which nothing in the graph enables.
+    # 0504, 0505, 0511, 0512 (hickory-proto) and 0514 (hickory-resolver) are flaws in DNSSEC
+    # validation, compiled only with hickory's `dnssec*` features, which nothing in the graph
+    # enables.
     "RUSTSEC-2026-0487",
     "RUSTSEC-2026-0489",
     "RUSTSEC-2026-0490",
     "RUSTSEC-2026-0491",
     "RUSTSEC-2026-0504",
     "RUSTSEC-2026-0505",
+    "RUSTSEC-2026-0511",
+    "RUSTSEC-2026-0512",
+    "RUSTSEC-2026-0514",
 
     # Unmaintained — all transitive, no direct upgrade path
     "RUSTSEC-2025-0161",  # libsecp256k1 0.7.2 (from frontier fp-evm/pallet-evm)
