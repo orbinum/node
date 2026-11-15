@@ -123,7 +123,9 @@ where
 
 	// The RPC runtime `spawn_tasks` keeps alive cannot be dropped inside an async context.
 	drop(task_manager);
-	runtime.shutdown_timeout(Duration::from_secs(5));
+	// Same grace as `sc_cli::Runner`: a task leaked past it keeps RocksDB open, and its
+	// background threads abort the process at exit ("pthread lock: Invalid argument").
+	runtime.shutdown_timeout(Duration::from_secs(60));
 	let _ = std::fs::remove_dir_all(base_path);
 	output
 }
