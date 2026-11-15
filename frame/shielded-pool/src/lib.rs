@@ -96,6 +96,7 @@ compile_error!(
 
 extern crate alloc;
 
+pub mod migrations;
 pub mod types;
 
 mod benchmarking;
@@ -111,10 +112,10 @@ pub use engine::{
 
 pub use pallet::*;
 pub use types::{
-	AssetId, AssetMetadata, Commitment, DEFAULT_TREE_DEPTH, DefaultMerklePath,
-	EncryptedMemo as FrameEncryptedMemo, Hash, MAX_ENCRYPTED_MEMO_SIZE, MAX_PROOF_SIZE,
-	MAX_SUBTREE_ROOTS, MAX_TREE_DEPTH, MerklePath, Note, Nullifier, Proof, SUBTREE_LEVEL,
-	SubtreeRoots,
+	AssetBackend, AssetId, AssetMetadata, BoundActions, Commitment, DEFAULT_TREE_DEPTH,
+	DefaultMerklePath, EncryptedMemo as FrameEncryptedMemo, Hash, MAX_ENCRYPTED_MEMO_SIZE,
+	MAX_PROOF_SIZE, MAX_SUBTREE_ROOTS, MAX_TREE_DEPTH, MerklePath, NoAction, Note, Nullifier,
+	Proof, SUBTREE_LEVEL, SubtreeRoots,
 };
 pub use weights::WeightInfo;
 
@@ -133,6 +134,11 @@ pub mod pallet {
 	/// The balance type for this pallet
 	pub type BalanceOf<T> =
 		<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+
+	/// The action a `bound_spend` carries.
+	pub type BoundActionOf<T> = <<T as Config>::BoundActions as crate::types::BoundActions<
+		<T as frame_system::Config>::AccountId,
+	>>::Action;
 
 	/// One `shield_batch` entry: `(asset_id, amount, commitment, encrypted_memo, proof,
 	/// circuit_version)`, the arguments of a single `shield`.
@@ -153,7 +159,9 @@ pub mod pallet {
 	/// - v3: historic-root window re-anchored from insert counts to block numbers;
 	///   both historic-root items carry an expiry. Migration removed once every
 	///   live chain reached v3 — see git history.
-	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(3);
+	/// - v4: every asset carries a backend (`AssetBackend`); existing ones are
+	///   `Native` (`migrations::v4`).
+	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(4);
 
 	/// How many sealed-tree nodes each block sweeps.
 	///
@@ -237,6 +245,9 @@ pub mod pallet {
 
 		/// Manages the asset registry: registers, verifies and unverifies assets.
 		type AdminOrigin: EnsureOrigin<Self::RuntimeOrigin>;
+
+		/// What a `bound_spend` hands its value to (`()` for none).
+		type BoundActions: crate::types::BoundActions<Self::AccountId>;
 
 		/// Weight information for extrinsics in this pallet
 		type WeightInfo: WeightInfo;
@@ -558,6 +569,34 @@ pub mod pallet {
 			change_leaf_index: Option<u32>,
 		},
 
+		/// A bound spend paid its action's executor (native asset) or burned a
+		/// pallet-backed asset, and ran the action.
+		BoundSpent {
+			/// Nullifier of the spent note
+			nullifier: Nullifier,
+			asset_id: u32,
+			/// Amount handed to the action
+			amount: BalanceOf<T>,
+			/// The action's executor: the proof's recipient
+			executor: T::AccountId,
+			/// Change note commitment (None for a total spend)
+			change_commitment: Option<Hash>,
+			/// Encrypted memo for the change note (None for a total spend)
+			change_encrypted_memo: Option<FrameEncryptedMemo>,
+			/// Leaf index of the change note (None for a total spend)
+			change_leaf_index: Option<u32>,
+		},
+
+		/// The chain inserted a note it computed itself, the output of a bound
+		/// action. Its owner key and blinding came with the action, so the wallet
+		/// that built it recognizes the note; no memo is stored.
+		NoteMinted {
+			commitment: Commitment,
+			asset_id: u32,
+			value: u128,
+			leaf_index: u32,
+		},
+
 		/// Merkle root was updated
 		MerkleRootUpdated {
 			/// Previous root
@@ -672,6 +711,10 @@ pub mod pallet {
 		/// the native currency for every asset, so only the native asset can be
 		/// shielded, spent, withdrawn or claimed.
 		AssetNotSupported,
+		/// The asset is issued by a pallet: governance cannot verify or unverify it.
+		AssetManagedByPallet,
+		/// The bound spend's action is unknown to the runtime, or refused by it.
+		InvalidBoundAction,
 	}
 
 	// ========================================================================
@@ -796,7 +839,9 @@ pub mod pallet {
 		/// * `MemoCommitmentMismatch` - Number of memos does not match number of commitments
 		#[pallet::call_index(1)]
 		#[pallet::weight(
-			T::WeightInfo::private_transfer().saturating_add(T::ZkVerifier::verification_weight())
+			T::WeightInfo::private_transfer()
+				.saturating_add(T::ZkVerifier::verification_weight())
+				.saturating_add(Pallet::<T>::pallet_asset_spend_weight(*asset_id))
 		)]
 		#[allow(clippy::too_many_arguments)]
 		pub fn private_transfer(
@@ -855,7 +900,12 @@ pub mod pallet {
 		/// * `FeeRecipientUnavailable` - Non-zero fee and no block author
 		/// * `InvalidMemoSize` - Memo present on a total unshield, or not exactly 180 bytes on a partial one
 		#[pallet::call_index(2)]
-		#[pallet::weight(T::WeightInfo::unshield().saturating_add(T::ZkVerifier::verification_weight()))]
+		#[pallet::weight(
+			T::WeightInfo::unshield()
+				.saturating_add(T::ZkVerifier::verification_weight())
+				// Whether the recipient executes bound actions.
+				.saturating_add(T::DbWeight::get().reads(1))
+		)]
 		#[allow(clippy::too_many_arguments)]
 		pub fn unshield(
 			origin: OriginFor<T>,
@@ -981,6 +1031,76 @@ pub mod pallet {
 			crate::operations::assets::AssetOperation::unverify::<T>(asset_id)
 		}
 
+		/// Spend a note for a runtime action: an unshield whose proof also commits
+		/// to `action`, paying the action's executor (native asset) or burning a
+		/// pallet-backed asset, then running the action through `T::BoundActions`.
+		///
+		/// The proof is an unshield proof whose `memo_hash` is
+		/// `statement::bound_digest` over the action and the change memo, and whose
+		/// recipient is the action's executor. It is valid for this action alone,
+		/// and plain `unshield` refuses executors, so it cannot be replayed as one.
+		///
+		/// # Arguments
+		/// * `origin` - Unsigned only; signed and Root fail with `BadOrigin`
+		/// * `action` - What the runtime does with the value; its encoding is bound by the proof
+		/// * The rest - As in `unshield`, without `recipient` (the action's executor)
+		///
+		/// # Errors
+		/// * `InvalidBoundAction` - The runtime runs no such action, or refuses it
+		/// * As in `unshield`; a pallet-backed asset is spendable even unverified
+		///
+		/// # Events
+		/// * `BoundSpent`, plus whatever the action emits (e.g. `NoteMinted`)
+		#[pallet::call_index(20)]
+		#[pallet::weight(
+			T::WeightInfo::unshield()
+				// The genesis hash the digest binds, and the asset's backend.
+				.saturating_add(T::DbWeight::get().reads(2))
+				.saturating_add(T::ZkVerifier::verification_weight())
+				.saturating_add(<T::BoundActions as crate::types::BoundActions<T::AccountId>>::weight(action))
+				.saturating_add(Pallet::<T>::pallet_asset_spend_weight(*asset_id))
+		)]
+		#[allow(clippy::too_many_arguments)]
+		pub fn bound_spend(
+			origin: OriginFor<T>,
+			proof: Proof,
+			merkle_root: Hash,
+			nullifier: Nullifier,
+			asset_id: u32,
+			amount: BalanceOf<T>,
+			fee: BalanceOf<T>,
+			change_commitment: Hash,
+			change_encrypted_memo: FrameEncryptedMemo,
+			circuit_version: u32,
+			action: BoundActionOf<T>,
+		) -> DispatchResult {
+			ensure_none(origin)?;
+			use crate::operations::{
+				bound::{BoundSpendOperation, BoundSpendRequest},
+				unshield::UnshieldRequest,
+			};
+			let recipient =
+				<T::BoundActions as crate::types::BoundActions<T::AccountId>>::executor(&action)
+					.ok_or(Error::<T>::InvalidBoundAction)?;
+			BoundSpendOperation::execute::<T>(
+				&proof,
+				BoundSpendRequest {
+					spend: UnshieldRequest {
+						merkle_root,
+						nullifier,
+						asset_id,
+						amount,
+						recipient,
+						fee,
+						change_commitment,
+						change_memo: change_encrypted_memo,
+						circuit_version,
+					},
+					action,
+				},
+			)
+		}
+
 		// Call index 18 (`commit_relay`) is retired and must not be reused.
 
 		/// Pay `amount` of the caller's pending spend fees out of the pool to the
@@ -999,7 +1119,9 @@ pub mod pallet {
 		/// # Events
 		/// * `FeesClaimed`
 		#[pallet::call_index(19)]
-		#[pallet::weight(T::WeightInfo::claim_fees())]
+		#[pallet::weight(T::WeightInfo::claim_fees().saturating_add(
+			<T::BoundActions as crate::types::BoundActions<T::AccountId>>::redeem_fees_weight()
+		))]
 		pub fn claim_fees(
 			origin: OriginFor<T>,
 			asset_id: u32,

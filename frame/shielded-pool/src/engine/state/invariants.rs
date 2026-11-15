@@ -17,8 +17,8 @@ impl<T: Config> Pallet<T> {
 	/// the pool account funds (a transfer, an EVM value transfer), so the
 	/// physical balance may exceed the ledger; that surplus is a donation no
 	/// note can spend.
-	/// Only the native asset (0) is backed by `Currency`; other assets live in
-	/// external backends — TODO: extend when a per-asset balance reader exists.
+	/// Only the native asset (0) is backed by `Currency`; a pallet-backed asset's
+	/// ledger is checked against its own pending fees below.
 	pub(crate) fn do_try_state() -> Result<(), sp_runtime::TryRuntimeError> {
 		let pool = Self::pool_account_id();
 		let physical = T::Currency::free_balance(&pool);
@@ -38,6 +38,26 @@ impl<T: Config> Pallet<T> {
 				"shielded-pool pending fees exceed the native pool ledger"
 			)
 		);
+
+		// A pallet-backed asset never leaves the pool as currency: its ledger is
+		// the notes issued less those burned, and its pending fees are a part of it.
+		for (asset_id, asset) in crate::Assets::<T>::iter() {
+			if !matches!(asset.backend, crate::types::AssetBackend::Pallet(_)) {
+				continue;
+			}
+			let ledger: u128 = sp_runtime::SaturatedConversion::saturated_into(
+				PoolBalancePerAsset::<T>::get(asset_id),
+			);
+			let pending = PendingFees::<T>::iter()
+				.filter(|(_, id, _)| *id == asset_id)
+				.fold(0u128, |sum, (_, _, amount)| sum.saturating_add(amount));
+			frame_support::ensure!(
+				pending <= ledger,
+				sp_runtime::TryRuntimeError::Other(
+					"shielded-pool pending fees exceed a pallet asset's ledger"
+				)
+			);
+		}
 
 		// Forest invariants: the active root must always be provable
 		// against; one sealed root per completed tree; the sealed maps

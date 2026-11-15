@@ -13,8 +13,8 @@ use frame_system::EnsureRoot;
 
 /// Staking's admin calls (cancelling deferred slashes, the commission floor and
 /// ceiling, restoring ledgers, migrating controllers in batch, the validator
-/// self-stake incentive), nomination pools' limits (`set_configs`) and aborting
-/// an election.
+/// self-stake incentive), nomination pools' limits (`set_configs`), the smallest
+/// private staking entry (`privateStaking.set_min_entry`) and aborting an election.
 ///
 /// Not staking's bonds, counts and eras: `set_staking_configs`,
 /// `set_validator_count`, `increase_validator_count`, `scale_validator_count`,

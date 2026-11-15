@@ -13,7 +13,7 @@ use crate::{
 const VECTORS: &str = include_str!("fixtures/ed25519_text_vectors.json");
 
 /// `(name, msg)` for every vector, `msg` being the whole signing payload.
-fn vector_messages() -> Vec<(&'static str, Vec<u8>)> {
+pub(super) fn vector_messages() -> Vec<(&'static str, Vec<u8>)> {
 	let claim = |asset_id, amount| {
 		RuntimeCall::ShieldedPool(pallet_shielded_pool::Call::claim_fees { asset_id, amount })
 	};
@@ -415,10 +415,54 @@ fn vector_messages() -> Vec<(&'static str, Vec<u8>)> {
 			}),
 		),
 		(
+			"private_staking_set_private",
+			payload_with_tip(
+				&RuntimeCall::PrivateStaking(crate::staking::private::Call::set_private {
+					pool_id: 7,
+					enabled: true,
+				}),
+				0,
+			),
+		),
+		(
 			"pools_set_metadata",
 			pools(pallet_nomination_pools::Call::set_metadata {
 				pool_id: 7,
-				metadata: vec![1, 2, 3],
+				metadata: b"Orbinum Pool 7".to_vec(),
+			}),
+		),
+		(
+			"pools_set_metadata_link",
+			pools(pallet_nomination_pools::Call::set_metadata {
+				pool_id: 7,
+				metadata: b"Orbinum Pool\nhttps://x.com/orbinum".to_vec(),
+			}),
+		),
+		(
+			"pools_set_metadata_emoji",
+			pools(pallet_nomination_pools::Call::set_metadata {
+				pool_id: 7,
+				metadata: "Orbinum \u{1f30a}".as_bytes().to_vec(),
+			}),
+		),
+		(
+			"pools_create_with_pool_id",
+			pools(pallet_nomination_pools::Call::create_with_pool_id {
+				amount: 100 * ORB,
+				root: AccountId::from(BOB),
+				nominator: AccountId::from(BOB),
+				bouncer: AccountId::from(BOB),
+				pool_id: 3,
+			}),
+		),
+		(
+			"pools_adjust_pool_deposit",
+			pools(pallet_nomination_pools::Call::adjust_pool_deposit { pool_id: 7 }),
+		),
+		(
+			"pools_apply_slash",
+			pools(pallet_nomination_pools::Call::apply_slash {
+				member_account: AccountId::from(BOB),
 			}),
 		),
 	]
@@ -463,11 +507,16 @@ fn render_vectors() -> serde_json::Value {
 	// byte with Alith's key (`personal_sign` with `v` as the raw recovery id). The shield's
 	// text holds `…` (3 UTF-8 bytes), so its EIP-191 length is the text's byte length.
 	let pair = sp_core::ecdsa::Pair::from_seed(&ALITH_KEY);
+	// Also every staking role's call, so clients check an EVM wallet can sign each.
+	let roles = vector_messages().into_iter().filter(|(name, payload)| {
+		super::roles::is_role_vector(name) && crate::signature::text_signable(payload)
+	});
 	let ecdsa: Vec<_> = [
 		("transfer", payload_with_tip(&transfer(3 * ORB / 2), 0)),
 		("shield_multibyte", payload_with_tip(&shield(0, 2 * ORB), 0)),
 	]
 	.into_iter()
+	.chain(roles)
 	.map(|(name, payload)| {
 		let message = crate::signature::eip191_text_message(&TESTNET_GENESIS, &payload);
 		serde_json::json!({

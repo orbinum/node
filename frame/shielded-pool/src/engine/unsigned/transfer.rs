@@ -86,7 +86,10 @@ pub fn validate_private_transfer<T: Config>(
 	// Dummy nullifiers (zero) are excluded: they carry no identity, and tagging
 	// them would collide every padded single-input spend with every other.
 	let mut builder = ValidTransaction::with_tag_prefix(super::SPEND_TAG_PREFIX)
-		.priority(req.fee.saturated_into())
+		.priority(crate::operations::fees::priority::<T>(
+			req.asset_id,
+			req.fee.saturated_into(),
+		))
 		.longevity(TX_LONGEVITY)
 		.propagate(true);
 

@@ -25,14 +25,30 @@ The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 Pool roles become text-signable, and only validators are slashed: nominators and
 pool members leave in two eras instead of twenty-eight, while validators keep the
 full bonding duration and the long window in which governance may cancel a
-slash. Extrinsics and their encoding are unchanged.
+slash. The shielded pool gains bound spends, and private staking builds on them:
+pool roots open their pools to members who join with shielded notes. Existing
+extrinsics and their encoding are unchanged (`bound_spend` and the
+`PrivateStaking` pallet are new). Ships with `pallet-shielded-pool` 0.27.0 and
+`pallet-evm-precompile-shielded-pool` 0.10.2.
 
-#### 1 · Pool roles are text-signable
+#### 1 · Every pool role's call is text-signable
 
-`NominationPools.update_roles` renders its pool and each role as `keep`, `remove`
-or the account it is handed to, so EVM (`EcdsaText`) and Solana (`Ed25519Text`,
-`Ed25519WrappedText`) roots can sign it; spec 21 refused it with `BadProof`.
-`set_metadata` stays refused: its free bytes cannot be shown safely.
+EVM (`EcdsaText`) and Solana (`Ed25519Text`, `Ed25519WrappedText`) accounts make
+every nominator, validator, pool member and pool owner call a Substrate key makes;
+spec 21 refused these with `BadProof`:
+
+- `NominationPools.update_roles`: its pool and each role as `keep`, `remove` or the
+  account it is handed to.
+- `NominationPools.set_metadata`: the pool, its name and its link, as written. A
+  pool's metadata is now `name` or `name\nurl`: the name ASCII letters and digits in
+  words one space apart (up to 64), the link one plain `https` URL (lowercase host, no
+  port or credentials). The call filter refuses any other metadata
+  (`PoolMetadataRules`, `staking::pools::pool_profile`), so a name cannot hide,
+  reorder or imitate text, and the text wallets sign shows it as it is.
+- `NominationPools.create_with_pool_id`, `adjust_pool_deposit` and `apply_slash`.
+
+Every such call has a shared vector, with an EIP-191 signature for EVM wallets
+(`ecdsa`), and a runtime test signs each from all three text formats.
 
 #### 2 · Only validators are slashed
 
@@ -54,17 +70,106 @@ or the account it is handed to, so EVM (`EcdsaText`) and Solana (`Ed25519Text`,
 - Governance may turn nominator slashing back on (`staking.setStakingConfigs`);
   backers then wait the full bonding duration again.
 
-#### 3 · Migrations
+#### 3 · Bound spends (shielded pool)
+
+- **`ShieldedPool.bound_spend`** (call index 20, unsigned): an unshield whose proof
+  commits to a runtime action as well as its change memo
+  (`memo_hash = blake2_256("orbinum:bound-spend:v1" ‖ genesis ‖ blake2_256(action)
+  ‖ memo_digest([change_memo]))`), paying the action's executor or burning a
+  pallet-backed asset, then running the action. Same unshield circuit and keys.
+  The runtime's actions (`BoundRouter`): `BoundAction::PrivateStaking` (index 0).
+- **`mint_note`**: notes the chain computes itself for an action's output
+  (`NoteMinted`), and **pallet-backed assets** (`AssetBackend`), which never leave
+  the pool as currency and cannot be frozen by governance.
+- Plain `unshield` refuses executors of bound actions as recipients.
+
+#### 4 · Private staking
+
+- **`PrivateStaking`** (pallet index 31, runtime-local): a pool's root calls
+  `set_private(pool, on|off)`; the first opening issues the pool's share asset
+  `sN` (pallet-backed, 18 decimals). Text-signable for EVM and Solana roots
+  (`pool`, `private members: on|off`). Closing a pool never opened, or opening a
+  destroying one, is refused.
+- Every action carries a one-time key and blinding for its output note: both
+  must be non-zero field elements. An exit never redeems more shares, its fee
+  included, than the pool issued.
+- One member account per pool (`m_P`, derived from `orb/pstk`) holds every
+  private member's stake; a share is worth `(value of m_P's points not held by
+  pending entries + V) / (supply + V)`, `V` = 1 ORB, rounded in the pool's
+  favour and never above the pro-rata share (a price below one, after a slash,
+  would otherwise overvalue all but the last shares). Pending entries keep the points their bond issued, so a slash while
+  they wait is shared with them.
+- **Only the pallet moves `m_P`'s stake**: the call filter refuses anyone's
+  `nominationPools.unbond` or `withdrawUnbonded` of a private member (a pool
+  root's kick included); the pallet winds a destroying pool's member down itself.
+- **Enter** (bound spend of an ORB note): bonded into the pool at once; its shares
+  are minted (`EntrySettled`) once the pool has compounded the entry era; an entry
+  whose shares would fall below its `min_shares` is refunded in ORB instead
+  (`EntryRefunded`). Minimum 10 ORB (`set_min_entry`, `StakingAdmin`, never below
+  the pool's join minimum). Refused, as the pool would refuse the bond, by a pool
+  slashed past `MaxPointsToBalance`.
+- **Exit** (bound spend of a share note, refused when what it is paid falls below
+  its `min_value`): unbonds the shares' value, keeping a nominating pool's stake
+  at the nominator minimum (a chilled pool has none) and the member's unbonding chunks within `MaxUnbonding`; an ORB note is
+  minted when it unlocks (`ExitSettled`, `NOMINATOR_UNBOND_DURATION`), scaled by
+  what the unbonding actually paid if it was slashed. Withdrawn ORB not paid yet
+  is held as escrow that compounding leaves alone, and an output that cannot be
+  paid stays queued. Exits never close and never wait for room: exits and fees
+  take as many pages of 256 as an unlock era needs (`Unlocks`), entries up to 32
+  pages per pool and era. A destroying pool refunds pending entries in ORB (the
+  rewards it did not compound stay with the minted shares), then fixes its
+  shares' value at what its member's points are worth plus its free balance
+  (claimed rewards), unlocking with its own unbonding; its fee floor follows
+  that value. If staking refuses that unbond because the slashed depositor is
+  below the nominator minimum, the pallet chills the pool first, as anyone may.
+- Shares move privately (`private_transfer`); a fee paid in shares is redeemed for
+  the block author as it is paid, and its ORB reaches the author when it unlocks
+  (`FeesRedeemed`). The action runs before its own fee is redeemed, so a spend
+  admitted never fails on its fee. The last holder leaves in full, paying the
+  minimum fee, even if fee dust (worth less than a spend fee) is left in the
+  supply; fee shares it leaves worth nothing are retired, never claiming part of
+  a later entry. An exit leaving only its own fee's shares takes the offset's
+  dust: the author redeems only what the fee is worth.
+- While `pallet-auto-payout` is paused, pools neither compound nor mint entries.
+- `on_idle` compounds each pool once per era after `pallet-auto-payout` paid the
+  previous one, and settles entries, exits and fees, within 10 % of the block's
+  leftover weight, pool by pool: a pool that took a step hands the next block to
+  the pools after it, and queue keys are charged as they are read; a dissolved
+  or wound-down pool with nothing left is forgotten (`PoolClosed`), and a
+  wound-down one cannot be opened again until then. Compounding is weighed as
+  the two pool bonds it runs.
+- `claim_fees` of a share asset is weighed with the unbond it runs.
+
+#### 5 · Nomination pools' unbonding window
+
+`PostUnbondingPoolsWindow` now follows the nominator unbonding time, so that
+`unbonding time + window` stays `BONDING_DURATION + POOL_UNBONDING_WINDOW` (32
+eras) whether nominators are slashable or not. That sum bounds every pool's
+stored unbonding records (`SubPoolsStorage`): with a fixed window of 4 it fell
+from 32 to 6 when nominator slashing was turned off, leaving pools with more
+than 6 unbonding eras undecodable — on a chain from before spec 22,
+`NominatorsUnslashable` does exactly that. Unlocked eras now stay apart up to 30
+eras instead of 4 while nominators are not slashable.
+
+#### 6 · Migrations
 
 - Added `NominatorsUnslashable` (above). Runs once per chain.
+- Added `pallet_shielded_pool::migrations::v4::MigrateToV4`: every asset gets a
+  backend (`Native`); storage v3 → v4.
 - Dropped `InitStaking`: it applied the spec 20 → 21 move to staking on testnet,
   which has run. `PrecompileCode` stays: it is versioned, for precompiles added
   later.
 
 #### Clients to ship with it
 
-- ts-protocol: renders `update_roles` as the runtime does (shared vector
-  `pools_update_roles`) and adds `NominationPoolsModule.updateRoles`.
+- ts-protocol: renders `update_roles`, `set_metadata`, `create_with_pool_id`,
+  `adjust_pool_deposit`, `apply_slash` and `PrivateStaking.set_private` as the
+  runtime does (shared vectors), reproduces the EVM signature of every staking
+  role's vector, and adds `NominationPoolsModule.updateRoles`.
+- Indexer and wallet-sdk: ingest `BoundSpent` (its change note) and `NoteMinted`
+  as leaf-inserting events, as they do `Unshielded`, or the Merkle leaves they
+  rebuild get holes. The wallet derives one-time keys for private staking
+  outputs and finds its notes in `NoteMinted`.
 - App: a nominator's and a pool member's unlock era from the nominator unbonding
   time, and no slash-sharing warnings for backers while nominator slashing is off.
 

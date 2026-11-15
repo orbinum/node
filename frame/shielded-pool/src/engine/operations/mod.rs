@@ -8,6 +8,7 @@
 //! and infrastructure services.
 
 pub mod assets;
+pub mod bound;
 pub mod fees;
 pub mod private_transfer;
 pub mod shield;
@@ -15,6 +16,7 @@ pub mod statement;
 pub mod unshield;
 
 use crate::pallet::{Call, Config};
+use bound::BoundSpendRequest;
 use frame_support::pallet_prelude::DispatchResult;
 use private_transfer::TransferRequest;
 use sp_std::vec::Vec;
@@ -25,11 +27,13 @@ use unshield::UnshieldRequest;
 pub enum SpendRequest<T: Config> {
 	Transfer(TransferRequest<T>),
 	Unshield(UnshieldRequest<T>),
+	Bound(BoundSpendRequest<T>),
 }
 
 impl<T: Config> SpendRequest<T> {
-	/// The proof and request of a `private_transfer` or `unshield` call, `None`
-	/// for any other call.
+	/// The proof and request of a `private_transfer`, `unshield` or
+	/// `bound_spend` call, `None` for any other call or for a bound spend whose
+	/// action has no executor.
 	pub fn from_call(call: &Call<T>) -> Option<(Vec<u8>, Self)> {
 		Some(match call.clone() {
 			Call::private_transfer {
@@ -76,6 +80,37 @@ impl<T: Config> SpendRequest<T> {
 					change_commitment,
 					change_memo: change_encrypted_memo,
 					circuit_version,
+				}),
+			),
+			Call::bound_spend {
+				proof,
+				merkle_root,
+				nullifier,
+				asset_id,
+				amount,
+				fee,
+				change_commitment,
+				change_encrypted_memo,
+				circuit_version,
+				action,
+			} => (
+				proof.into_inner(),
+				Self::Bound(BoundSpendRequest {
+					spend: UnshieldRequest {
+						merkle_root,
+						nullifier,
+						asset_id,
+						amount,
+						recipient:
+							<T::BoundActions as crate::types::BoundActions<T::AccountId>>::executor(
+								&action,
+							)?,
+						fee,
+						change_commitment,
+						change_memo: change_encrypted_memo,
+						circuit_version,
+					},
+					action,
 				}),
 			),
 			_ => return None,

@@ -375,6 +375,89 @@ fn pool_operator_calls_show_the_pool_and_its_roles() {
 	}
 }
 
+#[test]
+fn a_pool_root_opening_its_pool_to_private_members_signs_the_pool_and_the_switch() {
+	use crate::staking::private::Call;
+	for (enabled, word) in [(true, "on"), (false, "off")] {
+		let call = RuntimeCall::PrivateStaking(Call::set_private {
+			pool_id: 4,
+			enabled,
+		});
+		assert!(signs(call.clone()));
+		assert_eq!(
+			rendered(call, 0),
+			format!("PrivateStaking.set_private\npool: 4\nprivate members: {word}")
+		);
+	}
+	let governance = RuntimeCall::PrivateStaking(Call::set_min_entry { amount: 1 });
+	assert!(!signs(governance), "governance's, not text-signable");
+}
+
+/// A pool's name and link are shown as written: the runtime takes only ASCII letters
+/// and digits for a name and a plain `https` link, and refuses to sign anything else.
+#[test]
+fn a_pool_name_and_link_are_signed_as_written() {
+	use pallet_nomination_pools::Call;
+	let set = |metadata: &[u8]| {
+		pools(Call::set_metadata {
+			pool_id: 4,
+			metadata: metadata.to_vec(),
+		})
+	};
+	assert_eq!(
+		rendered(set(b"Orbinum Pool 7\nhttps://x.com/orbinum"), 0),
+		"NominationPools.set_metadata\npool: 4\nname: Orbinum Pool 7\nlink: https://x.com/orbinum"
+	);
+	assert_eq!(
+		rendered(set(b""), 0),
+		"NominationPools.set_metadata\npool: 4\nname: none"
+	);
+	for refused in [
+		"Orbinum \u{1f30a}".as_bytes(),
+		b"Orbinum\nroot: someone else",
+		b"Orbinum\nhttp://x.com",
+		&[0xff, 0x00],
+	] {
+		assert!(!signs(set(refused)), "{refused:?}");
+	}
+}
+
+/// The pool calls left to roles and members: a dissolved pool's id taken again, the
+/// deposit adjusted, a member's slash applied.
+#[test]
+fn pool_upkeep_calls_show_their_pool_or_member() {
+	use pallet_nomination_pools::Call;
+	let bob = AccountId::from(BOB);
+	assert_eq!(
+		rendered(pools(Call::adjust_pool_deposit { pool_id: 9 }), 0),
+		"NominationPools.adjust_pool_deposit\npool: 9"
+	);
+	let slash = rendered(
+		pools(Call::apply_slash {
+			member_account: bob.clone(),
+		}),
+		0,
+	);
+	assert!(
+		slash.starts_with("NominationPools.apply_slash\nmember: "),
+		"{slash}"
+	);
+	let create = rendered(
+		pools(Call::create_with_pool_id {
+			amount: ORB,
+			root: bob.clone(),
+			nominator: bob.clone(),
+			bouncer: bob,
+			pool_id: 3,
+		}),
+		0,
+	);
+	assert!(
+		create.starts_with("NominationPools.create_with_pool_id\npool: 3\namount: 1 ORB\nroot: "),
+		"{create}"
+	);
+}
+
 /// Every commission parameter is on its own line: the rate, its payee (who receives every
 /// later claim), the cap, the change rate and who may claim.
 #[test]
@@ -547,11 +630,6 @@ fn pool_calls_that_hide_value_or_authority_are_not_signable() {
 			.collect(),
 	};
 	assert!(!signs(pools(too_many)));
-	let metadata = Call::set_metadata {
-		pool_id: 1,
-		metadata: vec![1, 2],
-	};
-	assert!(!signs(pools(metadata)));
 }
 
 fn signs(call: RuntimeCall) -> bool {
@@ -722,7 +800,7 @@ fn a_call_without_its_extension_shows_no_expiry_or_tip() {
 
 /// The calls a text signature may authorise, reviewed one by one. A new arm in a
 /// renderer, or a new call it matches, fails here until listed.
-const SIGNABLE_CALLS: &[&str] = &[
+pub(crate) const SIGNABLE_CALLS: &[&str] = &[
 	"Balances.transfer_allow_death",
 	"Balances.transfer_keep_alive",
 	"Balances.transfer_all",
@@ -733,9 +811,14 @@ const SIGNABLE_CALLS: &[&str] = &[
 	"NominationPools.pool_withdraw_unbonded",
 	"NominationPools.withdraw_unbonded",
 	"NominationPools.create",
+	"NominationPools.create_with_pool_id",
+	"NominationPools.set_metadata",
+	"NominationPools.adjust_pool_deposit",
+	"NominationPools.apply_slash",
 	"NominationPools.nominate",
 	"NominationPools.set_state",
 	"NominationPools.update_roles",
+	"PrivateStaking.set_private",
 	"NominationPools.bond_extra_other",
 	"NominationPools.set_claim_permission",
 	"NominationPools.claim_payout_other",
@@ -811,6 +894,7 @@ fn zero_value(registry: &scale_info::PortableRegistry, id: u32, out: &mut Vec<u8
 const RENDERED_PALLETS: &[&str] = &[
 	"Balances",
 	"NominationPools",
+	"PrivateStaking",
 	"Session",
 	"ShieldedPool",
 	"Staking",

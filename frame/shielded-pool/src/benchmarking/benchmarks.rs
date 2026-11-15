@@ -63,6 +63,7 @@ mod benchmarks {
 				contract_address: None,
 				created_at: frame_system::Pallet::<T>::block_number(),
 				creator: T::PalletId::get().into_account_truncating(),
+				backend: crate::types::AssetBackend::Native,
 			};
 			Assets::<T>::insert(asset_id, metadata);
 			NextAssetId::<T>::put(asset_id + 1);

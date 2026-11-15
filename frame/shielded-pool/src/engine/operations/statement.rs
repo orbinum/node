@@ -22,6 +22,28 @@ pub fn memo_digest(memos: &[EncryptedMemo]) -> [u8; 32] {
 	sp_io::hashing::blake2_256(&memos.encode())
 }
 
+/// Domain of a bound spend's `memo_hash`.
+pub const BOUND_SPEND_DOMAIN: &[u8] = b"orbinum:bound-spend:v1";
+
+/// What a bound spend's proof commits to as `memo_hash` (reduced mod r):
+/// `blake2_256(BOUND_SPEND_DOMAIN ‖ genesis_hash ‖ blake2_256(SCALE(action)) ‖ memo_digest([change_memo]))`.
+///
+/// The genesis hash keeps a proof from one chain valid on no other; the action
+/// hash binds everything the action decides, its outputs included. A plain
+/// unshield commits to `memo_digest` alone, so neither proof passes as the other.
+pub fn bound_digest<T: Config>(action: &[u8], change_memo: &EncryptedMemo) -> [u8; 32] {
+	use sp_runtime::traits::Zero;
+	let genesis = frame_system::Pallet::<T>::block_hash(
+		frame_system::pallet_prelude::BlockNumberFor::<T>::zero(),
+	);
+	let mut preimage = sp_std::vec::Vec::with_capacity(BOUND_SPEND_DOMAIN.len() + 96);
+	preimage.extend_from_slice(BOUND_SPEND_DOMAIN);
+	preimage.extend_from_slice(genesis.as_ref());
+	preimage.extend_from_slice(&sp_io::hashing::blake2_256(action));
+	preimage.extend_from_slice(&memo_digest(core::slice::from_ref(change_memo)));
+	sp_io::hashing::blake2_256(&preimage)
+}
+
 /// The recipient's raw account bytes. Orbinum accounts are `AccountId32` for
 /// every signature scheme; any other width is rejected rather than bound as a
 /// truncated or zero-padded value.

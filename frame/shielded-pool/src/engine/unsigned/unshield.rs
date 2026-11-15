@@ -73,7 +73,10 @@ pub fn validate_unshield<T: Config>(
 	// changes; with the proof checked, only a valid one gets in. Mirrors
 	// `transfer.rs`.
 	let mut builder = ValidTransaction::with_tag_prefix(super::SPEND_TAG_PREFIX)
-		.priority(req.fee.saturated_into())
+		.priority(crate::operations::fees::priority::<T>(
+			req.asset_id,
+			req.fee.saturated_into(),
+		))
 		.longevity(TX_LONGEVITY)
 		.and_provides(req.nullifier)
 		.propagate(true);

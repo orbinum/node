@@ -9,7 +9,7 @@ use crate::{
 		Assets, Config, HistoricPoseidonRoots, HistoricRootsHead, HistoricRootsQueue,
 		HistoricRootsTail, MerkleTreeFrontier, NextAssetId, PoseidonRoot,
 	},
-	types::{AssetMetadata, Hash, NATIVE_ASSET_ID},
+	types::{AssetBackend, AssetMetadata, Hash, NATIVE_ASSET_ID},
 };
 use frame_support::traits::Get;
 use sp_runtime::traits::AccountIdConversion;
@@ -49,6 +49,7 @@ pub fn initialize_genesis<T: Config>(initial_root: Hash) {
 		contract_address: None,
 		created_at: 0u32.into(),
 		creator: T::PalletId::get().into_account_truncating(),
+		backend: AssetBackend::Native,
 	};
 	Assets::<T>::insert(NATIVE_ASSET_ID, native_asset);
 	NextAssetId::<T>::put(NATIVE_ASSET_ID + 1);

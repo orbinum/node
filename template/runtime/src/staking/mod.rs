@@ -18,11 +18,14 @@
 //!   unable to start ([`recovery`]); paying each era ([`payouts`]); and removing eras
 //!   past the history from `on_idle` ([`pruning`]).
 //!
+//! - [`private`]: nomination pools joined with shielded notes.
+//!
 //! Pallet configs are in `configs::staking`; where rewards and slashes go is in
 //! `economy`.
 
 mod eras;
 pub mod params;
+pub mod private;
 #[cfg(test)]
 mod tests;
 mod validators;

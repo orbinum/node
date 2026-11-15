@@ -3,7 +3,8 @@
 
 //! Nomination pool calls: the member calls (join, bond more, claim, leave) and the pool
 //! operator's calls that bond, nominate, set the pool's state, hand its roles over or
-//! manage its commission. Metadata changes are not text-signable: they are free bytes.
+//! manage its commission or name it. A name is shown as written: the runtime takes only
+//! ASCII letters and digits for it, and a plain `https` link (`staking::pools`).
 
 use super::{
 	labels::{
@@ -59,6 +60,20 @@ pub(super) fn lines(call: &Call<Runtime>) -> Option<Vec<Line>> {
 			(b"nominator", account(nominator)),
 			(b"bouncer", account(bouncer)),
 		],
+		// A dissolved pool's id taken again: the same as `create`, and the id.
+		Call::create_with_pool_id {
+			amount,
+			root,
+			nominator,
+			bouncer,
+			pool_id,
+		} => vec![
+			pool_line(pool_id),
+			(b"amount", orb(*amount)),
+			(b"root", account(root)),
+			(b"nominator", account(nominator)),
+			(b"bouncer", account(bouncer)),
+		],
 		Call::nominate {
 			pool_id,
 			validators,
@@ -82,6 +97,24 @@ pub(super) fn lines(call: &Call<Runtime>) -> Option<Vec<Line>> {
 			(b"nominator", role_op(new_nominator)),
 			(b"bouncer", role_op(new_bouncer)),
 		],
+		// The pool's name and link, shown as written; any other metadata is filtered.
+		Call::set_metadata { pool_id, metadata } => {
+			let profile = crate::staking::pools::pool_profile(metadata)?;
+			let name = if profile.name.is_empty() {
+				b"none".to_vec()
+			} else {
+				profile.name.as_bytes().to_vec()
+			};
+			let mut lines = vec![pool_line(pool_id), (b"name", name)];
+			if let Some(url) = profile.url {
+				lines.push((b"link", url.as_bytes().to_vec()));
+			}
+			lines
+		}
+		// Tops the pool's reward account up to the deposit, or returns the excess.
+		Call::adjust_pool_deposit { pool_id } => vec![pool_line(pool_id)],
+		// Applies a member's pending slash; it earns the caller nothing here.
+		Call::apply_slash { member_account } => vec![member_line(member_account)],
 		Call::set_claim_permission { permission } => {
 			vec![(b"permission", claim_permission(permission))]
 		}
@@ -129,4 +162,24 @@ pub(super) fn lines(call: &Call<Runtime>) -> Option<Vec<Line>> {
 		],
 		_ => return None,
 	})
+}
+
+/// A pool root's private staking call: opening or closing its pool to private
+/// members. Setting the entry minimum is governance's, not text-signable.
+pub(super) fn private_lines(call: &crate::staking::private::Call<Runtime>) -> Option<Vec<Line>> {
+	use crate::staking::private::Call;
+	match call {
+		Call::set_private { pool_id, enabled } => Some(vec![
+			pool_line(pool_id),
+			(
+				b"private members",
+				if *enabled {
+					b"on".to_vec()
+				} else {
+					b"off".to_vec()
+				},
+			),
+		]),
+		_ => None,
+	}
 }

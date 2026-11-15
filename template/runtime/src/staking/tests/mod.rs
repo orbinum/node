@@ -27,6 +27,7 @@ mod genesis;
 mod local_relay;
 mod offences;
 mod pools;
+mod private;
 mod pruning;
 mod unbonding;
 mod voters;

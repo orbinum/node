@@ -151,6 +151,159 @@ parameter_types! {
 	pub static MinSpendFee: u128 = 0;
 }
 
+// ── Bound actions ────────────────────────────────────────────────────────────
+
+/// The pallet id the test's pallet-backed assets are issued under.
+pub const TEST_ACTIONS_PALLET: PalletId = PalletId(*b"tst/actn");
+
+/// The account every test action pays: plain unshield refuses it.
+pub fn executor() -> AccountId {
+	acc(200)
+}
+
+/// What a test bound spend asks for.
+#[derive(
+	Clone,
+	PartialEq,
+	Eq,
+	parity_scale_codec::Encode,
+	parity_scale_codec::Decode,
+	parity_scale_codec::DecodeWithMemTracking,
+	parity_scale_codec::MaxEncodedLen,
+	scale_info::TypeInfo,
+	Debug
+)]
+pub enum TestAction {
+	/// Keep the value in the executor's account.
+	Keep,
+	/// Mint a note of the spent value of `asset_id` to the given key (a native
+	/// note is paid in by the executor).
+	Mint {
+		asset_id: u32,
+		owner_pk: [u8; 32],
+		blinding: [u8; 32],
+	},
+	/// An action the runtime refuses.
+	Refuse,
+	/// An action with no executor.
+	Orphan,
+}
+
+std::thread_local! {
+	static EXECUTED: core::cell::RefCell<Vec<(TestAction, u32, u128)>> = const { core::cell::RefCell::new(Vec::new()) };
+	static REDEEMED: core::cell::RefCell<Vec<(AccountId, u32, u128)>> = const { core::cell::RefCell::new(Vec::new()) };
+	static REFUSE_REDEEM: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+	static RUN_BEFORE_REDEEM: core::cell::RefCell<Vec<usize>> = const { core::cell::RefCell::new(Vec::new()) };
+	static PALLET_FLOOR: core::cell::Cell<Option<u128>> = const { core::cell::Cell::new(None) };
+}
+
+/// Actions executed so far in this test: `(action, asset_id, amount)`.
+pub fn executed_actions() -> Vec<(TestAction, u32, u128)> {
+	EXECUTED.with(|v| v.borrow().clone())
+}
+
+/// For each fee redemption, how many actions had run before it.
+pub fn actions_run_before_redeems() -> Vec<usize> {
+	RUN_BEFORE_REDEEM.with(|v| v.borrow().clone())
+}
+
+/// The fee floor the test pallet sets for its asset; `MinSpendFee` by default.
+pub fn mock_set_pallet_floor(floor: u128) {
+	PALLET_FLOOR.with(|f| f.set(Some(floor)));
+}
+
+/// Makes the test pallet refuse to redeem fees (as a full queue or dust would).
+pub fn mock_refuse_redeem(refuse: bool) {
+	REFUSE_REDEEM.with(|r| r.set(refuse));
+}
+
+/// Fee redemptions so far in this test: `(validator, asset_id, amount)`.
+pub fn redeemed_fees() -> Vec<(AccountId, u32, u128)> {
+	REDEEMED.with(|v| v.borrow().clone())
+}
+
+pub struct TestActions;
+
+impl crate::types::BoundActions<AccountId> for TestActions {
+	type Action = TestAction;
+
+	fn executor(action: &TestAction) -> Option<AccountId> {
+		(*action != TestAction::Orphan).then(executor)
+	}
+
+	fn is_executor(who: &AccountId) -> bool {
+		*who == executor()
+	}
+
+	fn min_fee(asset_id: u32) -> Option<u128> {
+		crate::Assets::<Test>::get(asset_id)
+			.filter(|asset| {
+				asset.backend == crate::types::AssetBackend::Pallet(TEST_ACTIONS_PALLET.0)
+			})
+			.map(|_| {
+				PALLET_FLOOR
+					.with(|f| f.get())
+					.unwrap_or_else(MinSpendFee::get)
+			})
+	}
+
+	fn validate(
+		action: &TestAction,
+		_: u32,
+		_: u128,
+		_: u128,
+	) -> frame_support::dispatch::DispatchResult {
+		match action {
+			TestAction::Refuse => Err(sp_runtime::DispatchError::Other("refused")),
+			_ => Ok(()),
+		}
+	}
+
+	fn execute(
+		action: TestAction,
+		asset_id: u32,
+		amount: u128,
+		_: u128,
+	) -> frame_support::dispatch::DispatchResult {
+		EXECUTED.with(|v| v.borrow_mut().push((action.clone(), asset_id, amount)));
+		if let TestAction::Mint {
+			asset_id: out,
+			owner_pk,
+			blinding,
+		} = action
+		{
+			let payer = executor();
+			let funding = if out == crate::types::NATIVE_ASSET_ID {
+				crate::types::Funding::From(&payer)
+			} else {
+				crate::types::Funding::Issued(TEST_ACTIONS_PALLET)
+			};
+			crate::Pallet::<Test>::mint_note(out, amount, owner_pk, blinding, funding)?;
+		}
+		Ok(())
+	}
+
+	fn weight(_: &TestAction) -> frame_support::weights::Weight {
+		frame_support::weights::Weight::zero()
+	}
+
+	fn redeem_fees(
+		validator: &AccountId,
+		asset_id: u32,
+		amount: u128,
+	) -> frame_support::dispatch::DispatchResult {
+		if REFUSE_REDEEM.with(|r| r.get()) {
+			return Err(sp_runtime::DispatchError::Other("cannot redeem now"));
+		}
+		REDEEMED.with(|v| v.borrow_mut().push((validator.clone(), asset_id, amount)));
+		RUN_BEFORE_REDEEM.with(|v| v.borrow_mut().push(executed_actions().len()));
+		Ok(())
+	}
+	fn redeem_fees_weight() -> frame_support::weights::Weight {
+		frame_support::weights::Weight::from_parts(1_000_000, 0)
+	}
+}
+
 impl pallet_shielded_pool::Config for Test {
 	type Currency = Balances;
 	type ZkVerifier = MockZkVerifier;
@@ -164,6 +317,7 @@ impl pallet_shielded_pool::Config for Test {
 	type WeightInfo = ();
 	type BlockAuthor = BlockAuthorAccount;
 	type MinSpendFee = MinSpendFee;
+	type BoundActions = TestActions;
 }
 
 // ── Fee test helpers ─────────────────────────────────────────────────────────
@@ -192,6 +346,8 @@ pub fn mock_clear_block_author() {
 /// Build genesis storage for testing
 pub fn new_test_ext() -> sp_io::TestExternalities {
 	VERIFIED.with(|v| v.borrow_mut().clear());
+	EXECUTED.with(|v| v.borrow_mut().clear());
+	REDEEMED.with(|v| v.borrow_mut().clear());
 	PROOF_VALID.with(|v| v.set(true));
 	BlockAuthorAccount::set(Some(acc(1)));
 	MinSpendFee::set(0);

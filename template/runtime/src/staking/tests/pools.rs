@@ -823,3 +823,40 @@ fn donations_do_not_move_the_points_price() {
 		);
 	});
 }
+
+// Name and link
+
+#[test]
+fn a_pool_takes_a_plain_name_and_one_https_link_and_nothing_else() {
+	use sp_runtime::traits::Dispatchable;
+	with_validators(|| {
+		create_pool(&[], vec![alice()]);
+		let set = |metadata: &[u8]| {
+			crate::RuntimeCall::NominationPools(pallet_nomination_pools::Call::set_metadata {
+				pool_id: POOL,
+				metadata: metadata.to_vec(),
+			})
+			.dispatch(signed(&depositor()))
+		};
+		let filtered: sp_runtime::DispatchError =
+			frame_system::Error::<Runtime>::CallFiltered.into();
+		for refused in [
+			"Orbinum \u{1f30a}".as_bytes(),
+			"Señor".as_bytes(),
+			b"Pool\nhttp://x.com",
+			b"Pool\nhttps://user:pw@x.com",
+			b"Pool\nroot: me\nhttps://x.com",
+		] {
+			let error = set(refused).expect_err("refused");
+			assert_eq!(error.error, filtered, "{refused:?}");
+		}
+		assert_ok!(set(b"Orbinum Pool 7\nhttps://x.com/orbinum"));
+		assert_eq!(
+			pallet_nomination_pools::Metadata::<Runtime>::get(POOL).into_inner(),
+			b"Orbinum Pool 7\nhttps://x.com/orbinum".to_vec()
+		);
+		// Empty clears it.
+		assert_ok!(set(b""));
+		assert!(pallet_nomination_pools::Metadata::<Runtime>::get(POOL).is_empty());
+	});
+}
