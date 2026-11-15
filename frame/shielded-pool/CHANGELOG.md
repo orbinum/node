@@ -56,6 +56,8 @@ Ships with runtime spec 22.
 - `private_transfer` accepts pallet-backed assets; the fee floor of a spend is
   the native `MinSpendFee` or what the issuing pallet sets.
 - `try_state` checks that a pallet-backed asset's pending fees fit its ledger.
+- Weights re-benchmarked on the reference machine against the v4 layout (the
+  larger `Assets` entry and the executor check on `unshield`).
 
 
 ## [0.26.0] - 2026-11-08

@@ -17,8 +17,8 @@ parity-scale-codec = { version = "3.6", default-features = false, features = ["d
 scale-info = { version = "2.11", default-features = false, features = ["derive"] }
 
 # Cache for zero hashes (no-std compatible with alloc)
-once_cell = { version = "1.19", default-features = false, features = ["alloc"] }
 log = { workspace = true }
+once_cell = { version = "1.19", default-features = false, features = ["alloc"] }
 
 # Substrate primitives
 sp-core = { version = "43.0.0", default-features = false }
