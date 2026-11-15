@@ -4,6 +4,62 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-12
+
+**Breaking** — `Config` gains `BoundActions`; storage v3 → v4 (`migrations::v4`,
+a `VersionedMigration` from v3 only, logging any asset that does not decode).
+Ships with runtime spec 22.
+
+### Added
+
+- **Bound spends** (`bound_spend`, call index 20, unsigned): an unshield whose
+  proof commits to a runtime action as well as its change memo, through
+  `memo_hash = blake2_256("orbinum:bound-spend:v1" ‖ genesis ‖ blake2_256(action)
+  ‖ memo_digest([change_memo]))`. The proof's recipient is the action's executor;
+  the spend pays it (native asset) or burns the spent units (pallet-backed asset),
+  then runs the action through `T::BoundActions`. The proof is valid for that
+  action alone, so a copier cannot swap the action or the output it mints. Uses
+  the existing unshield circuit and keys: no new circuit, no new ceremony.
+- **`BoundActions`** trait: an action's executor, its checks (run at admission
+  and before settling), its execution (before the spend's fee is credited, on
+  the state its checks saw; both are told the fee) and weight, the fee floor of a
+  pallet-backed asset and the redemption of fees earned in one, with its weight
+  (`redeem_fees_weight`, which `claim_fees` charges on top of its own). `()`
+  runs none.
+- **`mint_note`**: inserts a note the chain computes itself,
+  `Poseidon4(value, asset_id, owner_pk, blinding)`, for an action's output, and
+  emits `NoteMinted`. A native note is paid in by an account
+  (`Funding::From`); a pallet-backed one is issued only by its own pallet
+  (`Funding::Issued`, checked against the asset's backend). No memo: the action
+  carried both secrets. When a note of that value and key exists, the next value
+  down is tried (up to `MINT_ATTEMPTS`), so a reused key or a copied commitment
+  does not cost the output; `NoteMinted` carries the value minted.
+- **`AssetBackend { Native, Pallet }`** on every asset, and
+  `register_pallet_asset`: an asset its pallet issues and redeems. It never
+  leaves the pool as currency (`shield`, plain `unshield` and direct claims
+  refuse it), moves by bound spends and private transfers, and governance can
+  neither verify nor unverify it (`AssetManagedByPallet`), so holders can always
+  redeem. A fee paid in it is redeemed for the block author as it is credited
+  (`BoundActions::redeem_fees`), so it never lingers in the asset's supply; only
+  when the pallet cannot redeem it then does it wait in `PendingFees` for
+  `claim_fees`. Its creator account is the pallet's `asset` sub-account.
+- **Spend priority by native value**: an unsigned spend's pool priority is its
+  fee's value in native units (`fees::priority`), so a pallet-backed asset whose
+  units are cheap buys no extra priority.
+- Events `BoundSpent` and `NoteMinted`; errors `AssetManagedByPallet` and
+  `InvalidBoundAction`; pool-rejection code 14 (`INVALID_ACTION`).
+
+### Changed
+
+- Plain `unshield` refuses an executor of bound actions as recipient, so a bound
+  proof cannot be replayed as one.
+- `private_transfer` accepts pallet-backed assets; the fee floor of a spend is
+  the native `MinSpendFee` or what the issuing pallet sets.
+- `try_state` checks that a pallet-backed asset's pending fees fit its ledger.
+- Weights re-benchmarked on the reference machine against the v4 layout (the
+  larger `Assets` entry and the executor check on `unshield`).
+
+
 ## [0.26.0] - 2026-11-08
 
 **Breaking** — `Config` gains `AdminOrigin`. Ships with runtime spec 21 and

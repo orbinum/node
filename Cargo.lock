@@ -11353,7 +11353,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-evm-precompile-shielded-pool"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "fp-evm",
  "frame-support",
@@ -12395,13 +12395,14 @@ dependencies = [
 
 [[package]]
 name = "pallet-shielded-pool"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.5.0",
  "frame-benchmarking",
  "frame-support",
  "frame-system",
+ "log",
  "once_cell",
  "orbinum-zk-core",
  "orbinum-zk-verifier",

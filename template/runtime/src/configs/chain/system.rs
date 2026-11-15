@@ -7,6 +7,7 @@
 //! which is what bounds every other pallet's per-block work.
 
 use crate::{
+	configs::staking::PrivateMembersStay,
 	configs::{
 		consensus::ConsensusOnTimestampSet,
 		evm::{DefaultBaseFeePerGas, WeightPerGas},
@@ -18,6 +19,7 @@ use crate::{
 	},
 	staking::{
 		live::KickKeepsNominations, local_relay::LocalRelayFilter, payouts::NoControllerPayee,
+		pools::PoolMetadataRules,
 	},
 	AccountId, Balance, Balances, Block, BlockNumber, Hash, Hashing, Nonce, PalletInfo, Runtime,
 	RuntimeCall, RuntimeEvent, RuntimeFreezeReason, RuntimeHoldReason, RuntimeOrigin, RuntimeTask,
@@ -60,10 +62,16 @@ parameter_types! {
 #[derive_impl(frame_system::config_preludes::SolochainDefaultConfig as frame_system::DefaultConfig)]
 impl frame_system::Config for Runtime {
 	/// Everything but the staking clients' calls, a `staking.kick` that would
-	/// empty a nomination and a `staking.bond` paying the deprecated
-	/// `Controller` destination.
-	type BaseCallFilter =
-		InsideBoth<LocalRelayFilter, InsideBoth<KickKeepsNominations, NoControllerPayee>>;
+	/// empty a nomination, a `staking.bond` paying the deprecated `Controller`
+	/// destination, anyone's unbond or withdrawal of a private pool member, and a pool
+	/// name that is not ASCII letters and digits (or a link that is not plain `https`).
+	type BaseCallFilter = InsideBoth<
+		LocalRelayFilter,
+		InsideBoth<
+			KickKeepsNominations,
+			InsideBoth<NoControllerPayee, InsideBoth<PrivateMembersStay, PoolMetadataRules>>,
+		>,
+	>;
 	type BlockWeights = BlockWeights;
 	type BlockLength = BlockLength;
 	type Nonce = Nonce;

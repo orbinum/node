@@ -4,6 +4,14 @@ All notable changes to `pallet-evm-precompile-shielded-pool` will be documented 
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-11-12
+
+### Changed
+
+- Builds against `pallet-shielded-pool` 0.27.0: the test runtime sets
+  `BoundActions = ()`.
+
+
 ## [0.10.1] - 2026-11-08
 
 ### Security

@@ -45,6 +45,9 @@ fn staking_parameters_need_the_staking_admin() {
 	assert_role::<<Runtime as pallet_staking_async_ah_client::Config>::AdminOrigin, StakingAdmin>(
 		"ah-client",
 	);
+	assert_role::<<Runtime as crate::staking::private::Config>::MinEntryOrigin, StakingAdmin>(
+		"private staking",
+	);
 }
 
 #[test]

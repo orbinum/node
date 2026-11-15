@@ -21,11 +21,14 @@
 //! - [`codes`] — named pool-rejection codes shared by both validators.
 //! - [`transfer`] — admission for `private_transfer`.
 //! - [`unshield`] — admission for `unshield`.
+//! - [`bound`] — admission for `bound_spend`.
 
+pub mod bound;
 pub mod codes;
 pub mod transfer;
 pub mod unshield;
 
+pub use bound::validate_bound_spend;
 pub use transfer::validate_private_transfer;
 pub use unshield::validate_unshield;
 
@@ -70,6 +73,7 @@ impl<T: crate::Config> crate::Pallet<T> {
 		match request {
 			SpendRequest::Transfer(req) => admit::validate_private_transfer(proof, &req),
 			SpendRequest::Unshield(req) => admit::validate_unshield(proof, &req),
+			SpendRequest::Bound(req) => admit::validate_bound_spend(proof, &req),
 		}
 	}
 }

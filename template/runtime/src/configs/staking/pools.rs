@@ -7,14 +7,19 @@ use crate::{
 	configs::governance::StakingAdmin,
 	economy,
 	staking::{
-		params::{POOL_SLASH_REWARD_FRACTION, POOL_UNBONDING_WINDOW},
+		params::{BONDING_DURATION, POOL_SLASH_REWARD_FRACTION, POOL_UNBONDING_WINDOW},
 		pools::{BalanceToU256, U256ToBalance},
 	},
 	Balances, DelegatedStaking, Runtime, RuntimeEvent, RuntimeFreezeReason, RuntimeHoldReason,
 	Staking,
 };
-use frame_support::{parameter_types, traits::ConstU32, PalletId};
+use frame_support::{
+	parameter_types,
+	traits::{ConstU32, Get},
+	PalletId,
+};
 use sp_runtime::{FixedU128, Perbill};
+use sp_staking::StakingInterface;
 
 // Nomination pools
 
@@ -24,6 +29,21 @@ parameter_types! {
 	pub const MaxPointsToBalance: u8 = 10;
 	pub const DelegatedStakingPalletId: PalletId = PalletId(*b"orb/dlst");
 	pub const PoolSlashRewardFraction: Perbill = POOL_SLASH_REWARD_FRACTION;
+}
+
+/// Eras a pool keeps each era's unbonding funds apart after they unlock: as many
+/// as keep `bonding duration + window` fixed at `BONDING_DURATION +
+/// POOL_UNBONDING_WINDOW`, whichever unbonding time nominators have. That sum
+/// bounds every pool's stored unbonding records; were it to shrink when
+/// governance turns nominator slashing off, records kept under the larger
+/// bound would no longer decode.
+pub struct UnbondingWindow;
+
+impl Get<u32> for UnbondingWindow {
+	fn get() -> u32 {
+		(BONDING_DURATION + POOL_UNBONDING_WINDOW)
+			.saturating_sub(<Staking as StakingInterface>::nominator_bonding_duration())
+	}
 }
 
 impl pallet_nomination_pools::Config for Runtime {
@@ -37,7 +57,7 @@ impl pallet_nomination_pools::Config for Runtime {
 	/// Members' funds stay in their accounts, held as delegations to the pool.
 	type StakeAdapter =
 		pallet_nomination_pools::adapter::DelegateStake<Self, Staking, DelegatedStaking>;
-	type PostUnbondingPoolsWindow = ConstU32<POOL_UNBONDING_WINDOW>;
+	type PostUnbondingPoolsWindow = UnbondingWindow;
 	type MaxMetadataLen = ConstU32<256>;
 	/// As many unbonding chunks as a staker has.
 	type MaxUnbonding = <Self as pallet_staking_async::Config>::MaxUnlockingChunks;

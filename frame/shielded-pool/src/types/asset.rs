@@ -12,6 +12,31 @@ use frame_support::{BoundedVec, pallet_prelude::*};
 use parity_scale_codec::{Decode, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
 
+/// What backs an asset's notes.
+///
+/// - `Native`: `T::Currency` moves in and out of the pool account with every
+///   shield, unshield and fee claim. Only [`NATIVE_ASSET_ID`] is backed this way.
+/// - `Pallet`: the pallet with these `PalletId` bytes issues and redeems the asset
+///   itself, through `bound_spend` and `mint_note`. Its notes never leave the
+///   pool as currency: `shield`, plain `unshield` and direct fee claims refuse
+///   them, and governance cannot freeze them (`verify_asset` / `unverify_asset`
+///   refuse them), so a holder can always redeem.
+#[derive(
+	Clone,
+	Copy,
+	PartialEq,
+	Eq,
+	Encode,
+	Decode,
+	MaxEncodedLen,
+	TypeInfo,
+	Debug
+)]
+pub enum AssetBackend {
+	Native,
+	Pallet([u8; 8]),
+}
+
 /// The native asset, registered and verified at genesis. Every transfer into or
 /// out of the pool moves `T::Currency`, so this is the only asset whose notes
 /// are backed by what they claim.
@@ -30,6 +55,7 @@ pub struct AssetMetadata<AccountId, BlockNumber> {
 	pub contract_address: Option<[u8; 20]>,
 	pub created_at: BlockNumber,
 	pub creator: AccountId,
+	pub backend: AssetBackend,
 }
 
 impl<AccountId, BlockNumber> AssetMetadata<AccountId, BlockNumber> {
@@ -50,6 +76,7 @@ impl<AccountId, BlockNumber> AssetMetadata<AccountId, BlockNumber> {
 			contract_address: None,
 			created_at,
 			creator,
+			backend: AssetBackend::Native,
 		}
 	}
 	pub fn verify(&mut self) {

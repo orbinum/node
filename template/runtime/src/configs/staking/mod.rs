@@ -33,10 +33,11 @@ mod clients;
 mod election;
 mod payouts;
 mod pools;
+mod private;
 mod session;
 #[allow(clippy::module_inception)]
 mod staking;
 
-pub use self::staking::*;
 #[cfg(test)]
 pub use self::{clients::*, election::*, payouts::*, pools::*};
+pub use self::{private::PrivateMembersStay, staking::*};

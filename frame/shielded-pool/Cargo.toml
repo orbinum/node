@@ -1,6 +1,6 @@
 [package]
 name = "pallet-shielded-pool"
-version = "0.26.0"
+version = "0.27.0"
 description = "Shielded pool pallet for private transactions using ZK proofs"
 authors = { workspace = true }
 license = "GPL-3.0-or-later"
@@ -17,6 +17,7 @@ parity-scale-codec = { version = "3.6", default-features = false, features = ["d
 scale-info = { version = "2.11", default-features = false, features = ["derive"] }
 
 # Cache for zero hashes (no-std compatible with alloc)
+log = { workspace = true }
 once_cell = { version = "1.19", default-features = false, features = ["alloc"] }
 
 # Substrate primitives
@@ -51,6 +52,7 @@ sp-io = { version = "48.0.0" }
 [features]
 default = ["std", "poseidon-native"]
 std = [
+	"log/std",
 	"parity-scale-codec/std",
 	"scale-info/std",
 	"sp-core/std",

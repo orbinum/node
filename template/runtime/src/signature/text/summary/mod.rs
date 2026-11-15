@@ -22,7 +22,7 @@ mod session;
 mod shielded_pool;
 mod staking;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use super::format::{decimal, line, orb};
 use crate::{Balance, Nonce, RuntimeCall, SignedExtra, SignedExtraFields};
@@ -94,6 +94,7 @@ fn details(call: &RuntimeCall) -> Option<Vec<Line>> {
 		RuntimeCall::ShieldedPool(call) => shielded_pool::lines(call),
 		RuntimeCall::Staking(call) => staking::lines(call),
 		RuntimeCall::NominationPools(call) => pools::lines(call),
+		RuntimeCall::PrivateStaking(call) => pools::private_lines(call),
 		RuntimeCall::Session(_) | RuntimeCall::ValidatorSet(_) | RuntimeCall::System(_) => {
 			session::lines(call)
 		}

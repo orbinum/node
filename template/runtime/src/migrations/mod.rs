@@ -13,7 +13,11 @@ pub use precompile_code::PrecompileCode;
 
 /// Runs on upgrade, oldest first. Drop an entry once every live chain has passed its
 /// version: a migration that can no longer run could be re-armed by mistake.
-pub type Migrations = (PrecompileCode, NominatorsUnslashable);
+pub type Migrations = (
+	PrecompileCode,
+	NominatorsUnslashable,
+	pallet_shielded_pool::migrations::v4::MigrateToV4<crate::Runtime>,
+);
 
 use crate::Runtime;
 use frame_support::weights::Weight;

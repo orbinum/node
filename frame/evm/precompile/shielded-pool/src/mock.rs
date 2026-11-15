@@ -190,6 +190,7 @@ impl pallet_shielded_pool::Config for Test {
 	type WeightInfo = ();
 	type BlockAuthor = BlockAuthor;
 	type MinSpendFee = frame_support::traits::ConstU128<0>;
+	type BoundActions = ();
 }
 
 /// The EVM caller of every `MockHandle`.

@@ -14,13 +14,15 @@
 //! - [`proof`] — the serialized proof a call carries.
 
 pub mod asset;
+pub mod bound;
 pub mod ids;
 pub mod memo;
 pub mod merkle;
 pub mod note;
 pub mod proof;
 
-pub use asset::{AssetMetadata, NATIVE_ASSET_ID};
+pub use asset::{AssetBackend, AssetMetadata, NATIVE_ASSET_ID};
+pub use bound::{BoundActions, Funding, MINT_ATTEMPTS, MintedNote, NoAction};
 pub use ids::{AssetId, Commitment, Nullifier};
 pub use memo::{EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE};
 pub use merkle::{

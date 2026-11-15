@@ -219,4 +219,8 @@ mod runtime {
 	// Prunes eras past the history from `on_idle` (`staking::pruning`).
 	#[runtime::pallet_index(30)]
 	pub type EraPruning = staking::pruning;
+
+	// Nomination pools joined with shielded notes (`staking::private`).
+	#[runtime::pallet_index(31)]
+	pub type PrivateStaking = staking::private;
 }

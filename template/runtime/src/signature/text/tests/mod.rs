@@ -10,6 +10,7 @@ mod check;
 mod ecdsa;
 mod pool_commission;
 mod refusals;
+mod roles;
 mod vectors;
 mod wire;
 

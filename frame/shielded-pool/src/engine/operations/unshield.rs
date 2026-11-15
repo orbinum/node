@@ -8,7 +8,7 @@ use crate::{
 	operations::{assets::AssetOperation, ensure_valid_proof, fees, statement},
 	pallet::{BalanceOf, Config, Error, Event, Pallet},
 	storage::{CommitmentRepository, MerkleRepository, NullifierRepository, PoolBalanceRepository},
-	types::{Commitment, EncryptedMemo, Nullifier},
+	types::{BoundActions, Commitment, EncryptedMemo, Nullifier},
 };
 use frame_support::{
 	CloneNoBound, DebugNoBound, EqNoBound, PartialEqNoBound,
@@ -93,6 +93,19 @@ impl UnshieldOperation {
 			req.fee >= T::MinSpendFee::get().saturated_into(),
 			Error::<T>::FeeTooLow
 		);
+		Self::validate_spend(req)?;
+		AssetOperation::ensure_movable::<T>(req.asset_id)?;
+		// A bound action's executor is paid only by the spend bound to that action.
+		ensure!(
+			!<T::BoundActions as BoundActions<T::AccountId>>::is_executor(&req.recipient),
+			Error::<T>::InvalidRecipient
+		);
+		Ok(())
+	}
+
+	/// The checks a plain and a bound spend share: everything but the fee floor,
+	/// the asset rule and the recipient rule, which differ between them.
+	pub(crate) fn validate_spend<T: Config>(req: &UnshieldRequest<T>) -> Result<(), Error<T>> {
 		ensure!(
 			MerkleRepository::is_known_root::<T>(&req.merkle_root),
 			Error::<T>::UnknownMerkleRoot
@@ -126,7 +139,6 @@ impl UnshieldOperation {
 		};
 		ensure!(memo_ok, Error::<T>::InvalidMemoSize);
 
-		AssetOperation::ensure_movable::<T>(req.asset_id)?;
 		// The zero account has no known key: paying it burns the withdrawal.
 		ensure!(
 			req.recipient != Pallet::<T>::pool_account_id()
@@ -147,12 +159,25 @@ impl UnshieldOperation {
 	/// Pay the recipient, insert the change note, spend the nullifier. Returns
 	/// the change note's leaf index.
 	fn settle<T: Config>(req: &UnshieldRequest<T>) -> Result<Option<u32>, DispatchError> {
-		T::Currency::transfer(
-			&Pallet::<T>::pool_account_id(),
-			&req.recipient,
-			req.amount,
-			ExistenceRequirement::AllowDeath,
-		)?;
+		Self::settle_spend(req, true)
+	}
+
+	/// Settle a spend: pay `amount` to the recipient when `pay_out` (a native
+	/// spend) or burn it (a pallet-backed asset, whose value its pallet redeems),
+	/// insert the change note, spend the nullifier. Returns the change note's
+	/// leaf index.
+	pub(crate) fn settle_spend<T: Config>(
+		req: &UnshieldRequest<T>,
+		pay_out: bool,
+	) -> Result<Option<u32>, DispatchError> {
+		if pay_out {
+			T::Currency::transfer(
+				&Pallet::<T>::pool_account_id(),
+				&req.recipient,
+				req.amount,
+				ExistenceRequirement::AllowDeath,
+			)?;
+		}
 		// Only `amount` leaves the pool: the fee stays as backing for the
 		// block author's pending fee until it is claimed. Sound only because
 		// `validate` required a balance of `amount + fee`.

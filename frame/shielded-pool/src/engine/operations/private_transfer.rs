@@ -111,7 +111,7 @@ impl PrivateTransferOperation {
 			Error::<T>::TooManyInputsOrOutputs
 		);
 		ensure!(
-			req.fee >= T::MinSpendFee::get().saturated_into(),
+			req.fee.saturated_into::<u128>() >= fees::min_fee::<T>(req.asset_id)?,
 			Error::<T>::FeeTooLow
 		);
 		req.ensure_roots()?;
@@ -140,7 +140,8 @@ impl PrivateTransferOperation {
 			Error::<T>::InvalidMemoSize
 		);
 
-		AssetOperation::ensure_movable::<T>(req.asset_id)?;
+		// Value stays inside the pool, so a pallet-backed asset moves too.
+		AssetOperation::ensure_spendable::<T>(req.asset_id)?;
 
 		for commitment in req.commitments.iter() {
 			ensure!(

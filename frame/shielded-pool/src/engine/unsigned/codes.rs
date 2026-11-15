@@ -47,6 +47,10 @@ pub const INVALID_PROOF: u8 = 12;
 /// spend would fill blocks for free without ever spending its nullifier.
 pub const INVALID_SPEND: u8 = 13;
 
+/// A bound spend's action is unknown to the runtime, or the runtime refuses it
+/// (its pool closed, its queue full, …).
+pub const INVALID_ACTION: u8 = 14;
+
 /// Build an `InvalidTransaction` from one of the codes above.
 pub fn reject(code: u8) -> InvalidTransaction {
 	InvalidTransaction::Custom(code)
