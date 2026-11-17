@@ -12,10 +12,10 @@ use sp_runtime::{SaturatedConversion, traits::Zero};
 
 use crate::{
 	merkle::MerkleTreeService,
-	operations::{assets::AssetOperation, ensure_valid_proof},
+	operations::{assets::AssetOperation, ensure_valid_proof, memo_format},
 	pallet::{BalanceOf, Config, Error, Event, Pallet, ShieldBatchItem},
 	storage::{AssetRepository, CommitmentRepository, PoolBalanceRepository},
-	types::{Commitment, EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE, Proof},
+	types::{Commitment, EncryptedMemo, Proof},
 };
 
 /// A shield as submitted: the deposit and the note it creates.
@@ -104,10 +104,7 @@ impl ShieldOperation {
 	fn validate<T: Config>(req: &ShieldRequest<T>) -> DispatchResult {
 		AssetOperation::ensure_movable::<T>(req.asset_id)?;
 		ensure!(!req.amount.is_zero(), Error::<T>::InvalidAmount);
-		ensure!(
-			req.encrypted_memo.0.len() == MAX_ENCRYPTED_MEMO_SIZE as usize,
-			Error::<T>::InvalidMemoSize
-		);
+		memo_format::ensure_storable::<T>(core::slice::from_ref(&req.encrypted_memo))?;
 		ensure!(
 			req.commitment.is_canonical(),
 			Error::<T>::InvalidPublicSignals

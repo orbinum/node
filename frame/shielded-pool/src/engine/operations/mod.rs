@@ -10,6 +10,7 @@
 pub mod assets;
 pub mod bound;
 pub mod fees;
+pub mod memo_format;
 pub mod private_transfer;
 pub mod shield;
 pub mod statement;

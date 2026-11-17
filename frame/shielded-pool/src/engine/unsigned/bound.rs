@@ -86,6 +86,7 @@ fn admission_error<T: Config>(
 		}
 		Error::InsufficientPoolBalance => reject(codes::INSUFFICIENT_POOL_BALANCE).into(),
 		Error::InvalidMemoSize => reject(codes::INVALID_MEMO).into(),
+		Error::MemoFormatOutdated => reject(codes::MEMO_FORMAT_OUTDATED).into(),
 		Error::InvalidBoundAction => reject(codes::INVALID_ACTION).into(),
 		_ => reject(codes::INVALID_SPEND).into(),
 	}

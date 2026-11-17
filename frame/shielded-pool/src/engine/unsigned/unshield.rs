@@ -101,6 +101,7 @@ fn admission_error<T: Config>(
 		Error::InvalidAmount if !req.amount.is_zero() => reject(codes::AMOUNT_OVERFLOW).into(),
 		Error::InsufficientPoolBalance => reject(codes::INSUFFICIENT_POOL_BALANCE).into(),
 		Error::InvalidMemoSize => reject(codes::INVALID_MEMO).into(),
+		Error::MemoFormatOutdated => reject(codes::MEMO_FORMAT_OUTDATED).into(),
 		_ => reject(codes::INVALID_SPEND).into(),
 	}
 }

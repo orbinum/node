@@ -4,6 +4,42 @@ All notable changes to `pallet-shielded-pool` will be documented in this file.
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-17
+
+Ships with runtime spec 23. No storage migration: the new values start empty.
+
+### Added
+
+- **Memo format rule.** Nonce byte 1 of a memo declares its format:
+  `MEMO_FORMAT_TAGGED` (`0x01`, a note its owner finds by lookup) or
+  `MEMO_FORMAT_HANDSHAKE` (`0x02`, found by trial ECDH, as every memo before).
+  `schedule_tagged_memos(from)` (call index 21, `AdminOrigin`) sets
+  `TaggedMemosFrom`; the start can move, earlier or later, until its block is
+  reached (`TaggedMemosAlreadyActive` from then on, even before the leaf is
+  recorded) and must be a future block (`TaggedMemosStartInPast`). It has no
+  upper bound: a far start binds nothing and can be moved back. Emits
+  `TaggedMemosScheduled`.
+- `MemoFormat` and `EncryptedMemo::format()`: the format a full memo declares,
+  `None` for any other byte or a memo that is not full size.
+- **`TaggedMemosFromLeaf`**: recorded once, in the `on_initialize` of the first
+  block at or past `TaggedMemosFrom`, as the next leaf index; never changed after.
+  Every leaf from it on was inserted under the rule. Emits `TaggedMemosActivated`.
+- From the start block, shield, private transfer, unshield and bound spend refuse
+  a memo whose format byte is neither value with `MemoFormatOutdated`, before the
+  proof is verified; pool admission rejects such an unsigned spend with the new
+  code `MEMO_FORMAT_OUTDATED` (`Custom(15)`). One check
+  (`operations::memo_format::ensure_storable`) covers every memo stored with a
+  commitment: sizes first (`InvalidMemoSize`), then the format. Public
+  (zero-ephPk) and dummy memos get no exemption; minted notes store no memo.
+  The chain reads only public bytes: whether a declared tag is right depends on
+  keys it never sees.
+
+### Changed
+
+- `on_initialize` reads one or two more storage values per block (three reads and
+  two writes in the block that records the leaf), charged on top of the prune
+  batch.
+
 ## [0.27.0] - 2026-11-12
 
 **Breaking** — `Config` gains `BoundActions`; storage v3 → v4 (`migrations::v4`,

@@ -19,6 +19,56 @@ use sp_std::vec::Vec;
 /// Max encrypted memo size: `nonce(12) + ciphertext(120) + MAC(16) + ephPk(32) = 180`.
 pub const MAX_ENCRYPTED_MEMO_SIZE: u32 = 180;
 
+/// Position of the format byte: the memo's second nonce byte.
+///
+/// The nonce is public, so the chain reads it without any key:
+///
+/// | nonce bytes | content                                             |
+/// |-------------|-----------------------------------------------------|
+/// | `0`         | view tag (opaque to the chain)                      |
+/// | `1`         | format: `MEMO_FORMAT_TAGGED` or `MEMO_FORMAT_HANDSHAKE` |
+/// | `2..10`     | detection tag (opaque to the chain)                 |
+/// | `10..12`    | random                                              |
+pub const MEMO_FORMAT_BYTE_INDEX: usize = 1;
+/// A note found by lookup: its owner predicts its ephemeral key or its tag, so a
+/// wallet that does not predict it can skip the trial ECDH.
+pub const MEMO_FORMAT_TAGGED: u8 = 0x01;
+/// A note found by trial ECDH, as every memo before the format existed: the
+/// first payment between two parties, which opens their tagged channel.
+pub const MEMO_FORMAT_HANDSHAKE: u8 = 0x02;
+
+/// The format a memo declares in its format byte: how its owner finds it.
+///
+/// Any other byte is undeclared (a memo from a wallet that predates the format,
+/// or a format this runtime does not know): a new format needs a runtime
+/// upgrade before the chain accepts it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MemoFormat {
+	/// [`MEMO_FORMAT_TAGGED`].
+	Tagged,
+	/// [`MEMO_FORMAT_HANDSHAKE`].
+	Handshake,
+}
+
+impl MemoFormat {
+	/// The format `byte` declares, if any.
+	pub const fn from_byte(byte: u8) -> Option<Self> {
+		match byte {
+			MEMO_FORMAT_TAGGED => Some(Self::Tagged),
+			MEMO_FORMAT_HANDSHAKE => Some(Self::Handshake),
+			_ => None,
+		}
+	}
+
+	/// The byte that declares this format.
+	pub const fn byte(self) -> u8 {
+		match self {
+			Self::Tagged => MEMO_FORMAT_TAGGED,
+			Self::Handshake => MEMO_FORMAT_HANDSHAKE,
+		}
+	}
+}
+
 /// Encrypted memo attached to a commitment (ChaCha20-Poly1305).
 #[derive(
 	Clone,
@@ -48,6 +98,19 @@ impl EncryptedMemo {
 	/// opened, so the note it describes would be unrecoverable from the chain.
 	pub fn is_valid_size(&self) -> bool {
 		self.0.len() == MAX_ENCRYPTED_MEMO_SIZE as usize
+	}
+	/// The format a full memo declares, or None when it declares none. A memo
+	/// that is not full size has no format either: it is no memo a wallet can
+	/// open, whatever its second byte holds. Reads public bytes only; whether
+	/// the declaration is honest depends on keys the chain never sees.
+	pub fn format(&self) -> Option<MemoFormat> {
+		if !self.is_valid_size() {
+			return None;
+		}
+		self.0
+			.get(MEMO_FORMAT_BYTE_INDEX)
+			.copied()
+			.and_then(MemoFormat::from_byte)
 	}
 	pub fn len(&self) -> usize {
 		self.0.len()
@@ -92,6 +155,8 @@ impl EncryptedMemo {
 			&[]
 		}
 	}
+	/// The Poly1305 MAC, not the detection tag in the nonce (see
+	/// [`MEMO_FORMAT_BYTE_INDEX`]).
 	pub fn tag(&self) -> &[u8] {
 		// Layout: nonce(0..12) | ciphertext(12..132) | tag/MAC(132..148) | ephPk(148..180)
 		debug_assert_eq!(

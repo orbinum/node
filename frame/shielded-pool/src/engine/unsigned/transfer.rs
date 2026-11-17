@@ -117,6 +117,7 @@ fn admission_error<T: Config>(error: Error<T>) -> TransactionValidityError {
 		Error::MemoCommitmentMismatch | Error::InvalidMemoSize => {
 			reject(codes::INVALID_MEMO).into()
 		}
+		Error::MemoFormatOutdated => reject(codes::MEMO_FORMAT_OUTDATED).into(),
 		_ => reject(codes::INVALID_SPEND).into(),
 	}
 }

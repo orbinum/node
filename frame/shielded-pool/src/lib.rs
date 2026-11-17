@@ -456,6 +456,21 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type TotalNullifiersSpent<T> = StorageValue<_, u64, ValueQuery>;
 
+	/// Block from which every memo must declare its format (`TAGGED` or
+	/// `HANDSHAKE` in nonce byte 1). Set by `schedule_tagged_memos`; None until
+	/// scheduled. Movable until the rule is in force, fixed after (see
+	/// `operations::memo_format`).
+	#[pallet::storage]
+	pub type TaggedMemosFrom<T: Config> = StorageValue<_, BlockNumberFor<T>, OptionQuery>;
+
+	/// First leaf index inserted under the memo format rule, recorded once in
+	/// the first block at or after `TaggedMemosFrom` and never changed after:
+	/// every leaf at or past it carries a memo that declares its format (or no
+	/// memo). Wallets read it to know from which leaf they may skip the trial
+	/// ECDH for a tagged note they do not predict.
+	#[pallet::storage]
+	pub type TaggedMemosFromLeaf<T> = StorageValue<_, u32, OptionQuery>;
+
 	// ========================================================================
 	// Genesis Config
 	// ========================================================================
@@ -495,13 +510,14 @@ pub mod pallet {
 		/// differently once post-dispatch refunds are in play, so each would prune
 		/// a different number of nodes and their state roots would diverge. That
 		/// halted the testnet at block 406997.
-		fn on_initialize(_now: BlockNumberFor<T>) -> Weight {
+		fn on_initialize(now: BlockNumberFor<T>) -> Weight {
 			crate::merkle::MerkleTreeService::prune_sealed_nodes::<T>(PRUNED_NODES_PER_BLOCK);
 			// The full batch is charged, not the removals: the sweep probes
 			// `PRUNED_NODES_PER_BLOCK` keys either way, and a miss costs the same
 			// read as a hit. Charging removals would under-declare an all-miss
 			// pass and let the block admit extrinsics it cannot pay for.
 			T::WeightInfo::prune_sealed_nodes(PRUNED_NODES_PER_BLOCK)
+				.saturating_add(crate::operations::memo_format::record_activation::<T>(now))
 		}
 
 		fn integrity_test() {
@@ -651,6 +667,13 @@ pub mod pallet {
 			amount: u128,
 		},
 
+		/// Memos must declare their format from block `from` on.
+		TaggedMemosScheduled { from: BlockNumberFor<T> },
+
+		/// The memo format rule took effect: every leaf from `from_leaf` on was
+		/// inserted under it.
+		TaggedMemosActivated { from_leaf: u32 },
+
 		/// A spend's fee was credited to the block author's pending fees.
 		FeeCredited {
 			/// Validator that authored the block
@@ -715,6 +738,16 @@ pub mod pallet {
 		AssetManagedByPallet,
 		/// The bound spend's action is unknown to the runtime, or refused by it.
 		InvalidBoundAction,
+		/// A memo does not declare its format (nonce byte 1 is neither `TAGGED`
+		/// nor `HANDSHAKE`) while the rule is in force: the wallet that built it
+		/// predates the format and must be updated.
+		MemoFormatOutdated,
+		/// The memo format rule is already in force (its start block has been
+		/// reached); its start cannot move.
+		TaggedMemosAlreadyActive,
+		/// The memo format rule must start at a future block, whose
+		/// `on_initialize` records its first leaf.
+		TaggedMemosStartInPast,
 	}
 
 	// ========================================================================
@@ -1129,6 +1162,36 @@ pub mod pallet {
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			crate::operations::fees::FeeOperation::claim::<T>(who, asset_id, amount)
+		}
+
+		/// Schedule the block from which every memo must declare its format.
+		///
+		/// `from` must be a future block, and has no upper bound. It can be moved,
+		/// earlier or later, until the rule is in force (the current block is at
+		/// or past the scheduled one); from then on it is fixed for good, since
+		/// wallets skip trial ECDH from the leaf `TaggedMemosFromLeaf` records.
+		/// A start too far ahead binds nothing and can be moved back, which is
+		/// also how a pending start is called off.
+		///
+		/// # Errors
+		/// * `BadOrigin` - Caller is not `AdminOrigin`
+		/// * `TaggedMemosAlreadyActive` - The rule is already in force
+		/// * `TaggedMemosStartInPast` - `from` is not after the current block
+		///
+		/// # Events
+		/// * `TaggedMemosScheduled`
+		#[pallet::call_index(21)]
+		#[pallet::weight(
+			Weight::from_parts(10_000_000, 1_000).saturating_add(
+				T::DbWeight::get().reads_writes(crate::operations::memo_format::SCHEDULE_READS, 1)
+			)
+		)]
+		pub fn schedule_tagged_memos(
+			origin: OriginFor<T>,
+			from: BlockNumberFor<T>,
+		) -> DispatchResult {
+			T::AdminOrigin::ensure_origin(origin)?;
+			crate::operations::memo_format::schedule::<T>(from)
 		}
 	}
 

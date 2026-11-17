@@ -5,7 +5,7 @@
 
 use crate::{
 	merkle::MerkleTreeService,
-	operations::{assets::AssetOperation, ensure_valid_proof, fees, statement},
+	operations::{assets::AssetOperation, ensure_valid_proof, fees, memo_format, statement},
 	pallet::{BalanceOf, Config, Error, Event, Pallet},
 	storage::{CommitmentRepository, MerkleRepository, NullifierRepository, PoolBalanceRepository},
 	types::{BoundActions, Commitment, EncryptedMemo, Nullifier},
@@ -131,13 +131,13 @@ impl UnshieldOperation {
 			Error::<T>::InsufficientPoolBalance
 		);
 
-		// The change note is recoverable from the chain only through its memo.
-		let memo_ok = if req.has_change() {
-			req.change_memo.is_valid_size()
+		// The change note is recoverable from the chain only through its memo;
+		// a total unshield stores none.
+		if req.has_change() {
+			memo_format::ensure_storable::<T>(core::slice::from_ref(&req.change_memo))?;
 		} else {
-			req.change_memo.is_empty()
-		};
-		ensure!(memo_ok, Error::<T>::InvalidMemoSize);
+			ensure!(req.change_memo.is_empty(), Error::<T>::InvalidMemoSize);
+		}
 
 		// The zero account has no known key: paying it burns the withdrawal.
 		ensure!(

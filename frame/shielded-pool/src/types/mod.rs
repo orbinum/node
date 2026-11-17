@@ -24,7 +24,10 @@ pub mod proof;
 pub use asset::{AssetBackend, AssetMetadata, NATIVE_ASSET_ID};
 pub use bound::{BoundActions, Funding, MINT_ATTEMPTS, MintedNote, NoAction};
 pub use ids::{AssetId, Commitment, Nullifier};
-pub use memo::{EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE};
+pub use memo::{
+	EncryptedMemo, MAX_ENCRYPTED_MEMO_SIZE, MEMO_FORMAT_BYTE_INDEX, MEMO_FORMAT_HANDSHAKE,
+	MEMO_FORMAT_TAGGED, MemoFormat,
+};
 pub use merkle::{
 	DEFAULT_TREE_DEPTH, DefaultMerklePath, MAX_SUBTREE_ROOTS, MAX_TREE_DEPTH, MerklePath,
 	SUBTREE_LEVEL, SubtreeRoots,
