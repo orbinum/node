@@ -220,3 +220,100 @@ fn unshields_the_dispatch_would_refuse_are_refused_at_admission() {
 		assert!(admit::validate_unshield::<Test>(Some(&proof()), &base).is_ok());
 	});
 }
+
+// ── memo format ──────────────────────────────────────────────────────────────
+
+/// Once the memo format rule is in force, a memo that does not declare its
+/// format is refused at admission with its own code, not after the proof.
+#[test]
+fn transfer_memos_must_declare_their_format_once_the_rule_is_in_force() {
+	use crate::{
+		pallet::TaggedMemosFrom,
+		types::{MEMO_FORMAT_BYTE_INDEX, MEMO_FORMAT_HANDSHAKE, MEMO_FORMAT_TAGGED},
+	};
+	new_test_ext().execute_with(|| {
+		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+		let legacy = transfer_request(&KNOWN_ROOT, &nullifiers_of(&[0x01, 0x02]), 0, 1);
+		frame_system::Pallet::<Test>::set_block_number(5);
+		TaggedMemosFrom::<Test>::put(5);
+
+		assert!(rejected_with(
+			admit::validate_private_transfer::<Test>(Some(&proof()), &legacy),
+			codes::MEMO_FORMAT_OUTDATED
+		));
+
+		let declared = |format: u8| {
+			let mut bytes = full_memo().as_bytes().to_vec();
+			bytes[MEMO_FORMAT_BYTE_INDEX] = format;
+			EncryptedMemo::from_bytes(&bytes).unwrap()
+		};
+		let tagged = TransferRequest {
+			memos: vec![
+				declared(MEMO_FORMAT_HANDSHAKE),
+				declared(MEMO_FORMAT_TAGGED),
+			]
+			.try_into()
+			.unwrap(),
+			..legacy
+		};
+		assert!(admit::validate_private_transfer::<Test>(Some(&proof()), &tagged).is_ok());
+	});
+}
+
+/// An unshield's change memo answers to the same rule: undeclared is refused
+/// with its own code, a short one as a bad memo whatever its second byte holds.
+#[test]
+fn unshield_change_memo_must_declare_its_format_once_the_rule_is_in_force() {
+	use crate::{
+		pallet::TaggedMemosFrom,
+		types::{MEMO_FORMAT_BYTE_INDEX, MEMO_FORMAT_TAGGED},
+	};
+	new_test_ext().execute_with(|| {
+		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+		PoolBalanceRepository::set_asset_balance::<Test>(0, 1_000);
+		let mut change = [0u8; 32];
+		change[1] = 0xCC;
+		let partial = |change_memo: EncryptedMemo| UnshieldRequest {
+			change_commitment: change,
+			change_memo,
+			..unshield_request(&KNOWN_ROOT, &nullifier(0x31), 0, 100, 0, 1)
+		};
+		frame_system::Pallet::<Test>::set_block_number(5);
+		TaggedMemosFrom::<Test>::put(5);
+
+		assert!(rejected_with(
+			admit::validate_unshield::<Test>(Some(&proof()), &partial(full_memo())),
+			codes::MEMO_FORMAT_OUTDATED
+		));
+		let short_declared = EncryptedMemo::new(vec![MEMO_FORMAT_TAGGED; 32]).unwrap();
+		assert!(rejected_with(
+			admit::validate_unshield::<Test>(Some(&proof()), &partial(short_declared)),
+			codes::INVALID_MEMO
+		));
+		let mut declared = full_memo().as_bytes().to_vec();
+		declared[MEMO_FORMAT_BYTE_INDEX] = MEMO_FORMAT_TAGGED;
+		let declared = EncryptedMemo::from_bytes(&declared).unwrap();
+		assert!(admit::validate_unshield::<Test>(Some(&proof()), &partial(declared)).is_ok());
+		// A total unshield stores no memo: nothing to declare.
+		let total = unshield_request(&KNOWN_ROOT, &nullifier(0x32), 0, 100, 0, 1);
+		assert!(admit::validate_unshield::<Test>(Some(&proof()), &total).is_ok());
+	});
+}
+
+/// The format is checked after the cheaper gates: a stale spend is reported
+/// stale, not outdated.
+#[test]
+fn the_format_is_checked_after_the_nullifiers() {
+	use crate::pallet::TaggedMemosFrom;
+	new_test_ext().execute_with(|| {
+		MerkleRepository::add_historic_poseidon_root::<Test>(KNOWN_ROOT);
+		let legacy = transfer_request(&KNOWN_ROOT, &nullifiers_of(&[0x01, 0x02]), 0, 1);
+		NullifierRepository::mark_as_used::<Test>(nullifier(0x01), 1);
+		frame_system::Pallet::<Test>::set_block_number(5);
+		TaggedMemosFrom::<Test>::put(5);
+		assert_eq!(
+			admit::validate_private_transfer::<Test>(Some(&proof()), &legacy),
+			sp_runtime::transaction_validity::InvalidTransaction::Stale.into()
+		);
+	});
+}

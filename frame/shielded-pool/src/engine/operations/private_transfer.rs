@@ -5,7 +5,7 @@
 
 use crate::{
 	merkle::MerkleTreeService,
-	operations::{assets::AssetOperation, ensure_valid_proof, fees, statement},
+	operations::{assets::AssetOperation, ensure_valid_proof, fees, memo_format, statement},
 	pallet::{BalanceOf, Config, Error, Event, Pallet},
 	storage::{CommitmentRepository, MerkleRepository, NullifierRepository},
 	types::{Commitment, EncryptedMemo, Nullifier},
@@ -135,10 +135,7 @@ impl PrivateTransferOperation {
 			req.memos.len() == req.commitments.len(),
 			Error::<T>::MemoCommitmentMismatch
 		);
-		ensure!(
-			req.memos.iter().all(EncryptedMemo::is_valid_size),
-			Error::<T>::InvalidMemoSize
-		);
+		memo_format::ensure_storable::<T>(&req.memos)?;
 
 		// Value stays inside the pool, so a pallet-backed asset moves too.
 		AssetOperation::ensure_spendable::<T>(req.asset_id)?;

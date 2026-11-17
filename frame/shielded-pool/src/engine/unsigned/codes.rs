@@ -51,6 +51,13 @@ pub const INVALID_SPEND: u8 = 13;
 /// (its pool closed, its queue full, …).
 pub const INVALID_ACTION: u8 = 14;
 
+/// A memo does not declare its format (nonce byte 1 is neither `TAGGED` nor
+/// `HANDSHAKE`) while the memo format rule is in force: the wallet that built it
+/// predates the format. Apart from [`INVALID_MEMO`] because retrying never helps:
+/// the wallet must be updated. Raised by every spend that stores a memo, after
+/// the fee, root, nullifier and memo-size checks and before the proof.
+pub const MEMO_FORMAT_OUTDATED: u8 = 15;
+
 /// Build an `InvalidTransaction` from one of the codes above.
 pub fn reject(code: u8) -> InvalidTransaction {
 	InvalidTransaction::Custom(code)

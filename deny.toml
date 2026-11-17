@@ -44,9 +44,10 @@ ignore = [
     # 0489 and 0490 panic when parsing zone files or record text, which the node never does.
     # 0491 over-allocates (~18 MB, freed when decoding fails) on a DNS response with forged
     # record counts, reachable only by spoofing replies to the node's `/dns` multiaddr lookups.
-    # 0504, 0505, 0511, 0512, 0530, 0531, 0532 (hickory-proto) and 0514 (hickory-resolver)
-    # are flaws in DNSSEC validation, compiled only with hickory's `dnssec*` features, which
-    # nothing in the graph enables.
+    # 0504, 0505, 0511, 0512, 0530, 0531, 0532, 0549, 0550, 0551 (hickory-proto) and 0514
+    # (hickory-resolver) are flaws in DNSSEC validation, compiled only with hickory's
+    # `dnssec*` features, which nothing in the graph enables (`cargo tree -e features -i
+    # hickory-proto`); their fix lives only in hickory-net 0.26.2.
     "RUSTSEC-2026-0487",
     "RUSTSEC-2026-0489",
     "RUSTSEC-2026-0490",
@@ -59,6 +60,9 @@ ignore = [
     "RUSTSEC-2026-0530",
     "RUSTSEC-2026-0531",
     "RUSTSEC-2026-0532",
+    "RUSTSEC-2026-0549",
+    "RUSTSEC-2026-0550",
+    "RUSTSEC-2026-0551",
 
     # Unmaintained — all transitive, no direct upgrade path
     "RUSTSEC-2025-0161",  # libsecp256k1 0.7.2 (from frontier fp-evm/pallet-evm)
@@ -72,6 +76,7 @@ ignore = [
     "RUSTSEC-2024-0370",  # proc-macro-error 1.0.4 (from multihash)
     "RUSTSEC-2026-0173",  # proc-macro-error2 2.0.1 (from subxt-macro → frame-benchmarking-cli)
     "RUSTSEC-2026-0441",  # pin-utils 0.1.0 (from wasm-timer → sc-network)
+    "RUSTSEC-2026-0543",  # chrono 0.4.45 (from sc-cli, sc-telemetry, frame-benchmarking-cli; node side only)
 ]
 
 [licenses]

@@ -20,6 +20,19 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
+### spec 23 — tx 8 — [Unreleased] (`v0.9.0`)
+
+The shielded pool can require every memo to declare its format (nonce byte 1:
+`0x01` tagged, `0x02` handshake). `AdminOrigin` schedules the block it starts at
+(`schedule_tagged_memos`, call index 21); in that block's `on_initialize` the
+pool records the first leaf under the rule (`TaggedMemosFromLeaf`), which never
+changes after. From then on a memo without a declared format fails with
+`MemoFormatOutdated`, and pool admission refuses an unsigned spend carrying one
+with `Custom(15)`. Wallets skip the trial ECDH for tagged notes past that leaf.
+Nothing changes until the rule is scheduled. Existing extrinsics and their
+encoding are unchanged (`schedule_tagged_memos` is new). Ships with
+`pallet-shielded-pool` 0.28.0.
+
 ### spec 22 — tx 8 — [Unreleased] (`v0.8.0`)
 
 Pool roles become text-signable, and only validators are slashed: nominators and

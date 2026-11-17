@@ -6,6 +6,7 @@
 mod assets;
 mod bound;
 mod fees;
+mod memo_format;
 mod private_transfer;
 mod shield;
 mod statement;
