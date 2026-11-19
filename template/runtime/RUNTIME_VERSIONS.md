@@ -22,8 +22,29 @@ The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 
 ### spec 24 — tx 8 — [Unreleased] (`v0.10.0`)
 
-Private staking events say whose entry or exit they are about and what a share is
-worth, so a wallet and an indexer follow an entry to its outcome without decoding
+**A private entry no longer draws rewards while it waits.** Until spec 23 an entry's
+ORB was bonded the moment it entered, while its shares were minted only after its era
+compounded. The pool hands rewards out by points at payout time, so a pending entry's
+points drew rewards its stake had not earned (it was not exposed), and compounding then
+bonded them for the shares already minted: value moved from the entrants and the
+pool's public members to the private holders. On testnet pool 1 that was about 1,460
+ORB over three eras, most of its share price rise.
+
+- An entry's ORB now waits in `m_P`'s free balance, unbonded (`EntryEscrow`, a new
+  storage item). Once its era is compounded it is priced, bonded (the pool's first
+  private entry joins it) and its shares minted. Compounding never bonds escrowed ORB
+  (`liquid` leaves it out).
+- An entry that is not settled is refunded **at once**: fewer shares than it asked
+  for, a destroying pool, or a bond the pool refuses. Its ORB never left `m_P`, so it
+  is queued as an output already funded and minted in the same block (`EntryRefunded`
+  names the era it settled in as `unlock_era`). A pending entry bears no slash.
+- Entries made before spec 24 (bonded, `points > 0`) settle the old way, on their
+  points (`EntryPoints`, which only drains now). No migration: `Entry` is unchanged
+  and `EntryEscrow` starts empty.
+- One `on_idle` step may now be a settling entry's first `join`: `step_weight` covers it.
+
+Private staking events also say whose entry or exit they are about and what a share
+is worth, so a wallet and an indexer follow an entry to its outcome without decoding
 calls or matching amounts:
 
 - `Entered`, `Exited`, `EntrySettled`, `EntryRefunded` and `ExitSettled` carry the
@@ -32,10 +53,9 @@ calls or matching amounts:
   told from an exit by the key its `EntryRefunded` named.
 - `Compounded` carries `value` (what the minted shares are worth after the era's
   rewards) and `supply`: the share price per era, from which a pool's return is read.
+  Reading it is charged in the compounding weight (four more reads).
 
-Events only: no storage or call changes, no migration. `transaction_version` stays 8.
-Reading the price `Compounded` announces is charged in the compounding weight (four
-more reads), so `on_idle` stays within its budget.
+No call changes: `transaction_version` stays 8.
 
 ### spec 23 — tx 8 — 2026-11-18 (`v0.9.0`)
 

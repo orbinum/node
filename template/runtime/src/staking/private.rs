@@ -8,11 +8,15 @@
 //! every private member's stake, and issues a pallet-backed asset, `sP`, whose
 //! notes are shares of that membership. Nobody signs anything:
 //!
-//! - **Enter**: a bound spend of an ORB note pays `m_P`, which bonds it into the
-//!   pool at once. The entry keeps the pool points its bond issued; its shares
-//!   are minted once the pool has compounded the era the entry came in, so an
-//!   entry never collects a reward its stake did not earn, and shares a slash
-//!   with everyone while it waits.
+//! - **Enter**: a bound spend of an ORB note pays `m_P`, which holds it unbonded
+//!   (`EntryEscrow`) until the pool has compounded the era the entry came in; then
+//!   it is priced, bonded and its shares minted. Never bonded while it waits, a
+//!   pending entry draws no pool rewards: rewards that the pool hands out by
+//!   points at payout time, and that compounding would give to the shares already
+//!   minted, are drawn by nobody's waiting ORB. Nor does it bear a slash. An entry
+//!   it cannot settle (fewer shares than it asked for, a destroying pool, a bond
+//!   the pool refuses) is refunded at once. Entries made before spec 24 were bonded
+//!   at once and settle the old way (`EntryPoints`).
 //! - **Exit**: a bound spend of an `sP` note burns its shares and unbonds their
 //!   value from `m_P` (the nominator unbonding time). When it unlocks, an ORB
 //!   note is minted: its value, scaled down if the unbonding stake was slashed.
@@ -127,11 +131,16 @@ pub mod pallet {
 		pub withdrawn: bool,
 	}
 
-	/// An entry waiting for its shares: the pool points its bond issued.
+	/// An entry waiting for its shares.
+	///
+	/// From spec 24 an entry's ORB is held in `m_P`'s free balance ([`EntryEscrow`])
+	/// and bonded only when its shares are minted: `points` is 0. An entry made
+	/// before spec 24 was bonded at once; `points` are the pool points its bond
+	/// issued, and it settles the old way.
 	#[derive(Clone, PartialEq, Eq, Encode, Decode, MaxEncodedLen, TypeInfo, Debug)]
 	pub struct Entry {
 		pub points: u128,
-		/// The ORB it brought, for the record.
+		/// The ORB it brought: what an escrowed entry bonds, or is refunded.
 		pub value: u128,
 		/// The fewest shares it takes: fewer at its price, and it is refunded.
 		pub min_shares: u128,
@@ -173,7 +182,7 @@ pub mod pallet {
 	pub enum Action {
 		/// Join `pool_id` with an ORB note; its shares go to `owner_pk`. If they
 		/// would be fewer than `min_shares` when minted, the ORB is refunded to
-		/// `owner_pk` instead, once its unbonding unlocks.
+		/// `owner_pk` instead.
 		#[codec(index = 0)]
 		Enter {
 			pool_id: PoolId,
@@ -271,9 +280,17 @@ pub mod pallet {
 	pub type Members<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, PoolId, OptionQuery>;
 
-	/// Pool points of `m_P` held by entries whose shares are not minted yet.
+	/// Pool points of `m_P` held by entries made before spec 24 (bonded at once)
+	/// whose shares are not minted yet. Only drains: new entries are escrowed.
 	#[pallet::storage]
 	pub type EntryPoints<T> = StorageMap<_, Twox64Concat, PoolId, u128, ValueQuery>;
+
+	/// ORB in `m_P`'s free balance that belongs to entries not settled yet: bonded
+	/// when their shares are minted, refunded otherwise. Never bonded before that,
+	/// so a pending entry draws no pool rewards (which compounding would hand to
+	/// the shares already minted) and bears no slash.
+	#[pallet::storage]
+	pub type EntryEscrow<T> = StorageMap<_, Twox64Concat, PoolId, u128, ValueQuery>;
 
 	/// Entries waiting for their era to be compounded: `(pool, (era entered, page))`.
 	#[pallet::storage]
@@ -338,7 +355,8 @@ pub mod pallet {
 			enabled: bool,
 			asset_id: u32,
 		},
-		/// An entry was bonded; its shares are minted after its era compounds.
+		/// An entry was taken: its ORB is held, unbonded, until its era compounds;
+		/// then it is bonded and its shares minted.
 		///
 		/// `owner_pk` is the one-time key its output is minted to. It is already
 		/// public in the action; every later event of the entry names it too, so
@@ -373,8 +391,10 @@ pub mod pallet {
 			commitment: Commitment,
 			owner_pk: [u8; 32],
 		},
-		/// An entry would have taken fewer shares than it asked for: its ORB is
-		/// unbonded and minted back to its key when it unlocks.
+		/// An entry was not settled (fewer shares than it asked for, a destroying
+		/// pool, or a bond the pool refused): its ORB is minted back to its key once
+		/// `unlock_era` starts. From spec 24 that is the era it settled in, so the
+		/// ORB comes back at once; an entry made before spec 24 unbonds first.
 		EntryRefunded {
 			pool_id: PoolId,
 			value: u128,
@@ -586,7 +606,8 @@ pub mod pallet {
 					<T as shielded::Config>::Currency::free_balance(&Self::member_account(pool_id))
 						.saturated_into();
 				ensure!(
-					Escrow::<T>::get(pool_id) <= free,
+					Escrow::<T>::get(pool_id).saturating_add(EntryEscrow::<T>::get(pool_id))
+						<= free,
 					sp_runtime::TryRuntimeError::Other("escrow exceeds the member's balance")
 				);
 			}
@@ -1006,10 +1027,156 @@ pub mod pallet {
 			Ok((released.min(value), 0, unlock_era))
 		}
 
-		/// Refunds an entry: unbonds its points and queues their value as an exit
-		/// to its key. Returns `false` when the pool cannot release them (then the
-		/// shares are minted after all).
-		fn refund_entry(pool_id: PoolId, entry: &Entry) -> bool {
+		/// The shares `value` of ORB buys at the price of the minted shares, rounded
+		/// down: an entry's value is never in `net_value` when it is priced.
+		fn entry_shares(pool_id: PoolId, private: &PrivatePool, value: u128) -> u128 {
+			let offset = T::VirtualOffset::get();
+			multiply_by_rational_with_rounding(
+				value,
+				private.supply.saturating_add(offset),
+				Self::net_value(pool_id).saturating_add(offset),
+				Rounding::Down,
+			)
+			.unwrap_or_default()
+		}
+
+		/// Settles an entry whose ORB was escrowed (spec 24 on): priced before it is
+		/// bonded, then bonded and its shares minted. Refunded at once instead when
+		/// the pool is destroying, the shares are fewer than it asked for, or the
+		/// pool will not take the bond.
+		fn settle_escrowed(
+			pool_id: PoolId,
+			private: &mut PrivatePool,
+			entry: &Entry,
+			destroying: bool,
+			era: EraIndex,
+		) {
+			let shares = Self::entry_shares(pool_id, private, entry.value);
+			if destroying
+				|| shares == 0
+				|| shares < entry.min_shares
+				|| !Self::bond_entry(pool_id, entry.value)
+			{
+				Self::refund_escrowed(pool_id, entry, era);
+				return;
+			}
+			Self::mint_shares(pool_id, private, entry, shares, entry.value);
+		}
+
+		/// Bonds an escrowed entry's ORB from `m_P`'s free balance (joining the pool
+		/// for its first one). Nothing changes when the pool refuses it.
+		fn bond_entry(pool_id: PoolId, value: u128) -> bool {
+			let member = Self::member_account(pool_id);
+			let bonded = frame_support::storage::with_transaction(|| {
+				let origin: OriginFor<T> = frame_system::RawOrigin::Signed(member.clone()).into();
+				let result = if pools::PoolMembers::<T>::contains_key(&member) {
+					pools::Pallet::<T>::bond_extra(
+						origin,
+						BondExtra::FreeBalance(value.saturated_into()),
+					)
+				} else {
+					pools::Pallet::<T>::join(origin, value.saturated_into(), pool_id)
+				};
+				match result {
+					Ok(()) => frame_support::storage::TransactionOutcome::Commit(Ok(())),
+					Err(error) => frame_support::storage::TransactionOutcome::Rollback(Err(error)),
+				}
+			});
+			if bonded.is_ok() {
+				EntryEscrow::<T>::mutate(pool_id, |e| *e = e.saturating_sub(value));
+			}
+			bonded.is_ok()
+		}
+
+		/// Refunds an escrowed entry at once: its ORB never left `m_P`'s free
+		/// balance, so it is queued as an output already funded, paid this era.
+		fn refund_escrowed(pool_id: PoolId, entry: &Entry, era: EraIndex) {
+			let queued = Self::push_exit(
+				pool_id,
+				era,
+				Pending {
+					value: entry.value,
+					funded: entry.value,
+					owner_pk: entry.owner_pk,
+					blinding: entry.blinding,
+				},
+			);
+			if let Err(error) = queued {
+				// `push_exit` opens a new page when the last is full, so this does
+				// not happen; if it did, the ORB stays held for the entry.
+				log::error!(
+					target: "runtime::private-staking",
+					"refund to pool {pool_id} not queued: {error:?}"
+				);
+				return;
+			}
+			EntryEscrow::<T>::mutate(pool_id, |e| *e = e.saturating_sub(entry.value));
+			Escrow::<T>::mutate(pool_id, |e| *e = e.saturating_add(entry.value));
+			Self::mark_funded(pool_id, era);
+			Self::deposit_event(Event::EntryRefunded {
+				pool_id,
+				value: entry.value,
+				unlock_era: era,
+				owner_pk: entry.owner_pk,
+			});
+		}
+
+		/// Settles an entry made before spec 24, bonded at once: priced on its points,
+		/// refunded through an unbonding.
+		fn settle_bonded(
+			pool_id: PoolId,
+			private: &mut PrivatePool,
+			entry: &Entry,
+			destroying: bool,
+		) {
+			let value = Self::points_value(pool_id, entry.points);
+			let shares = Self::entry_shares(pool_id, private, value);
+			let refunded =
+				(destroying || shares < entry.min_shares) && Self::refund_bonded(pool_id, entry);
+			EntryPoints::<T>::mutate(pool_id, |p| *p = p.saturating_sub(entry.points));
+			if !refunded {
+				Self::mint_shares(pool_id, private, entry, shares, value);
+			}
+		}
+
+		/// Mints an entry's shares to its key. A note that cannot be minted (its
+		/// commitment exists) leaves its value with the other members.
+		fn mint_shares(
+			pool_id: PoolId,
+			private: &mut PrivatePool,
+			entry: &Entry,
+			shares: u128,
+			value: u128,
+		) {
+			let minted = (shares > 0)
+				.then(|| {
+					shielded::Pallet::<T>::mint_note(
+						private.asset_id,
+						shares,
+						entry.owner_pk,
+						entry.blinding,
+						Funding::Issued(T::PrivateStakingId::get()),
+					)
+				})
+				.transpose();
+			match minted {
+				Ok(Some(note)) => {
+					private.supply = private.supply.saturating_add(note.value);
+					Self::deposit_event(Event::EntrySettled {
+						pool_id,
+						shares: note.value,
+						commitment: note.commitment,
+						owner_pk: entry.owner_pk,
+					});
+				}
+				_ => Self::deposit_event(Event::OutputDropped { pool_id, value }),
+			}
+		}
+
+		/// Refunds an entry made before spec 24: unbonds its points and queues their
+		/// value as an exit to its key. Returns `false` when the pool cannot release
+		/// them (then the shares are minted after all).
+		fn refund_bonded(pool_id: PoolId, entry: &Entry) -> bool {
 			let value = Self::points_value(pool_id, entry.points);
 			let unlock_era = Self::unlock_era();
 			let member = Self::member_account(pool_id);
@@ -1083,6 +1250,7 @@ pub mod pallet {
 				}
 				if private.supply == 0
 					&& EntryPoints::<T>::get(pool_id) == 0
+					&& EntryEscrow::<T>::get(pool_id) == 0
 					&& !pools::PoolMembers::<T>::contains_key(&member)
 					&& Entries::<T>::iter_key_prefix(pool_id).next().is_none()
 					&& Unlocks::<T>::iter_key_prefix(pool_id).next().is_none()
@@ -1091,6 +1259,7 @@ pub mod pallet {
 					AssetPool::<T>::remove(private.asset_id);
 					Members::<T>::remove(&member);
 					Escrow::<T>::remove(pool_id);
+					EntryEscrow::<T>::remove(pool_id);
 					Self::deposit_event(Event::PoolClosed { pool_id });
 					return true;
 				}
@@ -1127,8 +1296,9 @@ pub mod pallet {
 			let Some(slots) = Self::metered(Entries::<T>::iter_key_prefix(pool_id), meter) else {
 				return false;
 			};
+			let compounded_era = private.compounded_era;
 			let due = slots.into_iter().filter(|(entered, _)| {
-				destroying || (*entered < era && private.compounded_era == Some(era))
+				destroying || (*entered < era && compounded_era == Some(era))
 			});
 			for slot in due {
 				let mut queue = Entries::<T>::get(pool_id, slot);
@@ -1138,49 +1308,10 @@ pub mod pallet {
 						return false;
 					}
 					queue.remove(0);
-					// Priced against the minted points alone: pending entries are
-					// still out of `net_value`.
-					let value = Self::points_value(pool_id, entry.points);
-					let offset = T::VirtualOffset::get();
-					let shares = multiply_by_rational_with_rounding(
-						value,
-						private.supply.saturating_add(offset),
-						Self::net_value(pool_id).saturating_add(offset),
-						Rounding::Down,
-					)
-					.unwrap_or_default();
-					// Fewer shares than it asked for: its ORB goes back to its key.
-					if (destroying || shares < entry.min_shares)
-						&& Self::refund_entry(pool_id, &entry)
-					{
-						EntryPoints::<T>::mutate(pool_id, |p| *p = p.saturating_sub(entry.points));
-						Pools::<T>::insert(pool_id, &private);
-						continue;
-					}
-					EntryPoints::<T>::mutate(pool_id, |p| *p = p.saturating_sub(entry.points));
-					let minted = (shares > 0)
-						.then(|| {
-							shielded::Pallet::<T>::mint_note(
-								private.asset_id,
-								shares,
-								entry.owner_pk,
-								entry.blinding,
-								Funding::Issued(T::PrivateStakingId::get()),
-							)
-						})
-						.transpose();
-					match minted {
-						Ok(Some(note)) => {
-							private.supply = private.supply.saturating_add(note.value);
-							Self::deposit_event(Event::EntrySettled {
-								pool_id,
-								shares: note.value,
-								commitment: note.commitment,
-								owner_pk: entry.owner_pk,
-							});
-						}
-						// Its value stays with the other members.
-						_ => Self::deposit_event(Event::OutputDropped { pool_id, value }),
+					if entry.points > 0 {
+						Self::settle_bonded(pool_id, &mut private, &entry, destroying);
+					} else {
+						Self::settle_escrowed(pool_id, &mut private, &entry, destroying, era);
 					}
 					Pools::<T>::insert(pool_id, &private);
 				}
@@ -1390,7 +1521,8 @@ pub mod pallet {
 			}
 		}
 
-		/// `m_P`'s free balance above its existential deposit and its escrow.
+		/// `m_P`'s free balance above its existential deposit, its escrow for unpaid
+		/// outputs and the ORB of entries not settled yet.
 		fn liquid(pool_id: PoolId, member: &T::AccountId) -> u128 {
 			let free: u128 =
 				<T as shielded::Config>::Currency::free_balance(member).saturated_into();
@@ -1398,6 +1530,7 @@ pub mod pallet {
 				<T as shielded::Config>::Currency::minimum_balance().saturated_into();
 			free.saturating_sub(reserve)
 				.saturating_sub(Escrow::<T>::get(pool_id))
+				.saturating_sub(EntryEscrow::<T>::get(pool_id))
 		}
 
 		/// Whether `pallet-auto-payout` is done with `era`. While it is paused nothing
@@ -1461,10 +1594,11 @@ pub mod pallet {
 		}
 
 		/// The most one step of `on_idle` costs: a mint (a shield's work), a pool
-		/// operation, or a withdrawal.
+		/// operation (a settling entry's bond or first join), or a withdrawal.
 		pub fn step_weight() -> Weight {
 			use pallet_nomination_pools::WeightInfo as _;
 			shielded::Pallet::<T>::mint_note_weight()
+				.max(<T as pools::Config>::WeightInfo::join())
 				.max(<T as pools::Config>::WeightInfo::bond_extra_other())
 				.max(<T as pools::Config>::WeightInfo::bond_extra_transfer())
 				.max(<T as pools::Config>::WeightInfo::withdraw_unbonded_kill(0))
@@ -1559,26 +1693,14 @@ pub mod pallet {
 					min_shares,
 				} => {
 					Self::check_enter(pool_id, &owner_pk, &blinding, asset_id, amount)?;
-					let member = Self::member_account(pool_id);
-					let origin: OriginFor<T> =
-						frame_system::RawOrigin::Signed(member.clone()).into();
-					let before = Self::member_points(pool_id);
-					if pools::PoolMembers::<T>::contains_key(&member) {
-						pools::Pallet::<T>::bond_extra(
-							origin,
-							BondExtra::FreeBalance(amount.saturated_into()),
-						)?;
-					} else {
-						pools::Pallet::<T>::join(origin, amount.saturated_into(), pool_id)?;
-					}
-					let points = Self::member_points(pool_id).saturating_sub(before);
-					ensure!(points > 0, Error::<T>::BelowMinimum);
+					// The spend paid `m_P`; the ORB waits in its free balance, unbonded,
+					// until the entry's era is compounded (see `EntryEscrow`).
 					let era = Self::active_era();
 					let page = Self::entry_page(pool_id, era).ok_or(Error::<T>::QueueFull)?;
-					EntryPoints::<T>::mutate(pool_id, |p| *p = p.saturating_add(points));
+					EntryEscrow::<T>::mutate(pool_id, |e| *e = e.saturating_add(amount));
 					Entries::<T>::try_mutate(pool_id, (era, page), |queue| {
 						queue.try_push(Entry {
-							points,
+							points: 0,
 							value: amount,
 							min_shares,
 							owner_pk,

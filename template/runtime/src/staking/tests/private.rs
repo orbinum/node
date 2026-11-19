@@ -10,7 +10,9 @@
 //! paid into `m_P`, an exit's shares are burned from the shielded ledger, then
 //! the action runs through `BoundActions`.
 
-use crate::staking::private::{self, Action, Entries, EntryPoints, Exits, FeeExits, Pools};
+use crate::staking::private::{
+	self, Action, Entries, EntryEscrow, EntryPoints, Exits, FeeExits, Pools,
+};
 use crate::test_utils::{
 	blocks::{active_era, run_block},
 	network::with_validators,
@@ -206,6 +208,11 @@ fn assert_solvent() {
 	let private = Pools::<Runtime>::get(POOL).expect("private pool");
 	assert_eq!(private.supply, ledger(private.asset_id), "supply == ledger");
 	assert!(EntryPoints::<Runtime>::get(POOL) <= PrivateStaking::member_points(POOL));
+	let free: Balance = <Balances as Inspect<AccountId>>::balance(&m_p());
+	assert!(
+		private::Escrow::<Runtime>::get(POOL) + EntryEscrow::<Runtime>::get(POOL) <= free,
+		"escrows exceed m_P's balance"
+	);
 }
 
 #[test]
@@ -340,19 +347,21 @@ fn an_entry_is_minted_after_its_era_compounds_and_shares_then_earn() {
 	with_private_pool(|| {
 		let era = active_era();
 		spend_into(enter(1), 100 * ORB);
-		assert_eq!(
-			EntryPoints::<Runtime>::get(POOL),
-			PrivateStaking::member_points(POOL)
-		);
+		// Held, not bonded: the entry draws no pool rewards while it waits.
+		assert_eq!(EntryEscrow::<Runtime>::get(POOL), 100 * ORB);
+		assert_eq!(PrivateStaking::member_points(POOL), 0);
+		assert_eq!(EntryPoints::<Runtime>::get(POOL), 0);
 		assert_eq!(Entries::<Runtime>::get(POOL, (era, 0)).len(), 1);
-		assert!(PrivateStaking::member_value(POOL) >= 100 * ORB - 1);
 		assert_eq!(supply(), 0, "nothing minted in the entry era");
+		assert_solvent();
 
 		settle_era(era + 1);
 		let minted = settled_entries();
 		assert_eq!(minted.len(), 1, "the entry settles once its era compounded");
 		assert_eq!(supply(), minted[0]);
-		assert_eq!(EntryPoints::<Runtime>::get(POOL), 0);
+		// Bonded when its shares were minted.
+		assert_eq!(EntryEscrow::<Runtime>::get(POOL), 0);
+		assert!(PrivateStaking::member_value(POOL) >= 100 * ORB - 1);
 		assert!(!Entries::<Runtime>::contains_key(POOL, (era, 0)));
 		let private = Pools::<Runtime>::get(POOL).unwrap();
 		let worth = PrivateStaking::value_of(POOL, &private, minted[0]);
@@ -869,7 +878,7 @@ mod adversarial {
 	}
 
 	#[test]
-	fn a_slash_while_entries_are_pending_is_shared_with_them() {
+	fn a_slash_while_entries_are_pending_is_not_charged_to_them() {
 		with_slashable_private_pool(|| {
 			spend_into(enter(1), 100 * ORB);
 			run_to_era(2);
@@ -890,15 +899,14 @@ mod adversarial {
 			// Right after the entry is minted, before it earns a reward of its own.
 			let second = supply() - first;
 			assert!(second > 0, "the entry was minted");
-			let (one, two) = (worth(first), worth(second));
-			// The pending entry bore its share of the slash...
-			assert!(two < 1_000 * ORB, "the entry shared the slash: {two}");
-			// ...so the holder, who also earned the rewards before it, lost no more
-			// per ORB than the entry.
+			// Held unbonded while it waited, it was not exposed: the slash is the
+			// holder's alone, and the entry is worth what it brought.
+			let two = worth(second);
 			assert!(
-				one * 1_000 * 99 / 100 >= two * 100,
-				"holder {one} for 100 ORB vs entry {two} for 1000 ORB"
+				two >= 1_000 * ORB - MILLI,
+				"the entry kept its value: {two}"
 			);
+			assert!(two <= 1_000 * ORB, "and no more: {two}");
 		});
 	}
 
@@ -1203,8 +1211,6 @@ mod hardening {
 	use super::*;
 	use crate::AutoPayout;
 
-	const MILLI_ORB: Balance = ORB / 1_000;
-
 	#[test]
 	fn an_entry_short_of_its_minimum_shares_is_refunded_in_orb() {
 		with_private_pool(|| {
@@ -1219,13 +1225,16 @@ mod hardening {
 			settle_era(era + 1);
 			assert!(settled_entries().is_empty(), "no shares below the minimum");
 			assert_eq!(supply(), 0);
-			assert!(seen()
-				.iter()
-				.any(|event| matches!(event, private::Event::EntryRefunded { .. })));
-			settle_era(era + 1 + crate::staking::params::NOMINATOR_UNBOND_DURATION);
+			let refunded_in = seen().into_iter().find_map(|event| match event {
+				private::Event::EntryRefunded { unlock_era, .. } => Some(unlock_era),
+				_ => None,
+			});
+			// Never bonded, so nothing unbonds: the ORB comes back in the era it settled.
+			assert_eq!(refunded_in, Some(era + 1));
 			let refunded = settled_exits();
-			assert_eq!(refunded.len(), 1);
-			assert!(refunded[0] >= 50 * ORB - MILLI_ORB, "{refunded:?}");
+			assert_eq!(refunded, vec![50 * ORB], "refunded in full, at once");
+			assert_eq!(EntryEscrow::<Runtime>::get(POOL), 0);
+			assert_eq!(private::Escrow::<Runtime>::get(POOL), 0);
 			assert_solvent();
 		});
 	}
@@ -1665,5 +1674,59 @@ fn a_refund_names_the_entry_s_key_and_its_orb_is_paid_to_it() {
 			paid.is_some_and(|v| v > 0),
 			"the refund is paid to the entry's key: {paid:?}"
 		);
+	});
+}
+
+/// Queues an entry as spec 23 left one: its ORB bonded at once, its points pending.
+fn bonded_entry(n: u8, value: Balance, min_shares: u128) {
+	let before = PrivateStaking::member_points(POOL);
+	Balances::mint_into(&m_p(), value).expect("m_P funded");
+	if before == 0 {
+		assert_ok!(NominationPools::join(signed(&m_p()), value, POOL));
+	} else {
+		assert_ok!(NominationPools::bond_extra(
+			signed(&m_p()),
+			pallet_nomination_pools::BondExtra::FreeBalance(value)
+		));
+	}
+	let points = PrivateStaking::member_points(POOL) - before;
+	EntryPoints::<Runtime>::mutate(POOL, |p| *p += points);
+	Entries::<Runtime>::try_mutate(POOL, (active_era(), 0), |queue| {
+		queue.try_push(private::Entry {
+			points,
+			value,
+			min_shares,
+			owner_pk: key(n),
+			blinding: key(n + 1),
+		})
+	})
+	.expect("room in the queue");
+}
+
+#[test]
+fn entries_bonded_before_spec_24_settle_on_their_points() {
+	with_private_pool(|| {
+		let era = active_era();
+		bonded_entry(1, 100 * ORB, 0);
+		bonded_entry(5, 40 * ORB, u128::MAX);
+		settle_era(era + 1);
+
+		// The first is minted on its points, as before.
+		let minted = settled_entries();
+		assert_eq!(minted.len(), 1);
+		let private = Pools::<Runtime>::get(POOL).unwrap();
+		let worth = PrivateStaking::value_of(POOL, &private, minted[0]);
+		assert!(worth >= 100 * ORB - 1, "{worth}");
+		assert_eq!(EntryPoints::<Runtime>::get(POOL), 0);
+		// The second is refunded through an unbonding, as before: not at once.
+		let unlock = seen().into_iter().find_map(|event| match event {
+			private::Event::EntryRefunded { unlock_era, .. } => Some(unlock_era),
+			_ => None,
+		});
+		assert!(unlock.is_some_and(|u| u > era + 1), "{unlock:?}");
+		assert!(settled_exits().is_empty(), "paid once it unlocks");
+		settle_era(unlock.unwrap());
+		assert!(settled_exits().iter().any(|v| *v >= 40 * ORB - MILLI));
+		assert_solvent();
 	});
 }
