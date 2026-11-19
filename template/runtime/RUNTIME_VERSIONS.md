@@ -20,7 +20,24 @@ to `spec_version` / `transaction_version` must add a row here in the same PR.
 The genesis reset (`69d1b837`) set `spec_version` back to 1 and
 `transaction_version` to 1 for the public testnet launch.
 
-### spec 23 — tx 8 — [Unreleased] (`v0.9.0`)
+### spec 24 — tx 8 — [Unreleased] (`v0.10.0`)
+
+Private staking events say whose entry or exit they are about and what a share is
+worth, so a wallet and an indexer follow an entry to its outcome without decoding
+calls or matching amounts:
+
+- `Entered`, `Exited`, `EntrySettled`, `EntryRefunded` and `ExitSettled` carry the
+  entry's or exit's one-time `owner_pk`, already public in its bound spend's action.
+  A refunded entry's ORB is paid by `ExitSettled` to the entry's key, so a refund is
+  told from an exit by the key its `EntryRefunded` named.
+- `Compounded` carries `value` (what the minted shares are worth after the era's
+  rewards) and `supply`: the share price per era, from which a pool's return is read.
+
+Events only: no storage or call changes, no migration. `transaction_version` stays 8.
+Reading the price `Compounded` announces is charged in the compounding weight (four
+more reads), so `on_idle` stays within its budget.
+
+### spec 23 — tx 8 — 2026-11-18 (`v0.9.0`)
 
 The shielded pool can require every memo to declare its format (nonce byte 1:
 `0x01` tagged, `0x02` handshake). `AdminOrigin` schedules the block it starts at

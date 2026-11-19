@@ -339,10 +339,15 @@ pub mod pallet {
 			asset_id: u32,
 		},
 		/// An entry was bonded; its shares are minted after its era compounds.
+		///
+		/// `owner_pk` is the one-time key its output is minted to. It is already
+		/// public in the action; every later event of the entry names it too, so
+		/// the entry can be followed without decoding calls.
 		Entered {
 			pool_id: PoolId,
 			value: u128,
 			era: EraIndex,
+			owner_pk: [u8; 32],
 		},
 		/// Shares were burned and their value unbonded until `unlock_era`.
 		Exited {
@@ -350,17 +355,23 @@ pub mod pallet {
 			shares: u128,
 			value: u128,
 			unlock_era: EraIndex,
+			owner_pk: [u8; 32],
 		},
-		/// An era's rewards were bonded back into the pool.
+		/// An era's rewards were bonded back into the pool. `value` is what the
+		/// minted shares are worth after it and `supply` how many there are: the
+		/// share price for the era.
 		Compounded {
 			pool_id: PoolId,
 			era: EraIndex,
+			value: u128,
+			supply: u128,
 		},
 		/// An entry's shares were minted.
 		EntrySettled {
 			pool_id: PoolId,
 			shares: u128,
 			commitment: Commitment,
+			owner_pk: [u8; 32],
 		},
 		/// An entry would have taken fewer shares than it asked for: its ORB is
 		/// unbonded and minted back to its key when it unlocks.
@@ -368,12 +379,14 @@ pub mod pallet {
 			pool_id: PoolId,
 			value: u128,
 			unlock_era: EraIndex,
+			owner_pk: [u8; 32],
 		},
-		/// An exit's ORB was minted.
+		/// An exit's ORB was minted (a refunded entry's too, to the entry's key).
 		ExitSettled {
 			pool_id: PoolId,
 			value: u128,
 			commitment: Commitment,
+			owner_pk: [u8; 32],
 		},
 		/// An output whose note already exists (a reused key with the same value)
 		/// was not minted: its value stays with the other members.
@@ -1028,6 +1041,7 @@ pub mod pallet {
 					pool_id,
 					value,
 					unlock_era,
+					owner_pk: entry.owner_pk,
 				});
 			}
 			refunded.is_ok()
@@ -1099,7 +1113,12 @@ pub mod pallet {
 				Self::compound(pool_id, &member);
 				private.compounded_era = Some(era);
 				Pools::<T>::insert(pool_id, &private);
-				Self::deposit_event(Event::Compounded { pool_id, era });
+				Self::deposit_event(Event::Compounded {
+					pool_id,
+					era,
+					value: Self::net_value(pool_id),
+					supply: private.supply,
+				});
 			}
 
 			// Mint the shares of entries whose era was compounded. A destroying
@@ -1157,6 +1176,7 @@ pub mod pallet {
 								pool_id,
 								shares: note.value,
 								commitment: note.commitment,
+								owner_pk: entry.owner_pk,
 							});
 						}
 						// Its value stays with the other members.
@@ -1273,6 +1293,7 @@ pub mod pallet {
 								pool_id,
 								value: note.value,
 								commitment: note.commitment,
+								owner_pk: exit.owner_pk,
 							}),
 							Ok(None) => {}
 							// A note that already exists: the value stays with the members.
@@ -1452,12 +1473,16 @@ pub mod pallet {
 		}
 
 		/// What compounding costs: bonding the pool rewards back and the paid-out
-		/// ones from the free balance (two pool calls).
+		/// ones from the free balance (two pool calls), then reading the share price
+		/// its event announces.
 		fn compound_weight() -> Weight {
 			use pallet_nomination_pools::WeightInfo as _;
 			<T as pools::Config>::WeightInfo::bond_extra_other()
 				.saturating_add(<T as pools::Config>::WeightInfo::bond_extra_transfer())
 				.saturating_add(T::DbWeight::get().reads_writes(6, 2))
+				// The share price `Compounded` announces (`net_value`): m_P's membership,
+				// the pending entry points, the bonded pool and its stake.
+				.saturating_add(T::DbWeight::get().reads(4))
 		}
 
 		/// What releasing shares costs: a pool unbond, the price reads and the
@@ -1565,6 +1590,7 @@ pub mod pallet {
 						pool_id,
 						value: amount,
 						era,
+						owner_pk,
 					});
 				}
 				Action::Exit {
@@ -1597,6 +1623,7 @@ pub mod pallet {
 						shares: amount,
 						value,
 						unlock_era,
+						owner_pk,
 					});
 				}
 			}

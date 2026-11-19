@@ -1306,9 +1306,16 @@ mod hardening {
 			.map_err(Into::into)
 	}
 
-	/// Shares worth about `value` now.
+	/// Shares worth about `value` now. Through 256 bits: a share supply and a value in
+	/// planck multiply past u128.
 	fn shares_for(value: u128) -> u128 {
-		value * supply() / PrivateStaking::net_value(POOL)
+		sp_runtime::helpers_128bit::multiply_by_rational_with_rounding(
+			value,
+			supply(),
+			PrivateStaking::net_value(POOL),
+			sp_runtime::Rounding::Down,
+		)
+		.expect("a share count fits u128")
 	}
 
 	#[test]
@@ -1544,4 +1551,119 @@ mod hardening {
 			assert!(Router::redeem_fees(&depositor(), NATIVE_ASSET_ID, 1).is_err());
 		});
 	}
+}
+
+/// What a 10 ORB holder's shares are worth before and after `whale` ORB enters and
+/// settles: the same eras pass either way.
+fn holder_value_across_an_entry(whale: Balance) -> (u128, u128) {
+	with_private_pool(|| {
+		let era = active_era();
+		spend_into(enter(1), 10 * ORB);
+		settle_era(era + 3);
+		let first = settled_entries()[0];
+		let private = Pools::<Runtime>::get(POOL).unwrap();
+		let before = PrivateStaking::value_of(POOL, &private, first);
+
+		let entered = active_era();
+		if whale > 0 {
+			spend_into(enter(3), whale);
+		}
+		settle_era(entered + 2);
+		let private = Pools::<Runtime>::get(POOL).unwrap();
+		(before, PrivateStaking::value_of(POOL, &private, first))
+	})
+}
+
+#[test]
+fn a_pending_entry_s_rewards_do_not_go_to_the_shares_already_minted() {
+	let (before_alone, after_alone) = holder_value_across_an_entry(0);
+	let (before, after) = holder_value_across_an_entry(1_000 * ORB);
+	let alone = after_alone - before_alone;
+	let with_whale = after - before;
+	// More stake behind the validator lowers every point's reward, so the holder may
+	// earn less; it must never earn more off the pending entry's points.
+	assert!(
+		with_whale <= alone + alone / 100 + MILLI,
+		"the holder earned {with_whale} with an entry pending, {alone} without"
+	);
+}
+
+#[test]
+fn events_name_the_entry_s_key_and_compounding_prices_the_share() {
+	with_private_pool(|| {
+		let era = active_era();
+		spend_into(enter(1), 100 * ORB);
+		settle_era(era + 3);
+		let first = settled_entries()[0];
+		spend_out(exit(5), first / 2);
+
+		let events = seen();
+		let entered = events.iter().find_map(|e| match e {
+			private::Event::Entered { owner_pk, .. } => Some(*owner_pk),
+			_ => None,
+		});
+		assert_eq!(entered, Some(key(1)), "the entry names its output key");
+		let settled = events.iter().find_map(|e| match e {
+			private::Event::EntrySettled { owner_pk, .. } => Some(*owner_pk),
+			_ => None,
+		});
+		assert_eq!(settled, Some(key(1)), "its shares name the same key");
+		let exited = events.iter().find_map(|e| match e {
+			private::Event::Exited { owner_pk, .. } => Some(*owner_pk),
+			_ => None,
+		});
+		assert_eq!(exited, Some(key(5)));
+
+		// The last compounding prices the shares as `value_of` does.
+		let (value, supply) = events
+			.iter()
+			.rev()
+			.find_map(|e| match e {
+				private::Event::Compounded { value, supply, .. } => Some((*value, *supply)),
+				_ => None,
+			})
+			.expect("compounded");
+		assert_eq!(supply, first, "one entry minted, nothing exited before it");
+		let private = Pools::<Runtime>::get(POOL).unwrap();
+		assert!(value > 0);
+		assert!(PrivateStaking::value_of(POOL, &private, first) > 0);
+	});
+}
+
+#[test]
+fn a_refund_names_the_entry_s_key_and_its_orb_is_paid_to_it() {
+	with_private_pool(|| {
+		let era = active_era();
+		spend_into(enter(1), 100 * ORB);
+		settle_era(era + 3);
+		// Asks for far more shares than its ORB can buy: refunded when it settles.
+		let entered = active_era();
+		spend_into(
+			Action::Enter {
+				pool_id: POOL,
+				owner_pk: key(7),
+				blinding: key(8),
+				min_shares: 1_000_000 * ORB,
+			},
+			50 * ORB,
+		);
+		settle_era(entered + 1);
+		let refunded = seen().into_iter().find_map(|e| match e {
+			private::Event::EntryRefunded { owner_pk, .. } => Some(owner_pk),
+			_ => None,
+		});
+		assert_eq!(refunded, Some(key(7)));
+
+		settle_era(entered + 6);
+		let paid = seen().into_iter().find_map(|e| match e {
+			private::Event::ExitSettled {
+				owner_pk, value, ..
+			} if owner_pk == key(7) => Some(value),
+			_ => None,
+		});
+		assert!(
+			paid.is_some_and(|v| v > 0),
+			"the refund is paid to the entry's key: {paid:?}"
+		);
+	});
 }
