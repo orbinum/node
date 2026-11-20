@@ -69,13 +69,13 @@ for url in "${RPCS[@]}"; do
   IMPL_NAME=$(echo "$RTV" | jget "implName")
   IMPL_VER=$(echo "$RTV" | jget "implVersion")
 
-  CLIENT=$(rpc_call "$url" "system_version" | jget_raw)
+  CLIENT=$(rpc_call "$url" "system_version" | jget_raw) || CLIENT=""
 
-  HEALTH=$(rpc_call "$url" "system_health")
+  HEALTH=$(rpc_call "$url" "system_health") || HEALTH=""
   PEERS=$(echo "$HEALTH" | jget "peers")
 
   BEST_HEX=$(rpc_call "$url" "chain_getHeader" | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',{}).get('number',''))" 2>/dev/null || echo "")
-  FIN_HASH=$(rpc_call "$url" "chain_getFinalizedHead" | jget_raw)
+  FIN_HASH=$(rpc_call "$url" "chain_getFinalizedHead" | jget_raw) || FIN_HASH=""
   FIN_HEX=$(rpc_call "$url" "chain_getHeader" "[\"$FIN_HASH\"]" | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',{}).get('number',''))" 2>/dev/null || echo "")
 
   echo "   spec_version : ${SPEC:-?}"
